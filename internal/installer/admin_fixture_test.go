@@ -19,6 +19,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/client"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/recordjson"
 )
 
@@ -168,6 +169,17 @@ func (f fixtureAdmin) Admin(ctx context.Context, action string, args, into any) 
 			}
 		}
 		return fixtureDecode(map[string]any{"version": version, "schema": schema}, into)
+	case "access-allow", "access-revoke":
+		var key model.SecretAccessKey
+		if err := fixtureRequest(args, &key); err != nil {
+			return err
+		}
+		verb := "allow"
+		if action == "access-revoke" {
+			verb = "revoke"
+		}
+		_, err := f.command(ctx, nil, "access", verb, key.Repo, key.Workflow, key.Step, key.Path)
+		return err
 	case "access-list":
 		raw, err := f.command(ctx, nil, "access", "list", "--json")
 		if err != nil {
@@ -324,3 +336,6 @@ func withUpgradeAdminFixture(deps *Deps, version string) {
 		return []byte("oberth v" + version + " commit=fixture"), nil
 	}}
 }
+
+const secretAccessConfigMapName = "oberth-secret-access"
+const secretAccessConfigMapKey = "grants"

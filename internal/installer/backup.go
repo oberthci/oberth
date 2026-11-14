@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/kubeconfig"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -415,12 +417,10 @@ func connectOpenBao(ctx context.Context, deps Deps, namespace string) (openBaoEx
 	return client, nil
 }
 
-// secretAccessExport is the oberth-secret-access ConfigMap's data. The
-// ConfigMap, not the database, is the source of truth the server reconciles
-// grants from at startup, so it must be restored before the server starts.
+// secretAccessExport is a database grant set, independent of Kubernetes objects.
 type secretAccessExport struct {
-	Present bool              `json:"present"`
-	Data    map[string]string `json:"data"`
+	Present bool                    `json:"present"`
+	Grants  []model.SecretAccessKey `json:"grants"`
 }
 
 func readSecretAccess(ctx context.Context, deps Deps, namespace string) (secretAccessExport, error) {
@@ -428,7 +428,11 @@ func readSecretAccess(ctx context.Context, deps Deps, namespace string) (secretA
 	if err != nil {
 		return secretAccessExport{}, err
 	}
-	return secretAccessExport{Present: true, Data: map[string]string{secretAccessConfigMapKey: string(data)}}, nil
+	var entries []model.SecretAccessKey
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return secretAccessExport{}, err
+	}
+	return secretAccessExport{Present: true, Grants: entries}, nil
 }
 
 // printBackupPlan is the --dry-run plan: what would be read and written.
@@ -444,7 +448,7 @@ func printBackupPlan(w io.Writer, cfg BackupConfig, server serverDeployment, pod
 	_, _ = fmt.Fprintf(w, "            schema identity %s, audit domain %s, witness key info %s\n",
 		server.Compatibility.SchemaIdentity, server.Compatibility.AuditDomain, server.Compatibility.WitnessKeyInfo)
 	if full {
-		_, _ = fmt.Fprintf(w, "  Grants    ConfigMap %s/%s\n", cfg.Namespace, secretAccessConfigMapName)
+		_, _ = fmt.Fprintln(w, "  Grants    audited database approvals")
 	}
 	_, _ = fmt.Fprintf(w, "  Output    %s, encrypted to %s\n", cfg.Output, cfg.Recipient)
 	_, _ = fmt.Fprintln(w, "Nothing was read from OpenBao or written to disk (--dry-run).")
@@ -567,19 +571,14 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 	if err != nil {
 		return err
 	}
-	contents, err := summarizeDatabaseArchive(ctx, databasePath, work, protocol, cfg.MaxDatabaseBytes)
+	contents, snapshotGrants, err := inspectGrantSnapshot(ctx, databasePath, work, protocol, cfg.MaxDatabaseBytes)
 	if err != nil {
 		return err
 	}
 
 	var grants secretAccessExport
 	if full {
-		if grants, err = readSecretAccess(ctx, deps.Deps, cfg.Namespace); err != nil {
-			return err
-		}
-		if err := writeBackupJSON(work, backupMemberSecretAccess, grants); err != nil {
-			return err
-		}
+		grants = snapshotGrants
 	}
 
 	serverVersion, _, _ := adminVersion(ctx, Config{Namespace: cfg.Namespace}, deps.Deps)

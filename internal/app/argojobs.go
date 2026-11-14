@@ -45,14 +45,6 @@ type SecretAccessLoader interface {
 	ActiveSecretGrants(ctx context.Context, repoID int64, workflow string) (map[string]map[string]bool, error)
 }
 
-// ReconcilerHealthChecker reports whether the access reconciler has completed
-// at least one successful reconciliation. Admission of granted secret steps must not
-// proceed before the initial reconcile succeeds, because a transient initial
-// ConfigMap Get failure would leave stale grants active in sqlite.
-type ReconcilerHealthChecker interface {
-	ReconcileHealthy() bool
-}
-
 // DeclarationRecorder records (repo, step, path) declarations observed at
 // Workflow admission so `access_list --pending` can surface declared-but-not-
 // granted paths without reading the git cache at query time.
@@ -72,22 +64,21 @@ type ArgoJobs struct {
 
 	beforeCreate func(context.Context, service.WorkflowRequest, argojob.Request) error
 
-	capabilityGrants  func(context.Context, int64) (*argoworkflow.Capability, error)
-	resourceBlobs     workflowpolicy.PolicyGit
-	controller        argoControl
-	auditor           service.Auditor
-	config            argojob.Config
-	secretAccess      SecretAccessLoader
-	declarations      DeclarationRecorder
-	collector         ArtifactCollector
-	artifacts         ArtifactStore
-	artifactLimit     int64
-	reconcilerHealthy ReconcilerHealthChecker
+	capabilityGrants func(context.Context, int64) (*argoworkflow.Capability, error)
+	resourceBlobs    workflowpolicy.PolicyGit
+	controller       argoControl
+	auditor          service.Auditor
+	config           argojob.Config
+	secretAccess     SecretAccessLoader
+	declarations     DeclarationRecorder
+	collector        ArtifactCollector
+	artifacts        ArtifactStore
+	artifactLimit    int64
 
 	// identities holds the live per-repo identity maps. When non-nil,
 	// create() snapshots it once per admission so both Builds (audit and
 	// controller) bind the same identity version. Updated by the
-	// reconciler callback in serve.go. (Issue #465)
+	// database mutation callback in serve.go.
 	identities *argojob.IdentityStore
 	// releaseWIF layers audited runtime overrides on the boot release WIF
 	// map (#1497). Each admission pins one snapshot for both Builds.
@@ -114,16 +105,6 @@ type argoIntent struct {
 // while the Workflow was being created. The scheduler records the run as
 // cancelled rather than as a creation failure.
 var ErrCreationCancelled = errors.New("app: Workflow cancelled before creation")
-
-// SetReconcilerHealth wires the reconciler health check after construction.
-// This exists because the reconciler may be created after the engine in the
-// initialization order. Once set, steps with secret grants wait until the
-// reconciler reports at least one successful reconciliation.
-func (jobs *ArgoJobs) SetReconcilerHealth(checker ReconcilerHealthChecker) {
-	jobs.mu.Lock()
-	defer jobs.mu.Unlock()
-	jobs.reconcilerHealthy = checker
-}
 
 func NewArgoJobs(controller argoControl, config argojob.Config, auditor service.Auditor, secretAccess SecretAccessLoader) (*ArgoJobs, error) {
 	config.ReleaseWIF = config.ReleaseWIF.Clone()

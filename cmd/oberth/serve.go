@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/sigstore/sigstore/pkg/cryptoutils"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -45,8 +46,6 @@ import (
 	"github.com/oberthci/oberth/internal/sshserver"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/pipeline"
-
-	"k8s.io/client-go/kubernetes"
 )
 
 type stringList []string
@@ -875,34 +874,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		chain.AnchoredAt = anchor.AnchoredAt.UTC().Format(time.RFC3339)
 		return chain, nil
 	}
-	accessReconciler := service.NewAccessReconciler(kube, options.namespace, database, logger)
-	// After every successful reconciliation, recompute the per-repo identity
-	// maps from the (now-converged) grant table and swap them into the live
-	// store. This makes a grant added via access_allow visible to the next
-	// admission without a server restart. (Issue #465)
-	accessReconciler.OnReconcileSuccess = func() {
-		refreshed, refreshErr := buildPerRepoIdentities(ctx, database)
-		if refreshErr != nil {
-			logger.Printf("WARNING: identity refresh after reconcile failed: %v; the server continues with the previous identity map", refreshErr)
-			return
-		}
-		refreshedSteps, stepErr := buildPerStepIdentities(ctx, database)
-		if stepErr != nil {
-			logger.Printf("WARNING: per-step identity refresh after reconcile failed: %v; the server continues with the previous identity map", stepErr)
-			return
-		}
-		identityStore.ReplaceWithSteps(refreshed, buildPerRepoCIIdentities(refreshed), refreshedSteps)
-		if len(refreshed) > 0 {
-			logger.Printf("identity refresh: %d per-repo, %d per-step identities (live)", len(refreshed), len(refreshedSteps))
-		}
-	}
-	if err := accessReconciler.Reconcile(ctx); err != nil {
-		logger.Printf("WARNING: initial secret access reconcile failed: %v; admission of granted secret steps is blocked until reconciliation succeeds", err)
-	}
-	// Wire the reconciler health gate so admission of granted secret steps blocks until
-	// the initial ConfigMap read succeeds. Without this, a transient startup
-	// failure would leave stale grants active in sqlite for admission to consume.
-	argoJobs.SetReconcilerHealth(accessReconciler)
+	refreshGrantIdentities := newGrantIdentityRefresher(database, identityStore)
 	// Wire the declaration recorder so Workflow admission records (repo, step,
 	// path) declarations for `access_list --pending`. Issue #623, finding 4.
 	argoJobs.SetDeclarationRecorder(database)
@@ -981,11 +953,11 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		SecretAccess:           database,
 		WorkflowCapabilities:   database,
 
-		ReleaseWIFOverrides:    database,
-		ReleaseWIF:             releaseWIF,
-		SecretStoreVerifier:    buildSecretStoreVerifier(options, kube),
-		SecretAccessReconciler: accessReconciler,
-		RepositoryArchiver:     database,
+		ReleaseWIFOverrides: database,
+		ReleaseWIF:          releaseWIF,
+		SecretStoreVerifier: buildSecretStoreVerifier(options, kube),
+		SecretAccessChanged: refreshGrantIdentities,
+		RepositoryArchiver:  database,
 		ChangeRepositoryArchive: func(ctx context.Context, name string, archived bool, change func() error) error {
 			err := git.ChangeRepositoryArchive(ctx, name, archived, change)
 			if archived && err == nil {
@@ -1139,7 +1111,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	defer func() { stopTokenWarnings(); <-tokenWarningsDone }()
 	stopBootstrap()
 	adminServer := newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyCancellations, options.uplinkTokenPolicy, queueSnapshot.current)
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, adminServer, activateScheduler, argoJobs.RunWatch, accessReconciler, schedules, ciIssues, branchDeletions, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, adminServer, activateScheduler, argoJobs.RunWatch, schedules, ciIssues, branchDeletions, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
 }
 
 type startupContinuity interface {
@@ -1539,7 +1511,6 @@ func runComponents(
 	adminServer *http.Server,
 	activateScheduler func(context.Context) error,
 	runWatch func(context.Context),
-	accessReconciler *service.AccessReconciler,
 	schedules *app.Schedules,
 	ciIssues *service.CIIssueReconciler,
 	branchDeletions *service.BranchDeletionPropagator,
@@ -1625,7 +1596,7 @@ func runComponents(
 		}
 		return err
 	})
-	startBackgroundLoops(runCtx, &workers, schedulerActivated, options, git, schedules, ciIssues, branchDeletions, accessReconciler, logger)
+	startBackgroundLoops(runCtx, &workers, schedulerActivated, options, git, schedules, ciIssues, branchDeletions, logger)
 	logger.Printf("ready for bootstrap: SSH %s, HTTPS %s", options.sshListen, options.httpsListen)
 
 	var componentErr error
@@ -1675,7 +1646,6 @@ func startBackgroundLoops(
 	schedules *app.Schedules,
 	ciIssues *service.CIIssueReconciler,
 	branchDeletions *service.BranchDeletionPropagator,
-	accessReconciler *service.AccessReconciler,
 	logger *log.Logger,
 ) {
 	workers.Add(1)
@@ -1718,15 +1688,6 @@ func startBackgroundLoops(
 			}
 			if err := branchDeletions.Run(runCtx); err != nil && runCtx.Err() == nil {
 				logger.Printf("upstream branch deletion stopped: %v", err)
-			}
-		}()
-	}
-	if accessReconciler != nil {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			if err := accessReconciler.Watch(runCtx); err != nil && runCtx.Err() == nil {
-				logger.Printf("secret access ConfigMap watcher stopped: %v", err)
 			}
 		}()
 	}
@@ -2058,4 +2019,24 @@ func writeHealthMetrics(w io.Writer, health app.Health) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	health.WriteStatusMetrics(ctx, w)
+}
+
+// newGrantIdentityRefresher serializes reading and publishing grant identities,
+// so a slower refresh cannot replace a newer committed grant snapshot.
+func newGrantIdentityRefresher(database perRepoStore, identityStore *argojob.IdentityStore) func(context.Context) error {
+	var refreshMu sync.Mutex
+	return func(ctx context.Context) error {
+		refreshMu.Lock()
+		defer refreshMu.Unlock()
+		refreshed, err := buildPerRepoIdentities(ctx, database)
+		if err != nil {
+			return err
+		}
+		steps, err := buildPerStepIdentities(ctx, database)
+		if err != nil {
+			return err
+		}
+		identityStore.ReplaceWithSteps(refreshed, buildPerRepoCIIdentities(refreshed), steps)
+		return nil
+	}
 }

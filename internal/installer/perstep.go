@@ -15,7 +15,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-// PerStepIdentity describes one (repo, workflow file, step) combination's per-step Vault
+// PerStepIdentity describes one (repo, workflow file, step) combination's per-step OpenBao
 // identity. The installer creates the policy, role, and (via the chart) the
 // ServiceAccount.
 type PerStepIdentity struct {
@@ -42,23 +42,10 @@ func PerStepName(upstream, org, repo, workflow, step string) string {
 	return identityname.PerStepName(upstream, org, repo, workflow, step)
 }
 
-// PerStepPolicy generates the HCL policy for a single per-step identity. It
-// grants:
-//   - Read access to the repo's upstream org/repo namespace (same scope as
-//     the per-repo policy — the step still needs upstream-scoped secrets)
-//   - Exact-path read for only the paths granted to this step
-//   - Token self-revocation
-//
-// Compared to the per-repo policy which carries ALL of a repo's grant paths,
-// this carries only the paths relevant to one step, enforcing least privilege
-// at the Vault layer.
-func PerStepPolicy(kvPrefix, org, repo string, grantPaths []string) string {
+// PerStepPolicy grants only exact approved paths and token self-revocation.
+func PerStepPolicy(kvPrefix string, grantPaths []string) string {
 	var builder strings.Builder
-	fmt.Fprintf(&builder, `# Per-step identity: read-only on this step's granted paths only.
-# Managed by oberth secretstore sync. Do not edit manually. Issue #623.
-path "%s/data/upstream/%s/%s/*" {
-  capabilities = ["read"]
-}`, kvPrefix, org, repo)
+	builder.WriteString("# Per-step identity: exact granted paths only. Managed by Oberth.\n")
 
 	seen := make(map[string]struct{}, len(grantPaths))
 	for _, p := range grantPaths {
@@ -73,7 +60,7 @@ path "%s/data/upstream/%s/%s/*" {
 	return builder.String() + denyServerIdentities(kvPrefix)
 }
 
-// perStepRoleMatches checks whether an existing Vault role matches the
+// perStepRoleMatches checks whether an existing OpenBao role matches the
 // expected per-step shape: bound to the exact ServiceAccount name in the
 // pipeline namespace, with the per-step policy and the standard TTLs.
 func perStepRoleMatches(role map[string]any, saName, policyName, namespace string) bool {
@@ -81,7 +68,7 @@ func perStepRoleMatches(role map[string]any, saName, policyName, namespace strin
 	return perRepoRoleMatches(role, saName, policyName, namespace)
 }
 
-// ConfigurePerStepIdentities creates or updates the Vault policy and role for
+// ConfigurePerStepIdentities creates or updates the OpenBao policy and role for
 // each per-step identity. ServiceAccounts are managed by the Helm chart (via
 // the perStepIdentities values list), not by this function.
 //
@@ -89,6 +76,14 @@ func perStepRoleMatches(role map[string]any, saName, policyName, namespace strin
 // expected shape are left untouched; policies that drift are rewritten; roles
 // with incompatible bindings fail loudly.
 func ConfigurePerStepIdentities(ctx context.Context, store openBaoExec, rootToken string, identities []PerStepIdentity, argoNamespace string) ([]configItem, error) {
+	items, err := configureStepTierIdentities(ctx, store, rootToken, identities, argoNamespace, false)
+	if err != nil {
+		return items, err
+	}
+	ci, err := configureStepTierIdentities(ctx, store, rootToken, identities, argoNamespace, true)
+	return append(items, ci...), err
+}
+func configureStepTierIdentities(ctx context.Context, store openBaoExec, rootToken string, identities []PerStepIdentity, argoNamespace string, ci bool) ([]configItem, error) {
 	var items []configItem
 
 	for _, id := range identities {
@@ -103,6 +98,9 @@ func ConfigurePerStepIdentities(ctx context.Context, store openBaoExec, rootToke
 			return items, err
 		}
 		name := PerStepName(id.Upstream, id.Org, id.Repo, id.Workflow, id.Step)
+		if ci {
+			name = PerStepCIName(id.Upstream, id.Org, id.Repo, id.Workflow, id.Step)
+		}
 
 		// --- Policy ---
 
@@ -111,7 +109,10 @@ func ConfigurePerStepIdentities(ctx context.Context, store openBaoExec, rootToke
 			return items, fmt.Errorf("per-step %s: %w", name, err)
 		}
 
-		wantPolicy := PerStepPolicy(defaultKVPrefix, id.Org, id.Repo, grantPaths)
+		wantPolicy := PerStepPolicy(defaultKVPrefix, grantPaths)
+		if ci {
+			wantPolicy = PerStepCIPolicy(defaultKVPrefix, id.Org, id.Repo, grantPaths)
+		}
 		havePolicy, policyExists, err := store.policyRead(ctx, rootToken, name)
 		if err != nil {
 			return items, fmt.Errorf("per-step policy read %s: %w", name, err)
@@ -160,10 +161,11 @@ func PerStepIdentityNames(identities []PerStepIdentity) []string {
 	seen := make(map[string]struct{}, len(identities))
 	var names []string
 	for _, id := range identities {
-		name := PerStepName(id.Upstream, id.Org, id.Repo, id.Workflow, id.Step)
-		if _, dup := seen[name]; !dup {
-			seen[name] = struct{}{}
-			names = append(names, name)
+		for _, name := range []string{PerStepName(id.Upstream, id.Org, id.Repo, id.Workflow, id.Step), PerStepCIName(id.Upstream, id.Org, id.Repo, id.Workflow, id.Step)} {
+			if _, dup := seen[name]; !dup {
+				seen[name] = struct{}{}
+				names = append(names, name)
+			}
 		}
 	}
 	sort.Strings(names)
@@ -252,4 +254,21 @@ func containsString(slice []string, val string) bool {
 		}
 	}
 	return false
+}
+
+// PerStepCIName is the ServiceAccount, role and policy for a CI grant key.
+func PerStepCIName(upstream, org, repo, workflow, step string) string {
+	return identityname.PerStepCIName(upstream, org, repo, workflow, step)
+}
+
+// PerStepCIPolicy limits a CI identity to exact granted upstream paths in its repository.
+func PerStepCIPolicy(kvPrefix, org, repo string, paths []string) string {
+	allowed := []string{}
+	prefix := "upstream/" + org + "/" + repo + "/"
+	for _, path := range paths {
+		if strings.HasPrefix(path, prefix) {
+			allowed = append(allowed, path)
+		}
+	}
+	return PerStepPolicy(kvPrefix, allowed)
 }

@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -686,7 +685,7 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 	}
 
 	// Shared credentialed identities never carry approvals or upstream access.
-	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)
+	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil)
 	haveCredentialedPolicy, credentialedPolicyExists, err := store.policyRead(ctx, rootToken, defaultCredentialedPolicy)
 	if err != nil {
 		return result, err
@@ -732,11 +731,7 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 	// unlike the credentialed policy there is nothing approval-driven to sync
 	// — drift from the managed shape is always rewritten back.
 
-	sharedOrgs := upstreamOrgs
-	if len(cfg.PerRepoIdentities) > 0 {
-		sharedOrgs = nil
-	}
-	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix, sharedOrgs)
+	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix)
 	haveCISecretsPolicy, ciSecretsPolicyExists, err := store.policyRead(ctx, rootToken, defaultCISecretsPolicy)
 	if err != nil {
 		return result, err
@@ -896,28 +891,12 @@ func credentialedPolicyPaths(kvPrefix string, paths []string) ([]string, error) 
 	return out, nil
 }
 
-// OberthCredentialedPolicyWithGrants returns the credentialed HCL policy
-// with exact-path entries for each approved secret from the approval table.
-// When upstreamOrgs is non-empty, per-org path rules replace the former
-// static path "oberth/data/upstream/*" wildcard — the policy grants read
-// access only to the enumerated registered upstream subtrees (issue #246
-// design revision). When upstreamOrgs is empty (fresh install, no
-// registered upstreams with grants), no upstream access is granted — fail
-// closed — because there are no repos to serve and no grants to carry.
-// The approvedPaths entries add exact grants for paths outside the
-// upstream subtree (typically release secrets).
-//
-// The installer calls this with the active grants and the registered
-// upstream orgs so the Vault policy matches both the approval table and
-// the upstream registry. After running `oberth access allow` or
-// `oberth upstream add`, re-run `oberth install --install-secretstore
-// --upgrade` to sync.
-func OberthCredentialedPolicyWithGrants(kvPrefix string, upstreamOrgs []string, approvedPaths []string) string {
+// OberthCredentialedPolicyWithGrants contains only explicit approved paths.
+func OberthCredentialedPolicyWithGrants(kvPrefix string, approvedPaths []string) string {
 	var builder strings.Builder
-	builder.WriteString("# Granted secret-consuming templates: read-only, per-upstream subtrees. The\n")
+	builder.WriteString("# Granted secret-consuming templates: explicit approved paths only.\n")
 	builder.WriteString("# approval table in the Oberth database is the fine-grained gate; this policy\n")
 	builder.WriteString("# is the coarse Vault-level boundary. Managed by oberth install.\n")
-	writeUpstreamOrgRules(&builder, kvPrefix, upstreamOrgs)
 
 	seen := make(map[string]struct{}, len(approvedPaths))
 	for _, p := range approvedPaths {
@@ -932,26 +911,12 @@ func OberthCredentialedPolicyWithGrants(kvPrefix string, upstreamOrgs []string, 
 	return builder.String() + denyServerIdentities(kvPrefix)
 }
 
-// OberthCISecretsPolicy returns the HCL policy for CI-trigger credentialed
-// pipelines: registered upstream subtrees and token self-revocation,
-// nothing else.
-//
-// It deliberately takes no grants parameter. The credentialed (release-tier)
-// policy is synced with approval-table grants; this one is structurally
-// incapable of carrying them, so no reconciliation input — however
-// misconfigured — can put a release secret within reach of a branch push.
-//
-// When upstreamOrgs is non-empty, per-org path rules replace the former
-// static path "oberth/data/upstream/*" wildcard, narrowing the CI tier's
-// outer boundary to exactly the registered upstream subtrees (issue #246
-// design revision). When upstreamOrgs is empty, no upstream access is
-// granted — fail closed.
-func OberthCISecretsPolicy(kvPrefix string, upstreamOrgs []string) string {
+// OberthCISecretsPolicy grants no secret reads; granted CI steps have exact policies.
+func OberthCISecretsPolicy(kvPrefix string) string {
 	var builder strings.Builder
-	builder.WriteString("# CI-trigger granted steps: read-only, per-upstream subtrees. This\n")
+	builder.WriteString("# Shared CI identity: no secret reads.\n")
 	builder.WriteString("# policy never carries approval-table grants; release secrets are reachable\n")
 	builder.WriteString("# only through the release-tier credentialed role. Managed by oberth install.\n")
-	writeUpstreamOrgRules(&builder, kvPrefix, upstreamOrgs)
 	builder.WriteString("\n\n# Allow the fetch client to revoke its own short-lived login token.\npath \"auth/token/revoke-self\" {\n  capabilities = [\"update\"]\n}")
 	return builder.String() + denyServerIdentities(kvPrefix)
 }
@@ -971,7 +936,7 @@ var orgNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // ValidateOrgName checks that an org name contains only characters safe for
 // Vault policy HCL interpolation. Callers must validate before any org name
-// reaches writeUpstreamOrgRules.
+// reaches an OpenBao identity policy.
 func ValidateOrgName(name string) error {
 	if !orgNamePattern.MatchString(name) {
 		return fmt.Errorf("org name %q contains characters outside [A-Za-z0-9._-]; refusing to interpolate into Vault policy HCL", name)
@@ -1012,35 +977,6 @@ func validateSecretPath(path string) error {
 		return fmt.Errorf("credentialed secret path %q contains characters outside [A-Za-z0-9._/-]; refusing to interpolate into Vault policy HCL", path)
 	}
 	return nil
-}
-
-// writeUpstreamOrgRules appends per-org Vault policy path stanzas. Each
-// registered upstream org gets its own exact rule scoped to that org's
-// subtree, replacing the former static "upstream/*" wildcard. The
-// enumeration is sorted for deterministic output.
-//
-// Callers must validate org names with ValidateOrgName before calling this
-// function; unvalidated names interpolated into fmt.Fprintf are an HCL
-// injection vector (issue #411).
-func writeUpstreamOrgRules(builder *strings.Builder, kvPrefix string, upstreamOrgs []string) {
-	sorted := make([]string, len(upstreamOrgs))
-	copy(sorted, upstreamOrgs)
-	sort.Strings(sorted)
-	seen := make(map[string]struct{}, len(sorted))
-	first := true
-	for _, org := range sorted {
-		if _, dup := seen[org]; dup || org == "" {
-			continue
-		}
-		seen[org] = struct{}{}
-		if !first {
-			builder.WriteString("\n\n")
-		}
-		fmt.Fprintf(builder, `path "%s/data/upstream/%s/*" {
-  capabilities = ["read"]
-}`, kvPrefix, org)
-		first = false
-	}
 }
 
 func getClusterCA(ctx context.Context, deps Deps) (string, error) {

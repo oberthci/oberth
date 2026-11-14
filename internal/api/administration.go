@@ -55,6 +55,7 @@ var adminRoutes = map[string]string{
 	"upstream-add": "upstream_add", "upstream-list": "upstream_list",
 	"upstream-remove": "upstream_remove", "upstream-provide-key": "upstream_provide_key",
 	"repo-add": "repo_add", "repo-verify": "repo_verify",
+	"access-allow": "admin_access_allow", "access-revoke": "admin_access_revoke",
 	"access-list": "admin_access_list", "public-identity": "admin_public_identity",
 	"readiness": "admin_readiness", "version": "admin_version",
 	"idle": "admin_idle", "audit-record": "admin_audit_record",

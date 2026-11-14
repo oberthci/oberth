@@ -32,29 +32,22 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 )
 
 const (
 	// backupFormat is what this release writes: the database, the OpenBao
-	// state a fresh install cannot recreate, and the grants. v2 (v0.17.32-33)
-	// and v1 archives are still read; the Helm values and step logs they
-	// carry are ignored.
-	backupFormat       = "oberth.backup/v3"
-	backupFormatV2     = "oberth.backup/v2"
-	backupFormatV1     = "oberth.backup/v1"
+	// state a fresh install cannot recreate. Grants have one persisted copy,
+	// inside the verified database. Older archive formats are refused.
+	backupFormat       = "oberth.backup/v4"
 	backupManifestName = "manifest.json"
 
-	backupMemberKV           = "openbao/kv.json"
-	backupMemberPolicies     = "openbao/policies.json"
-	backupMemberRoles        = "openbao/roles.json"
-	backupMemberReference    = "openbao/reference.json"
-	backupMemberDatabase     = "database/oberth-database.tar"
-	backupMemberHelmValues   = "kubernetes/helm-values.json"
-	backupMemberSecretAccess = "kubernetes/secret-access.json" // #nosec G101 -- archive member NAME, not credential material.
-	backupMemberLogs         = "server/logs.tar"
+	backupMemberKV        = "openbao/kv.json"
+	backupMemberPolicies  = "openbao/policies.json"
+	backupMemberRoles     = "openbao/roles.json"
+	backupMemberReference = "openbao/reference.json"
+	backupMemberDatabase  = "database/oberth-database.tar"
 
 	// Non-database member cap; the database has an operator-configured limit.
 	maxBackupMemberBytes   = 160 << 20
@@ -65,7 +58,7 @@ const (
 	minBackupRecipientBits = 3072
 )
 
-// backupMemberOrder is the exact, closed member inventory of a full v3
+// backupMemberOrder is the exact, closed member inventory of a full v4
 // archive in archive order. A restore refuses any archive whose inventory
 // differs, so an unexpected file can never be smuggled in next to the
 // verified ones.
@@ -75,19 +68,6 @@ var backupMemberOrder = []string{
 	backupMemberRoles,
 	backupMemberReference,
 	backupMemberDatabase,
-	backupMemberSecretAccess,
-}
-
-// legacyMemberOrder is the full inventory of v1 and v2 archives, which also
-// carried the release's Helm values.
-var legacyMemberOrder = []string{
-	backupMemberKV,
-	backupMemberPolicies,
-	backupMemberRoles,
-	backupMemberReference,
-	backupMemberDatabase,
-	backupMemberHelmValues,
-	backupMemberSecretAccess,
 }
 
 // Archive scopes: a full archive holds the database and the secrets; a
@@ -102,12 +82,14 @@ const (
 // archive order.
 func requiredBackupMembers(format, scope string) []string {
 	switch {
+	case format != backupFormat:
+		return nil
 	case scope == BackupScopeHistory:
 		return []string{backupMemberDatabase}
 	case format == backupFormat:
 		return backupMemberOrder
 	}
-	return legacyMemberOrder
+	return nil
 }
 
 // backupManifest is the archive's self-description. It carries no secret
@@ -115,7 +97,7 @@ func requiredBackupMembers(format, scope string) []string {
 type backupManifest struct {
 	Format    string `json:"format"`
 	CreatedAt string `json:"created_at"`
-	// Scope is BackupScopeFull (also when empty: v1 archives) or
+	// Scope is BackupScopeFull (also when empty) or
 	// BackupScopeHistory.
 	Scope         string                `json:"scope,omitempty"`
 	ToolVersion   string                `json:"tool_version"`
@@ -123,9 +105,6 @@ type backupManifest struct {
 	Compatibility backupCompatibility   `json:"compatibility"`
 	Database      backupDatabaseSummary `json:"database"`
 	OpenBao       backupOpenBaoSummary  `json:"openbao"`
-	// Logs summarised the step logs member of a v2 archive; read, not
-	// written or restored.
-	Logs *backupLogsSummary `json:"logs,omitempty"`
 	// Contents counts what the database holds.
 	Contents *backupContents      `json:"contents,omitempty"`
 	Members  []backupMemberDigest `json:"members"`
@@ -147,10 +126,6 @@ type backupSource struct {
 	// server URL (https://127.0.0.1:6443 on every k3s), it tells a rollback
 	// of the same cluster from a restore onto a reinstalled one (#068).
 	ClusterUID string `json:"cluster_uid,omitempty"`
-	// ServiceAccountKeyIDs and SigningKeyID were recorded by v2 archives;
-	// read, not written.
-	ServiceAccountKeyIDs []string `json:"service_account_key_ids,omitempty"`
-	SigningKeyID         string   `json:"service_account_signing_key_id,omitempty"`
 }
 
 // backupContents counts what the archived database holds.
@@ -162,12 +137,6 @@ type backupContents struct {
 	Promotions   int    `json:"promotions"`
 	Repositories int    `json:"repositories"`
 	Uplinks      int    `json:"uplinks"`
-}
-
-// backupLogsSummary describes the step logs member.
-type backupLogsSummary struct {
-	Files int   `json:"files"`
-	Bytes int64 `json:"bytes"`
 }
 
 // backupCompatibility holds the administrator-owned protocol identifiers a
@@ -516,8 +485,8 @@ func openBackupArchive(ctx context.Context, input string, cipher archiveCipher, 
 	}
 	reader := tar.NewReader(io.LimitReader(plain, limits.plaintext+(1<<20)))
 
-	allowed := make(map[string]bool, len(legacyMemberOrder)+1)
-	for _, name := range append(slices.Clone(legacyMemberOrder), backupMemberLogs) {
+	allowed := make(map[string]bool, len(backupMemberOrder))
+	for _, name := range backupMemberOrder {
 		allowed[name] = true
 	}
 	var manifestBytes []byte
@@ -575,7 +544,7 @@ func openBackupArchive(ctx context.Context, input string, cipher archiveCipher, 
 	if err := json.Unmarshal(manifestBytes, &header); err != nil {
 		return backupManifest{}, fmt.Errorf("parse archive manifest: %w", err)
 	}
-	if !slices.Contains([]string{backupFormat, backupFormatV2, backupFormatV1}, header.Format) {
+	if header.Format != backupFormat {
 		return backupManifest{}, fmt.Errorf("archive format %q is not %q; use the oberth release that wrote it", header.Format, backupFormat)
 	}
 	var manifest backupManifest
@@ -584,15 +553,10 @@ func openBackupArchive(ctx context.Context, input string, cipher archiveCipher, 
 	if err := decoder.Decode(&manifest); err != nil {
 		return backupManifest{}, fmt.Errorf("parse archive manifest: %w", err)
 	}
-	if manifest.Format == backupFormatV1 && manifest.Scope != "" || manifest.Scope != "" && manifest.Scope != BackupScopeFull && manifest.Scope != BackupScopeHistory {
+	if manifest.Scope != "" && manifest.Scope != BackupScopeFull && manifest.Scope != BackupScopeHistory {
 		return backupManifest{}, fmt.Errorf("archive scope %q is not one this release reads", manifest.Scope)
 	}
-	// The closed inventory in order; a v2 archive may end with step logs,
-	// which this release no longer restores.
-	want := slices.Clone(requiredBackupMembers(manifest.Format, manifest.Scope))
-	if manifest.Format == backupFormatV2 && len(extracted) == len(want)+1 && extracted[len(want)].Name == backupMemberLogs {
-		want = append(want, backupMemberLogs)
-	}
+	want := requiredBackupMembers(manifest.Format, manifest.Scope)
 	if len(manifest.Members) != len(want) || len(extracted) != len(want) {
 		return backupManifest{}, errors.New("archive member inventory is incomplete")
 	}

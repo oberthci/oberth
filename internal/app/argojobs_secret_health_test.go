@@ -55,7 +55,6 @@ func TestStepsWithoutSecretReadsIgnoreDegradedSecretAccess(t *testing.T) {
 			f := newRaceFixture(t)
 			g := &failingAdmissionGrants{}
 			f.jobs.secretAccess = g
-			f.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
 			r := f.request("plain", "plain-run")
 			var err error
 			if release {
@@ -73,21 +72,6 @@ func TestStepsWithoutSecretReadsIgnoreDegradedSecretAccess(t *testing.T) {
 				t.Fatalf("err=%v grant reads=%d created=%v", err, g.calls, f.controller.created)
 			}
 		})
-	}
-}
-
-func TestGrantedStepsRequireHealthyReconciliation(t *testing.T) {
-	f := newRaceFixture(t)
-	grantedAdmissionSource(t, f.sourceDir)
-	g := &admissionGrants{active: map[string]map[string]bool{"main": {admissionSecretPath: true}}}
-	f.jobs.secretAccess = g
-	f.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
-	err := f.jobs.CreateWorkflow(t.Context(), f.request("granted", "granted-run"))
-	if len(g.files) != 1 || g.files[0] != argoworkflow.BuildFile {
-		t.Fatal("admission loaded another workflow file", g.files)
-	}
-	if err == nil || !strings.Contains(err.Error(), "initial reconciliation; secret access is blocked") || g.calls != 1 || len(f.controller.created) != 0 {
-		t.Fatalf("err=%v reads=%d created=%v", err, g.calls, f.controller.created)
 	}
 }
 
@@ -136,27 +120,6 @@ func TestSecretConsumersRequireAvailableGrantLoader(t *testing.T) {
 	}
 }
 
-type completingReconcileGrants struct{ health *fakeReconciler }
-
-func (g completingReconcileGrants) ActiveSecretGrants(context.Context, int64, string) (map[string]map[string]bool, error) {
-	// This read began while stale grants could still exist; reconciliation has
-	// finished by the time it returns. The earlier unhealthy observation wins.
-	g.health.healthy = true
-	return map[string]map[string]bool{"main": {admissionSecretPath: true}}, nil
-}
-
-func TestGrantedStepsRejectGrantsReadBeforeInitialReconcile(t *testing.T) {
-	f := newRaceFixture(t)
-	grantedAdmissionSource(t, f.sourceDir)
-	health := &fakeReconciler{healthy: false}
-	f.jobs.SetReconcilerHealth(health)
-	f.jobs.secretAccess = completingReconcileGrants{health: health}
-	err := f.jobs.CreateWorkflow(t.Context(), f.request("reconcile-race", "reconcile-race-run"))
-	if err == nil || !strings.Contains(err.Error(), "initial reconciliation") || len(f.controller.created) != 0 {
-		t.Fatalf("stale grants became authoritative: err=%v created=%v", err, f.controller.created)
-	}
-}
-
 func TestUnusedSecretDeclarationDoesNotBlock(t *testing.T) {
 	for _, release := range []bool{false, true} {
 		for _, declared := range []bool{false, true} {
@@ -168,7 +131,6 @@ func TestUnusedSecretDeclarationDoesNotBlock(t *testing.T) {
 				f.jobs.config.VaultCISecretsRole = "ci-role"
 				g := &admissionGrants{active: map[string]map[string]bool{"main": {admissionSecretPath: true}}}
 				f.jobs.secretAccess = g
-				f.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
 				source, err := os.ReadFile(filepath.Join(f.sourceDir, ".oberth", "build.yaml"))
 				if err != nil {
 					t.Fatal(err)

@@ -477,8 +477,8 @@ tools (a call to one is still refused by the server); available operations are:
 | `uplink_rotate` | Finish rotation to an already registered active replacement key with identical identity, admin status and scope, atomically revoking the selected old credential. Unscoped admin only. Issue the replacement through uplink add first; no key material crosses MCP. |
 | `access_dismiss` | Dismiss one stale pending declaration. Unscoped admin only. Copy its exact repository and workflow file from access_list; orphaned repository keys are supported. Scoped uplinks are refused. Audited; later admission can observe it again. |
 | `access_list` | List secret access grants, including their exact workflow file, for a repository. |
-| `access_allow` | Grant a step in an exact workflow file access to a secret path. Requires admin uplink. |
-| `access_revoke` | Revoke a step's access in an exact workflow file to a secret path. Requires admin uplink. |
+| `access_allow` | Grant a step in an exact workflow file access to a secret path. Requires an unscoped admin uplink. |
+| `access_revoke` | Revoke a step's access in an exact workflow file to a secret path. Requires an unscoped admin uplink. |
 | `workflow_capability_grant` | Grant operator-owned Kubernetes API access to one registered repository. The operator owns the ServiceAccount, RBAC and namespace quota. Administrator only; audited. Existing technology-specific grants confer no authority here. |
 | `workflow_capability_revoke` | Revoke a repository's operator capability. New submissions and restart adoption refuse the revoked authority. Running Kubernetes workloads remain operator-owned. Administrator only; audited. |
 | `workflow_capability_get` | Read the repository's current or revoked operator capability within the caller's upstream scope. |

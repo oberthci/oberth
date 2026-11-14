@@ -96,18 +96,13 @@
   capacity.
 - CI Jobs have no Secret volumes. Release Secrets and writable caches are wholly
   separate from branch CI.
-- Pipeline pods run under trigger-selected ServiceAccounts: no granted store
-  consumer means the tokenless pipeline identity on every trigger; granted steps
-  select the release-login identity or the separate
-  ci-secrets identity. The two OpenBao roles bind those exact
-  (namespace, ServiceAccount) pairs, the ci-secrets policy covers the
-  upstream subtree only and never receives approval-table grants, and only
-  the release-tier policy carries exact release-secret grants — so a branch
-  push cannot reach release credentials at the Vault layer, independent of
-  the admission gate that already rejects a CI document declaring a
-  system-namespace path. Secret paths an
-  `oberth secretstore exec` invocation would fetch are admission-checked
-  against the same declared annotation.
+- Secret-consuming steps use distinct release and CI ServiceAccounts for the
+  exact repository, workflow file and grant step. OpenBao roles bind those
+  accounts in the pipeline namespace. Policies list only explicitly granted
+  paths; CI policies include only approved upstream paths in that repository,
+  and never release-only paths. Shared and repository policies have no implicit
+  upstream reads. The database is the approval authority, and each admission
+  reads its current grants. Editing the retired grant ConfigMap changes nothing.
 - Release preflight (`oberth secretstore verify --release-tier --repo upstream/org/repo`)
   requests a short-lived token for the same release ServiceAccount a run uses.
   The server's established Role in `argo.namespace` grants `create` on

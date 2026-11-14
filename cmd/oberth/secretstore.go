@@ -960,10 +960,10 @@ type planStepForDigest struct {
 // service.ComputePlanDigest. The algorithm is frozen: changing it breaks
 // current/stale detection for all prior syncs.
 //
-// v3 includes exact workflow-file scope and deliberately invalidates prior sync receipts.
+// v4 binds exact workflow/step grants and distinct CI policies; earlier receipts are stale.
 func computePlanDigestLocal(repos []planRepoForDigest) string {
 	h := sha256.New()
-	h.Write([]byte("oberth-secretstore-plan-v3\x00"))
+	h.Write([]byte("oberth-secretstore-plan-v4\x00"))
 	for _, repo := range repos {
 		h.Write([]byte(repo.Repo))
 		h.Write([]byte{0})

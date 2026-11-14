@@ -226,15 +226,15 @@ func TestPolicyIsolation_RealOpenBao(t *testing.T) {
 	// kvPrefix/data/ — the builder adds the full KV v2 path prefix. This
 	// mirrors how credentialedPolicyPaths strips the mount prefix before
 	// the paths reach the builder.
-	perRepoPolicy := PerRepoPolicy(kvPrefix, org, repo, []string{
+	perRepoPolicy := PerRepoPolicy(kvPrefix, []string{
 		"release/cosign-secret",
 	})
-	perRepoCIPolicy := PerRepoCIPolicy(kvPrefix, org, repo)
-	perStepAPolicy := PerStepPolicy(kvPrefix, org, repo, []string{
+	perRepoCIPolicy := PerRepoCIPolicy(kvPrefix)
+	perStepAPolicy := PerStepPolicy(kvPrefix, []string{
 		"release/r2-upload",
 		"release/cosign-secret", // wildcard-inherited
 	})
-	perStepBPolicy := PerStepPolicy(kvPrefix, org, repo, []string{
+	perStepBPolicy := PerStepPolicy(kvPrefix, []string{
 		"release/step-b-only",
 		"release/cosign-secret", // wildcard-inherited
 	})
@@ -328,15 +328,15 @@ func TestPolicyIsolation_RealOpenBao(t *testing.T) {
 		}
 	})
 
-	// 7. Upstream read: both per-repo and per-step can read upstream secrets.
-	t.Run("upstream-read", func(t *testing.T) {
+	// Upstream paths require an explicit per-step approval.
+	t.Run("ungranted-upstream-read-denied", func(t *testing.T) {
 		status, _ := baoHTTP(t, "GET", addr, "/v1/"+kvPrefix+"/data/upstream/"+org+"/"+repo+"/app-config", tokenStepA, nil)
-		if status != 200 {
-			t.Fatalf("step A reading upstream secret: expected 200, got %d", status)
+		if status != 403 {
+			t.Fatalf("step A reading ungranted upstream secret: expected 403, got %d", status)
 		}
 		status2, _ := baoHTTP(t, "GET", addr, "/v1/"+kvPrefix+"/data/upstream/"+org+"/"+repo+"/app-config", tokenCI, nil)
-		if status2 != 200 {
-			t.Fatalf("CI reading upstream secret: expected 200, got %d", status2)
+		if status2 != 403 {
+			t.Fatalf("CI reading ungranted upstream secret: expected 403, got %d", status2)
 		}
 	})
 
@@ -390,5 +390,37 @@ path "auth/token/revoke-self" { capabilities = ["update"] }`, kvPrefix)
 	status, _ := baoHTTP(t, "GET", addr, "/v1/"+kvPrefix+"/data/release/step-b-only", tokenWidened, nil)
 	if status != 200 {
 		t.Fatalf("widened policy reading step B path: expected 200, got %d (negative control failed: the + glob should grant access)", status)
+	}
+}
+
+// TestGrantedCIStepCannotReadSiblingPath exercises real OpenBao token authority.
+func TestGrantedCIStepCannotReadSiblingPath(t *testing.T) {
+	root, addr, cleanup := baoDevServer(t)
+	t.Cleanup(cleanup)
+	baoEnableKVv2(t, addr, root, "oberth")
+	for _, path := range []string{"upstream/org/repo/a", "upstream/org/repo/b", "release/only"} {
+		baoWriteSecret(t, addr, root, "oberth", path, map[string]any{"value": "fixture"})
+	}
+	baoWritePolicy(t, addr, root, "ci-step-a", PerStepCIPolicy("oberth", "org", "repo", []string{"upstream/org/repo/a", "release/only"}))
+	baoWritePolicy(t, addr, root, "release-step-a", PerStepPolicy("oberth", []string{"upstream/org/repo/a", "release/only"}))
+	ci := baoCreateToken(t, addr, root, []string{"ci-step-a"})
+	release := baoCreateToken(t, addr, root, []string{"release-step-a"})
+	for _, check := range []struct {
+		name, token, path string
+		want              int
+	}{
+		{"CI-own-grant", ci, "upstream/org/repo/a", http.StatusOK},
+		{"CI-sibling-denied", ci, "upstream/org/repo/b", http.StatusForbidden},
+		{"CI-release-denied", ci, "release/only", http.StatusForbidden},
+		{"release-own-grant", release, "upstream/org/repo/a", http.StatusOK},
+		{"release-sibling-denied", release, "upstream/org/repo/b", http.StatusForbidden},
+		{"release-explicit-release-grant", release, "release/only", http.StatusOK},
+	} {
+		t.Run(check.name, func(t *testing.T) {
+			status, _ := baoHTTP(t, http.MethodGet, addr, "/v1/oberth/data/"+check.path, check.token, nil)
+			if status != check.want {
+				t.Fatalf("own token read status=%d want=%d", status, check.want)
+			}
+		})
 	}
 }

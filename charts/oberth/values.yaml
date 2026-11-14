@@ -347,15 +347,10 @@ argo:
   # oberth.ci/workspace-env: none restrict shared mounts and environment.
   # These are pipeline fields, not chart values; see docs/workspace-isolation.md.
   # Workspace isolation requires Pod leaves without templateDefaults.
-  # ciSecrets is the branch-tier credentialed identity: CI templates with
-  # approved upstream-scoped secret paths run as this ServiceAccount and log
-  # in with this role. Binding branch pods to a ServiceAccount the release
-  # role does not accept is what keeps release credentials unreachable from a
-  # branch push at the Vault layer — the release role's bound_service_account_names
-  # never lists this account, and this role's policy covers
-  # oberth/data/upstream/* only and never receives approval-table grants.
-  # `oberth install --install-secretstore` and setup-secretstore.sh create
-  # the matching OpenBao policy and role under these default names.
+  # ciSecrets is a shared branch-tier account with no implicit secret reads.
+  # Granted CI steps use distinct per-step CI accounts and exact-path OpenBao
+  # policies derived from the database. Release-only paths are never added to
+  # those CI policies. The installer creates the managed policies and roles.
   # Empty strings are refused: omit a key for its default.
   ciSecrets:
     serviceAccount: "oberth-argo-ci-secrets"

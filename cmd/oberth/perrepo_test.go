@@ -35,13 +35,13 @@ func (s fakePerRepoStore) SecretAccessList(_ context.Context, qualified string, 
 	var result []store.SecretAccessGrant
 	for _, repo := range s.repos {
 		for _, upstream := range s.upstreams {
-			if upstream.ID != repo.UpstreamID || model.CanonicalRepoKey(upstream.Name, upstream.Org(), repo.Name) != qualified {
+			if upstream.ID != repo.UpstreamID || qualified != "" && model.CanonicalRepoKey(upstream.Name, upstream.Org(), repo.Name) != qualified {
 				continue
 			}
 			for step, secrets := range s.grants[repo.ID] {
 				for secret, allowed := range secrets {
 					if allowed {
-						result = append(result, store.SecretAccessGrant{Workflow: ".oberth/release.yaml", Repo: qualified, Step: step, Secret: secret})
+						result = append(result, store.SecretAccessGrant{Workflow: ".oberth/release.yaml", Repo: model.CanonicalRepoKey(upstream.Name, upstream.Org(), repo.Name), Step: step, Secret: secret})
 					}
 				}
 			}

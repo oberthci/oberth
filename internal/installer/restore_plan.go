@@ -266,7 +266,7 @@ func printHistoryChanges(w io.Writer, archive restoreArchive, target restoreTarg
 
 func printSecretChanges(w io.Writer, archive restoreArchive, target restoreTarget) {
 	plan := target.OpenBao
-	grants := fmt.Sprintf("grants (ConfigMap %s) %d -> %d", secretAccessConfigMapName, target.Grants, countGrants(archive.Grants))
+	grants := fmt.Sprintf("database grants %d -> %d", target.Grants, countGrants(archive.Grants))
 	if !archive.Grants.Present {
 		grants = fmt.Sprintf("grants kept (%d; the backup has none)", target.Grants)
 	}

@@ -216,7 +216,7 @@ func pinsFixture(t *testing.T, sourceCA, targetCA string, samePin bool) (string,
 		pinnedKey = hostKey
 	}
 	archiveBytes, raw, runID := sourceDatabase(t)
-	source := newFakeBackupCluster(t, sourceCompat, grantsConfigMap(testGrants))
+	source := newFakeBackupCluster(t, sourceCompat)
 	source.database, source.rawFiles = archiveBytes, raw
 	source.clusterUID = "source-cluster"
 	seedSourceOpenBao(source.bao)

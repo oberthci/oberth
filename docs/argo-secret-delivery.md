@@ -28,8 +28,9 @@ Admission and Build delivery use this same decision. The grant table is keyed by
 
 Only the granted step's container gets the secret-store env, mounts, token and helper; non-secret settings (address, role name, CA path) can be visible in the Pod's template metadata. Oberth does not inject those settings into authored sidecars or init containers or into other steps. Argo retains its native mirrors of main-container mounts in wait. Argo serializes the main template into `ARGO_TEMPLATE`; this metadata carries public settings and mount descriptions, never the projected token bytes or materialised secrets. No per-run settings ConfigMap is created. Oberth sets `automountServiceAccountToken: false` on the Workflow and every template, independently of the live ServiceAccount setting. Granted mains keep their explicit projected login token. Authored token opt-outs are checked before identity normalization.
 
-Branch credentials use a separate role
-limited to the upstream subtree; release grants require a release trigger.
+Branch credentials use a distinct per-step CI identity whose policy lists
+only that step's exact approved upstream paths in its repository. A sibling path
+is refused by OpenBao itself. Release-only paths stay unavailable to CI.
 
 The wrapper verifies tmpfs, effective-user ownership and directory permissions
 before fetching. It logs in with the projected ServiceAccount token, fetches
@@ -65,7 +66,7 @@ annotations record intent and do not replace store policy.
 The `oberth-argo-` and per-step identity prefixes are reserved for policies and
 roles managed by Oberth. Avoid manually provisioning identities under those
 prefixes: authoritative sync removes managed names absent from the live grant
-table. Sync refuses a ConfigMap fallback or a producer warning before making
+table. Sync refuses an unavailable database/API grant catalog or a producer warning before making
 changes, because a partial desired set cannot authorize orphan deletion.
 
 Only `oberth secretstore exec` receives the secret-store login token.
@@ -85,14 +86,14 @@ set `secretstore.external: false` for an in-cluster store behind custom DNS, or
 these bindings themselves can set `secretstore.createAuthDelegatorBinding: false`.
 
 Run records have no `Credentialed` field or column. Admission reloads current
-step grants, including on retry and rerun, and requires healthy access
-reconciliation for granted consumers. Release triggers alone do not load the
+step grants directly from the database, including on retry and rerun. Release triggers alone do not load the
 approval table or grant store settings. Step-level credential evidence remains
 part of replay safety.
 
 The v0.22.5 migration drops the existing approval table and creates an empty
-workflow-scoped table. No approvals are backfilled; old ConfigMap approvals
-without workflow scope are removed once by the server start that commits the migration, with the count logged. Later unscoped entries are rejected with an error naming the ConfigMap, entry and edit remedy; they cannot restore approvals. Fresh databases do not print the clearing notice. Audit history is
+workflow-scoped table. No approvals are backfilled. The retired grant ConfigMap
+is ignored, so edits or recreation cannot restore approvals. Fresh databases do
+not print the clearing notice. Audit history is
 retained. When the migration commits during an install or upgrade, its output says:
 
 all secret approvals are cleared; re-approve.
@@ -103,7 +104,10 @@ Use that exact tuple with `access_revoke`. `access_list` and pending declaration
 return the workflow file; `access_dismiss` requires it too. After re-approval,
 run `oberth secretstore sync` to prune the old OpenBao roles and policies, then install the scoped identities.
 
-For upstream-scoped paths, the step and workflow-file scope is enforced at admission. The current OpenBao policy still grants the repository upstream subtree; a follow-up narrows that policy.
+For upstream-scoped paths, admission and the per-step OpenBao policy enforce the
+step and workflow-file scope. Release and CI accounts have distinct names and
+roles. Shared and repository identities receive no implicit upstream reads.
+The v0.22.8 upgrade leaves oberth-secret-access orphaned; operators may delete it.
 
 The optional helper image is published for Linux amd64 and arm64 alongside each
 release. It contains only the static Oberth binary at `/usr/local/bin/oberth`

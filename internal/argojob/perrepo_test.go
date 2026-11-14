@@ -12,14 +12,15 @@ import (
 )
 
 const (
-	testPerRepoSA     = "oberth-argo-codeberg-oberthci-oberth-abcdef012345"
-	testPerRepoRole   = testPerRepoSA // SA name == role name by convention
-	testPerRepoCISA   = "oberth-argo-ci-codeberg-oberthci-oberth-fedcba543210"
-	testPerRepoCIRole = testPerRepoCISA // CI SA name == CI role name by convention
+	testPerRepoSA   = "oberth-argo-codeberg-oberthci-oberth-abcdef012345"
+	testPerRepoRole = testPerRepoSA // SA name == role name by convention
+	testPerRepoCISA = "oberth-argo-ci-codeberg-oberthci-oberth-fedcba543210"
+	testPerStepCISA = "oberth-step-ci-fixture"
 )
 
 func testConfigWithPerRepo() Config {
 	cfg := testConfig()
+	cfg.PerStepIdentities["codeberg/oberthci/oberth/.oberth/build.yaml/*"] = PerRepoIdentityConfig{CIServiceAccountName: testPerStepCISA}
 	cfg.PerStepIdentities["codeberg/oberthci/oberth/.oberth/release.yaml/*"] = PerRepoIdentityConfig{ServiceAccountName: testPerRepoSA}
 	cfg.PerRepoIdentities = map[string]PerRepoIdentityConfig{
 		"codeberg/oberthci/oberth": {ServiceAccountName: testPerRepoSA},
@@ -78,15 +79,8 @@ func TestBuildUsesPerRepoIdentityForRelease(t *testing.T) {
 	}
 }
 
-// TestBuildCIUsesPerRepoCIIdentity verifies that a CI run with per-repo CI
-// identities uses the CI per-repo SA (not the release per-repo SA, not the
-// shared ci-secrets SA). The CI per-repo policy is structurally grant-free:
-// it scopes upstream access to the repo's own namespace only, closing the
-// org-union gap where the shared ci-secrets policy gave every CI run read
-// access to every registered org's upstream subtree (issue #433). The release
-// per-repo identity is NEVER used for CI — that would put release grants
-// inside the pod's reachable policy and collapse the CI-to-release boundary
-// (issue #200).
+// The Workflow keeps its repository CI account while a granted Pod uses its
+// exact step CI account. Neither receives release-tier authority.
 func TestBuildCIUsesPerRepoCIIdentity(t *testing.T) {
 	t.Parallel()
 	cfg := testConfigWithPerRepo()
@@ -104,32 +98,25 @@ func TestBuildCIUsesPerRepoCIIdentity(t *testing.T) {
 	if wf.Spec.ServiceAccountName != testPerRepoCISA {
 		t.Fatalf("CI ServiceAccount = %q, want per-repo CI %q", wf.Spec.ServiceAccountName, testPerRepoCISA)
 	}
+	if got := wf.Spec.Templates[0].ServiceAccountName; got != testPerStepCISA {
+		t.Fatalf("granted CI step account=%q want %q", got, testPerStepCISA)
+	}
 	env := environmentOf(t, wf, "main")
-	if env["OBERTH_VAULT_ROLE"] != testPerRepoCIRole {
-		t.Fatalf("CI OBERTH_VAULT_ROLE = %q, want per-repo CI %q", env["OBERTH_VAULT_ROLE"], testPerRepoCIRole)
+	if env["OBERTH_VAULT_ROLE"] != testPerStepCISA {
+		t.Fatalf("CI role=%q want exact step %q", env["OBERTH_VAULT_ROLE"], testPerStepCISA)
 	}
 }
 
-// TestBuildCIFallsBackToSharedWhenNoCIPerRepoIdentities verifies that when no
-// CI per-repo identities exist at all, CI runs use the shared ci-secrets SA.
-// This is the single-repo / no-grants case.
-func TestBuildCIFallsBackToSharedWhenNoCIPerRepoIdentities(t *testing.T) {
+// Granted CI steps fail closed when no step identity has been materialized.
+func TestBuildCIRefusesMissingStepIdentityWithoutRepoIdentities(t *testing.T) {
 	t.Parallel()
-	cfg := testConfig() // no PerRepoCIIdentities
+	cfg := testConfig()
 	path := "oberth/upstream/oberthci/oberth/test-secret"
 	req := testRequest(pipeline.TriggerCI, perRepoCredentialedDocument(path))
-	req.Repo = "oberth"
-	req.UpstreamName = "codeberg"
-	req.UpstreamOrg = "oberthci"
+	req.Repo, req.UpstreamName, req.UpstreamOrg = "oberth", "upstream", "oberthci"
 	req.ApprovedSecrets = map[string]bool{path: true}
-
-	wf, err := Build(cfg, req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if wf.Spec.ServiceAccountName != testCISecretsAcct {
-		t.Fatalf("CI ServiceAccount = %q, want shared %q (no CI per-repo identities exist)",
-			wf.Spec.ServiceAccountName, testCISecretsAcct)
+	if _, err := Build(cfg, req); err == nil || !strings.Contains(err.Error(), "per-step identity is not materialized") {
+		t.Fatalf("missing exact CI identity was not refused: %v", err)
 	}
 }
 
@@ -341,6 +328,8 @@ func TestCICrossRepoReadRefusedByPerRepoCIRole(t *testing.T) {
 		"codeberg/org-b/repo-b": {ServiceAccountName: "oberth-argo-upstream-org-b-repo-b-bbb222"},
 	}
 
+	cfg.PerStepIdentities["codeberg/org-a/repo-a/.oberth/build.yaml/*"] = PerRepoIdentityConfig{CIServiceAccountName: "oberth-step-ci-a"}
+	cfg.PerStepIdentities["codeberg/org-b/repo-b/.oberth/build.yaml/*"] = PerRepoIdentityConfig{CIServiceAccountName: "oberth-step-ci-b"}
 	pathA := "oberth/upstream/org-a/repo-a/test-secret"
 	reqA := testRequest(pipeline.TriggerCI, perRepoCredentialedDocument(pathA))
 	reqA.Repo = "repo-a"
@@ -365,6 +354,9 @@ func TestCICrossRepoReadRefusedByPerRepoCIRole(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if wfA.Spec.Templates[0].ServiceAccountName == wfB.Spec.Templates[0].ServiceAccountName {
+		t.Fatal("granted CI steps shared an identity")
+	}
 	if wfA.Spec.ServiceAccountName == wfB.Spec.ServiceAccountName {
 		t.Fatalf("CI repos a and b got the same SA %q; per-repo CI isolation violated", wfA.Spec.ServiceAccountName)
 	}

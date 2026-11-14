@@ -516,8 +516,6 @@ func TestScopedAdminCannotActOutsideItsUpstream(t *testing.T) {
 	fixture := newScopeFixture(t)
 	hiddenRepo := "codeberg/exampleorg/" + hiddenRepoName
 	for tool, arguments := range map[string]map[string]any{
-		"access_allow":               {"repo": hiddenRepo, "workflow": ".oberth/release.yaml", "step": "deploy", "secret": "oberth/data/x"},
-		"access_revoke":              {"repo": hiddenRepo, "workflow": ".oberth/release.yaml", "step": "release", "secret": "oberth/data/codeberg/token"},
 		"workflow_capability_grant":  {"repo": hiddenRepo, "capability": map[string]any{"namespace": "pipelines", "service_account": "operator-worker", "extended_resources": map[string]int{"devices.example.test/worker": 2}}},
 		"workflow_capability_revoke": {"repo": hiddenRepo},
 		"repo_remove":                {"repo": hiddenRepo},
@@ -532,7 +530,7 @@ func TestScopedAdminCannotActOutsideItsUpstream(t *testing.T) {
 			t.Errorf("%s outside scope = %#v, %v", tool, value, err)
 		}
 	}
-	for _, tool := range []string{"secretstore_verify", "secretstore_plan", "secretstore_sync_receipt"} {
+	for _, tool := range []string{"secretstore_verify", "secretstore_plan", "secretstore_sync_receipt", "access_allow", "access_revoke"} {
 		if _, err := fixture.call(scopedAdmin, tool, map[string]any{}); !errors.Is(err, ErrForbidden) {
 			t.Errorf("%s by a scoped admin = %v, want forbidden", tool, err)
 		}
@@ -544,10 +542,6 @@ func TestScopedAdminCannotActOutsideItsUpstream(t *testing.T) {
 	}
 	if _, err := fixture.store.RepositoryByName(context.Background(), hiddenRepo); err != nil {
 		t.Fatalf("hidden repository removed: %v", err)
-	}
-	// Inside the scope the admin still acts.
-	if _, err := fixture.call(scopedAdmin, "access_allow", map[string]any{"repo": "github/oberthci/oberth", "workflow": ".oberth/release.yaml", "step": "deploy", "secret": "oberth/data/github/deploy"}); err != nil {
-		t.Fatalf("in-scope access_allow: %v", err)
 	}
 }
 
@@ -723,7 +717,7 @@ var toolScopeBehaviour = map[string]string{
 	"publication_abandon": "refused",
 	"issue_create":        "mutation", "issue_update": "mutation", "issue_append": "mutation",
 	"issue_close": "mutation", "issue_reopen": "mutation", "issue_delete": "mutation",
-	"issue_lock": "mutation", "access_allow": "mutation", "access_revoke": "mutation",
+	"issue_lock": "mutation", "access_allow": "refused", "access_revoke": "refused",
 
 	"workflow_capability_grant": "mutation", "workflow_capability_revoke": "mutation", "workflow_capability_get": "lookup",
 	"release_wif_list": "refused", "release_wif_grant": "refused", "release_wif_revoke": "refused", "release_wif_reset": "refused",

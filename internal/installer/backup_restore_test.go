@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -22,14 +23,12 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
-	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
@@ -210,6 +209,7 @@ func (f *fakeOpenBao) handle(command []string, input []byte) ([]byte, error) {
 // --- A fake cluster: kubectl, helm and the Kubernetes API ---
 
 type fakeBackupCluster struct {
+	compat        backupCompatibility
 	helmShowChart []string
 	missingChart  bool
 	t             *testing.T
@@ -242,6 +242,7 @@ type fakeBackupCluster struct {
 	helmUpgrade        []string
 	helmValues         map[string]any
 	scales             []int32
+	beforeServerStop   func()
 }
 
 func serverDeploymentFixture(compat backupCompatibility) *appsv1.Deployment {
@@ -289,6 +290,7 @@ func newFakeBackupCluster(t *testing.T, compat backupCompatibility, objects ...r
 	objects = append(objects, serverDeploymentFixture(compat), serverPodFixture("oberth-1"), runningOpenBaoPod(), runningOpenBaoStatefulSet())
 	c := &fakeBackupCluster{
 		t:       t,
+		compat:  compat,
 		bao:     newFakeOpenBao(t),
 		client:  fake.NewClientset(objects...),
 		values:  map[string]any{"compatibility": map[string]any{"schemaIdentity": compat.SchemaIdentity, "auditDomain": compat.AuditDomain, "witnessKeyInfo": compat.WitnessKeyInfo}, "argo": map[string]any{"namespace": DefaultArgoNamespace}},
@@ -319,6 +321,10 @@ func newFakeBackupCluster(t *testing.T, compat backupCompatibility, objects ...r
 		c.scaleSubres = append(c.scaleSubres, action.GetSubresource())
 		c.mu.Unlock()
 		if patch.Spec.Replicas == 0 {
+			if c.beforeServerStop != nil {
+				c.beforeServerStop()
+				c.beforeServerStop = nil
+			}
 			_ = c.client.Tracker().Delete(pods, DefaultNamespace, "oberth-1")
 		} else {
 			_ = c.client.Tracker().Add(serverPodFixture("oberth-2"))
@@ -450,18 +456,66 @@ func (c *fakeBackupCluster) run(ctx context.Context, input []byte, name string, 
 	joined := strings.Join(command, " ")
 	switch {
 	case joined == "oberth access list --json":
-		cm, err := c.client.CoreV1().ConfigMaps(DefaultNamespace).Get(ctx, secretAccessConfigMapName, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return []byte("[]"), nil
+		db, _, cleanup, err := c.openGrantDatabase(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+		grants, err := exportDatabaseGrants(ctx, db)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(grants.Grants)
+	case strings.HasPrefix(joined, "oberth access allow ") || strings.HasPrefix(joined, "oberth access revoke "):
+		if len(command) != 7 {
+			return nil, fmt.Errorf("bad grant tuple: %v", command)
+		}
+		db, path, cleanup, err := c.openGrantDatabase(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if command[2] == "allow" {
+			_, err = db.Grant(ctx, command[3], command[4], command[5], command[6], "admin@fixture")
+		} else {
+			_, err = db.Revoke(ctx, command[3], command[4], command[5], command[6], "admin@fixture")
+		}
+		if closeErr := cleanup(); err == nil {
+			err = closeErr
 		}
 		if err != nil {
 			return nil, err
 		}
-		var entries []accessListJSONEntry
-		if err := yaml.Unmarshal([]byte(cm.Data[secretAccessConfigMapKey]), &entries); err != nil {
+		return nil, c.captureGrantDatabase(ctx, path)
+	case container == restoreHelperContainer && strings.Contains(joined, "tar -cf -"):
+		db, path, cleanup, err := c.openGrantDatabase(ctx)
+		_ = db
+		if err != nil {
 			return nil, err
 		}
-		return json.Marshal(entries)
+		if err := cleanup(); err != nil {
+			return nil, err
+		}
+		var out bytes.Buffer
+		tw := tar.NewWriter(&out)
+		for _, suffix := range []string{"", "-wal"} {
+			body, err := os.ReadFile(path + suffix)
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if err := tw.WriteHeader(&tar.Header{Name: "oberth.sqlite" + suffix, Mode: 0600, Size: int64(len(body))}); err != nil {
+				return nil, err
+			}
+			if _, err := tw.Write(body); err != nil {
+				return nil, err
+			}
+		}
+		if err := tw.Close(); err != nil {
+			return nil, err
+		}
+		return out.Bytes(), nil
 	case joined == "oberth version --schema":
 		if c.schemaExecErr != nil {
 			return nil, c.schemaExecErr
@@ -576,6 +630,9 @@ func sourceDatabase(t *testing.T) ([]byte, map[string][]byte, string) {
 	if _, err := database.SetRunWorkflowName(ctx, run.ID, "oberth-backup-fixture"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := database.Grant(ctx, "upstream/org/repo", ".oberth/release.yaml", "*", "oberth/data/release/cosign-secret", "admin@fixture"); err != nil {
+		t.Fatal(err)
+	}
 	// An audited action makes the hash chain depend on the audit domain.
 	if _, err := database.AppendAuditAction(ctx, model.AuditActionSpec{Actor: "fixture", Action: "backup-test", ResourceType: "backup", ResourceID: "restore"}); err != nil {
 		t.Fatal(err)
@@ -622,19 +679,19 @@ func freshInstallDatabase(t *testing.T) []byte {
 }
 
 func seedSourceOpenBao(bao *fakeOpenBao) {
-	bao.kv["upstream/codeberg/org/ssh-key"] = map[string]any{"private_key": testSecretValue}
+	bao.kv["upstream/upstream/org/ssh-key"] = map[string]any{"private_key": testSecretValue}
 	bao.kv["release/cosign-secret"] = map[string]any{"key": "cosign-canary", "password": "pw-canary"}
 	bao.kv["identities/oberth/ssh-host"] = map[string]any{"ed25519": "host-key-canary"}
 	bao.policies["oberth-ci"] = "path \"oberth/data/*\" { capabilities = [\"read\"] }"
-	bao.policies["oberth-argo-codeberg-org-repo"] = "path \"oberth/data/upstream/codeberg/org/repo/*\" { capabilities = [\"read\"] }"
-	bao.roles["oberth-argo-codeberg-org-repo"] = map[string]any{
+	bao.policies["oberth-argo-upstream-org-repo"] = "path \"oberth/data/upstream/upstream/org/repo/*\" { capabilities = [\"read\"] }"
+	bao.roles["oberth-argo-upstream-org-repo"] = map[string]any{
 		"alias_name_source":                "serviceaccount_uid",
 		"audience":                         "openbao",
-		"bound_service_account_names":      []any{"oberth-argo-codeberg-org-repo"},
+		"bound_service_account_names":      []any{"oberth-argo-upstream-org-repo"},
 		"bound_service_account_namespaces": []any{"oberth-argo"},
 		"token_no_default_policy":          true,
-		"token_policies":                   []any{"oberth-argo-codeberg-org-repo"},
-		"policies":                         []any{"oberth-argo-codeberg-org-repo"},
+		"token_policies":                   []any{"oberth-argo-upstream-org-repo"},
+		"policies":                         []any{"oberth-argo-upstream-org-repo"},
 		"token_ttl":                        float64(1200),
 		"token_max_ttl":                    float64(1800),
 		"token_bound_cidrs":                []any{},
@@ -642,20 +699,11 @@ func seedSourceOpenBao(bao *fakeOpenBao) {
 	}
 }
 
-func grantsConfigMap(grants string) *corev1.ConfigMap {
-	return &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: DefaultNamespace},
-		Data:       map[string]string{secretAccessConfigMapKey: grants},
-	}
-}
-
-const testGrants = "- repo: codeberg/org/repo\n  step: '*'\n  secret: oberth/data/release/cosign-secret\n"
-
 // backupFixtureArchive runs a full backup against a seeded source cluster.
 func backupFixtureArchive(t *testing.T, oldServer bool) (string, string, *fakeBackupCluster) {
 	t.Helper()
 	archiveBytes, raw, runID := sourceDatabase(t)
-	source := newFakeBackupCluster(t, sourceCompat, grantsConfigMap(testGrants))
+	source := newFakeBackupCluster(t, sourceCompat)
 	source.database, source.rawFiles, source.oldServer = archiveBytes, raw, oldServer
 	source.clusterUID = "source-cluster"
 	source.values["argo"] = map[string]any{"namespace": DefaultArgoNamespace, "releaseWIF": map[string]any{
@@ -710,7 +758,7 @@ func TestBackupCapturesOpenBaoDatabaseAndValues(t *testing.T) {
 	}
 	// Every field the server returned is kept, including the one a
 	// hand-picked restore once dropped.
-	if got, want := len(roles.Roles[0].Fields), len(source.bao.roles["oberth-argo-codeberg-org-repo"]); got != want {
+	if got, want := len(roles.Roles[0].Fields), len(source.bao.roles["oberth-argo-upstream-org-repo"]); got != want {
 		t.Fatalf("role fields = %d, want all %d", got, want)
 	}
 	if roles.Roles[0].Fields["token_no_default_policy"] != true {
@@ -732,13 +780,11 @@ func TestBackupCapturesOpenBaoDatabaseAndValues(t *testing.T) {
 	if _, ok := reference.TransitKeys["oberth-transit/trusted-plan-artifacts"]; !ok || reference.PKICACerts["oberth-pki"] == "" {
 		t.Fatalf("reference lacks Transit/PKI metadata: %+v", reference)
 	}
-	var grants secretAccessExport
-	if err := readBackupJSON(work, backupMemberSecretAccess, &grants); err != nil {
-		t.Fatal(err)
+	_, grants, err := inspectGrantSnapshot(t.Context(), filepath.Join(work, backupMemberDatabase), work, store.ProtocolConfig{SchemaIdentity: sourceCompat.SchemaIdentity, AuditDomain: sourceCompat.AuditDomain}, 0)
+	if err != nil || !grants.Present || len(grants.Grants) != 1 || grants.Grants[0].Repo != "upstream/org/repo" {
+		t.Fatal("database approvals missing", grants, err)
 	}
-	if !grants.Present || !strings.Contains(grants.Data[secretAccessConfigMapKey], "codeberg/org/repo") {
-		t.Fatalf("secret-access export = %+v", grants)
-	}
+
 }
 
 func TestBackupDryRunReadsNoSecrets(t *testing.T) {
@@ -830,7 +876,7 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 			t.Fatalf("policy %s = %q, want %q", name, target.bao.policies[name], rules)
 		}
 	}
-	role := target.bao.roles["oberth-argo-codeberg-org-repo"]
+	role := target.bao.roles["oberth-argo-upstream-org-repo"]
 	if role["token_no_default_policy"] != true || role["alias_name_source"] != "serviceaccount_uid" {
 		t.Fatalf("role restored without every field: %v", role)
 	}
@@ -854,10 +900,13 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 		t.Fatal("helper pod left behind")
 	}
 
-	// The grants ConfigMap the server reconciles from is back.
-	cm, err := target.client.CoreV1().ConfigMaps(DefaultNamespace).Get(context.Background(), secretAccessConfigMapName, metav1.GetOptions{})
-	if err != nil || !strings.Contains(cm.Data[secretAccessConfigMapKey], "codeberg/org/repo") {
-		t.Fatalf("secret-access ConfigMap = %v, %v", cm, err)
+	// Grants travel in the same verified database, with no mirror object.
+	keys := uploadedGrantKeys(t, target, sourceCompat)
+	if len(keys) != 1 || keys[0].Workflow != ".oberth/release.yaml" || keys[0].Path != "oberth/data/release/cosign-secret" {
+		t.Fatal("restored grants differ", keys)
+	}
+	if _, err := target.client.CoreV1().ConfigMaps(DefaultNamespace).Get(t.Context(), secretAccessConfigMapName, metav1.GetOptions{}); err == nil {
+		t.Fatal("grant mirror recreated")
 	}
 
 	// Only the Workflow unknown to the restored database receives native Terminate.
@@ -937,8 +986,8 @@ func TestRestoreDryRunChangesNothing(t *testing.T) {
 	assertNoRestoreMutation(t, target)
 	assertSubstringsInOrder(t, out.String(), []string{"Verified: all", "History    1 run, ", "Secrets    2 KV secrets, 1 policies, 1 roles, 1 grants",
 		"What changes on this install:", "History    replaced, not merged: runs 0 -> 1", "Secrets    2 new, 0 replaced, 0 unchanged",
-		"new: release/cosign-secret, upstream/codeberg/org/ssh-key",
-		"policies 1 new, 0 replaced; roles 1 new, 0 replaced; grants (ConfigMap oberth-secret-access) 0 -> 1",
+		"new: release/cosign-secret, upstream/upstream/org/ssh-key",
+		"policies 1 new, 0 replaced; roles 1 new, 0 replaced; database grants 0 -> 1",
 		"Unchanged  this install's identities, CA and Helm values",
 		"deploy/oberth stopped (1 -> 0)", "pre-restore-20261017T093000Z", "Helm       compatibility values the database needs",
 		"oberth-oberth-orphan", "No changes were made"})
@@ -969,7 +1018,7 @@ func TestRestoreSkipsUnchangedSecrets(t *testing.T) {
 	if slices.Contains(target.bao.writes, "oberth/data/release/cosign-secret") {
 		t.Fatalf("unchanged secret was written again: %v", target.bao.writes)
 	}
-	if !slices.Contains(target.bao.writes, "oberth/data/upstream/codeberg/org/ssh-key") {
+	if !slices.Contains(target.bao.writes, "oberth/data/upstream/upstream/org/ssh-key") {
 		t.Fatalf("changed secret was not written: %v", target.bao.writes)
 	}
 }
@@ -1063,7 +1112,7 @@ func TestRestoreFailsWhenARoleDoesNotReadBack(t *testing.T) {
 	cfg := RestoreConfig{Input: archive, Yes: true, Timeout: time.Second}
 	cfg.applyDefaults()
 	err := runRestore(context.Background(), cfg, target.deps(&out))
-	if err == nil || !strings.Contains(err.Error(), "oberth-argo-codeberg-org-repo (token_no_default_policy)") {
+	if err == nil || !strings.Contains(err.Error(), "oberth-argo-upstream-org-repo (token_no_default_policy)") {
 		t.Fatalf("lossy role write error = %v, want the role and field named", err)
 	}
 	if len(target.scales) != 0 {
@@ -1223,4 +1272,47 @@ func assertUtilityHelperImage(t *testing.T, cluster *fakeBackupCluster, image st
 	if !found {
 		t.Fatal("no maintenance helper pod created")
 	}
+}
+
+func (c *fakeBackupCluster) openGrantDatabase(ctx context.Context) (*store.Store, string, func() error, error) {
+	work := c.t.TempDir()
+	opts := store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: c.compat.SchemaIdentity, AuditDomain: c.compat.AuditDomain}, SnapshotTempDir: work}
+	path := filepath.Join(work, "oberth.sqlite")
+	if len(c.database) > 0 {
+		tarPath := filepath.Join(work, "db.tar")
+		if err := os.WriteFile(tarPath, c.database, 0600); err != nil {
+			return nil, "", nil, err
+		}
+		files, err := extractDatabaseFiles(ctx, tarPath, work, 0)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		path = files.Main
+	}
+	var db *store.Store
+	var err error
+	if len(c.database) > 0 {
+		db, err = store.OpenAdminClient(ctx, path, opts)
+	} else {
+		db, err = store.CreateGenesis(ctx, path, opts)
+	}
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return db, path, db.Close, nil
+}
+func (c *fakeBackupCluster) captureGrantDatabase(ctx context.Context, path string) error {
+	var out bytes.Buffer
+	opts := store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: c.compat.SchemaIdentity, AuditDomain: c.compat.AuditDomain}, SnapshotTempDir: filepath.Dir(path)}
+	if _, err := store.WriteVerifiedBackup(ctx, path, store.LatestMigrationVersion(), opts, &out); err != nil {
+		return err
+	}
+	c.database = out.Bytes()
+	c.rawFiles = map[string][]byte{}
+	for _, suffix := range []string{"", "-wal"} {
+		if body, err := os.ReadFile(path + suffix); err == nil {
+			c.rawFiles[serverDatabasePath+suffix] = body
+		}
+	}
+	return nil
 }

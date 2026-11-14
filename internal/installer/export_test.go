@@ -243,18 +243,6 @@ func printProductionCredentials(w io.Writer, initResult baoInitResult, color boo
 	_, _ = fmt.Fprintln(w)
 }
 
-// OberthCredentialedPolicy returns the HCL policy for the store login identity
-// used by granted steps. It grants read access to registered upstream subtrees only; the
-// approval table in Oberth's database is the fine-grained admission gate,
-// and any non-upstream paths (e.g. release secrets) require explicit
-// approval-table entries that are synced to the policy via
-// OberthCredentialedPolicyWithGrants. The release/* wildcard was removed
-// to close a trust-tier collapse where any CI pipeline declaring an
-// upstream path received credentials that could read all release secrets.
-func OberthCredentialedPolicy(kvPrefix string, upstreamOrgs []string) string {
-	return OberthCredentialedPolicyWithGrants(kvPrefix, upstreamOrgs, nil)
-}
-
 // checkValuesPinnedConflicts checks parsed YAML data for leaf keys that
 // collide with a pinned upgrade key.
 func checkValuesPinnedConflicts(data []byte) error {

@@ -883,7 +883,7 @@ func configuredProductionStoreResponses(t *testing.T) map[string]fakeBaoResponse
 }`}
 	configuredServerPKIResponses(t, responses)
 	responses["policy read oberth-ci"] = fakeBaoResponse{out: OberthPolicy("oberth") + serverPKIPolicy()}
-	responses["policy read oberth-argo-credentialed"] = fakeBaoResponse{out: OberthCredentialedPolicy("oberth", nil)}
+	responses["policy read oberth-argo-credentialed"] = fakeBaoResponse{out: OberthCredentialedPolicyWithGrants("oberth", nil)}
 	responses["read -format=json auth/kubernetes/role/oberth-argo-credentialed"] = fakeBaoResponse{out: `{"request_id":"3","data":{` +
 		`"bound_service_account_names":["oberth-argo-credentialed"],` +
 		`"bound_service_account_namespaces":["oberth-argo"],` +
@@ -909,7 +909,7 @@ func configuredStoreResponses() map[string]fakeBaoResponse {
 			`"token_no_default_policy":true,` +
 			`"token_ttl":600,` +
 			`"token_max_ttl":900}}`},
-		"policy read oberth-argo-credentialed": {out: OberthCredentialedPolicy("oberth", nil)},
+		"policy read oberth-argo-credentialed": {out: OberthCredentialedPolicyWithGrants("oberth", nil)},
 		"read -format=json auth/kubernetes/role/oberth-argo-credentialed": {out: `{"request_id":"3","data":{` +
 			`"bound_service_account_names":["oberth-argo-credentialed"],` +
 			`"bound_service_account_namespaces":["oberth-argo"],` +
@@ -917,7 +917,7 @@ func configuredStoreResponses() map[string]fakeBaoResponse {
 			`"token_no_default_policy":true,` +
 			`"token_ttl":1200,` +
 			`"token_max_ttl":1800}}`},
-		"policy read oberth-argo-ci-secrets": {out: OberthCISecretsPolicy("oberth", nil)},
+		"policy read oberth-argo-ci-secrets": {out: OberthCISecretsPolicy("oberth")},
 		"read -format=json auth/kubernetes/role/oberth-argo-ci-secrets": {out: `{"request_id":"4","data":{` +
 			`"bound_service_account_names":["oberth-argo-ci-secrets"],` +
 			`"bound_service_account_namespaces":["oberth-argo"],` +
@@ -3269,13 +3269,13 @@ func TestOfferSSHConfigWritesFile(t *testing.T) {
 // of the trust-tier separation: even if admission has a bug, the
 // credentialed SA's token cannot read release secrets.
 func TestCredentialedPolicyExcludesReleaseWildcard(t *testing.T) {
-	policy := OberthCredentialedPolicy("oberth", []string{"oberthci"})
+	policy := OberthCredentialedPolicyWithGrants("oberth", nil)
 	if strings.Contains(policy, "release/*") {
 		t.Fatal("OberthCredentialedPolicy contains release/*; " +
 			"the credentialed SA must not have wildcard access to release secrets")
 	}
-	if !strings.Contains(policy, `upstream/oberthci/*`) {
-		t.Fatal("OberthCredentialedPolicy is missing per-org upstream rule")
+	if strings.Contains(policy, `upstream/`) {
+		t.Fatal("shared credentialed policy grants implicit upstream access")
 	}
 	if strings.Contains(policy, `upstream/*"`) {
 		t.Fatal("OberthCredentialedPolicy still uses the static upstream/* wildcard; " +
@@ -3288,14 +3288,14 @@ func TestCredentialedPolicyExcludesReleaseWildcard(t *testing.T) {
 
 // TestCredentialedPolicyWithGrantsAddsExactPaths proves that
 // OberthCredentialedPolicyWithGrants includes exact-path entries for each
-// approved secret alongside the upstream/* wildcard.
+// approved secret without an implicit upstream wildcard.
 func TestCredentialedPolicyWithGrantsAddsExactPaths(t *testing.T) {
-	policy := OberthCredentialedPolicyWithGrants("oberth", []string{"oberthci"}, []string{
+	policy := OberthCredentialedPolicyWithGrants("oberth", []string{
 		"release/r2-upload-token",
 		"release/cosign-secret",
 	})
-	if !strings.Contains(policy, `upstream/oberthci/*`) {
-		t.Fatal("policy missing per-org upstream rule")
+	if strings.Contains(policy, `upstream/`) {
+		t.Fatal("exact approvals gained implicit upstream access")
 	}
 	if strings.Contains(policy, `upstream/*"`) {
 		t.Fatal("policy uses static upstream/* wildcard instead of per-org enumeration")
@@ -3312,15 +3312,14 @@ func TestCredentialedPolicyWithGrantsAddsExactPaths(t *testing.T) {
 }
 
 // TestCISecretsPolicyIsGrantFree proves the branch-tier policy covers the
-// upstream subtree and token self-revocation and NOTHING else. The function
+// token self-revocation and identity denial, with no secret read. The function
 // deliberately takes no grants parameter, so this test is the tripwire for
 // anyone re-adding one: a CI-trigger pod's Vault token must never be able to
 // read a release secret, whatever the approval table says (issue #200).
 func TestCISecretsPolicyIsGrantFree(t *testing.T) {
-	orgs := []string{"oberthci"}
-	policy := OberthCISecretsPolicy("oberth", orgs)
-	if !strings.Contains(policy, `path "oberth/data/upstream/oberthci/*"`) {
-		t.Fatal("ci-secrets policy is missing the per-org upstream rule")
+	policy := OberthCISecretsPolicy("oberth")
+	if strings.Contains(policy, `path "oberth/data/upstream/`) {
+		t.Fatal("shared CI policy has implicit upstream reads")
 	}
 	if strings.Contains(policy, `path "oberth/data/upstream/*"`) {
 		t.Fatal("ci-secrets policy still uses static upstream/* wildcard")
@@ -3333,14 +3332,13 @@ func TestCISecretsPolicyIsGrantFree(t *testing.T) {
 			t.Fatalf("ci-secrets policy grants %s; the branch tier must never reach release paths", stanza)
 		}
 	}
-	// Exactly two path stanzas: the per-org upstream rule and revoke-self.
-	// A third means someone taught this policy to carry grants.
-	if got := strings.Count(policy, `path "`); got != 3 {
-		t.Fatalf("ci-secrets policy has %d path stanzas, want upstream, revoke-self and identity denial:\n%s", got, policy)
+	// Only self-revocation and identity denial; no implicit secret access.
+	if got := strings.Count(policy, `path "`); got != 2 {
+		t.Fatalf("ci-secrets policy has %d path stanzas, want revoke-self and identity denial:\n%s", got, policy)
 	}
 	// The credentialed policy WITH grants must still never leak into the
 	// ci-secrets one: the two are separate objects with separate contents.
-	granted := OberthCredentialedPolicyWithGrants("oberth", orgs, []string{"release/cosign-secret"})
+	granted := OberthCredentialedPolicyWithGrants("oberth", []string{"release/cosign-secret"})
 	if policy == granted {
 		t.Fatal("the ci-secrets policy and the granted credentialed policy are the same text")
 	}
@@ -3425,7 +3423,7 @@ func TestCredentialedPolicyPathsAcceptsUpstreamPrefix(t *testing.T) {
 // TestCredentialedPolicyWithGrantsDeduplicates proves that duplicate paths
 // in the grant list produce only one policy entry.
 func TestCredentialedPolicyWithGrantsDeduplicates(t *testing.T) {
-	policy := OberthCredentialedPolicyWithGrants("oberth", nil, []string{
+	policy := OberthCredentialedPolicyWithGrants("oberth", []string{
 		"release/r2-upload-token",
 		"release/r2-upload-token",
 	})
@@ -3492,46 +3490,22 @@ func TestK3sAutoNetworkPolicySetsFlag(t *testing.T) {
 	}
 }
 
-// TestCredentialedPolicyWithNoGrantsMatchesBasePolicy proves that passing
-// no grants produces the same output as the base OberthCredentialedPolicy.
+// Empty grant slices carry no implicit secret authority.
 func TestCredentialedPolicyWithNoGrantsMatchesBasePolicy(t *testing.T) {
-	orgs := []string{"oberthci"}
-	base := OberthCredentialedPolicy("oberth", orgs)
-	withNil := OberthCredentialedPolicyWithGrants("oberth", orgs, nil)
-	withEmpty := OberthCredentialedPolicyWithGrants("oberth", orgs, []string{})
-	if base != withNil {
-		t.Fatal("OberthCredentialedPolicy(prefix, orgs) != OberthCredentialedPolicyWithGrants(prefix, orgs, nil)")
+	nilGrants := OberthCredentialedPolicyWithGrants("oberth", nil)
+	if empty := OberthCredentialedPolicyWithGrants("oberth", []string{}); empty != nilGrants {
+		t.Fatal("empty grant sets differ")
 	}
-	if base != withEmpty {
-		t.Fatal("OberthCredentialedPolicy(prefix, orgs) != OberthCredentialedPolicyWithGrants(prefix, orgs, []string{})")
+	if strings.Contains(nilGrants, `capabilities = ["read"]`) {
+		t.Fatal("empty grants permit a secret read")
 	}
 }
 
-// --- Enumerated upstream policy tests (issue #246 design revision) ---
-
-// TestCISecretsPolicyEnumeratesMultipleOrgs proves that multiple registered
-// upstream orgs produce separate per-org path rules, sorted and deduplicated.
-func TestCISecretsPolicyEnumeratesMultipleOrgs(t *testing.T) {
-	t.Parallel()
-	policy := OberthCISecretsPolicy("oberth", []string{"acme", "oberthci", "oberthci"})
-	if !strings.Contains(policy, `path "oberth/data/upstream/oberthci/*"`) {
-		t.Fatal("policy missing oberthci org rule")
-	}
-	if !strings.Contains(policy, `path "oberth/data/upstream/acme/*"`) {
-		t.Fatal("policy missing acme org rule")
-	}
-	if strings.Contains(policy, `path "oberth/data/upstream/*"`) {
-		t.Fatal("policy still uses static upstream/* wildcard")
-	}
-	// acme appears before oberthci (sorted)
-	oberthciIdx := strings.Index(policy, "oberthci")
-	acmeIdx := strings.Index(policy, "acme")
-	if acmeIdx > oberthciIdx {
-		t.Fatal("org rules are not sorted: acme should appear before oberthci")
-	}
-	// Deduplicated: oberthci appears exactly once in path rules
-	if count := strings.Count(policy, `upstream/oberthci/*"`); count != 1 {
-		t.Fatalf("oberthci path rule appears %d times, want 1", count)
+// Shared CI identities never gain authority from registered orgs.
+func TestCISecretsPolicyCannotReadAnyUpstream(t *testing.T) {
+	policy := OberthCISecretsPolicy("oberth")
+	if strings.Contains(policy, `upstream/`) || strings.Contains(policy, `capabilities = ["read"]`) {
+		t.Fatal("shared CI identity permits implicit reads", policy)
 	}
 }
 
@@ -3540,7 +3514,7 @@ func TestCISecretsPolicyEnumeratesMultipleOrgs(t *testing.T) {
 // install has no upstreams and no grants, so zero access is correct.
 func TestCISecretsPolicyEmptyOrgsFailsClosed(t *testing.T) {
 	t.Parallel()
-	policy := OberthCISecretsPolicy("oberth", nil)
+	policy := OberthCISecretsPolicy("oberth")
 	if strings.Contains(policy, `path "oberth/data/upstream`) {
 		t.Fatalf("empty upstream orgs must produce no upstream path rules:\n%s", policy)
 	}
@@ -3550,37 +3524,6 @@ func TestCISecretsPolicyEmptyOrgsFailsClosed(t *testing.T) {
 	// Only the revoke-self path stanza
 	if got := strings.Count(policy, `path "`); got != 2 {
 		t.Fatalf("empty-orgs policy has %d path stanzas, want revoke-self and identity denial:\n%s", got, policy)
-	}
-}
-
-// TestCredentialedPolicyEmptyOrgsFailsClosed proves the credentialed policy
-// also produces no upstream path rules when the org list is empty.
-func TestCredentialedPolicyEmptyOrgsFailsClosed(t *testing.T) {
-	t.Parallel()
-	policy := OberthCredentialedPolicy("oberth", nil)
-	if strings.Contains(policy, `path "oberth/data/upstream`) {
-		t.Fatalf("empty upstream orgs must produce no upstream path rules:\n%s", policy)
-	}
-}
-
-// TestCredentialedPolicyWithOrgsAndGrants proves that both per-org upstream
-// rules and exact grant paths coexist in the credentialed policy.
-func TestCredentialedPolicyWithOrgsAndGrants(t *testing.T) {
-	t.Parallel()
-	policy := OberthCredentialedPolicyWithGrants("oberth", []string{"oberthci", "acme"}, []string{
-		"release/cosign-secret",
-	})
-	if !strings.Contains(policy, `upstream/oberthci/*`) {
-		t.Fatal("missing oberthci org rule")
-	}
-	if !strings.Contains(policy, `upstream/acme/*`) {
-		t.Fatal("missing acme org rule")
-	}
-	if !strings.Contains(policy, `oberth/data/release/cosign-secret`) {
-		t.Fatal("missing grant path")
-	}
-	if strings.Contains(policy, `upstream/*"`) {
-		t.Fatal("policy uses static upstream/* wildcard")
 	}
 }
 

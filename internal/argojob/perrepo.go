@@ -20,7 +20,8 @@ import (
 type PerRepoIdentityConfig struct {
 	// ServiceAccountName is the per-repo SA in the pipeline namespace.
 	// It is also the Vault role name and policy name.
-	ServiceAccountName string
+	ServiceAccountName   string
+	CIServiceAccountName string
 }
 
 // canonicalRepoKey constructs the map key for PerRepoIdentities from

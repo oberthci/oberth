@@ -34,21 +34,15 @@ const promotionCompensationTimeout = 30 * time.Second
 // The server's own identity has no Vault policy-write capability, so the resync
 // must be triggered externally.
 const revokePolicySyncAdvisory = "Revocation is effective for new Oberth admissions immediately. " +
-	"The Vault credentialed policy still has this path until re-synced: " +
-	"run `oberth secretstore sync` (or `oberth install --install-secretstore --upgrade`) to remove it from the Vault policy."
+	"The per-step OpenBao policy still has this path until re-synced: " +
+	"run `oberth secretstore sync` (or `oberth install --install-secretstore --upgrade`) to remove it from the OpenBao policy."
 
-// grantPolicySyncAdvisory is the warning returned by access_allow to inform
-// the caller that the new grant is recorded but not yet live. The server
-// refreshes its identity map on every successful reconciliation (issue #465),
-// so the identity appears without a restart — but the Vault policy and the
-// chart-managed ServiceAccount remain operator-gated: the server's own
-// identity has no Vault policy-write capability (issue #427), and a plain
-// `install --upgrade` without --install-secretstore skips the secret-store
-// leg entirely (no identity produce, no policy sync, no ServiceAccount).
-// Until both complete, admission fails closed: the grant exists in sqlite
-// but the Vault layer refuses the path.
-const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes automatically on the next reconcile — no restart needed. " +
-	"The Vault policy does not include this path yet: run `oberth secretstore sync` under your own BAO_TOKEN, " +
+// grantPolicySyncAdvisory names the remaining operator-controlled materialization.
+// The server refreshes identities after the database transaction; OpenBao policy
+// writes and chart-managed ServiceAccounts require the operator's credentials.
+// Admission fails closed until those exact identities and policies exist.
+const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes immediately — no restart needed. " +
+	"The per-step OpenBao policy does not include this path yet: run `oberth secretstore sync` under your own BAO_TOKEN, " +
 	"then `oberth install --install-secretstore --upgrade` if this repo's ServiceAccount does not exist yet. " +
 	"Until then, access fails closed."
 
@@ -89,7 +83,7 @@ type APIConfig struct {
 	ReleaseWIFOverrides       ReleaseWIFOverrideStore
 	ReleaseWIF                ReleaseWIFPolicy
 	SecretStoreVerifier       SecretStoreVerifier
-	SecretAccessReconciler    *AccessReconciler
+	SecretAccessChanged       func(context.Context) error
 	RepositoryArchiver        RepositoryArchiver
 	ChangeRepositoryArchive   func(context.Context, string, bool, func() error) error
 	RepositoryRemover         RepositoryRemover
@@ -171,7 +165,7 @@ type API struct {
 	releaseWIF                ReleaseWIFPolicy
 	releaseWIFMu              *sync.Mutex
 	secretStoreVerifier       SecretStoreVerifier
-	secretAccessReconciler    *AccessReconciler
+	secretAccessChanged       func(context.Context) error
 	repositoryArchiver        RepositoryArchiver
 	changeRepositoryArchive   func(context.Context, string, bool, func() error) error
 	repositoryRemover         RepositoryRemover
@@ -270,7 +264,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		tags: config.Tags, enqueues: config.Enqueues, git: config.Git, refs: config.Refs, logs: config.Logs, artifacts: config.Artifacts, auditor: config.Auditor,
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
 		promotionWorkspaceRoot: promotionWorkspaceRoot, workspaces: workspaces,
-		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,
+		secretAccess: config.SecretAccess, secretAccessChanged: config.SecretAccessChanged,
 		workflowCapabilities: config.WorkflowCapabilities,
 
 		secretStoreVerifier: config.SecretStoreVerifier,
@@ -407,7 +401,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	}
 	switch name {
-	case "upstream_add", "upstream_list", "upstream_remove", "upstream_provide_key", "repo_add", "repo_verify", "admin_access_list", "admin_public_identity", "admin_readiness", "admin_version", "admin_idle", "admin_audit_record", "uplink_scope", "uplink_add":
+	case "upstream_add", "upstream_list", "upstream_remove", "upstream_provide_key", "repo_add", "repo_verify", "admin_access_list", "admin_access_allow", "admin_access_revoke", "admin_public_identity", "admin_readiness", "admin_version", "admin_idle", "admin_audit_record", "uplink_scope", "uplink_add":
 		return service.administrationTool(ctx, actor, name, raw)
 	// Credential and grant lifecycle (#1105).
 	case "uplink_invite":
@@ -836,7 +830,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			Step     string `json:"step"`
 			Secret   string `json:"secret"`
 		}
-		if err := decodeTool(raw, &arguments); err != nil {
+		if err := decodeAdministration(raw, &arguments); err != nil {
 			return nil, err
 		}
 		return service.accessAllow(ctx, actor, arguments.Repo, arguments.Workflow, arguments.Step, arguments.Secret)
@@ -847,7 +841,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			Step     string `json:"step"`
 			Secret   string `json:"secret"`
 		}
-		if err := decodeTool(raw, &arguments); err != nil {
+		if err := decodeAdministration(raw, &arguments); err != nil {
 			return nil, err
 		}
 		return service.accessRevoke(ctx, actor, arguments.Repo, arguments.Workflow, arguments.Step, arguments.Secret)
@@ -2797,11 +2791,11 @@ func (service *API) waitDuration(seconds int) (time.Duration, error) {
 
 // canonicalAccessRepo resolves any accepted repository spelling (bare,
 // org/repo, upstream/org/repo) onto the qualified persisted grant key the
-// v12 migration and the reconciler converge on. An ambiguous bare spelling
+// database stores. An ambiguous bare spelling
 // is refused — it names neither same-name repository. An unregistered or
-// syntactically unresolvable spelling is returned verbatim: grants for
-// unregistered repositories are stored and listed as spelled, and stay
-// inert until the repository registers (#245 BLOCKER B, #256).
+// syntactically unresolvable spelling is returned verbatim so listing and
+// revocation can still address inert existing rows (#245 BLOCKER B, #256).
+// accessAllow separately requires a qualified key before granting.
 func (service *API) canonicalAccessRepo(ctx context.Context, repo string) (string, error) {
 	if service.repositories == nil {
 		return repo, nil
@@ -2878,8 +2872,8 @@ func (service *API) accessListPending(ctx context.Context, repo string) (api.Acc
 }
 
 func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, workflow, step, secret string) (api.AccessGrantResponse, error) {
-	if !actor.Admin {
-		return api.AccessGrantResponse{}, refuse(ErrForbidden, "access_allow requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
+	if !actor.Admin || actor.Scoped() {
+		return api.AccessGrantResponse{}, refuse(ErrForbidden, "access_allow requires an unscoped admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
 	}
 	if service.secretAccess == nil {
 		return api.AccessGrantResponse{}, refuse(ErrUnavailable, "secret access")
@@ -2894,10 +2888,13 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, work
 		return api.AccessGrantResponse{}, err
 	}
 	repo = canonical
+	if strings.Count(repo, "/") != 2 {
+		return api.AccessGrantResponse{}, fmt.Errorf("%w: repository %q is not registered; use the qualified form upstream/org/repo", ErrInvalidInput, repo)
+	}
 	if service.scope != nil && !service.scope.seesAccessKey(repo) {
 		return api.AccessGrantResponse{}, hiddenRepository(repo)
 	}
-	// Unregistered spellings keep their verbatim form above; only a
+	// Unregistered qualified names permit pre-approval; only a
 	// registered, archived repository is refused here.
 	if service.repositories != nil {
 		if resolved, err := service.repositories.RepositoryByName(ctx, repo); err == nil {
@@ -2906,35 +2903,18 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, work
 			}
 		}
 	}
-	// Validate the entry before touching the ConfigMap. Without this check a
-	// malformed entry (glob characters in repo/secret, or a non-wildcard step)
-	// would be written to the ConfigMap, and the next reconciliation would
-	// reject the entire list and revoke every active approval — a single
-	// malformed request causing global secret revocation.
-	if err := ValidateGrantEntry(0, SecretAccessGrantEntry{Repo: repo, Workflow: workflow, Step: step, Secret: secret}); err != nil {
+	// Validate before the audited database mutation.
+	if err := (model.SecretAccessKey{Repo: repo, Workflow: workflow, Step: step, Path: secret}).Validate(); err != nil {
 		return api.AccessGrantResponse{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
-	}
-	if service.secretAccessReconciler != nil {
-		if err := service.secretAccessReconciler.UpdateConfigMap(ctx, actor.Identity, service.secretAccessReconciler.AddGrantCanonical(ctx, repo, workflow, step, secret)); err != nil {
-			return api.AccessGrantResponse{}, fmt.Errorf("update ConfigMap: %w", err)
-		}
-		// Read the grant back from sqlite after reconcile.
-		grants, err := service.secretAccess.SecretAccessList(ctx, repo, false)
-		if err != nil {
-			return api.AccessGrantResponse{}, err
-		}
-		for _, grant := range grants {
-			if grant.Repo == repo && grant.Workflow == workflow && grant.Step == step && grant.Secret == secret {
-				response := wireAccessGrant(grant)
-				response.Warning = grantPolicySyncAdvisory
-				return response, nil
-			}
-		}
-		return api.AccessGrantResponse{}, fmt.Errorf("grant was written to ConfigMap but not found in store after reconcile")
 	}
 	grant, err := service.secretAccess.Grant(ctx, repo, workflow, step, secret, actor.Identity)
 	if err != nil {
 		return api.AccessGrantResponse{}, err
+	}
+	if service.secretAccessChanged != nil {
+		if err := service.secretAccessChanged(ctx); err != nil {
+			return api.AccessGrantResponse{}, fmt.Errorf("%w: grant committed but identity refresh failed: %w", ErrUnavailable, err)
+		}
 	}
 	response := wireAccessGrant(grant)
 	response.Warning = grantPolicySyncAdvisory
@@ -2942,8 +2922,8 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, work
 }
 
 func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, workflow, step, secret string) (api.AccessGrantResponse, error) {
-	if !actor.Admin {
-		return api.AccessGrantResponse{}, refuse(ErrForbidden, "access_revoke requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
+	if !actor.Admin || actor.Scoped() {
+		return api.AccessGrantResponse{}, refuse(ErrForbidden, "access_revoke requires an unscoped admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
 	}
 	if service.secretAccess == nil {
 		return api.AccessGrantResponse{}, refuse(ErrUnavailable, "secret access")
@@ -2964,42 +2944,17 @@ func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, wor
 	if service.scope != nil && !service.scope.seesAccessKey(repo) {
 		return api.AccessGrantResponse{}, hiddenRepository(repo)
 	}
-	if service.secretAccessReconciler != nil {
-		// Read the grant before removal so we can return it.
-		grants, err := service.secretAccess.SecretAccessList(ctx, repo, false)
-		if err != nil {
-			return api.AccessGrantResponse{}, err
-		}
-		var target *store.SecretAccessGrant
-		for i := range grants {
-			if grants[i].Repo == repo && grants[i].Workflow == workflow && grants[i].Step == step && grants[i].Secret == secret {
-				target = &grants[i]
-				break
-			}
-		}
-		if target == nil {
-			return api.AccessGrantResponse{}, fmt.Errorf("%w: no active grant for %s workflow %s step %s secret %s", ErrInvalidInput, repo, workflow, step, secret)
-		}
-		if err := service.secretAccessReconciler.UpdateConfigMap(ctx, actor.Identity, service.secretAccessReconciler.RemoveGrantCanonical(ctx, repo, workflow, step, secret)); err != nil {
-			return api.AccessGrantResponse{}, fmt.Errorf("update ConfigMap: %w", err)
-		}
-		// Read the revoked grant back.
-		revoked, err := service.secretAccess.SecretAccessList(ctx, repo, true)
-		if err != nil {
-			return api.AccessGrantResponse{}, err
-		}
-		for _, grant := range revoked {
-			if grant.ID == target.ID && grant.RevokedAt != nil {
-				response := wireAccessGrant(grant)
-				response.Warning = revokePolicySyncAdvisory
-				return response, nil
-			}
-		}
-		return api.AccessGrantResponse{}, refuse(ErrUnavailable, "revocation was requested but its committed state could not be confirmed; inspect access_list")
-	}
 	grant, err := service.secretAccess.Revoke(ctx, repo, workflow, step, secret, actor.Identity)
+	if errors.Is(err, store.ErrNotFound) {
+		return api.AccessGrantResponse{}, fmt.Errorf("%w: no active grant matches the exact repository, workflow, step and secret tuple", ErrInvalidInput)
+	}
 	if err != nil {
 		return api.AccessGrantResponse{}, err
+	}
+	if service.secretAccessChanged != nil {
+		if err := service.secretAccessChanged(ctx); err != nil {
+			return api.AccessGrantResponse{}, fmt.Errorf("%w: grant committed but identity refresh failed: %w", ErrUnavailable, err)
+		}
 	}
 	response := wireAccessGrant(grant)
 	response.Warning = revokePolicySyncAdvisory

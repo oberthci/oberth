@@ -49,8 +49,10 @@ func testConfig() Config {
 		VaultCISecretsRole:         testVaultCISecretsRole,
 		VaultCACertPEM:             testVaultAnchorPEM,
 		PerStepIdentities: map[string]PerRepoIdentityConfig{
-			"oberth/.oberth/release.yaml/*":             {ServiceAccountName: testCredentialedAcct},
-			"github/acme/oberth/.oberth/release.yaml/*": {ServiceAccountName: testCredentialedAcct},
+			"oberth/.oberth/build.yaml/*":               {ServiceAccountName: testCredentialedAcct, CIServiceAccountName: testCISecretsAcct},
+			"github/acme/oberth/.oberth/build.yaml/*":   {ServiceAccountName: testCredentialedAcct, CIServiceAccountName: testCISecretsAcct},
+			"oberth/.oberth/release.yaml/*":             {ServiceAccountName: testCredentialedAcct, CIServiceAccountName: testCISecretsAcct},
+			"github/acme/oberth/.oberth/release.yaml/*": {ServiceAccountName: testCredentialedAcct, CIServiceAccountName: testCISecretsAcct},
 		},
 	}
 }
@@ -1671,7 +1673,7 @@ spec:
 	if err := admitSecretstoreExecPaths(workflow, []string{path}, map[string]map[string]bool{path: {"release-publish": true}}); err == nil || !strings.Contains(err.Error(), "secret grant denied") {
 		t.Fatal("different template's grant authorized the step", err)
 	}
-	request := Request{Repo: "consumer", UpstreamName: "forge", UpstreamOrg: "org", PipelineFile: argoworkflow.ReleaseFile, StepGrants: map[string]map[string]bool{path: {name: true}}}
+	request := Request{Trigger: pipeline.TriggerRelease, Repo: "consumer", UpstreamName: "forge", UpstreamOrg: "org", PipelineFile: argoworkflow.ReleaseFile, StepGrants: map[string]map[string]bool{path: {name: true}}}
 	config := testConfig()
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{"forge/org/consumer/" + argoworkflow.ReleaseFile + "/" + name: {ServiceAccountName: "step-authored"}}
 	granted, err := GrantedSecretSteps(workflow, []string{path}, request.StepGrants)
@@ -1776,7 +1778,7 @@ func TestPerStepGrantNilStepGrantsDenied(t *testing.T) {
 // A per-step Vault policy can contain both upstream and release grants for a
 // step. A branch run that declares only its upstream path must never select
 // that identity, because its token could then read the undeclared release path.
-func TestCINamedStepGrantKeepsCISecretsIdentity(t *testing.T) {
+func TestCINamedStepGrantUsesExactCIIdentity(t *testing.T) {
 	const upstreamPath = "oberth/upstream/acme/oberth/test-secret"
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -1803,12 +1805,19 @@ spec:
 `
 	config := testConfig()
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-		"oberth/.oberth/release.yaml/publish": {ServiceAccountName: "oberth-step-release-publish"},
+		"oberth/.oberth/build.yaml/publish": {ServiceAccountName: "oberth-step-release-publish", CIServiceAccountName: "oberth-step-ci-publish"},
 	}
 	request := testRequest(pipeline.TriggerCI, document)
 	request.ApprovedSecrets = map[string]bool{upstreamPath: true}
 	request.StepGrants = map[string]map[string]bool{upstreamPath: {"publish": true}}
 
+	t.Run("MissingCIIdentityFailsClosed", func(t *testing.T) {
+		missing := config
+		missing.PerStepIdentities = map[string]PerRepoIdentityConfig{"oberth/.oberth/build.yaml/publish": {ServiceAccountName: "oberth-step-release-publish"}}
+		if _, err := Build(missing, request); err == nil || !strings.Contains(err.Error(), "not materialized") {
+			t.Fatal("CI fell back to a release identity", err)
+		}
+	})
 	workflow, err := Build(config, request)
 	if err != nil {
 		t.Fatalf("build branch CI: %v", err)
@@ -1817,10 +1826,10 @@ spec:
 		if template.Name != "publish" {
 			continue
 		}
-		if template.ServiceAccountName != testCISecretsAcct {
+		if template.ServiceAccountName != "oberth-step-ci-publish" {
 			t.Fatalf("branch publish ServiceAccount = %q, want CI-secrets identity %q", template.ServiceAccountName, testCISecretsAcct)
 		}
-		if role := environmentOf(t, workflow, "publish")["OBERTH_VAULT_ROLE"]; role != testVaultCISecretsRole {
+		if role := environmentOf(t, workflow, "publish")["OBERTH_VAULT_ROLE"]; role != "oberth-step-ci-publish" {
 			t.Fatalf("branch publish Vault role = %q, want %q", role, testVaultCISecretsRole)
 		}
 		return

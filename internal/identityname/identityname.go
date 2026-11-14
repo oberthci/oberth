@@ -37,6 +37,14 @@ const PerStepPrefix = "oberth-step-"
 // steps in different repos that sanitise to the same readable portion get
 // different names.
 func PerStepName(upstream, org, repo, workflow, step string) string {
+	return perStepName(PerStepPrefix, upstream, org, repo, workflow, step)
+}
+
+// PerStepCIName binds the same exact grant key to a distinct CI identity.
+func PerStepCIName(upstream, org, repo, workflow, step string) string {
+	return perStepName("oberth-step-ci-", upstream, org, repo, workflow, step)
+}
+func perStepName(prefix, upstream, org, repo, workflow, step string) string {
 	canonical := strings.Join([]string{upstream, org, repo, workflow, step}, "\x00")
 	digest := sha256.Sum256([]byte(canonical))
 	hashSuffix := hex.EncodeToString(digest[:])[:12]
@@ -55,14 +63,14 @@ func PerStepName(upstream, org, repo, workflow, step string) string {
 	readable := strings.Trim(safe.String(), "-")
 
 	// Budget: prefix(12) + readable + "-" + hash(12) = total ≤ 63
-	maxReadable := MaxNameLength - len(PerStepPrefix) - 1 - len(hashSuffix)
+	maxReadable := MaxNameLength - len(prefix) - 1 - len(hashSuffix)
 	if len(readable) > maxReadable {
 		readable = strings.TrimRight(readable[:maxReadable], "-")
 	}
 	if readable == "" {
 		readable = "step"
 	}
-	return PerStepPrefix + readable + "-" + hashSuffix
+	return prefix + readable + "-" + hashSuffix
 }
 
 // PerStepNameFromQualified derives the per-step name from a qualified repo

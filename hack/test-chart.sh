@@ -157,23 +157,11 @@ if sed -n '/# Source: oberth\/templates\/rbac.yaml/,/^---$/p' "$manifest" | grep
 fi
 sed -n '/# Source: oberth\/templates\/rbac-argo.yaml/,/^---$/p' "$manifest" | grep -q 'resources: \["pods/exec"\]'
 test "$(grep -c 'resources: \["pods/exec"\]' "$manifest")" -eq 1
-# ConfigMap least privilege: the collection rule is read/create/watch only
-# (watch feeds the secret-access reconciler and cannot be name-scoped
-# portably); in-place mutation exists solely as a resourceNames-scoped update
-# on the grants ConfigMap, so audit-anchor continuity ConfigMaps stay
-# unwritable by the server's own identity. patch and delete stay absent
-# everywhere.
-sed -n '/resources: \["configmaps"\]/,/verbs:/p' "$manifest" | grep -q 'verbs: \["create", "get", "list", "watch"\]'
-sed -n '/resources: \["configmaps"\]/,/verbs:/p' "$manifest" | grep -q 'resourceNames: \["oberth-secret-access"\]'
-sed -n '/resources: \["configmaps"\]/,/verbs:/p' "$manifest" | grep -q 'verbs: \["update"\]'
-if sed -n '/resources: \["configmaps"\]/,/verbs:/p' "$manifest" | grep -Eq '"patch"|"delete"'; then
-  exit 1
-fi
-# update may never ride on the unnamed collection rule.
-if sed -n '/resources: \["configmaps"\]/,/verbs:/p' "$manifest" | grep -Eq '"update".*"create"|"create".*"update"'; then
-  exit 1
-fi
-if sed -n '/resourceNames: \["oberth-secret-access"\]/,/verbs:/p' "$manifest" | grep -Eq '"create"|"list"|"watch"|"patch"|"delete"'; then
+# The remaining server ConfigMap permissions serve immutable audit witnesses.
+# Grant storage adds no collection watch or named mutation rule.
+sed -n '/# Source: oberth\/templates\/rbac.yaml/,/^---$/p' "$manifest" | grep -q 'verbs: \["create", "get", "list"\]'
+if sed -n '/# Source: oberth\/templates\/rbac.yaml/,/^---$/p' "$manifest" | grep -Eq '"watch"|"update"|"patch"|"delete"|oberth-secret-access'; then
+  echo 'server Role retains retired grant-mirror permissions' >&2
   exit 1
 fi
 # No unbounded secrets create rule or batch/jobs CRUD.
