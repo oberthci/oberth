@@ -268,3 +268,18 @@ func (h *Hub) podWorkflowName(obj any) string {
 	}
 	return name
 }
+
+// WorkflowsForRun returns cached Workflows carrying the durable run label.
+func (h *Hub) WorkflowsForRun(runID string) []*wfv1.Workflow {
+	objects, err := h.workflows.GetIndexer().ByIndex("byRun", runID)
+	if err != nil {
+		return nil
+	}
+	workflows := make([]*wfv1.Workflow, 0, len(objects))
+	for _, obj := range objects {
+		if wf, ok := obj.(*wfv1.Workflow); ok && wf.Namespace == h.namespace && h.workflowName(wf) != "" {
+			workflows = append(workflows, wf)
+		}
+	}
+	return workflows
+}

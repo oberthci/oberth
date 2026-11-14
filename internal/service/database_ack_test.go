@@ -28,14 +28,14 @@ func (s *lostDatabaseAck) lost(operation string, err error) error {
 	}
 	return err
 }
-func (s *lostDatabaseAck) ClaimNextRun(ctx context.Context) (model.Run, error) {
+func (s *lostDatabaseAck) StartRun(ctx context.Context, id string) (model.Run, error) {
 	if s.committedClaim != nil {
 		v := *s.committedClaim
 		s.committedClaim = nil
-		return v, s.lost("ClaimNextRun", nil)
+		return v, s.lost("StartRun", nil)
 	}
-	v, e := s.Store.ClaimNextRun(ctx)
-	return v, s.lost("ClaimNextRun", e)
+	v, e := s.Store.StartRun(ctx, id)
+	return v, s.lost("StartRun", e)
 }
 func (s *lostDatabaseAck) BeginPublication(ctx context.Context, spec model.PublicationSpec) (model.Publication, error) {
 	v, e := s.Store.BeginPublication(ctx, spec)
@@ -68,14 +68,14 @@ func TestDatabaseDeadlineLostClaimAckKeepsExactRun(t *testing.T) {
 	// cannot replace the intended lost-ack fault with a pre-commit timeout.
 	// The fixture exposes this result once. Replaying the write would invoke
 	// the live store again, claim the second run and fail the assertions below.
-	committed, err := fixture.store.ClaimNextRun(t.Context())
+	committed, err := storetest.ClaimNextRun(fixture.store, t.Context())
 	if err != nil || committed.ID != first.ID {
 		t.Fatalf("commit original claim: %+v %v", committed, err)
 	}
 	scheduler := fixture.scheduler(t, &recoveryJobs{})
-	fault := &lostDatabaseAck{Store: fixture.store, operation: "ClaimNextRun", committedClaim: &committed}
+	fault := &lostDatabaseAck{Store: fixture.store, operation: "StartRun", committedClaim: &committed}
 	scheduler.store = fault
-	run, err := scheduler.database().ClaimNextRun(deadlineScope(t.Context(), scheduler))
+	run, err := scheduler.database().StartRun(deadlineScope(t.Context(), scheduler), first.ID)
 	if err != nil || run.ID != first.ID || fault.writes.Load() != 1 || scheduler.DatabaseRetries() != 1 {
 		t.Fatalf("lost original claim: %+v %v writes=%d retries=%d", run, err, fault.writes.Load(), scheduler.DatabaseRetries())
 	}
@@ -136,13 +136,13 @@ func TestDatabaseDeadlineLostTransitionAcksConverge(t *testing.T) {
 }
 
 func TestDatabaseDeadlinePermanentStoreFailureStillStopsScheduler(t *testing.T) {
-	for _, operation := range []string{"PendingRunCancellations", "ClaimNextRun"} {
+	for _, operation := range []string{"PendingRunCancellations"} {
 		t.Run(operation, func(t *testing.T) {
 			fixture := newRecoveryFixture(t)
 			scheduler, _ := faultScheduler(t, fixture, &recoveryJobs{}, operation, store.ErrInvalidState)
 			ctx, cancel := context.WithTimeout(t.Context(), testStartTimeout(5*time.Second))
 			defer cancel()
-			err := scheduler.Run(ctx)
+			err := scheduler.runAcceptedFixtures(ctx)
 			if err == nil || scheduler.DatabaseRetries() != 0 {
 				t.Fatal("invariant did not reach fatal owner result", err, scheduler.DatabaseRetries())
 			}

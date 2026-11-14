@@ -19,25 +19,17 @@ const (
 // DisplayStatuses lists the whole user-facing vocabulary, in list order.
 var DisplayStatuses = []string{DisplayQueued, DisplayRunning, DisplayPassed, DisplayFailed, DisplayCancelled}
 
-// ClaimedUnstarted reports a run the scheduler has claimed but not admitted
-// or submitted: durable status running with no started_at (phase waiting,
-// preparing or a trusted preflight). The wire projects it as RunWaiting; the
-// run list and the display status keep it in the queue, because it has not
-// started. Publication keeps its start time, so it is never unstarted.
+// ClaimedUnstarted reports accepted preparation before Workflow submission.
+// Preparation displays running. Only native Argo Pending projects queued.
 func (run Run) ClaimedUnstarted() bool {
 	return run.Status == RunRunning && run.StartedAt == nil && run.Phase != "publishing"
 }
 
-// DisplayRunStatus is the single raw-to-display mapping. Every server surface
-// (HTTP, MCP, CLI, dashboard) derives display_status here and nowhere else.
+// DisplayRunStatus maps durable history to its base display label.
+// Live execution observations project native Argo Pending as queued.
 func DisplayRunStatus(run Run) string {
 	switch run.Status {
-	case RunQueued, RunWaiting:
-		return DisplayQueued
-	case RunRunning:
-		if run.ClaimedUnstarted() {
-			return DisplayQueued
-		}
+	case RunQueued, RunWaiting, RunRunning:
 		return DisplayRunning
 	case RunPassed:
 		return DisplayPassed

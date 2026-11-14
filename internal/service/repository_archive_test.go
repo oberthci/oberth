@@ -75,7 +75,7 @@ func TestRepositoryArchiveToolsRequireUnscopedAdminAndKeepCatalog(t *testing.T) 
 		t.Fatalf("unknown archived filter = %v", err)
 	}
 	// A caller retaining a pre-archive repository snapshot cannot enqueue.
-	_, err = fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "late", Repository: fixture.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "agent"})
+	_, err = fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "late", Repository: fixture.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "agent"})
 	if !errors.Is(err, store.ErrRepositoryArchived) {
 		t.Fatalf("stale snapshot enqueue = %v", err)
 	}
@@ -127,7 +127,7 @@ func TestArchivedRepositoryStatusReadsHistoryWithoutGitCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, Phase: "passed"}); err != nil {
@@ -214,11 +214,11 @@ func TestQueuedArchivedRepositoryReasonOnEveryReadSurface(t *testing.T) {
 			t.Fatal(err)
 		}
 		rows := value.([]model.Run)
-		if len(rows) != 1 || rows[0].DisplayReason != "repository archived" || rows[0].Status != model.RunQueued {
+		if len(rows) != 1 || rows[0].DisplayReason != "starting" || rows[0].Status != model.RunQueued {
 			t.Fatal("list lost archive reason or changed status", rows)
 		}
 		detail, err := s.Run(t.Context(), actor, run.ID)
-		if err != nil || detail.(RunDetailResponse).Run.DisplayReason != "repository archived" {
+		if err != nil || detail.(RunDetailResponse).Run.DisplayReason != "starting" {
 			t.Fatal("detail lost archive reason", detail, err)
 		}
 		scoped, err := s.forActor(t.Context(), actor)
@@ -226,7 +226,7 @@ func TestQueuedArchivedRepositoryReasonOnEveryReadSurface(t *testing.T) {
 			t.Fatal(err)
 		}
 		status, err := scoped.status(t.Context(), f.repo.Name, run.SHA, "")
-		if err != nil || status.DisplayReason != "repository archived" || status.Scheduling == nil || !strings.Contains(status.Scheduling.Message, "operator unarchives") {
+		if err != nil || status.DisplayReason != "starting" || status.Scheduling == nil || strings.Contains(status.Scheduling.Message, "operator unarchives") {
 			t.Fatal("status lost archive remedy", status, err)
 		}
 	}
@@ -234,7 +234,7 @@ func TestQueuedArchivedRepositoryReasonOnEveryReadSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	value, err := s.Run(t.Context(), api.Actor{Identity: "owner"}, run.ID)
-	if err != nil || value.(RunDetailResponse).Run.DisplayReason != "in line" {
+	if err != nil || value.(RunDetailResponse).Run.DisplayReason != "starting" {
 		t.Fatal("unarchived repository retained stale reason", value, err)
 	}
 }

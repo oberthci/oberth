@@ -149,7 +149,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			done := make(chan error, 1)
-			go func() { done <- scheduler.Run(ctx) }()
+			go func() { done <- scheduler.runAcceptedFixtures(ctx) }()
 			select {
 			case <-jobs.waitEntered:
 			case err := <-done:
@@ -248,7 +248,7 @@ func TestAdoptedWorkflowSurvivesShutdownWithWorkspace(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- scheduler.Run(ctx) }()
+	go func() { done <- scheduler.runAcceptedFixtures(ctx) }()
 	select {
 	case <-jobs.waitEntered:
 	case err := <-done:
@@ -418,7 +418,7 @@ func TestUnreadableNonAdoptingWorkflowKeepsRunForObservation(t *testing.T) {
 			t.Fatal(err)
 		}
 		run := enqueued.Run
-		if _, err := fixture.store.ClaimNextRun(context.Background()); err != nil {
+		if _, err := fixture.store.StartRun(context.Background(), run.ID); err != nil {
 			t.Fatal(err)
 		}
 		fixture.setWorkflowName(t, run.ID, "oberth-legacy")
@@ -479,7 +479,7 @@ func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- scheduler.Run(ctx) }()
+	go func() { done <- scheduler.runAcceptedFixtures(ctx) }()
 	current := waitAdoptedStatus(t, fixture.store, run.ID, model.RunInterrupted)
 	if current.Phase != model.PhaseCancelled || !strings.Contains(current.Error, "Stopped with strategy") {
 		t.Fatalf("adopted observation failure = %#v", current)
@@ -489,12 +489,14 @@ func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
 		t.Fatalf("one adopted run's observation failure stopped the scheduler: %v", err)
 	case <-time.After(testTimeout(50 * time.Millisecond)):
 	}
-	// The scheduler keeps dispatching new work after the failed adoption.
+	// A new accepting request still submits after the failed adoption.
 	next, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/next", SHA: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", Actor: "agent@host", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler.signalQueue()
+	if err := scheduler.AcceptEnqueue(ctx, next); err != nil {
+		t.Fatal(err)
+	}
 	waitAdoptedStatus(t, fixture.store, next.ID, model.RunInterrupted)
 	cancel()
 	if err := <-done; err != nil {
@@ -667,7 +669,7 @@ func TestAdoptedPreemptedObservationDeleteRefusalKeepsSchedulerAlive(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- scheduler.Run(ctx) }()
+	go func() { done <- scheduler.runAcceptedFixtures(ctx) }()
 	select {
 	case <-inner.waitEntered:
 	case err := <-done:

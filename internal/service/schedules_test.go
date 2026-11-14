@@ -41,10 +41,8 @@ func (control *recordingScheduleControl) InspectSchedule(ctx context.Context, re
 	return ScheduleRepoView{Repo: repository.Name, DefaultBranch: "main", Entries: []ScheduleEntryView{entry}}, true, nil
 }
 
-func (control *recordingScheduleControl) PlanScheduleTrigger(_ context.Context, repository model.Repository, entry string, force bool) (SchedulePlan, error) {
-	if control.busy && !force {
-		return SchedulePlan{}, fmt.Errorf("%w: busy", store.ErrInvalidState)
-	}
+func (control *recordingScheduleControl) PlanScheduleTrigger(_ context.Context, repository model.Repository, entry string) (SchedulePlan, error) {
+
 	plan := SchedulePlan{Repository: repository, Qualified: repository.Name, Entry: entry, Branch: "main", SHA: sha("a")}
 	control.plans = append(control.plans, plan)
 	return plan, nil
@@ -135,13 +133,6 @@ func TestScheduleMutationsAreAdminOnlyAuditedAndScoped(t *testing.T) {
 	}
 	if _, err := fixture.call(unscopedActor, "schedule_resume", repo); err != nil {
 		t.Fatal(err)
-	}
-	control.busy = true
-	if _, err := fixture.call(unscopedActor, "schedule_trigger", repo); !errors.Is(err, store.ErrInvalidState) {
-		t.Fatalf("trigger on a busy repository error = %v", err)
-	}
-	if _, ok := latestScheduleAudit(t, fixture, "schedule.trigger"); ok || len(control.enqueued) != 0 {
-		t.Fatal("a refused trigger was audited or enqueued")
 	}
 	control.busy = false
 	control.enqueueErr = fmt.Errorf("%w: admission refused", store.ErrInvalidState)

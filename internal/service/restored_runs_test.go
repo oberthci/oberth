@@ -41,7 +41,7 @@ func TestStartupReconciliationDoesNotReexecuteRestoredRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(database, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.SetRunWorkflowName(ctx, enqueued.ID, "oberth-restored-job"); err != nil {
@@ -62,7 +62,7 @@ func TestStartupReconciliationDoesNotReexecuteRestoredRuns(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	database, err = storetest.Open(ctx, dbPath, store.Options{})
+	database, err = storetest.OpenAdminClient(ctx, dbPath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestOwnerRecoveryPreservesUnnamedRestoredRunForCancellation(t *testing.T) {
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatal("restore marker not retired", err)
 	}
-	queued, err := f.store.ClaimNextRun(ctx)
+	queued, err := storetest.ClaimNextRun(f.store, ctx)
 	if !errors.Is(err, store.ErrNotFound) || len(jobs.deleted) != 0 {
 		t.Fatal("restored run redispatched or deleted", queued, jobs.deleted, err)
 	}

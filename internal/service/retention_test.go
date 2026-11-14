@@ -81,7 +81,7 @@ func (f *retentionFixture) run(t *testing.T, ref, trigger string, terminal bool)
 	}
 	run := enqueued.Run
 	if terminal {
-		if _, err := f.retention.Database.ClaimNextRun(ctx); err != nil {
+		if _, err := storetest.ClaimNextRun(f.retention.Database, ctx); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := f.retention.Database.PutStepResult(ctx, model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
@@ -391,7 +391,7 @@ func TestTerminalClaimCannotRecreatePurgedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := fixture.store.ClaimNextRun(ctx)
+	claimed, err := storetest.ClaimNextRun(fixture.store, ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

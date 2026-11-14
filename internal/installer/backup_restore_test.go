@@ -564,7 +564,7 @@ func sourceDatabase(t *testing.T) ([]byte, map[string][]byte, string) {
 	}
 	// The run was running when the backup was taken: a restore must not
 	// re-execute it.
-	if _, err := database.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(database, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.SetRunWorkflowName(ctx, run.ID, "oberth-backup-fixture"); err != nil {

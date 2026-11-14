@@ -50,43 +50,25 @@ func TestPromotionTrainAdmissionQueueAndRetry(t *testing.T) {
 	if first.Train == nil || first.SourceCount() != 2 || first.RunID == "" || first.Train.TreeSHA != strings.Repeat("f", 40) {
 		t.Fatalf("train = %+v", first)
 	}
-	// The next train waits without preparing a stale merge.
+	// Another train is planned immediately on the same base.
 	value, err = c.CallTool(ctx, actor, "promote", args)
 	if err != nil {
 		t.Fatal(err)
 	}
 	second := requireToolPromotion(t, f, value)
-	if second.RunID != "" || second.ResultSHA != "" {
-		t.Fatalf("queued = %+v", second)
+	if second.RunID == "" || second.PreviousSHA != first.PreviousSHA {
+		t.Fatalf("second train not planned immediately: %+v", second)
 	}
 	g.mu.Lock()
 	calls := g.calls
 	g.plan.BaseSHA = first.ResultSHA
 	g.plan.MergedSHA = strings.Repeat("d", 40)
 	g.mu.Unlock()
-	if calls != 1 {
+	if calls != 2 {
 		t.Fatalf("prepared %d trains", calls)
 	}
 	if _, err = f.store.FinishRun(ctx, first.RunID, model.RunResult{Status: model.RunFailed, Phase: "job", Error: "unit failed"}); err != nil {
 		t.Fatal(err)
-	}
-	f.signals.NotifyPromotion(first.ID)
-	deadline := time.Now().Add(testStartTimeout(10 * time.Second))
-	for {
-		second, err = f.store.Promotion(ctx, second.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if second.RunID != "" {
-			break
-		}
-		if second.Status.Terminal() || time.Now().After(deadline) {
-			t.Fatalf("queued train did not start: %+v", second)
-		}
-		time.Sleep(testTimeout(20 * time.Millisecond))
-	}
-	if second.PreviousSHA != first.ResultSHA {
-		t.Fatalf("train used stale base: %+v", second)
 	}
 	if _, err = f.store.FinishRun(ctx, second.RunID, model.RunResult{Status: model.RunFailed, Phase: "job", Error: "unit failed"}); err != nil {
 		t.Fatal(err)

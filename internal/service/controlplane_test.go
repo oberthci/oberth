@@ -112,7 +112,7 @@ func (git *controlGit) SyncBranch(ctx context.Context, repo, branch, sha string,
 	return git.applyThenErr
 }
 
-func TestNewPushWaitsWhilePreviousRunPublishes(t *testing.T) {
+func TestPublicationCompletionOrdersExplicitlyPreparedHistory(t *testing.T) {
 	const (
 		branch   = "feature/publication-interleaving"
 		firstSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -125,7 +125,7 @@ func TestNewPushWaitsWhilePreviousRunPublishes(t *testing.T) {
 	fixture.git.publishStarted = make(chan struct{})
 	fixture.git.publishRelease = make(chan struct{})
 	ctx := context.Background()
-	first, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	first, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-publication-first", Repository: fixture.repo, Branch: branch,
 		SHA: firstSHA, Actor: "agent@host",
 	})
@@ -141,7 +141,7 @@ func TestNewPushWaitsWhilePreviousRunPublishes(t *testing.T) {
 		t.Fatal("first run did not reach durable publication")
 	}
 
-	replacement, enqueueErr := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	replacement, enqueueErr := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-publication-next", Repository: fixture.repo, Branch: branch,
 		OldSHA: firstSHA, SHA: nextSHA, Actor: "agent@host",
 	})
@@ -162,7 +162,7 @@ func TestNewPushWaitsWhilePreviousRunPublishes(t *testing.T) {
 	if ownerErr != nil || owner.Status != model.RunRunning || owner.Phase != "publishing" {
 		t.Fatalf("publication owner during newer enqueue = %#v, %v", owner, ownerErr)
 	}
-	if queuedErr != nil || queued.Status != model.RunQueued {
+	if queuedErr != nil || queued.Status != model.RunRunning {
 		t.Fatalf("newer run while publication pending = %#v, %v", queued, queuedErr)
 	}
 	if pendingErr != nil || len(pending) != 1 || pending[0].RunID != first.ID {
@@ -189,124 +189,32 @@ func TestNewPushWaitsWhilePreviousRunPublishes(t *testing.T) {
 	}
 }
 
-func TestSchedulerSkipsSameRefRunWhilePublicationPending(t *testing.T) {
-	const (
-		branch       = "feature/publication-serialization"
-		otherBranch  = "feature/publication-independent"
-		firstSHA     = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-		nextSHA      = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-		unrelatedSHA = "cccccccccccccccccccccccccccccccccccccccc"
-	)
-	fixture := newControlFixture(t,
-		JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}},
-		JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "independent red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
-		JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}},
-	)
-	fixture.git.publishStarted = make(chan struct{})
-	fixture.git.publishRelease = make(chan struct{})
-	var releaseOnce sync.Once
-	releasePublication := func() { releaseOnce.Do(func() { close(fixture.git.publishRelease) }) }
-
-	ctx, cancel := context.WithCancel(context.Background())
-	var schedulerErr error
-	schedulerDone := make(chan struct{})
-	go func() {
-		schedulerErr = fixture.scheduler.Run(ctx)
-		close(schedulerDone)
-	}()
-	t.Cleanup(func() {
-		releasePublication()
-		cancel()
-		select {
-		case <-schedulerDone:
-			if schedulerErr != nil {
-				t.Errorf("scheduler run: %v", schedulerErr)
-			}
-		case <-time.After(testStartTimeout(5 * time.Second)):
-			t.Error("scheduler did not stop after cancellation")
-		}
-	})
-
-	waitForStatus := func(runID string, wanted model.RunStatus) model.Run {
-		t.Helper()
-		timer := time.NewTimer(testStartTimeout(5 * time.Second))
-		defer timer.Stop()
-		for {
-			run, err := fixture.store.Run(context.Background(), runID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if run.Status == wanted {
-				return run
-			}
-			if run.Status.Terminal() {
-				t.Fatalf("run %s status = %q, want %q", runID, run.Status, wanted)
-			}
-			changed := fixture.signals.Run(runID)
-			run, err = fixture.store.Run(context.Background(), runID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if run.Status == wanted {
-				return run
-			}
-			if run.Status.Terminal() {
-				t.Fatalf("run %s status = %q, want %q", runID, run.Status, wanted)
-			}
-			select {
-			case <-changed:
-			case <-schedulerDone:
-				t.Fatalf("scheduler exited before run %s reached %q: %v", runID, wanted, schedulerErr)
-			case <-timer.C:
-				t.Fatalf("run %s remained %q, want %q", runID, run.Status, wanted)
-			}
-		}
-	}
-
-	first, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
-		EventID: "receive-concurrent-publication-first", Repository: fixture.repo, Branch: branch,
-		SHA: firstSHA, Actor: "agent@host",
-	})
+func TestDirectCreateIgnoresPendingPublicationOnTheSameRef(t *testing.T) {
+	f := newGroupFixture(t, 0)
+	prior, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.terraform.ID, RefKind: model.RefBranch, Ref: "feature/publication", SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-fixture.git.publishStarted:
-	case <-time.After(testStartTimeout(5 * time.Second)):
-		t.Fatal("first run did not reach publication")
+	if _, err := f.store.StartRun(t.Context(), prior.ID); err != nil {
+		t.Fatal(err)
 	}
-
-	replacement, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
-		EventID: "receive-concurrent-publication-next", Repository: fixture.repo, Branch: branch,
-		OldSHA: firstSHA, SHA: nextSHA, Actor: "agent@host",
-	})
+	if _, err := f.store.BeginPublication(t.Context(), model.PublicationSpec{RepoID: prior.RepoID, RunID: prior.ID, RefKind: prior.RefKind, Ref: prior.Ref, ResultSHA: prior.SHA, Actor: prior.Actor}); err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "direct-with-publication", Repository: f.terraform, Branch: prior.Ref, SHA: strings.Repeat("b", 40), Actor: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	unrelated, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
-		EventID: "receive-concurrent-publication-independent", Repository: fixture.repo, Branch: otherBranch,
-		SHA: unrelatedSHA, Actor: "agent@host",
-	})
-	if err != nil {
-		t.Fatal(err)
+	f.awaitCreated(t, 1)
+	current := f.run(t, accepted.ID)
+	if current.WorkflowName == "" || current.Status != model.RunRunning {
+		t.Fatalf("publication gated create: %+v", accepted)
 	}
-	waitForStatus(unrelated.ID, model.RunFailed)
-	queued, err := fixture.store.Run(context.Background(), replacement.ID)
-	if err != nil || queued.Status != model.RunQueued {
-		t.Fatalf("same-ref run while first publication is pending = %#v, %v", queued, err)
-	}
-	owner, err := fixture.store.Run(context.Background(), first.ID)
-	if err != nil || owner.Status != model.RunRunning || owner.Phase != "publishing" {
-		t.Fatalf("publication owner before release = %#v, %v", owner, err)
-	}
-
-	releasePublication()
-	waitForStatus(first.ID, model.RunPassed)
-	waitForStatus(replacement.ID, model.RunPassed)
-	remoteSHA, exists, err := fixture.git.RemoteRef(context.Background(), fixture.repo.Name, "refs/heads/"+branch)
-	if err != nil || !exists || remoteSHA != nextSHA {
-		t.Fatalf("serialized branch publication = %q, %v, %v", remoteSHA, exists, err)
-	}
+	f.engine.mu.Lock()
+	job := f.engine.byRun[accepted.ID]
+	f.engine.mu.Unlock()
+	job.result <- JobResult{Status: model.RunFailed, Phase: "job", Error: "test finished"}
+	f.awaitTerminal(t, accepted.ID)
 }
 
 func (git *controlGit) SyncTag(_ context.Context, repo, tag, sha string) error {
@@ -453,18 +361,12 @@ func TestFastForwardPendingPublicationRecoversWithoutRestart(t *testing.T) {
 			t.Error("scheduler did not stop")
 		}
 	})
-	for index := 0; index < 2; index++ {
-		select {
-		case <-failing.empty:
-		case <-time.After(testStartTimeout(5 * time.Second)):
-			t.Fatalf("scheduler startup empty claim %d did not occur", index+1)
-		}
-	}
+	awaitSchedulerRecovered(t, scheduler)
 
 	control, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: scheduler, Git: fixture.git, Logs: fixture.logs, Auditor: fixture.store,
+		Enqueues: fixtureEnqueues{scheduler}, Git: fixture.git, Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "fast-forward-recovery-api"),
 	})
@@ -526,13 +428,7 @@ func TestPublicationRecoveryWakeDoesNotSeizeUnrelatedLivePublication(t *testing.
 			t.Error("scheduler did not stop")
 		}
 	})
-	for index := 0; index < 2; index++ {
-		select {
-		case <-observed.empty:
-		case <-time.After(testStartTimeout(5 * time.Second)):
-			t.Fatalf("scheduler startup empty claim %d did not occur", index+1)
-		}
-	}
+	awaitSchedulerRecovered(t, scheduler)
 
 	beginPending := func(branch, sha string) (model.Run, model.Publication) {
 		t.Helper()
@@ -543,7 +439,7 @@ func TestPublicationRecoveryWakeDoesNotSeizeUnrelatedLivePublication(t *testing.
 		if enqueueErr != nil {
 			t.Fatal(enqueueErr)
 		}
-		claimed, claimErr := fixture.store.ClaimNextRun(context.Background())
+		claimed, claimErr := storetest.ClaimNextRun(fixture.store, context.Background())
 		if claimErr != nil {
 			t.Fatal(claimErr)
 		}
@@ -731,7 +627,7 @@ func seedGreenPromotionCandidate(t *testing.T, fixture *controlFixture, sha stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.ClaimNextRun(context.Background()); err != nil {
+	if _, err := storetest.ClaimNextRun(fixture.store, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.store.FinishRun(context.Background(), run.ID, model.RunResult{
@@ -768,7 +664,7 @@ func TestSchedulerPausesAndResumesCompletedWorkWhenMutationGateCloses(t *testing
 	var schedulerErr error
 	schedulerDone := make(chan struct{})
 	go func() {
-		schedulerErr = scheduler.Run(schedulerCtx)
+		schedulerErr = scheduler.runAcceptedFixtures(schedulerCtx)
 		close(schedulerDone)
 	}()
 	defer func() {
@@ -815,52 +711,24 @@ func TestSchedulerPausesAndResumesCompletedWorkWhenMutationGateCloses(t *testing
 	}
 }
 
-func TestDurableEnqueueWakeSurvivesMutationGateClosingBeforeAcceptance(t *testing.T) {
-	fixture := newControlFixture(t, JobResult{
-		Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)},
-	})
+func TestDirectAcceptanceRefusesAnAuditGateThatClosedAfterRecording(t *testing.T) {
+	f := newControlFixture(t)
 	gate := &mutableMutationGate{}
-	observed := &gateClosingEnqueueStore{Store: fixture.store, gate: gate, empty: make(chan struct{}, 8)}
-	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: observed, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
-		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "durable-enqueue-wake-work"), MutationGate: gate.check,
-	})
-	if err != nil {
-		t.Fatal(err)
+	observed := &gateClosingEnqueueStore{Store: f.store, gate: gate}
+	f.scheduler.store = observed
+	f.scheduler.mutationGate = gate.check
+	row, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "gate-closes", Repository: f.repo, Branch: "feature/gate", SHA: strings.Repeat("a", 40), Actor: "owner"})
+	if err != nil || row.ID == "" {
+		t.Fatalf("closed audit gate accepted: %+v %v", row, err)
 	}
-	schedulerCtx, cancelScheduler := context.WithCancel(context.Background())
-	schedulerDone := make(chan error, 1)
-	go func() { schedulerDone <- scheduler.Run(schedulerCtx) }()
-	t.Cleanup(func() {
-		cancelScheduler()
-		select {
-		case runErr := <-schedulerDone:
-			if runErr != nil {
-				t.Errorf("scheduler run: %v", runErr)
-			}
-		case <-time.After(testStartTimeout(5 * time.Second)):
-			t.Error("scheduler did not stop")
-		}
-	})
-	for index := 0; index < 2; index++ {
-		select {
-		case <-observed.empty:
-		case <-time.After(testStartTimeout(5 * time.Second)):
-			t.Fatalf("scheduler startup empty claim %d did not occur", index+1)
-		}
+	failed := waitForFixtureRunStatus(t, f, row.ID, model.RunFailed)
+	if !strings.Contains(failed.Error, errMutationBlocked.Error()) {
+		t.Fatal(failed)
 	}
-
-	enqueued, err := scheduler.EnqueueCI(context.Background(), CIRequest{
-		EventID: "receive-gate-closes-after-enqueue", Repository: fixture.repo,
-		Branch: "feature/durable-wake", SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		Actor: "agent@host",
-	})
-	if err != nil {
-		t.Fatalf("durable admission wake failed: %v", err)
+	if len(f.jobs.createdCI) != 0 {
+		t.Fatal("Workflow created without audit integrity")
 	}
 	gate.set(nil)
-	waitForFixtureRunStatus(t, fixture, enqueued.ID, model.RunPassed)
 }
 
 func (git *controlGit) RemoteRef(_ context.Context, _ string, ref string) (string, bool, error) {
@@ -1200,8 +1068,8 @@ func (value *gateClosingEnqueueStore) EnqueueReceiveEvent(
 	return enqueued, err
 }
 
-func (value *gateClosingEnqueueStore) ClaimNextRun(ctx context.Context) (model.Run, error) {
-	run, err := value.Store.ClaimNextRun(ctx)
+func (value *gateClosingEnqueueStore) StartRun(ctx context.Context, id string) (model.Run, error) {
+	run, err := value.Store.StartRun(ctx, id)
 	if queueEmpty(err) {
 		select {
 		case value.empty <- struct{}{}:
@@ -1211,8 +1079,8 @@ func (value *gateClosingEnqueueStore) ClaimNextRun(ctx context.Context) (model.R
 	return run, err
 }
 
-func (value *claimObservingStore) ClaimNextRun(ctx context.Context) (model.Run, error) {
-	run, err := value.Store.ClaimNextRun(ctx)
+func (value *claimObservingStore) StartRun(ctx context.Context, id string) (model.Run, error) {
+	run, err := value.Store.StartRun(ctx, id)
 	switch {
 	case err == nil:
 		select {
@@ -1299,8 +1167,8 @@ func (value *finalizeFailStore) FinalizePublication(ctx context.Context, id stri
 	return value.Store.FinalizePublication(ctx, id, status, failure)
 }
 
-func (value *finalizeFailStore) ClaimNextRun(ctx context.Context) (model.Run, error) {
-	run, err := value.Store.ClaimNextRun(ctx)
+func (value *finalizeFailStore) StartRun(ctx context.Context, id string) (model.Run, error) {
+	run, err := value.Store.StartRun(ctx, id)
 	if queueEmpty(err) && value.empty != nil {
 		select {
 		case value.empty <- struct{}{}:
@@ -1345,6 +1213,9 @@ func newControlFixtureWithOptions(t *testing.T, options store.Options, results .
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixtureHistories.Store(scheduler, scheduler.store)
+	t.Cleanup(func() { fixtureHistories.Delete(scheduler) })
+	t.Cleanup(scheduler.closeObservations)
 	return &controlFixture{store: database, repo: repository, logs: logs, git: git, jobs: jobs, scheduler: scheduler, signals: signals, root: root}
 }
 
@@ -1353,7 +1224,7 @@ func (fixture *controlFixture) api(t *testing.T) *API {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
@@ -1379,7 +1250,7 @@ func TestSchedulerDoesNotUseStaticSizeForWorkflowAdmission(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
 		Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)},
 	})
-	enqueued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(context.Background(), CIRequest{
 		EventID: "sized-run", Repository: fixture.repo, Branch: "feature/sized",
 		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
 	})
@@ -1442,7 +1313,7 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 	}
 	var issueID int64
 	for index, sha := range shas {
-		if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+		if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 			EventID: fmt.Sprintf("receive-%d", index), Repository: fixture.repo,
 			Branch: "main", SHA: sha, Actor: "agent@host",
 		}); err != nil {
@@ -1553,7 +1424,7 @@ func TestStatusReturnsRefWithoutRunWhenBranchExists(t *testing.T) {
 	const runSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	// A branch selector now requires the admitted cache ref to match the run.
 	fixture.refs.(stubRefResolver).branches["codeberg/acme/oberth"]["feature/has-run"] = runSHA
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-run", Repository: fixture.repo,
 		Branch: "feature/has-run", SHA: runSHA, Actor: "agent@host",
 	}); err != nil {
@@ -1606,7 +1477,7 @@ func TestLogsReturnOnlyOneNamedStep(t *testing.T) {
 	})
 	const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	ctx := context.Background()
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-burn-logs", Repository: fixture.repo,
 		Branch: "feature/burn-logs", SHA: sha, Actor: "agent@host",
 	}); err != nil {
@@ -1639,7 +1510,7 @@ func TestDashboardRunDetailAndLogViewsAreReadOnly(t *testing.T) {
 	})
 	const sha = "abababababababababababababababababababab"
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-dashboard-detail", Repository: fixture.repo,
 		Branch: "main", SHA: sha, Actor: "agent@host",
 	})
@@ -1721,14 +1592,14 @@ func TestActiveRunDetailAndStatusExposePersistedStepProgress(t *testing.T) {
 	fixture := newControlFixture(t)
 	const sha = "fdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfd"
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-live-step-plan", Repository: fixture.repo,
 		Branch: "feature/live-step-plan", SHA: sha, Actor: "agent@host",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, err := fixture.store.ClaimNextRun(ctx)
+	running, err := fixture.store.StartRun(ctx, enqueued.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1773,14 +1644,14 @@ func TestActiveMCPAndDashboardLogsReadCurrentStepRange(t *testing.T) {
 	fixture := newControlFixture(t)
 	const sha = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-active-step-log", Repository: fixture.repo,
 		Branch: "feature/active-step-log", SHA: sha, Actor: "agent@host",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+	if _, err := fixture.store.StartRun(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	logFile, err := fixture.logs.Create(enqueued.ID)
@@ -1832,7 +1703,7 @@ func TestDefaultBranchUsesOrdinaryCIPublicationAndSync(t *testing.T) {
 	})
 	const sha = "dddddddddddddddddddddddddddddddddddddddd"
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-main", Repository: fixture.repo, Branch: fixture.repo.DefaultBranch,
 		SHA: sha, Actor: "agent@host",
 	})
@@ -1874,7 +1745,7 @@ func TestSyncRejectsBareSHAWhenMultipleBranchesShareIt(t *testing.T) {
 	ctx := context.Background()
 
 	// Enqueue runs on two different branches sharing the same SHA.
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-branch-a", Repository: fixture.repo, Branch: "feature/alpha",
 		SHA: sha, Actor: "agent@host",
 	}); err != nil {
@@ -1883,7 +1754,7 @@ func TestSyncRejectsBareSHAWhenMultipleBranchesShareIt(t *testing.T) {
 	if err := fixture.scheduler.ProcessNext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-branch-b", Repository: fixture.repo, Branch: "feature/beta",
 		SHA: sha, Actor: "agent@host",
 	}); err != nil {
@@ -1915,7 +1786,7 @@ func TestSyncRejectsBareSHAWhenMultipleBranchesShareIt(t *testing.T) {
 
 	// Single-branch SHA should still work bare.
 	const singleSHA = "ffffffffffffffffffffffffffffffffffffffff"
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-single", Repository: fixture.repo, Branch: "feature/solo",
 		SHA: singleSHA, Actor: "agent@host",
 	}); err != nil {
@@ -1968,7 +1839,7 @@ func TestPostCreateReadAndDeleteFailureRecoversExactJobOnRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	enqueued, err := scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-post-create-read-failure", Repository: fixture.repo, Branch: "feature/read-failure",
 		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
 	})
@@ -2030,7 +1901,7 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enqueued, err := scheduler.EnqueueCI(context.Background(), CIRequest{
+	enqueued, err := scheduler.recordCIForTest(context.Background(), CIRequest{
 		EventID: "receive-shutdown", Repository: fixture.repo, Branch: "feature/shutdown",
 		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
 	})
@@ -2040,7 +1911,7 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	runReturned := make(chan error, 1)
-	go func() { runReturned <- scheduler.Run(ctx) }()
+	go func() { runReturned <- scheduler.runAcceptedFixtures(ctx) }()
 	select {
 	case <-jobs.started:
 	case <-time.After(testStartTimeout(time.Second)):
@@ -2110,7 +1981,7 @@ func TestJobObservationCancellationDoesNotImpersonateSchedulerShutdown(t *testin
 		t.Run(name, func(t *testing.T) {
 			fixture := newControlFixture(t)
 			fixture.jobs.waitErr = waitErr
-			enqueued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
+			enqueued, err := fixture.scheduler.recordCIForTest(context.Background(), CIRequest{
 				EventID: "receive-observation-" + name, Repository: fixture.repo, Branch: "feature/observation-" + name,
 				SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
 			})
@@ -2142,7 +2013,7 @@ func TestReleaseChecksOutCommitButPublishesRawTagObject(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}})
 	const objectSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	const commitSHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	result, err := fixture.scheduler.AdmitRelease(context.Background(), ReleaseRequest{
+	result, err := fixture.scheduler.recordReleaseForTest(context.Background(), ReleaseRequest{
 		EventID: "receive-tag", Repository: fixture.repo, Tag: "v1.2.3",
 		ObjectSHA: objectSHA, CommitSHA: commitSHA, Actor: "agent@host",
 	})
@@ -2188,7 +2059,7 @@ func TestBranchAndTagPublicationRecoverAfterPushBeforeFinalization(t *testing.T)
 		{
 			name: "branch",
 			enqueue: func(ctx context.Context, scheduler *Scheduler, repository model.Repository) (model.Run, error) {
-				result, err := scheduler.EnqueueCI(ctx, CIRequest{
+				result, err := scheduler.recordCIForTest(ctx, CIRequest{
 					EventID: "receive-branch-crash", Repository: repository,
 					Branch: "feature/publication-crash", SHA: branchSHA, Actor: "agent@host",
 				})
@@ -2199,7 +2070,7 @@ func TestBranchAndTagPublicationRecoverAfterPushBeforeFinalization(t *testing.T)
 		{
 			name: "tag",
 			enqueue: func(ctx context.Context, scheduler *Scheduler, repository model.Repository) (model.Run, error) {
-				result, err := scheduler.AdmitRelease(ctx, ReleaseRequest{
+				result, err := scheduler.recordReleaseForTest(ctx, ReleaseRequest{
 					EventID: "receive-tag-crash", Repository: repository, Tag: "v1.2.3",
 					ObjectSHA: tagObject, CommitSHA: tagCommit, Actor: "agent@host",
 				})
@@ -2286,7 +2157,7 @@ func TestBranchPublicationRecoveryForcePublishesOverAnyRemoteFeatureState(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := fixture.store.ClaimNextRun(context.Background()); err != nil {
+			if _, err := storetest.ClaimNextRun(fixture.store, context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := fixture.store.BeginPublication(context.Background(), model.PublicationSpec{
@@ -2331,7 +2202,7 @@ func TestDivergentPromotionRecoversPushBeforeAtomicFinalization(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := fixture.store.ClaimNextRun(context.Background()); err != nil {
+		if _, err := storetest.ClaimNextRun(fixture.store, context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := fixture.store.FinishRun(context.Background(), run.ID, model.RunResult{Status: model.RunPassed, TestedSHA: sourceSHA}); err != nil {
@@ -2385,7 +2256,7 @@ func TestPublicationFailureTerminalizesWithoutBackgroundRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.ClaimNextRun(context.Background()); err != nil {
+	if _, err := storetest.ClaimNextRun(fixture.store, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.store.FinishRun(context.Background(), green.ID, model.RunResult{
@@ -2427,7 +2298,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := fixture.store.ClaimNextRun(context.Background()); err != nil {
+		if _, err := storetest.ClaimNextRun(fixture.store, context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := fixture.store.FinishRun(context.Background(), run.ID, model.RunResult{Status: model.RunPassed, TestedSHA: sourceSHA}); err != nil {
@@ -2508,7 +2379,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if run.Status != model.RunQueued || run.Trigger != "promotion" || run.SHA != baseSHA || run.TestedSHA != baseSHA || run.BaseSHA != baseSHA {
+		if run.Status != model.RunRunning || run.Trigger != "promotion" || run.SHA != baseSHA || run.TestedSHA != baseSHA || run.BaseSHA != baseSHA {
 			t.Fatalf("already-contained promotion run = %#v", run)
 		}
 	})
@@ -2624,7 +2495,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 	})
 }
 
-func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
+func TestFastForwardPublicationDoesNotDelaySameRefWorkflowCreation(t *testing.T) {
 	const (
 		target    = "stage"
 		sourceSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -2641,7 +2512,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.ClaimNextRun(context.Background()); err != nil {
+	if _, err := storetest.ClaimNextRun(fixture.store, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.store.FinishRun(context.Background(), seed.ID, model.RunResult{Status: model.RunPassed, TestedSHA: sourceSHA}); err != nil {
@@ -2665,7 +2536,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 	controlAPI, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: scheduler, Git: fixture.git, Logs: fixture.logs, Auditor: fixture.store,
+		Enqueues: fixtureEnqueues{scheduler}, Git: fixture.git, Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-publication-wake-api"),
 	})
@@ -2677,7 +2548,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 	var schedulerErr error
 	schedulerDone := make(chan struct{})
 	go func() {
-		schedulerErr = scheduler.Run(schedulerCtx)
+		schedulerErr = scheduler.runAcceptedFixtures(schedulerCtx)
 		close(schedulerDone)
 	}()
 	t.Cleanup(func() {
@@ -2695,13 +2566,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 	// Run performs one initial empty claim, then consumes its self-wake and
 	// performs a second. Waiting for both proves it is idle in select with no
 	// residual wake before the publication race begins.
-	for index := 0; index < 2; index++ {
-		select {
-		case <-observed.empty:
-		case <-time.After(testStartTimeout(5 * time.Second)):
-			t.Fatalf("scheduler startup empty claim %d did not occur", index+1)
-		}
-	}
+	awaitSchedulerRecovered(t, scheduler)
 
 	type promotionResult struct {
 		value any
@@ -2726,17 +2591,32 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-observed.empty:
-	case <-time.After(testStartTimeout(5 * time.Second)):
-		t.Fatal("scheduler did not consume the gated run's enqueue wake")
+	until := time.Now().Add(testStartTimeout(5 * time.Second))
+	for {
+		run, err := fixture.store.Run(t.Context(), blocked.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.WorkflowName != "" {
+			break
+		}
+		if time.Now().After(until) {
+			t.Fatal("Workflow submission did not start")
+		}
+		time.Sleep(time.Millisecond)
 	}
 	queued, err := fixture.store.Run(context.Background(), blocked.ID)
-	if err != nil || queued.Status != model.RunQueued {
+	if err != nil || queued.Status != model.RunRunning || queued.WorkflowName == "" {
 		t.Fatalf("same-ref run during fast-forward publication = %#v, %v", queued, err)
 	}
 	pending, err := fixture.store.PendingPublications(context.Background())
-	if err != nil || len(pending) != 1 || pending[0].Ref != target || pending[0].RunID != "" {
+	foundAPI := false
+	for _, pub := range pending {
+		if pub.Ref == target && pub.RunID == "" {
+			foundAPI = true
+		}
+	}
+	if err != nil || !foundAPI {
 		t.Fatalf("API-owned pending publication = %#v, %v", pending, err)
 	}
 
@@ -2753,14 +2633,6 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 	promotion := requireToolPromotion(t, fixture, promoted.value)
 	if promotion.Status != model.PromotionPassed {
 		t.Fatalf("fast-forward promotion = %#v", promotion)
-	}
-	select {
-	case claimed := <-observed.claimed:
-		if claimed.ID != blocked.ID {
-			t.Fatalf("claim after fast-forward publication = %s, want %s", claimed.ID, blocked.ID)
-		}
-	case <-time.After(testStartTimeout(5 * time.Second)):
-		t.Fatal("fast-forward publication finalization did not wake the gated queue")
 	}
 	waitForFixtureRunStatus(t, fixture, blocked.ID, model.RunPassed)
 	remoteSHA, exists, err := fixture.git.RemoteRef(context.Background(), fixture.repo.Name, "refs/heads/"+target)
@@ -2780,7 +2652,7 @@ func TestAdmittedPromotionAlwaysReturnsDurableID(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := fixture.store.ClaimNextRun(context.Background()); err != nil {
+		if _, err := storetest.ClaimNextRun(fixture.store, context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := fixture.store.FinishRun(context.Background(), run.ID, model.RunResult{Status: model.RunPassed}); err != nil {
@@ -2829,7 +2701,7 @@ func TestAdmittedPromotionCompensationSurvivesRequestCancellation(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := fixture.store.ClaimNextRun(context.Background()); err != nil {
+		if _, err := storetest.ClaimNextRun(fixture.store, context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := fixture.store.FinishRun(context.Background(), enqueued.ID, model.RunResult{Status: model.RunPassed}); err != nil {
@@ -2859,7 +2731,7 @@ func TestAdmittedPromotionCompensationSurvivesRequestCancellation(t *testing.T) 
 				t.Fatalf("compensated promotion run = %#v, %v", run, runErr)
 			}
 		}
-		if _, claimErr := fixture.store.ClaimNextRun(context.Background()); !queueEmpty(claimErr) {
+		if _, claimErr := storetest.ClaimNextRun(fixture.store, context.Background()); !queueEmpty(claimErr) {
 			t.Fatalf("cancellation left claimable promotion work: %v", claimErr)
 		}
 		assertWorkspaceMissing(t, mustPromotionWorkspacePath(t, workspaceRoot, promotion.ID))
@@ -2950,7 +2822,7 @@ func TestStatusUsesDirectIssueLookupWithoutRenewal(t *testing.T) {
 	})
 	ctx := context.Background()
 	const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "status-direct-issue", Repository: fixture.repo, Branch: "main",
 		SHA: sha, Actor: "agent@host",
 	}); err != nil {
@@ -2964,7 +2836,7 @@ func TestStatusUsesDirectIssueLookupWithoutRenewal(t *testing.T) {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: &issueListFailer{Store: fixture.store, err: listErr}, Promotions: fixture.store,
-		PromotionRuns: fixture.store, Enqueues: fixture.scheduler, Git: fixture.git, Logs: fixture.logs,
+		PromotionRuns: fixture.store, Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Logs: fixture.logs,
 		Auditor: fixture.store, Signals: fixture.signals,
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "status-direct"),
 	})
@@ -2986,7 +2858,7 @@ func TestStatusUsesDirectIssueLookupWithoutRenewal(t *testing.T) {
 	service, err = NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: failing, Promotions: fixture.store,
-		PromotionRuns: fixture.store, Enqueues: fixture.scheduler, Git: fixture.git, Logs: fixture.logs,
+		PromotionRuns: fixture.store, Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Logs: fixture.logs,
 		Auditor: fixture.store, Signals: fixture.signals,
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "status-no-renew"),
 	})
@@ -3014,7 +2886,7 @@ func TestStatusUsesDirectIssueLookupWithoutRenewal(t *testing.T) {
 	service, err = NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: failing2, Promotions: fixture.store,
-		PromotionRuns: fixture.store, Enqueues: fixture.scheduler, Git: fixture.git, Logs: fixture.logs,
+		PromotionRuns: fixture.store, Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Logs: fixture.logs,
 		Auditor: fixture.store, Signals: fixture.signals,
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "issue-no-renew"),
 	})
@@ -3041,7 +2913,7 @@ func TestStatusPollingDoesNotExtendExpiringLock(t *testing.T) {
 	})
 	ctx := context.Background()
 	const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "lock-expiry-poll", Repository: fixture.repo, Branch: "feature/lock-expire",
 		SHA: sha, Actor: "agent@host",
 	}); err != nil {
@@ -3058,7 +2930,7 @@ func TestStatusPollingDoesNotExtendExpiringLock(t *testing.T) {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: failing, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Logs: fixture.logs,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Logs: fixture.logs,
 		Auditor: fixture.store, Signals: fixture.signals,
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "lock-poll"),
 	})
@@ -3093,7 +2965,7 @@ func TestMutationGateBlocksIssueLockTool(t *testing.T) {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Logs: fixture.logs,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Logs: fixture.logs,
 		Auditor: fixture.store, Signals: fixture.signals,
 		MutationGate:           func(context.Context) error { return gateErr },
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "gate-lock"),
@@ -3125,7 +2997,7 @@ func TestIssueCloseRejectsAReplacementIncident(t *testing.T) {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: interleaver, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Logs: fixture.logs,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Logs: fixture.logs,
 		Auditor: fixture.store, Signals: fixture.signals,
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "stale-issue-close"),
 	})
@@ -3199,7 +3071,7 @@ func TestIssueMutationLockRenewalIsNotPostCommit(t *testing.T) {
 		service, err := NewAPI(APIConfig{
 			Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 			Issues: failing, Promotions: fixture.store, PromotionRuns: fixture.store,
-			Enqueues: fixture.scheduler, Git: fixture.git, Logs: fixture.logs,
+			Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Logs: fixture.logs,
 			Auditor: fixture.store, Signals: fixture.signals,
 			PromotionWorkspaceRoot: filepath.Join(fixture.root, "close-without-renew"),
 		})
@@ -3322,14 +3194,14 @@ func TestRunsViewFiltersRepoAndRef(t *testing.T) {
 	shaA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	shaB := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
-	_, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	_, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "push-a", Repository: fixture.repo, Branch: branchA,
 		SHA: shaA, Actor: actor.Identity,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	_, err = fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "push-b", Repository: fixture.repo, Branch: branchB,
 		SHA: shaB, Actor: actor.Identity,
 	})
@@ -3435,7 +3307,7 @@ func TestAccessAllowRequiresAdminUplink(t *testing.T) {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
@@ -3481,7 +3353,7 @@ func TestAccessRevokeRequiresAdminUplink(t *testing.T) {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
@@ -3515,7 +3387,7 @@ func TestPromoteRejectsNonAdmin(t *testing.T) {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
@@ -3588,7 +3460,7 @@ func TestRepoRemoveRequiresAdminUplink(t *testing.T) {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
@@ -3651,7 +3523,7 @@ func TestRepoRemoveSurfacesCacheCleanupFailure(t *testing.T) {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
@@ -3696,7 +3568,7 @@ func TestAccessRevokeResponseCarriesPolicySyncWarning(t *testing.T) {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
@@ -3745,7 +3617,7 @@ func TestAccessAllowResponseCarriesPolicySyncWarning(t *testing.T) {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),
@@ -3803,7 +3675,7 @@ func TestPublishRetrySucceedsAfterSimulatedForge500(t *testing.T) {
 		Steps: []model.StepResult{stepResult(model.StepPassed)},
 	})
 	// Enqueue and run a CI job to completion.
-	enqueued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(context.Background(), CIRequest{
 		EventID: "receive-retry", Repository: fixture.repo,
 		Branch: "feature/retry-publish", SHA: sha, Actor: "agent@host",
 	})
@@ -3853,7 +3725,7 @@ func TestPublishRetryRefusedForRedRun(t *testing.T) {
 		Status: model.RunFailed, Phase: "test", Error: "unit test failed",
 		Steps: []model.StepResult{{NodeID: "test.unit", Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1}},
 	})
-	enqueued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(context.Background(), CIRequest{
 		EventID: "receive-red", Repository: fixture.repo,
 		Branch: "feature/red-run", SHA: sha, Actor: "agent@host",
 	})
@@ -3883,7 +3755,7 @@ func TestPublishRetryIdempotentWhenUpstreamAlreadyHasObject(t *testing.T) {
 		Status: model.RunPassed, Phase: "passed",
 		Steps: []model.StepResult{stepResult(model.StepPassed)},
 	})
-	enqueued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(context.Background(), CIRequest{
 		EventID: "receive-idempotent", Repository: fixture.repo,
 		Branch: "feature/idempotent-retry", SHA: sha, Actor: "agent@host",
 	})
@@ -3924,7 +3796,7 @@ func TestPublishIssueKindDistinguishesPublishFromCodeFailure(t *testing.T) {
 		Status: model.RunPassed, Phase: "passed",
 		Steps: []model.StepResult{stepResult(model.StepPassed)},
 	})
-	enqueued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(context.Background(), CIRequest{
 		EventID: "receive-issue-kind", Repository: fixture.repo,
 		Branch: "main", SHA: sha, Actor: "agent@host",
 	})

@@ -131,7 +131,7 @@ func (f *recoveryFixture) enqueueAndClaim(t *testing.T, ref, sha string) model.R
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := f.store.ClaimNextRun(context.Background())
+	claimed, err := storetest.ClaimNextRun(f.store, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,6 +166,9 @@ func (f *recoveryFixture) scheduler(t *testing.T, jobs JobController) *Scheduler
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixtureHistories.Store(scheduler, scheduler.store)
+	t.Cleanup(func() { fixtureHistories.Delete(scheduler) })
+	t.Cleanup(scheduler.closeObservations)
 	return scheduler
 }
 
@@ -295,7 +298,7 @@ func TestShutdownLeavesTagWorkflowForAdoption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := fixture.store.ClaimNextRun(context.Background())
+	run, err := storetest.ClaimNextRun(fixture.store, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +376,7 @@ func TestStartupReconciliationFinishesRunWhoseJobCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(database, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.SetRunWorkflowName(ctx, enqueued.ID, "oberth-reconcile-job"); err != nil {
@@ -470,7 +473,7 @@ func TestStartupReconciliationFailsRunWithVanishedWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(database, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.SetRunWorkflowName(ctx, enqueued.ID, "oberth-vanished-job"); err != nil {
@@ -579,7 +582,7 @@ func TestStartupReconciliationFailsUnobservedTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(database, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.SetRunWorkflowName(ctx, enqueued.ID, "oberth-tag-job"); err != nil {

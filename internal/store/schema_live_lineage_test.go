@@ -202,7 +202,7 @@ PRAGMA foreign_keys = ON;`); err != nil {
 
 	// v16 (#658) lands on the live lineage as well: the retired column
 	// exists and the pre-upgrade run still scans.
-	if value, err := s2.Run(ctx, liveRun.ID); err != nil || value.Status != model.RunQueued {
+	if value, err := s2.Run(ctx, liveRun.ID); err != nil || value.Status != model.RunFailed {
 		t.Fatalf("pre-upgrade run after live-lineage upgrade = %#v, %v", value, err)
 	}
 

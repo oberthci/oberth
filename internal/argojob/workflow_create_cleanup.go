@@ -7,9 +7,7 @@ import (
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const workflowCreateCleanupReadBudget = 5 * time.Second
@@ -26,7 +24,7 @@ func (controller *Controller) SettleCreate(ctx context.Context, name, runID stri
 	defer cancel()
 	finalObservation := !time.Now().Before(notBefore)
 	readCtx, cancelRead := context.WithTimeout(budgetCtx, workflowCreateCleanupReadBudget)
-	workflow, err := controller.workflows.Get(readCtx, name, metav1.GetOptions{})
+	workflow, err := controller.findCreatedWorkflow(readCtx, name, runID)
 	readErr := readCtx.Err()
 	cancelRead()
 	if readErr != nil {

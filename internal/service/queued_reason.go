@@ -10,7 +10,7 @@ import (
 // queuedDisplayReason uses only native waiting and the submission lifecycle.
 func queuedDisplayReason(scheduling *model.RunScheduling) string {
 	if scheduling == nil {
-		return "in line"
+		return "starting"
 	}
 	if scheduling.Execution != nil && lockWaitReason(scheduling.Execution) != "" {
 		return lockWaitReason(scheduling.Execution)
@@ -24,7 +24,7 @@ func queuedDisplayReason(scheduling *model.RunScheduling) string {
 	case "preparing", "startup":
 		return "starting"
 	}
-	return "in line"
+	return "starting"
 }
 
 // bytesText renders bytes in the largest binary unit with one decimal.
@@ -43,10 +43,7 @@ func bytesText(bytes int64) string {
 	return fmt.Sprintf("%d B", bytes)
 }
 
-// applyQueuedDisplay sets display_reason of a run that has not started from
-// its scheduling observation. It is the only place a queued run's reason
-// comes from, so every surface (list, detail, live log, status, active
-// view) reads the same line.
+// applyQueuedDisplay uses the native Pending observation for the queue reason.
 func applyQueuedDisplay(run *model.Run, scheduling *model.RunScheduling, reason string) {
 	if run.DisplayStatus != model.DisplayQueued || scheduling == nil {
 		return

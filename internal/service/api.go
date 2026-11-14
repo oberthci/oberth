@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -132,7 +133,6 @@ type API struct {
 	issueActiveStaleAfter  time.Duration
 	issueObservedAt        time.Time
 	workflowCapabilities   WorkflowCapabilityStore
-	promotionProgress      *sync.Map
 	releasePreflight       ReleasePreflighter
 	clientCertificates     *ClientCertIssuer
 	uplinkLifecycle        UplinkLifecycle
@@ -271,8 +271,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		assistHolds: config.AssistHolds, runAssists: config.RunAssists, assistGate: newAssistGate(maxConcurrentHoldActions),
 		releaseWIFOverrides: config.ReleaseWIFOverrides, releaseWIF: config.ReleaseWIF, releaseWIFMu: &sync.Mutex{},
 
-		promotionProgress: &sync.Map{},
-		lifetime:          lifetime, stopLifetime: stopLifetime, closing: &backgroundClosing{},
+		lifetime: lifetime, stopLifetime: stopLifetime, closing: &backgroundClosing{},
 	}
 	created.agentEvents = newAgentEventRecorder(created, config.AgentEvents, config.AgentEventPolicy)
 	return created, nil
@@ -1073,6 +1072,17 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 		}
 		storeFilter.RepoID = repository.ID
 	}
+	// Active display status comes from Argo after the durable history read.
+	// Read both active states so native Pending can be filtered accurately.
+	if slices.Contains(filter.Status, model.DisplayQueued) || slices.Contains(filter.Status, model.DisplayRunning) {
+		storeFilter.Status = append(model.RunStatusFilter(nil), filter.Status...)
+		if !slices.Contains(storeFilter.Status, model.DisplayQueued) {
+			storeFilter.Status = append(storeFilter.Status, model.DisplayQueued)
+		}
+		if !slices.Contains(storeFilter.Status, model.DisplayRunning) {
+			storeFilter.Status = append(storeFilter.Status, model.DisplayRunning)
+		}
+	}
 	runs, err := service.history.ListRecentRuns(ctx, storeFilter)
 	if err != nil {
 		return nil, err
@@ -1096,11 +1106,10 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 			if runs[i].DisplayReason == "" && (runs[i].Scheduling == nil || runs[i].Scheduling.Execution == nil || runs[i].Scheduling.Execution.State == "unavailable" || runs[i].Scheduling.Execution.State == "not_observed") {
 				runs[i].DisplayReason = "awaiting Argo state"
 			}
-		case model.DisplayQueued:
-			var reason string
-			runs[i].Scheduling, reason = service.observeScheduling(observationCtx, runs[i], nil, false)
-			applyQueuedDisplay(&runs[i], runs[i].Scheduling, reason)
 		}
+	}
+	if len(filter.Status) != 0 {
+		runs = slices.DeleteFunc(runs, func(run model.Run) bool { return !slices.Contains(filter.Status, run.DisplayStatus) })
 	}
 	return service.stripScopedSequences(runs), nil
 }
@@ -1703,9 +1712,8 @@ func wireRunStatus(status model.RunStatus) string {
 	return string(status)
 }
 
-// visibleRun keeps the legacy wire projection: a claimed run that has not
-// started reports Status waiting. Its display_status is queued, from
-// model.DisplayRunStatus, the one raw-to-display mapping.
+// visibleRun projects preparation as the wire status waiting. Its display
+// status remains running; only native Argo Pending projects queued.
 func visibleRun(run model.Run) model.Run {
 	if run.ClaimedUnstarted() {
 		run.Status = model.RunWaiting
@@ -1723,8 +1731,8 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	run.Error, collectionDeadline = model.SplitArtifactCollectionDeadline(run.Error)
 	visible.DisplayStatus = model.DisplayRunStatus(run)
 	visible.DisplayReason = runDisplayReason(run)
-	if visible.DisplayStatus == model.DisplayQueued {
-		visible.DisplayReason = queuedDisplayReason(nil)
+	if run.Status == model.RunQueued || run.Status == model.RunWaiting || run.ClaimedUnstarted() {
+		visible.DisplayReason = "starting"
 	}
 	if run.Status == model.RunRunning && isPendingCreate(run) {
 		visible.DisplayReason = "workflow create uncertain, cleanup pending"
@@ -2267,7 +2275,7 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	if err != nil {
 		return model.Promotion{}, err
 	}
-	return service.planOrQueuePromotion(ctx, actor, repository, candidate, target, promotion)
+	return service.planAdmittedPromotion(ctx, actor, repository, candidate, target, promotion)
 }
 
 // validatePromotionTarget accepts a branch name only. A full ref was admitted
@@ -2439,7 +2447,6 @@ func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, 
 			promotion.Error = errors.Join(err, lookupErr).Error()
 			return promotion, nil
 		}
-		service.enqueues.NotifyQueue()
 		service.signals.NotifyPromotion(promotion.ID)
 		return finalization.Promotion, nil
 	}
@@ -3340,7 +3347,6 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 		response.Error = current.Publication.Error
 	}
 	service.signals.NotifyRun(runID)
-	service.enqueues.NotifyQueue()
 	return response, nil
 }
 

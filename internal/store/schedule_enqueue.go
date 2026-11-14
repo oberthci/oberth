@@ -9,10 +9,8 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-// EnqueueScheduleOccurrence consumes a due cursor and either enqueues its run
-// and receive audit, or coalesces it into an active run of the same entry and
-// branch. BEGIN IMMEDIATE serializes the cursor CAS and unbounded active lookup
-// with all other queue mutations. Any read/write failure rolls everything back.
+// EnqueueScheduleOccurrence records one due occurrence with its run and receive
+// audit. The cursor CAS prevents duplicate ticks; overlapping runs remain independent.
 func (s *Store) EnqueueScheduleOccurrence(ctx context.Context, event model.ReceiveEventSpec, spec model.RunSpec, fire model.ScheduleFireSpec) (model.ScheduleEnqueueResult, error) {
 	if err := validateReceiveEventSpec(event, true); err != nil {
 		return model.ScheduleEnqueueResult{}, err
@@ -56,17 +54,10 @@ func (s *Store) EnqueueScheduleOccurrence(ctx context.Context, event model.Recei
 		return model.ScheduleEnqueueResult{Outcome: "stale"}, nil
 	}
 
-	active, err := scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs
-WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ?
-  AND schedule_entry = ? AND status IN ('queued', 'running')
-ORDER BY queue_sequence LIMIT 1`, spec.RepoID, spec.Ref, spec.ScheduleEntry))
-	result := model.ScheduleEnqueueResult{Outcome: "coalesced", Enqueued: model.EnqueueRunResult{Run: active, Duplicate: true}}
-	if errors.Is(err, sql.ErrNoRows) {
-		result.Outcome = "fired"
-		result.Enqueued, err = s.enqueueReceiveEventTx(ctx, tx, event, spec)
-	}
+	result := model.ScheduleEnqueueResult{Outcome: "fired"}
+	result.Enqueued, err = s.enqueueReceiveEventTx(ctx, tx, event, spec)
 	if err != nil {
-		return model.ScheduleEnqueueResult{}, fmt.Errorf("enqueue or coalesce schedule: %w", err)
+		return model.ScheduleEnqueueResult{}, fmt.Errorf("record schedule run: %w", err)
 	}
 	if err := recordScheduleFire(ctx, tx, qualified, spec.ScheduleEntry, fire.At, result.Outcome); err != nil {
 		return model.ScheduleEnqueueResult{}, err

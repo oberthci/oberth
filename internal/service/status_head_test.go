@@ -21,7 +21,7 @@ func seedStatusRun(t *testing.T, fixture *controlFixture, ref, sha, trigger stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := fixture.store.ClaimNextRun(t.Context())
+	claimed, err := storetest.ClaimNextRun(fixture.store, t.Context())
 	if err != nil || claimed.ID != enqueued.ID {
 		t.Fatalf("claim = %s, %v", claimed.ID, err)
 	}

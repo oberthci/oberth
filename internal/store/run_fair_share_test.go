@@ -8,40 +8,22 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestClaimFIFOAcrossRepositoriesAndRunKinds(t *testing.T) {
+func TestStartRunUsesTheAcceptedIDWithoutDispatchOrder(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
-	other, err := s.CreateRepository(t.Context(), model.RepositorySpec{Name: "second", UpstreamID: repo.UpstreamID, DefaultBranch: "main"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	enqueue := func(repo int64, ref, trigger string) model.Run {
-		t.Helper()
-		spec := testRunSpec(repo, ref, strings.Repeat("a", 40))
-		spec.Trigger = trigger
-		r, err := s.EnqueueRun(t.Context(), spec)
+	var runs []model.Run
+	for _, trigger := range []string{"branch", "schedule", "promotion"} {
+		result, err := s.EnqueueRun(t.Context(), model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/" + trigger, SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: trigger})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return r.Run
+		runs = append(runs, result.Run)
 	}
-	a := enqueue(repo.ID, "first", "branch")
-	pending := enqueue(repo.ID, "second", "branch")
-	b := enqueue(other.ID, "first", "branch")
-	claimed, err := s.ClaimNextRun(t.Context())
-	if err != nil || claimed.ID != a.ID {
-		t.Fatal(claimed, err)
-	}
-	peek, err := s.NextQueuedRun(t.Context())
-	if err != nil || peek.ID != pending.ID {
-		t.Fatalf("FIFO acceptance order changed: %+v %v", peek, err)
-	}
-	promotion := enqueue(repo.ID, "promotion/main/one", "promotion")
-	for _, want := range []model.Run{pending, b, promotion} {
-		got, err := s.ClaimNextRun(t.Context())
-		if err != nil || got.ID != want.ID {
-			t.Fatalf("claim=%+v want=%s err=%v", got, want.ID, err)
+	for i := len(runs) - 1; i >= 0; i-- {
+		started, err := s.StartRun(t.Context(), runs[i].ID)
+		if err != nil || started.ID != runs[i].ID || started.Status != model.RunRunning {
+			t.Fatalf("start=%+v %v", started, err)
 		}
 	}
 }

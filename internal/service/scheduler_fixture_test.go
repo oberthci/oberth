@@ -215,7 +215,7 @@ func newGroupFixture(t *testing.T, _ int) *groupFixture {
 	}
 	control, err := NewAPI(APIConfig{
 		Runs: database, History: database, Repositories: database, Issues: database,
-		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Logs: logs, Auditor: database,
+		Promotions: database, PromotionRuns: database, Enqueues: fixtureEnqueues{scheduler}, Logs: logs, Auditor: database,
 		Signals: signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"), RunCancels: database,
 	})
@@ -223,6 +223,9 @@ func newGroupFixture(t *testing.T, _ int) *groupFixture {
 		t.Fatal(err)
 	}
 	// The fake engine records native creation and cancellation only.
+	fixtureHistories.Store(scheduler, scheduler.store)
+	t.Cleanup(func() { fixtureHistories.Delete(scheduler) })
+	t.Cleanup(scheduler.closeObservations)
 	return &groupFixture{store: database, terraform: terraform, exampleService: exampleService, engine: engine, scheduler: scheduler, control: control, git: git}
 }
 
@@ -230,7 +233,7 @@ func (fixture *groupFixture) start(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	finished := make(chan error, 1)
-	go func() { finished <- fixture.scheduler.Run(ctx) }()
+	go func() { finished <- fixture.scheduler.runAcceptedFixtures(ctx) }()
 	fixture.stop = func() {
 		cancel()
 		select {
@@ -247,7 +250,7 @@ func (fixture *groupFixture) start(t *testing.T) {
 
 func (fixture *groupFixture) branch(t *testing.T, repository model.Repository, branch, shaDigit string) model.Run {
 	t.Helper()
-	enqueued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(context.Background(), CIRequest{
 		EventID: "push-" + repository.Name + "-" + branch + "-" + shaDigit, Repository: repository,
 		Branch: branch, SHA: strings.Repeat(shaDigit, 40), Actor: "agent@host",
 	})
@@ -259,7 +262,7 @@ func (fixture *groupFixture) branch(t *testing.T, repository model.Repository, b
 
 func (fixture *groupFixture) tag(t *testing.T, repository model.Repository, tag, objectDigit, commitDigit string) model.Run {
 	t.Helper()
-	enqueued, err := fixture.scheduler.AdmitRelease(context.Background(), ReleaseRequest{
+	enqueued, err := fixture.scheduler.recordReleaseForTest(context.Background(), ReleaseRequest{
 		EventID: "tag-" + repository.Name + "-" + tag, Repository: repository, Tag: tag,
 		ObjectSHA: strings.Repeat(objectDigit, 40), CommitSHA: strings.Repeat(commitDigit, 40), Actor: "agent@host",
 	})

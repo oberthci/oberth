@@ -23,7 +23,7 @@ func TestQueuedStatusReasonMatchesAcrossSelectors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selected.DisplayStatus != "queued" || selected.DisplayReason != direct.DisplayReason || selected.Run.DisplayReason != direct.DisplayReason {
+	if selected.DisplayStatus != "running" || selected.DisplayReason != direct.DisplayReason || selected.Run.DisplayReason != direct.DisplayReason {
 		t.Fatalf("selector reason = %q / %q, want shared reason %q", selected.DisplayReason, selected.Run.DisplayReason, direct.DisplayReason)
 	}
 }

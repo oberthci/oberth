@@ -62,7 +62,7 @@ func newAgentFixture(t *testing.T) *agentFixture {
 		now: time.Now().UTC()}
 	service, err := NewAPI(APIConfig{
 		Runs: f.store, History: f.store, Repositories: f.store, Issues: f.store, Promotions: f.store, PromotionRuns: f.store,
-		Enqueues: f.scheduler, Git: f.git, Logs: f.logs, Auditor: f.store, Signals: f.signals,
+		Enqueues: fixtureEnqueues{f.scheduler}, Git: f.git, Logs: f.logs, Auditor: f.store, Signals: f.signals,
 		AssistHolds: f.holds, RunAssists: f.store, SchedulingObserver: f.observer,
 		AgentEvents: f.store, AgentEventPolicy: AgentEventPolicy{LockWait: time.Minute},
 		MaximumWait: testTimeout(2 * time.Second),
@@ -402,7 +402,7 @@ func TestRunWaitUntilFinishedHeldAndTimeout(t *testing.T) {
 func TestRunWaitReturnsOnHold(t *testing.T) {
 	f := newAgentFixture(t)
 	run := f.enqueue(t, "land/hold", "6", true)
-	claimed, err := f.store.ClaimNextRun(t.Context())
+	claimed, err := storetest.ClaimNextRun(f.store, t.Context())
 	if err != nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %+v, %v", claimed, err)
 	}
@@ -544,7 +544,7 @@ func TestAgentEventRunHeldNotDelayedBySlowSweep(t *testing.T) {
 	observer := &stuckSyncObserver{release: make(chan struct{})}
 	f.service.assistHolds, f.service.schedulingObserver = holds, observer
 	enqueued := f.enqueue(t, "land/held-fast", "a", true)
-	claimed, err := f.store.ClaimNextRun(t.Context())
+	claimed, err := storetest.ClaimNextRun(f.store, t.Context())
 	if err != nil || claimed.ID != enqueued.ID {
 		t.Fatalf("claim = %+v %v", claimed, err)
 	}

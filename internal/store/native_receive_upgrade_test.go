@@ -187,10 +187,10 @@ func TestNativeReceiveUpgradeArchivedReceiptsStayTerminalAfterUnarchive(t *testi
 				t.Fatal("unarchive resurrected receipt", again, err)
 			}
 			rerun, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: replay.ID, Actor: "admin", Reason: "repository restored"})
-			if err != nil || rerun.Enqueued.Status != model.RunQueued || rerun.Enqueued.SHA != spec.SHA || rerun.Enqueued.ID == replay.ID {
+			if err != nil || rerun.Enqueued.Status != model.RunRunning || rerun.Enqueued.SHA != spec.SHA || rerun.Enqueued.ID == replay.ID {
 				t.Fatal("manual rerun after unarchive", rerun, err)
 			}
-			claimed, err := s.ClaimNextRun(ctx)
+			claimed, err := s.StartRun(ctx, rerun.Enqueued.ID)
 			if err != nil || claimed.ID != rerun.Enqueued.ID {
 				t.Fatal("manual rerun was not claimable", claimed, err)
 			}
@@ -203,7 +203,7 @@ func TestNativeReceiveUpgradeArchivedReceiptsStayTerminalAfterUnarchive(t *testi
 			}
 			event.ID = "new-push"
 			fresh, err := s.EnqueueReceiveEvent(ctx, event, spec)
-			if err != nil || fresh.Status != model.RunQueued || fresh.ID == replay.ID {
+			if err != nil || fresh.Status != model.RunRunning || fresh.ID == replay.ID {
 				t.Fatal("fresh push hidden", fresh, err)
 			}
 		})

@@ -134,11 +134,11 @@ func TestPromotionViewsUseLedgerUntilRecovery(t *testing.T) {
 func failedPublicationForStatus(t *testing.T) (*controlFixture, model.Run, model.Publication) {
 	t.Helper()
 	f := newControlFixture(t)
-	queued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "status-failure", Repository: f.repo, Branch: "feature/status", SHA: retrySourceSHA, Actor: "agent@host"})
+	queued, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "status-failure", Repository: f.repo, Branch: "feature/status", SHA: retrySourceSHA, Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := f.store.ClaimNextRun(t.Context())
+	run, err := f.store.StartRun(t.Context(), queued.ID)
 	if err != nil || run.ID != queued.ID {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestRetryResponsesDescribeActionAndDurableRun(t *testing.T) {
 }
 func TestRerunResponseNamesFullRunAndRefusalStartsNothing(t *testing.T) {
 	h := newRerunHarness(t, flakyResult)
-	enqueued, err := h.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "status-rerun", Repository: h.fixture.repo, Branch: rerunBranch, SHA: rerunSHA, Actor: "agent@host"})
+	enqueued, err := h.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "status-rerun", Repository: h.fixture.repo, Branch: rerunBranch, SHA: rerunSHA, Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func (s lostRerunDispatchAck) AcceptEnqueue(ctx context.Context, run model.Enque
 }
 func TestAdmittedRerunErrorDoesNotClaimNothingStarted(t *testing.T) {
 	h := newRerunHarness(t, flakyResult)
-	enqueued, err := h.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "status-rerun-ack", Repository: h.fixture.repo, Branch: rerunBranch, SHA: rerunSHA, Actor: "agent@host"})
+	enqueued, err := h.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "status-rerun-ack", Repository: h.fixture.repo, Branch: rerunBranch, SHA: rerunSHA, Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestAdmittedRerunErrorDoesNotClaimNothingStarted(t *testing.T) {
 	}
 	response := value.(api.RunRerunResponse)
 	run, readErr := h.fixture.store.Run(t.Context(), response.RunID)
-	if readErr != nil || run.Status != model.RunQueued || response.Action != "rerun" {
+	if readErr != nil || run.Status != model.RunRunning || response.Action != "rerun" {
 		t.Fatalf("admitted work lost: %+v %v", response, readErr)
 	}
 }
@@ -384,7 +384,7 @@ func TestMCPRetryOutcomeSurvivesPrivateErrorRedaction(t *testing.T) {
 	})
 	t.Run("full rerun admitted", func(t *testing.T) {
 		h := newRerunHarness(t, flakyResult)
-		enqueued, err := h.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "status-mcp-rerun", Repository: h.fixture.repo, Branch: rerunBranch, SHA: rerunSHA, Actor: "agent@host"})
+		enqueued, err := h.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "status-mcp-rerun", Repository: h.fixture.repo, Branch: rerunBranch, SHA: rerunSHA, Actor: "agent@host"})
 		if err != nil {
 			t.Fatal(err)
 		}

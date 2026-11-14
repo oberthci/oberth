@@ -34,7 +34,7 @@ func TestRunListMCPMatchesHTTPOrderAndPassedAlias(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = f.store.ClaimNextRun(ctx); err != nil {
+		if _, err = storetest.ClaimNextRun(f.store, ctx); err != nil {
 			t.Fatal(err)
 		}
 		if _, err = f.store.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
@@ -46,7 +46,7 @@ func TestRunListMCPMatchesHTTPOrderAndPassedAlias(t *testing.T) {
 		}
 		passed = append(passed, finished)
 	}
-	queued, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "surface-queue", Repository: f.repo, Branch: "feature/queued", SHA: strings.Repeat("c", 40), Actor: "agent@host"})
+	queued, err := f.scheduler.recordCIForTest(ctx, CIRequest{EventID: "surface-queue", Repository: f.repo, Branch: "feature/queued", SHA: strings.Repeat("c", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}

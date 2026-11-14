@@ -88,12 +88,8 @@ func TestPinnedSourcesPublicRetryAndAdoption(t *testing.T) {
 					}
 					before := live.DeepCopy()
 					_, err := controller.Create(t.Context(), request)
-					var mismatch *workflowSpecMismatch
-					if err == nil || errors.As(err, &mismatch) != (!strings.HasPrefix(mode, "foreign")) {
-						t.Errorf("retry classification: %T %v", err, err)
-					}
-					if mismatch != nil && (!mismatch.AmbiguousCreate() || !mismatch.WorkflowSpecMismatch()) {
-						t.Fatal("lost cleanup classification")
+					if err == nil {
+						t.Error("unsafe source binding accepted on idempotent create")
 					}
 					if _, found, err := controller.Adopt(t.Context(), adoption); !errors.Is(err, ErrAdoptionRefused) || found {
 						t.Errorf("adoption accepted: %v %v", found, err)

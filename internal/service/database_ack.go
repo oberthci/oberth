@@ -12,27 +12,10 @@ import (
 // These transactions return their exact candidate on commit failure. Resolve
 // that candidate before retrying: a lost acknowledgement cannot orphan a claim,
 // enqueue a second successor, or append a second publication intent.
-func (database schedulerDatabase) ClaimNextRun(ctx context.Context) (model.Run, error) {
-	return database.claimRun(ctx, database.SchedulerStore.ClaimNextRun)
-}
-
-func (database schedulerDatabase) claimRun(ctx context.Context, claim func(context.Context) (model.Run, error)) (model.Run, error) {
-	var candidate model.Run
-	return retryDatabase(ctx, "ClaimNextRun", func(ctx context.Context) (model.Run, error) {
-		if candidate.ID != "" {
-			current, err := database.SchedulerStore.Run(ctx, candidate.ID)
-			if err != nil {
-				return current, err
-			}
-			if current.Status == model.RunRunning {
-				return current, nil
-			}
-			candidate = model.Run{}
-		}
-		var err error
-		candidate, err = claim(ctx)
-		return candidate, err
-	})
+func (database schedulerDatabase) StartRun(ctx context.Context, id string) (model.Run, error) {
+	return database.runTransition(ctx, "StartRun", id, func(run model.Run) bool {
+		return run.Status == model.RunRunning
+	}, database.SchedulerStore.StartRun)
 }
 
 func (database schedulerDatabase) BeginPublication(ctx context.Context, spec model.PublicationSpec) (model.Publication, error) {

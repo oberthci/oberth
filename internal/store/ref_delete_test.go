@@ -134,7 +134,7 @@ func TestRefDeletionReplayCannotCancelRecreatedBranchAtSameSHA(t *testing.T) {
 		t.Fatalf("delete replay: %v %v", duplicate, err)
 	}
 	current, err := s.Run(t.Context(), newer.ID)
-	if err != nil || current.Status != model.RunQueued || current.Reason == "ref deleted" {
+	if err != nil || current.Status != model.RunRunning || current.Reason == "ref deleted" {
 		t.Fatalf("new push cancelled: %+v %v", current, err)
 	}
 	before, err := s.Run(t.Context(), old.ID)

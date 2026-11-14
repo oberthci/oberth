@@ -94,8 +94,8 @@ func (schedules *Schedules) InspectSchedule(ctx context.Context, repository mode
 }
 
 // PlanScheduleTrigger resolves one entry to the branch head a manual run would
-// test, applying the manual trigger's busy-repository guard unless force is set.
-func (schedules *Schedules) PlanScheduleTrigger(ctx context.Context, repository model.Repository, name string, force bool) (service.SchedulePlan, error) {
+// test. Execution timing belongs to Argo.
+func (schedules *Schedules) PlanScheduleTrigger(ctx context.Context, repository model.Repository, name string) (service.SchedulePlan, error) {
 	qualified, head, file, found, parseErr, err := schedules.readSchedule(ctx, repository, time.Now().UTC())
 	if err != nil {
 		return service.SchedulePlan{}, err
@@ -112,9 +112,6 @@ func (schedules *Schedules) PlanScheduleTrigger(ctx context.Context, repository 
 	}
 	if entry.Name == "" {
 		return service.SchedulePlan{}, fmt.Errorf("%w: %s has no runnable schedule entry %q", service.ErrInvalidInput, repository.Name, name)
-	}
-	if !force && schedules.busy(ctx, repository.ID) {
-		return service.SchedulePlan{}, fmt.Errorf("%w: %s has active runs; wait for them, or pass force to queue the run anyway", store.ErrInvalidState, repository.Name)
 	}
 	branch, sha, err := schedules.entryTarget(ctx, qualified, entry, head, repository.DefaultBranch)
 	if err != nil {

@@ -27,25 +27,31 @@ func TestEveryRawPhaseMapsToExactlyOneDisplayStatus(t *testing.T) {
 		}
 	}
 	for _, status := range DisplayStatuses {
+		if status == DisplayQueued {
+			if seen[status] != 0 {
+				t.Fatal("durable history invented Argo Pending")
+			}
+			continue
+		}
 		if seen[status] == 0 {
 			t.Fatalf("no raw state displays %q", status)
 		}
 	}
 }
 
-func TestDisplayRunStatusCollapsesNotStartedRunsIntoQueued(t *testing.T) {
+func TestDisplayRunStatusLeavesPreparationRunning(t *testing.T) {
 	started := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
 		name string
 		run  Run
 		want string
 	}{
-		{"durable queued", Run{Status: RunQueued}, DisplayQueued},
-		{"wire waiting projection", Run{Status: RunWaiting}, DisplayQueued},
-		{"claimed, preparing", Run{Status: RunRunning, Phase: "preparing"}, DisplayQueued},
-		{"claimed, waiting for admission", Run{Status: RunRunning, Phase: "waiting"}, DisplayQueued},
-		{"granted, admission not yet recorded", Run{Status: RunRunning, Phase: "waiting"}, DisplayQueued},
-		{"preflight before admission recorded", Run{Status: RunRunning, Phase: "preflight"}, DisplayQueued},
+		{"durable queued", Run{Status: RunQueued}, DisplayRunning},
+		{"wire waiting projection", Run{Status: RunWaiting}, DisplayRunning},
+		{"claimed, preparing", Run{Status: RunRunning, Phase: "preparing"}, DisplayRunning},
+		{"claimed, waiting for admission", Run{Status: RunRunning, Phase: "waiting"}, DisplayRunning},
+		{"granted, admission not yet recorded", Run{Status: RunRunning, Phase: "waiting"}, DisplayRunning},
+		{"preflight before admission recorded", Run{Status: RunRunning, Phase: "preflight"}, DisplayRunning},
 		{"started", Run{Status: RunRunning, Phase: "running", StartedAt: &started}, DisplayRunning},
 		{"uncertain workflow create", Run{Status: RunRunning, Phase: "infrastructure-pending", StartedAt: &started}, DisplayRunning},
 		{"publishing", Run{Status: RunRunning, Phase: "publishing", StartedAt: &started}, DisplayRunning},

@@ -77,7 +77,7 @@ func (service *API) retryPromotion(ctx context.Context, actor api.Actor, failed 
 	if err != nil {
 		return model.Promotion{}, err
 	}
-	return service.planOrQueuePromotion(ctx, actor, repository, candidate, failed.TargetRef, promotion)
+	return service.planAdmittedPromotion(ctx, actor, repository, candidate, failed.TargetRef, promotion)
 }
 
 // admitPromotionRetry durably admits the retry of failed as actor, with its
@@ -244,7 +244,7 @@ func (service *API) retryAutomaticPromotion(ctx context.Context, failed model.Pr
 				go func() {
 					defer service.background.Done()
 					defer cancel()
-					if _, planErr := scoped.planOrQueuePromotion(ctx, actor, repository, candidate, failed.TargetRef, retried); planErr != nil {
+					if _, planErr := scoped.planAdmittedPromotion(ctx, actor, repository, candidate, failed.TargetRef, retried); planErr != nil {
 						log.Printf("oberth: automatic retry %s of promotion %s: %v", retried.ID, failed.ID, planErr)
 					}
 				}()

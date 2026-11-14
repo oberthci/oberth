@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // This exercises the existing finalization hook, including replay of a
@@ -25,7 +26,7 @@ func TestGreenPublicationClosesTrailerIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(f.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	pub, err := f.store.BeginPublication(ctx, model.PublicationSpec{RepoID: f.repo.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref, ResultSHA: sha, Actor: "owner"})
@@ -112,7 +113,7 @@ func TestGreenTrailerRecoveryRetainsFailedWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.store.ClaimNextRun(ctx); err != nil {
+	if _, err = storetest.ClaimNextRun(f.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	pub, err := f.store.BeginPublication(ctx, model.PublicationSpec{RepoID: f.repo.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref, ResultSHA: sha, Actor: "owner"})
@@ -177,7 +178,7 @@ func TestGreenPromotionTrainClosesTrailerIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.store.ClaimNextRun(ctx); err != nil {
+	if _, err = f.store.StartRun(ctx, queued.ID); err != nil {
 		t.Fatal(err)
 	}
 	pub, err := f.store.BeginPublication(ctx, model.PublicationSpec{RepoID: f.repo.ID, RunID: queued.ID, PromotionID: promotion.ID, RefKind: model.RefBranch, Ref: "main", PreviousSHA: previous, PreviousKnown: true, ResultSHA: merged, Actor: "owner"})
@@ -222,7 +223,7 @@ func TestGreenTrailerPoisonedRepositoryDoesNotStarveOthers(t *testing.T) {
 				if e != nil {
 					t.Fatal(e)
 				}
-				if _, e = f.store.ClaimNextRun(ctx); e != nil {
+				if _, e = storetest.ClaimNextRun(f.store, ctx); e != nil {
 					t.Fatal(e)
 				}
 				pub, e := f.store.BeginPublication(ctx, model.PublicationSpec{RepoID: repo.ID, RunID: run.ID, RefKind: model.RefBranch, Ref: "main", ResultSHA: sha, Actor: "owner"})

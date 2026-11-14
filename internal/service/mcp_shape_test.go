@@ -61,7 +61,7 @@ func TestServiceRunListPopulatedReturnsArray(t *testing.T) {
 	actor := api.Actor{Identity: "agent@host"}
 
 	// Enqueue a run so the list is non-empty.
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "shape-test", Repository: fixture.repo,
 		Branch: "feature/shape", SHA: strings.Repeat("c", 40), Actor: "agent@host",
 	}); err != nil {
@@ -128,7 +128,7 @@ func TestServiceAllListToolsReturnObjectShape(t *testing.T) {
 	actor := api.Actor{Identity: "agent@host"}
 
 	// Enqueue one run to exercise populated paths for run_list.
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "all-shapes", Repository: fixture.repo,
 		Branch: "feature/all-shapes", SHA: strings.Repeat("d", 40), Actor: "agent@host",
 	}); err != nil {

@@ -16,7 +16,7 @@ import (
 func TestRunGetRetainsBoundTerminationAndUnavailableHistory(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := context.Background()
-	run, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "termination-read", Repository: f.repo, Branch: "feature/termination", SHA: strings.Repeat("a", 40), Actor: "reader@host"})
+	run, err := f.scheduler.recordCIForTest(ctx, CIRequest{EventID: "termination-read", Repository: f.repo, Branch: "feature/termination", SHA: strings.Repeat("a", 40), Actor: "reader@host"})
 	if err != nil {
 		t.Fatal(err)
 	}

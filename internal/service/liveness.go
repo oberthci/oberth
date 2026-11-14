@@ -18,22 +18,8 @@ func (scheduler *Scheduler) Live() error {
 	return nil
 }
 
-// Live checks every queued promotion independently, so one busy queue cannot
-// mask a wedged background task in another. Planning/delivery use external services and
-// are not included in the local queue-wait heartbeat.
-func (service *API) Live() error { return service.liveAt(time.Now()) }
-
-func (service *API) liveAt(now time.Time) error {
-	var err error
-	service.promotionProgress.Range(func(key, value any) bool {
-		if checkErr := value.(*liveness.Heartbeat).CheckAt(now); checkErr != nil {
-			err = fmt.Errorf("promotion %s: %w", key, checkErr)
-			return false
-		}
-		return true
-	})
-	return err
-}
+// Promotion planning waits only on external services; it has no local worker loop.
+func (service *API) Live() error { return nil }
 
 type dispatchProgressKey struct{}
 
@@ -102,9 +88,4 @@ func (scheduler *Scheduler) WalkLiveness(visit func(string, *liveness.Heartbeat)
 	visit("scheduler", &scheduler.dispatchProgress)
 }
 
-func (service *API) WalkLiveness(visit func(string, *liveness.Heartbeat)) {
-	service.promotionProgress.Range(func(key, value any) bool {
-		visit(fmt.Sprintf("promotion %s", key), value.(*liveness.Heartbeat))
-		return true
-	})
-}
+func (service *API) WalkLiveness(_ func(string, *liveness.Heartbeat)) {}

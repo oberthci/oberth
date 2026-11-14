@@ -84,7 +84,7 @@ func TestSummaryDoesNotPollExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.ClaimNextRun(t.Context()); err != nil {
+	if _, err := storetest.ClaimNextRun(f.store, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	controlBefore := f.api(t)

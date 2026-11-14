@@ -133,7 +133,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
   run(`
     const f3Claimed=[
       makeRun('scoped-claimed-normal',{ref:'s5',status:'running',started_at:null,finished_at:null,queued_at:f3Time(20),display_status:'queued',display_reason:'waiting for an Argo workflow slot'}),
-      makeRun('scoped-high-unclaimed',{ref:'s6',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(25),display_status:'queued',display_reason:'next in line'}),
+      makeRun('scoped-high-unclaimed',{ref:'s6',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(25),display_status:'queued',display_reason:'waiting for Argo'}),
       makeRun('scoped-started',{ref:'s7',status:'running',started_at:f3Time(30),finished_at:null,display_status:'running'}),
     ];
     api=async path=>{

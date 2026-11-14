@@ -19,7 +19,7 @@ import (
 func TestSchedulerRemovesRunWorkspaceOnlyAfterTerminalOutcome(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{Status: model.RunFailed, Phase: "test", Error: "red"})
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "workspace-terminal", Repository: fixture.repo, Branch: "feature/workspace-terminal",
 		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
 	})
@@ -55,7 +55,7 @@ func TestWorkspaceCleanupFailureDoesNotRepaintTerminalRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enqueued, err := scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "workspace-cleanup-failure", Repository: fixture.repo, Branch: "feature/workspace-cleanup-failure",
 		SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: "agent@host",
 	})
@@ -75,7 +75,7 @@ func TestWorkspaceCleanupFailureDoesNotRepaintTerminalRun(t *testing.T) {
 	if err := scheduler.recoverOwnedWorkspaces(ctx); err != nil {
 		t.Fatalf("cleanup stopped startup: %v", err)
 	}
-	later, err := scheduler.EnqueueCI(ctx, CIRequest{EventID: "after-cleanup-failure", Repository: fixture.repo, Branch: "feature/later", SHA: "cccccccccccccccccccccccccccccccccccccccc", Actor: "agent@host"})
+	later, err := scheduler.recordCIForTest(ctx, CIRequest{EventID: "after-cleanup-failure", Repository: fixture.repo, Branch: "feature/later", SHA: "cccccccccccccccccccccccccccccccccccccccc", Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestWorkspaceStartupRecoveryDeletesOnlyDurablyTerminalOwners(t *testing.T) 
 	root := filepath.Join(fixture.root, "work")
 
 	terminal := enqueueWorkspaceRun(t, fixture, "feature/terminal", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.store.FinishRun(ctx, terminal.ID, model.RunResult{Status: model.RunFailed, Error: "red"}); err != nil {
@@ -114,11 +114,11 @@ func TestWorkspaceStartupRecoveryDeletesOnlyDurablyTerminalOwners(t *testing.T) 
 	}
 
 	running := enqueueWorkspaceRun(t, fixture, "feature/running", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	publishing := enqueueWorkspaceRun(t, fixture, "feature/publishing", "cccccccccccccccccccccccccccccccccccccccc")
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	publication, err := fixture.store.BeginPublication(ctx, model.PublicationSpec{
@@ -182,11 +182,11 @@ func TestWorkspaceStartupRecoveryPreservesPendingPublication(t *testing.T) {
 	databasePath := filepath.Join(fixture.root, "oberth.sqlite")
 
 	interrupted := enqueueWorkspaceRun(t, fixture, "feature/interrupted", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	publicationOwner := enqueueWorkspaceRun(t, fixture, "feature/publication-owner", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.store.BeginPublication(ctx, model.PublicationSpec{
@@ -424,7 +424,7 @@ func newWorkspaceAPI(t *testing.T, fixture *controlFixture, auditor Auditor, rem
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Logs: fixture.logs, Auditor: auditor,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Logs: fixture.logs, Auditor: auditor,
 		Signals: fixture.signals, PromotionWorkspaceRoot: filepath.Join(fixture.root, "work"),
 		RemoveWorkspace: remove,
 	})
@@ -437,7 +437,7 @@ func newWorkspaceAPI(t *testing.T, fixture *controlFixture, auditor Auditor, rem
 func seedWorkspacePromotionCandidate(t *testing.T, fixture *controlFixture, sha string) {
 	t.Helper()
 	run := enqueueWorkspaceRun(t, fixture, "feature/promotion-source", sha)
-	if _, err := fixture.store.ClaimNextRun(context.Background()); err != nil {
+	if _, err := storetest.ClaimNextRun(fixture.store, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.store.FinishRun(context.Background(), run.ID, model.RunResult{Status: model.RunPassed}); err != nil {

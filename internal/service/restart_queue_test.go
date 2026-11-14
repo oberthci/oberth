@@ -51,7 +51,7 @@ func TestClaimedWaitingRunsAreNeverResubmittedAfterRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			run, err := f.store.ClaimNextRun(ctx)
+			run, err := f.store.StartRun(ctx, enqueued.ID)
 			if err != nil || run.ID != enqueued.ID {
 				t.Fatalf("claim: %+v %v", run, err)
 			}

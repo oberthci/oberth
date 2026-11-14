@@ -111,7 +111,7 @@ func TestNativeSchedulingUpgradeMaterializesReceivesAndPreservesReplay(t *testin
 	event := events["deleted"]
 	event.ID = "re-push"
 	fresh, err := s.EnqueueReceiveEvent(ctx, event, saved["deleted"])
-	if err != nil || fresh.Duplicate || fresh.Status != model.RunQueued {
+	if err != nil || fresh.Duplicate || fresh.Status != model.RunRunning {
 		t.Fatal(fresh, err)
 	}
 	if _, err = s.EnqueueReceiveEvent(ctx, events["deleted"], saved["deleted"]); err != nil {
@@ -121,11 +121,6 @@ func TestNativeSchedulingUpgradeMaterializesReceivesAndPreservesReplay(t *testin
 	if err != nil || latest.ID != fresh.ID {
 		t.Fatal("cancelled receipt hid fresh run", latest, err)
 	}
-	for range 3 {
-		if _, err = s.ClaimNextRun(ctx); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if _, err = s.FinishRun(ctx, fresh.ID, model.RunResult{Status: model.RunPassed, Phase: "complete"}); err != nil {
 		t.Fatal(err)
 	}
@@ -133,4 +128,13 @@ func TestNativeSchedulingUpgradeMaterializesReceivesAndPreservesReplay(t *testin
 	if err != nil || latest.ID != fresh.ID || latest.Status != model.RunPassed {
 		t.Fatal(latest, err)
 	}
+	// Owner activation after upgrading also closes rows retained by the old queue.
+	if err := s.RecoverOwnerState(ctx); err != nil {
+		t.Fatal(err)
+	}
+	interrupted, err := s.Run(ctx, queued.ID)
+	if err != nil || interrupted.Status != model.RunFailed || interrupted.Error != model.ServerRestartReason {
+		t.Fatalf("upgrade stranded queued history: %+v %v", interrupted, err)
+	}
+
 }

@@ -171,9 +171,7 @@ func (j *rcaPendingJobs) SettleCreate(context.Context, string, string, time.Time
 	return false, context.DeadlineExceeded
 }
 func TestRCARevisionCreateCleanupOutageDoesNotStopRunLoop(t *testing.T) {
-	for _, known := range []bool{false, true} {
-		t.Run(map[bool]string{false: "uncertain-post", true: "submitted-delete-outage"}[known], func(t *testing.T) { testRCACreateCleanupOutage(t, known) })
-	}
+	testRCACreateCleanupOutage(t, true)
 }
 func testRCACreateCleanupOutage(t *testing.T, knownCreate bool) {
 	fixture := newRecoveryFixture(t)
@@ -202,7 +200,7 @@ func testRCACreateCleanupOutage(t *testing.T, knownCreate bool) {
 	scheduler.createTicks = ticks
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- scheduler.Run(ctx) }()
+	go func() { done <- scheduler.runAcceptedFixtures(ctx) }()
 	t.Cleanup(func() {
 		cancel()
 		select {

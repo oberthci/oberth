@@ -88,18 +88,19 @@ func TestNonrootHelperPolicyRecovery(t *testing.T) {
 			if !reflect.DeepEqual(before, workflows.existing) || len(seeds) != count || workflows.creates != 1 {
 				t.Fatal("recovery mutated workflow/source")
 			}
-			// Submission identity and helper policy checks remain.
-			for _, mutation := range []string{"identity", "policy"} {
+			// Native fields can change without changing run ownership; delivery policy stays checked.
+			for _, mutation := range []string{"native-default", "policy"} {
 				t.Run(mutation, func(t *testing.T) {
 					workflows.existing = before.DeepCopy()
 					switch mutation {
-					case "identity":
-						workflows.existing.Annotations[identityAnnotation] = strings.Repeat("f", 64)
+					case "native-default":
+						workflows.existing.Spec.Parallelism = new(int64(5))
 					case "policy":
 						workflows.existing.Annotations[helperStorageAnnotation] = "unknown-policy"
 					}
-					if _, err := controller.Create(t.Context(), request); err == nil {
-						t.Fatal("changed authority/spec accepted")
+					_, err := controller.Create(t.Context(), request)
+					if (err != nil) != (mutation == "policy") {
+						t.Fatalf("native-field/owner recovery: %v", err)
 					}
 					if len(seeds) != count || workflows.creates != 1 {
 						t.Fatal("refusal mutated source/workflow")

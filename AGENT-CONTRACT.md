@@ -479,6 +479,15 @@ trust assumptions and complete invalidation rules.
   priority mapping. Repository YAML owns requests, limits, placement, native
   priority, retries, optional deadlines and synchronization. See
   [native scheduling](docs/native-scheduling.md).
+- Push, promotion, rerun and cron accepting handlers validate, write run history,
+  and submit the specific run's Workflow before returning. No claim loop selects
+  a next run, and pending publication does not delay Workflow creation. Git's
+  branch-head check prevents an older result from overwriting a newer commit.
+  Workflow creation posts once under a fixed name. AlreadyExists adopts only
+  the same run label and owner; there is no spec reconstruction or create retry.
+  An uncertain acknowledgement uses the shared watch hub's run-label index,
+  with one live GET on a miss. API failure records a reason and requires an
+  explicit user retry. Observation outlives the accepting request.
 - A named scheduled run durably records its resolved schedule entry in
   `runs.schedule_entry` (v31). Cron and manual
   schedule triggers share that identity. Retry, rerun,
@@ -488,14 +497,14 @@ trust assumptions and complete invalidation rules.
   server-owned Workflow parameter: any repository declaration in
   `spec.arguments.parameters` is refused. Named schedules always receive it;
   other runs receive empty only when their document references it, otherwise
-  it is absent. Named entries have separate same-branch supersession domains.
-  Due cron entries queue even when the repository has active runs; Argo and Kubernetes policy govern execution. Cron atomically checks the
-  consumed cursor and all active runs of that entry/branch before enqueue:
-  overlap records `coalesced` and advances the cursor without replacing the
-  live run; `fired` commits its run/receive/audit/cursor together. Read failures
+  it is absent. Named entries retain their own schedule identity.
+  Due cron entries submit directly even when earlier occurrences are active.
+  Each occurrence commits its run/receive/audit/cursor together, then creates
+  its Workflow in the accepting handler. Cursor and event identity deduplicate
+  replay; active runs do not coalesce later occurrences. Read failures
   fail closed and are logged; cursor-read failure reports `failed_state`
   without advancing. Manual schedule triggers
-  retain their busy-repository guard unless forced. Run list/detail expose
+  submit directly; force overrides only an explicit entry pause. Run list/detail expose
   `ScheduleEntry`; status/wait expose
   `schedule_entry`. See [scheduled runs](docs/scheduled-runs.md).
 
@@ -1126,11 +1135,8 @@ trust assumptions and complete invalidation rules.
   bounded reason and remedy; it is independent of resource quantities.
 
 - Run list views (#1122): `/api/runs`, MCP `run_list`, `oberth runs` and the
-  dashboard use one default order in three groups, top to bottom. The queue
-  first: every not-yet-admitted run, capped at 500, in scheduler claim order:
-  highest effective class first, then earliest `admission_sequence`, then
-  `queue_sequence`, preserving restart FIFO order. High work, including aged
-  normal runs, precedes normal work in every view.
+  dashboard use one default order in three groups, top to bottom. Runs awaiting
+  native execution appear first, capped at 500, in acceptance/history order.
   Then running runs, capped at 500, most recently started first. Then
   terminal runs, most recently finished first (`COALESCE(finished_at,
   started_at, queued_at)` descending, ties by ID). Only terminal rows count
@@ -1138,11 +1144,9 @@ trust assumptions and complete invalidation rules.
   key with the last run's sequence or ID as the external cursor; no limit or
   page lists a queued or running run below a finished one, and a run that
   finishes between page loads cannot land on an older page. `latest_per_ref=1`
-  groups each ref's newest run the same way. The whole queue, including claimed
-  but unadmitted runs, has one numbering computed before repository/ref filters.
-  Each queued run carries its scheduling reason; filtered lists keep global positions;
-  scoped uplinks see no global position (#073). `started_at` is recorded when
-  workflow admission is granted.
+  groups each ref's newest run the same way. Each queued run carries its native
+  scheduling reason. There is no Oberth execution queue or queue position.
+  `started_at` is recorded when Workflow submission begins.
   Workflow submission preserves the admission time. `view=history` retains its
   terminal-only sequence paging. Repository/ref filters and uplink scope apply
   to both views. `run_list.status` accepts one existing display status or a non-empty

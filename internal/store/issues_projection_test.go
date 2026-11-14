@@ -118,7 +118,7 @@ func TestInfrastructurePromotionRunDoesNotProjectCIRedIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.ClaimNextRun(ctx); err != nil {
+	if _, err := database.StartRun(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: "Evicted: The node was low on resource: memory."}); err != nil {

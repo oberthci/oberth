@@ -915,7 +915,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	schedules := app.NewSchedules(app.SchedulesConfig{
 		Repositories: database.ListRepositories,
 		Git:          git,
-		Runs:         database,
 		Enqueuer:     scheduler,
 		State:        database,
 		Upstreams:    database,
@@ -1140,7 +1139,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	defer func() { stopTokenWarnings(); <-adminExpiryDone }()
 	defer func() { stopTokenWarnings(); <-tokenWarningsDone }()
 	stopBootstrap()
-	adminServer := withAdminReadiness(withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), health.Ready)
+	adminServer := withAdminReadiness(withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyCancellations, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), health.Ready)
 	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, adminServer, activateScheduler, argoJobs.RunWatch, accessReconciler, schedules, ciIssues, branchDeletions, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
 }
 

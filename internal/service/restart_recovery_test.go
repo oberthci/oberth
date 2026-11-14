@@ -162,7 +162,7 @@ func TestRestartLateAdoptionSurvivesAnotherOwnerShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- scheduler.Run(ctx) }()
+	go func() { done <- scheduler.runAcceptedFixtures(ctx) }()
 	select {
 	case <-jobs.waitEntered:
 	case err := <-done:

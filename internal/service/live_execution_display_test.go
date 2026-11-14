@@ -14,11 +14,11 @@ import (
 
 func submittedDisplayRun(t *testing.T, f *controlFixture, ref string) model.Run {
 	t.Helper()
-	enqueued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: ref, Repository: f.repo, Branch: ref, SHA: strings.Repeat("a", 40), Actor: "owner"})
+	enqueued, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: ref, Repository: f.repo, Branch: ref, SHA: strings.Repeat("a", 40), Actor: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := f.store.ClaimNextRun(t.Context())
+	run, err := f.store.StartRun(t.Context(), enqueued.ID)
 	if err != nil || run.ID != enqueued.ID {
 		t.Fatal(run, err)
 	}
@@ -139,11 +139,24 @@ func TestSeedPendingReasonPrecedesArgoStateOnAllReadSurfaces(t *testing.T) {
 				t.Fatal(err)
 			}
 			rows := listed.([]model.Run)
-			if len(rows) != 1 || rows[0].DisplayStatus != model.DisplayQueued || rows[0].DisplayReason != message {
+			if len(rows) != 1 || rows[0].DisplayStatus != model.DisplayRunning || rows[0].DisplayReason != message {
 				t.Fatal("list waited for nonexistent Argo Workflow", rows)
 			}
+			for _, display := range []string{model.DisplayQueued, model.DisplayRunning} {
+				filtered, err := s.Runs(t.Context(), actor, api.RunFilter{Status: model.RunStatusFilter{display}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := 0
+				if display == model.DisplayRunning {
+					want = 1
+				}
+				if len(filtered.([]model.Run)) != want {
+					t.Fatalf("source preparation in %s filter: %+v", display, filtered)
+				}
+			}
 			value, err := s.Run(t.Context(), actor, run.ID)
-			if err != nil || value.(RunDetailResponse).Run.DisplayReason != message {
+			if err != nil || value.(RunDetailResponse).Run.DisplayReason != message || value.(RunDetailResponse).Run.DisplayStatus != model.DisplayRunning {
 				t.Fatal("run detail hid source reason", value, err)
 			}
 			scopedAPI, err := s.forActor(t.Context(), actor)
@@ -151,7 +164,7 @@ func TestSeedPendingReasonPrecedesArgoStateOnAllReadSurfaces(t *testing.T) {
 				t.Fatal(err)
 			}
 			status, err := scopedAPI.status(t.Context(), f.repo.Name, run.SHA, "")
-			if err != nil || status.Run.DisplayReason != message {
+			if err != nil || status.Run.DisplayReason != message || status.DisplayStatus != model.DisplayRunning {
 				t.Fatal("status hid source reason", status, err)
 			}
 			kept, err := f.store.Run(t.Context(), run.ID)

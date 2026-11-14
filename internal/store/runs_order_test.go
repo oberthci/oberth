@@ -249,7 +249,7 @@ func TestRunListKeepsClaimedUnstartedRunsInTheQueue(t *testing.T) {
 		if runs[0].Status != model.RunRunning || runs[0].StartedAt != nil || runs[0].Phase != "waiting" || !runs[0].ClaimedUnstarted() {
 			t.Fatalf("claimed run is not the raw running/unstarted record: %+v", runs[0])
 		}
-		if model.DisplayRunStatus(runs[0]) != model.DisplayQueued || runListGroup(runs[0]) != 0 {
+		if model.DisplayRunStatus(runs[0]) != model.DisplayRunning || runListGroup(runs[0]) != 0 {
 			t.Fatalf("claimed run must display queued in the queue group: %+v", runs[0])
 		}
 	}

@@ -1000,7 +1000,7 @@ func (s *Store) recoverInterruptedRuns(ctx context.Context) error {
 	}
 	runRows, err := tx.QueryContext(ctx, `
 SELECT `+runColumns+` FROM runs
-WHERE status = 'running'
+WHERE status IN ('queued', 'running')
   AND NOT EXISTS (
       SELECT 1 FROM publications
       WHERE publications.run_id = runs.id AND publications.status = 'pending'
@@ -1022,11 +1022,18 @@ ORDER BY queue_sequence`)
 		return fmt.Errorf("list active recovery runs: %w", err)
 	}
 	for _, active := range activeRuns {
-		if active.WorkflowName != "" || restored[active.ID] {
-			// Named Workflows need engine observation. Marker-listed backup
-			// runs belong to restore cancellation, including unnamed claims.
+		if restored[active.ID] {
 			continue
 		}
+		if active.WorkflowName != "" {
+			if active.Status == model.RunQueued {
+				if _, err := tx.ExecContext(ctx, `UPDATE runs SET status='running',phase=CASE WHEN phase='cancelled' THEN phase ELSE 'waiting' END,updated_at=? WHERE id=?`, now, active.ID); err != nil {
+					return err
+				}
+			}
+			continue // Named Workflows are observed by startup adoption.
+		}
+
 		if active.Cancelled() && active.WorkflowName == "" {
 			if _, err := s.finishRunTx(ctx, tx, active.ID, model.RunResult{Status: model.RunInterrupted, Phase: model.PhaseCancelled, Error: strings.Replace(active.Reason, "cancelling by ", "cancelled by ", 1)}, model.PhaseCancelled, now); err != nil {
 				return err
@@ -1616,7 +1623,7 @@ func (s *Store) EnqueueAdmittedPromotionRun(ctx context.Context, runSpec model.R
 		!baseMatches {
 		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("%w: admitted promotion run does not match promotion", ErrInvalidState)
 	}
-	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now)
+	enqueued, err := s.enqueueStartedRunTx(ctx, tx, validatedRun, runID, now)
 	if err != nil {
 		return model.EnqueueRunResult{}, model.Promotion{}, err
 	}

@@ -64,7 +64,7 @@ func runStatusRestriction(statuses model.RunStatusFilter) (string, []any, error)
 		case "queued":
 			durable["queued"], durable["running"] = true, true
 		case "running":
-			durable["running"] = true
+			durable["queued"], durable["running"] = true, true
 		case "failed":
 			durable["failed"] = true
 		case "cancelled":

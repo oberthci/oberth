@@ -61,5 +61,7 @@ errors, unavailable objects and authentication failures cannot be skipped.
 `promote_retry` / `oberth promotion retry <id>` preserves the requested train and
 conflict policy, rechecks every source and merges onto the current target again.
 Train retries always test the resulting tree. A source that conflicted previously
-is reconsidered. Queued requests use the existing promotion queue and statuses;
-there is no separate train queue or run status.
+is reconsidered. Every promotion is planned immediately, including promotions
+to a target with other active promotions. If that target moves before publication,
+the existing moved-target path prepares and tests a new result. Publication
+refuses the stale result; no promotion waits in an Oberth queue.

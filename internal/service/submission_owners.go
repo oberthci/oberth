@@ -95,3 +95,11 @@ func (g *submissionRegistry) releaseTerminalRun(id string) {
 		}
 	}
 }
+
+// ownsLiveRun excludes a replay submitted during activation from startup adoption.
+func (g *submissionRegistry) ownsLiveRun(run model.Run) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	owner := g.owners[run.QueueSequence]
+	return owner != nil && !owner.adopted && owner.runID == run.ID && owner.repoID == run.RepoID
+}

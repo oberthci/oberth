@@ -244,6 +244,10 @@
       "doc_anchor": "docs/installer-reruns.md#install-reconciles-upgrade-moves-versions",
       "test_ref": "internal/installer/upgrade_backup_test.go TestRollbackRestoresTheBackupAfterAMigration"
     },
+    "flag:force": {
+      "doc_anchor": "docs/scheduled-runs.md#overlap-downtime-and-attribution",
+      "test_ref": "cmd/oberth/schedules_remote_test.go TestSchedulesCLIForwardsToTheMCPTools"
+    },
     "flag:force-record": {
       "doc_anchor": "docs/installer-reruns.md#install-reconciles-upgrade-moves-versions",
       "test_ref": "internal/installer/upgrade_backup_test.go TestRollbackRefusals"

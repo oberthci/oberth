@@ -42,7 +42,7 @@ func TestRestartCutAdoptionPersistsRetryableWithoutTestIssue(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			done := make(chan error, 1)
-			go func() { done <- scheduler.Run(ctx); close(done) }()
+			go func() { done <- scheduler.runAcceptedFixtures(ctx); close(done) }()
 			deadline := time.NewTimer(testStartTimeout(15 * time.Second))
 			defer deadline.Stop()
 			var current model.Run
@@ -85,7 +85,7 @@ func TestRestartCutAdoptionPersistsRetryableWithoutTestIssue(t *testing.T) {
 				}
 			} else {
 				retry, retryErr := fixture.store.RerunRun(t.Context(), model.RunRerunRequest{RunID: run.ID, Actor: "agent@host"})
-				if current.Status != model.RunInterrupted || current.FailedStep != "" || !errors.Is(issueErr, store.ErrNotFound) || retryErr != nil || retry.Enqueued.ID == run.ID || retry.Enqueued.Status != model.RunQueued {
+				if current.Status != model.RunInterrupted || current.FailedStep != "" || !errors.Is(issueErr, store.ErrNotFound) || retryErr != nil || retry.Enqueued.ID == run.ID || retry.Enqueued.Status != model.RunRunning {
 					t.Fatalf("restart remained CI red or unretryable: run=%+v issue=%+v/%v retry=%+v/%v", current, issue, issueErr, retry, retryErr)
 				}
 				shown := presentationRun(current)

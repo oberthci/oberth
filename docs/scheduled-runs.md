@@ -55,12 +55,12 @@ and promotion runs receive an empty value when they reference the parameter,
 and otherwise omit it. No caller parameter can turn them into a named
 schedule run.
 
-Named entries on the same repository/branch/SHA remain distinct queued runs.
-Ordinary branch pushes and other entries are independent. A due cron occurrence
-coalesces into a queued or running attempt of the same entry and branch instead
-of creating another attempt. Other active work does not stop cron from queueing. Explicit
-forced triggers leave existing attempts active. Admission, Argo parallelism and native Argo
-synchronization bound execution ([where limits live](where-limits-live.md)).
+Named entries on the same repository/branch/SHA remain distinct runs.
+Each distinct cron occurrence creates its own Workflow, even when an earlier
+occurrence is queued in Argo or running. Receive and cursor deduplication
+prevent a replay of one occurrence from creating another run. Native Argo
+parallelism and synchronization govern execution
+([where limits live](where-limits-live.md)).
 
 Run list/detail APIs expose `ScheduleEntry`; `status` and `wait` expose
 `schedule_entry`. The dashboard run detail shows the entry name. List and
@@ -133,21 +133,14 @@ Friday, not only on Fridays that fall on the 1st.
 
 ## Overlap, downtime and attribution
 
-**A due fire is queued even when other repository work is busy.** Admission,
-Argo parallelism and native Argo synchronization decide when it executes. A
-stream of ordinary branch runs must not prevent a nightly from entering that
-queue. `fired` means the run was enqueued, not that it has started or passed.
-The current tick's branch head is pinned in the queued run; later pushes do not
-replace a named schedule with an ordinary branch run.
-
-If that entry already has a queued or running run on the target branch, the
-occurrence is recorded as `coalesced`, preserving that run's original commit and
-acceptance order. Coalescing advances the cursor to the tick time: that occurrence
-is consumed, and the next one is the first cron time after it. Completion does
-not trigger an extra catch-up run for consumed occurrences. This prevents a
-nightly whose capacity wait or runtime exceeds its interval from killing itself
-at every occurrence. The lookup covers all active runs, without a history-page
-limit; different entries and target branches remain independent.
+**Each due occurrence submits its own Workflow.** The accepting handler records
+the occurrence and started run history, then starts submission immediately on
+the server lifetime. The request returns before preparation or cluster work. Argo
+parallelism and native Argo synchronization decide when it executes. `fired`
+means the occurrence was accepted; the run records a create failure with its
+reason if the cluster API is unavailable. Another execution requires an
+explicit user request. The pinned branch head belongs to that occurrence;
+later pushes leave it running.
 
 Older servers recorded `skipped` while any repository run was active. Those
 outcomes did not advance the successful-fire cursor: pending entries catch up
@@ -159,18 +152,18 @@ latest row was skipped, failed or paused have a pending cursor when their
 successful-fire history is unavailable. They queue once when scheduling is
 enabled and the entry is unpaused, then resume their normal cadence.
 
-Manual `schedule_trigger` still refuses active repository work unless `force`
-is set. That guard prevents an accidental extra manual run; cron occurrences
-are already bounded by their consumed-occurrence cursor and minimum interval.
+Manual `schedule_trigger` submits directly even when other runs are active.
+A paused entry requires `force` to run it once; that flag does not control
+parallelism.
 
-Cron checks the cursor snapshot and the active entry in the same SQLite write
-transaction that records `fired` or `coalesced`. A new run, receive event, audit
+Cron checks the cursor snapshot in the same SQLite write
+transaction that records `fired`. A new run, receive event, audit
 record and cursor commit together. A lost enqueue reply or concurrent stale tick
 cannot create a second run, including after the original run has finished.
 
 An unreadable cursor aborts the repository tick, logs the error, and attempts to
-record `failed_state` without inventing or advancing a cursor. An active-entry
-query or enqueue error logs the error and records `failed`, preserving a due
+record `failed_state` without inventing or advancing a cursor. A run-recording
+error logs the error and records `failed`, preserving a due
 cursor for retry. Outcome-write errors are logged too; an unreadable database
 cannot be expected to persist its own failure. No read failure blindly enqueues.
 

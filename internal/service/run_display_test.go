@@ -22,9 +22,9 @@ func TestDisplayRunStatusSeparatesPrestartAndTerminalCauses(t *testing.T) {
 		run  model.Run
 		want string
 	}{
-		{"unclaimed", model.Run{Status: model.RunQueued}, "queued"},
-		{"claimed", model.Run{Status: model.RunRunning}, "queued"},
-		{"legacy waiting", model.Run{Status: model.RunWaiting}, "queued"},
+		{"unclaimed", model.Run{Status: model.RunQueued}, "running"},
+		{"claimed", model.Run{Status: model.RunRunning}, "running"},
+		{"waiting projection", model.Run{Status: model.RunWaiting}, "running"},
 		{"started", model.Run{Status: model.RunRunning, StartedAt: &started}, "running"},
 
 		{"cancelled", model.Run{Status: model.RunInterrupted, Phase: model.PhaseCancelled}, "cancelled"},
@@ -71,12 +71,12 @@ func TestRunDisplayReasonsCoverTerminalCausesAndTrustedPreflight(t *testing.T) {
 func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
-	run, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "display", Repository: fixture.repo,
+	run, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "display", Repository: fixture.repo,
 		Branch: "feature/display", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := fixture.store.ClaimNextRun(ctx)
+	claimed, err := fixture.store.StartRun(ctx, run.ID)
 	if err != nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %+v, %v", claimed, err)
 	}
@@ -87,12 +87,12 @@ func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 		t.Fatal(err)
 	}
 	defaultJSON, _ := json.Marshal(defaultRuns)
-	if !strings.Contains(string(defaultJSON), `"display_status":"queued"`) ||
+	if !strings.Contains(string(defaultJSON), `"display_status":"running"`) ||
 		!strings.Contains(string(defaultJSON), `"display_reason":`) {
 		t.Fatalf("default list lacks display fields: %s", defaultJSON)
 	}
 	entry := defaultRuns.([]model.Run)[0]
-	if entry.Status != model.RunWaiting || entry.DisplayStatus != "queued" || entry.Scheduling == nil {
+	if entry.Status != model.RunWaiting || entry.DisplayStatus != "running" || entry.Scheduling == nil {
 		t.Fatalf("active run = %+v", entry)
 	}
 	detailValue, err := service.Run(ctx, actor, run.ID)
@@ -100,11 +100,11 @@ func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 		t.Fatal(err)
 	}
 	detail := detailValue.(RunDetailResponse)
-	if detail.Run.Status != model.RunWaiting || detail.Run.DisplayStatus != "queued" || detail.Scheduling == nil {
+	if detail.Run.Status != model.RunWaiting || detail.Run.DisplayStatus != "running" || detail.Scheduling == nil {
 		t.Fatalf("detail = %+v", detail)
 	}
 	status, err := service.statusForRun(ctx, fixture.repo, claimed)
-	if err != nil || status.DisplayStatus != "queued" || status.DisplayReason == "" || status.Run.DisplayReason != status.DisplayReason {
+	if err != nil || status.DisplayStatus != "running" || status.DisplayReason == "" || status.Run.DisplayReason != status.DisplayReason {
 		t.Fatalf("status display pair = %+v, %v", status, err)
 	}
 	logValue, err := service.RunLogLive(ctx, actor, run.ID, 0)
@@ -112,10 +112,10 @@ func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := logValue.(LiveLogResponse)
-	if log.DisplayStatus != "queued" || log.DisplayReason == "" {
+	if log.DisplayStatus != "running" || log.DisplayReason == "" {
 		t.Fatalf("live log display pair = %+v", log)
 	}
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "successor", Repository: fixture.repo,
+	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "successor", Repository: fixture.repo,
 		Branch: "feature/display", SHA: strings.Repeat("b", 40), Actor: "agent@host"}); err != nil {
 		t.Fatal(err)
 	}
@@ -133,16 +133,16 @@ func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 func TestDefaultRunListNumbersClaimedAndUnclaimedTogether(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := t.Context()
-	first, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "first-position", Repository: fixture.repo,
+	first, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "first-position", Repository: fixture.repo,
 		Branch: "feature/first", SHA: strings.Repeat("d", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := fixture.store.ClaimNextRun(ctx)
+	claimed, err := fixture.store.StartRun(ctx, first.ID)
 	if err != nil || claimed.ID != first.ID {
 		t.Fatalf("claim = %+v, %v", claimed, err)
 	}
-	second, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "second-position", Repository: fixture.repo,
+	second, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "second-position", Repository: fixture.repo,
 		Branch: "feature/second", SHA: strings.Repeat("e", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestDefaultRunListNumbersClaimedAndUnclaimedTogether(t *testing.T) {
 		t.Fatalf("queue order = %+v", runs)
 	}
 	for _, run := range runs {
-		if run.DisplayStatus != "queued" || run.Scheduling == nil || run.DisplayReason == "" {
+		if run.DisplayStatus != "running" || run.Scheduling == nil || run.DisplayReason == "" {
 			t.Fatalf("queued run = %+v", run)
 		}
 	}
@@ -181,7 +181,7 @@ type listPositionGuard struct {
 func TestRunListsUseStorePositionsWithoutPerRowQueries(t *testing.T) {
 	fixture := newControlFixture(t)
 	for _, branch := range []string{"one", "two"} {
-		if _, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: branch, Repository: fixture.repo, Branch: branch, SHA: strings.Repeat("a", 40), Actor: "agent"}); err != nil {
+		if _, err := fixture.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: branch, Repository: fixture.repo, Branch: branch, SHA: strings.Repeat("a", 40), Actor: "agent"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -212,7 +212,7 @@ func TestPromotionRestartDisplaysFailureWithoutCIIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.store.ClaimNextRun(ctx); err != nil {
+	if _, err = f.store.StartRun(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = f.store.MarkRunSubmissionStarted(ctx, enqueued.ID); err != nil {

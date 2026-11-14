@@ -78,8 +78,8 @@ spec:
 			}
 			f.scheduler.jobs = jobs
 			request := CIRequest{EventID: "validation", Repository: f.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "author@host"}
-			accepted, err := f.scheduler.EnqueueCI(t.Context(), request)
-			if err != nil || accepted.Status != model.RunQueued {
+			accepted, err := f.scheduler.recordCIForTest(t.Context(), request)
+			if err != nil || accepted.Status != model.RunRunning {
 				t.Fatal(accepted, err)
 			}
 			if jobs.creates != 0 {
@@ -112,7 +112,7 @@ spec:
 			if jobs.creates != wantCreates {
 				t.Fatal("unexpected Create calls", jobs.creates)
 			}
-			replay, err := f.scheduler.EnqueueCI(t.Context(), request)
+			replay, err := f.scheduler.recordCIForTest(t.Context(), request)
 			if err != nil || !replay.Duplicate || replay.ID != run.ID {
 				t.Fatal("validation changed accepted event binding", replay, err)
 			}
@@ -159,11 +159,11 @@ spec:
 			if failure == nil {
 				t.Fatal("Build did not fail", kind)
 			}
-			accepted, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: kind, Repository: f.repo, Branch: "main", SHA: request.SHA, Actor: "owner"})
+			accepted, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: kind, Repository: f.repo, Branch: "main", SHA: request.SHA, Actor: "owner"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			run, err := f.store.ClaimNextRun(t.Context())
+			run, err := f.store.StartRun(t.Context(), accepted.ID)
 			if err != nil || run.ID != accepted.ID {
 				t.Fatal(run, err)
 			}

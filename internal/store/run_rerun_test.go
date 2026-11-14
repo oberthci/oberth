@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,7 +75,7 @@ func TestRerunRunRefusesWithoutQueueingAndRecordsLineage(t *testing.T) {
 		t.Fatal(err)
 	}
 	rerun := result.Enqueued.Run
-	if rerun.Status != model.RunQueued || rerun.SHA != sha || rerun.Ref != failed.Ref || rerun.Actor != "other@host" {
+	if rerun.Status != model.RunRunning || rerun.SHA != sha || rerun.Ref != failed.Ref || rerun.Actor != "other@host" {
 		t.Fatalf("rerun = %#v", rerun)
 	}
 	if source, err := s.RunRerunOf(ctx, rerun.ID); err != nil || source != failed.ID {
@@ -141,5 +142,33 @@ func TestRunRerunOfLineageCacheStaysCurrent(t *testing.T) {
 		if source, err := reopened.RunRerunOf(ctx, run); err != nil || source != want {
 			t.Fatalf("reopened RunRerunOf(%s) = %q, %v; want %q", run, source, err, want)
 		}
+	}
+}
+
+func TestBranchRerunDoesNotWaitForAnOlderActiveRun(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	older, err := s.EnqueueRun(t.Context(), model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/parallel-replay", SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: "branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.StartRun(t.Context(), older.ID); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := s.EnqueueRun(t.Context(), model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: older.Ref, SHA: strings.Repeat("b", 40), Actor: "owner", Trigger: "branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FinishRun(t.Context(), latest.ID, model.RunResult{Status: model.RunFailed, Phase: "job"}); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := s.RerunRun(t.Context(), model.RunRerunRequest{RunID: latest.ID, Actor: "owner"})
+	if err != nil || replay.Enqueued.ID == "" {
+		t.Fatalf("older execution gated rerun: %+v %v", replay, err)
+	}
+	preserved, err := s.Run(t.Context(), older.ID)
+	if err != nil || preserved.Status != model.RunRunning {
+		t.Fatalf("older execution displaced: %+v %v", preserved, err)
 	}
 }

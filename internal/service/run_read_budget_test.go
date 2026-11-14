@@ -18,6 +18,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type blockedRunHistory struct{ RunHistory }
@@ -111,7 +112,7 @@ func TestRunLogsBoundedMetadataAndByteCursorReachCaller(t *testing.T) {
 func TestRunLogsEmptyActiveWindowHasMCPContinuation(t *testing.T) {
 	f := newRetentionFixture(t)
 	run := f.run(t, "feature/empty-window", "branch", false)
-	if _, err := f.retention.Database.ClaimNextRun(t.Context()); err != nil {
+	if _, err := storetest.ClaimNextRun(f.retention.Database, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.retention.Database.PutStepResult(t.Context(), model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
@@ -171,7 +172,7 @@ func TestRunLogsEmptyActiveWindowHasMCPContinuation(t *testing.T) {
 func TestRunLogsRunningIndexFindsLateStepWithIdenticalRequest(t *testing.T) {
 	f := newRetentionFixture(t)
 	run := f.run(t, "feature/repeated-active", "branch", false)
-	if _, err := f.retention.Database.ClaimNextRun(t.Context()); err != nil {
+	if _, err := storetest.ClaimNextRun(f.retention.Database, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.retention.Database.PutStepResult(t.Context(), model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
@@ -228,7 +229,7 @@ func TestRunLogsTerminalUnexecutedStepDropsActiveIndex(t *testing.T) {
 func TestRunLogsInfrastructureFailureDropsActiveIndex(t *testing.T) {
 	f := newRetentionFixture(t)
 	run := f.run(t, "feature/infrastructure-finish", "branch", false)
-	claimed, err := f.retention.Database.ClaimNextRun(t.Context())
+	claimed, err := storetest.ClaimNextRun(f.retention.Database, t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

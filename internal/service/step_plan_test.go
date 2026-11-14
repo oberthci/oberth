@@ -29,7 +29,7 @@ func TestDeclaredRetryOutcomeInRunDetailAndStatus(t *testing.T) {
 			fixture := newControlFixture(t, result)
 			fixture.jobs.plan = []runprogress.PlannedStep{{Stage: "retry", Step: "check", Ordinal: 26}}
 			ctx := context.Background()
-			run, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+			run, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 				EventID: "retry", Repository: fixture.repo, Branch: "feature/retry",
 				SHA: strings.Repeat("a", 40), Actor: "agent@host",
 			})
@@ -116,7 +116,7 @@ func TestRunWithoutAPlanKeepsItsExistingBehaviour(t *testing.T) {
 	})
 	fixture.jobs.plan = nil
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-planless", Repository: fixture.repo,
 		Branch: "feature/planless", SHA: "5555555555555555555555555555555555555555", Actor: "agent@host",
 	})
@@ -142,7 +142,7 @@ func TestNativeStepHistoryDoesNotNeedADeclarationPlan(t *testing.T) {
 		Steps: []model.StepResult{{NodeID: "test.unit", Stage: "test", Step: "unit", Status: model.StepPassed}},
 	})
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-unplannable", Repository: fixture.repo,
 		Branch: "feature/unplannable", SHA: "6666666666666666666666666666666666666666", Actor: "agent@host",
 	})

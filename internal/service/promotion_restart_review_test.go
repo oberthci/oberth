@@ -24,7 +24,7 @@ func TestRestartNeverResubmitsPromotion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.store.ClaimNextRun(t.Context()); err != nil {
+	if _, err = f.store.StartRun(t.Context(), original.RunID); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.store.RecoverOwnerState(t.Context()); err != nil {

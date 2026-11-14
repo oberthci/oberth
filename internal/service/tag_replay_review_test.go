@@ -74,7 +74,7 @@ func TestTagReplayReviewPendingDeletionRefusesEvenForce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.fixture.store.ClaimNextRun(t.Context()); err != nil {
+	if _, err := storetest.ClaimNextRun(h.fixture.store, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.fixture.store.SetRunWorkflowName(t.Context(), source.ID, "live-source"); err != nil {

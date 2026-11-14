@@ -20,6 +20,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type run struct {
@@ -176,9 +177,12 @@ spec:
 	}
 	// This Argo suspension keeps a real in-flight Workflow across every restart
 	// without running build containers or contacting an upstream.
-	enqueue("feature/running", model.RefBranch, "push")
-	running, err := s.ClaimNextRun(ctx)
+	queued := enqueue("feature/running", model.RefBranch, "push")
+	running, err := storetest.ClaimNextRun(s, ctx)
 	must(err)
+	if running.ID != queued.ID {
+		panic("upgrade fixture started the wrong run")
+	}
 	_, err = s.MarkRunSubmissionStarted(ctx, running.ID)
 	must(err)
 	_, err = setWorkflowName(ctx, s, running.ID, "oberth-e2e-running")

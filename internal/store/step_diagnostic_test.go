@@ -25,6 +25,9 @@ func TestStepDiagnosticMigrationAndDurableRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.SetRunWorkflowName(ctx, run.ID, "diagnostic-workflow"); err != nil {
+		t.Fatal(err)
+	}
 	step := model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 137}
 	if _, err = s.PutStepResult(ctx, step); err != nil {
 		t.Fatal(err)

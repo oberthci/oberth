@@ -14,13 +14,13 @@ import (
 func TestDeletedReceiveReplayMustNotHideRecreatedRun(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := t.Context()
-	occupant, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "occupant", Repository: f.repo, Branch: "feature/occupant", SHA: strings.Repeat("b", 40), Actor: "dev"})
+	occupant, err := f.scheduler.recordCIForTest(ctx, CIRequest{EventID: "occupant", Repository: f.repo, Branch: "feature/occupant", SHA: strings.Repeat("b", 40), Actor: "dev"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sha := strings.Repeat("a", 40)
 	g := &parkPushGit{stubPushGit: &stubPushGit{peeled: gitcache.PeeledObject{ObjectSHA: sha, CommitSHA: sha}}}
-	ingestor, err := NewPushIngestor(PushConfig{Repositories: f.store, Discoverer: stubRepositoryDiscoverer{}, Git: g, Receives: f.store, Branches: f.scheduler, Auditor: f.store})
+	ingestor, err := NewPushIngestor(PushConfig{Repositories: f.store, Discoverer: stubRepositoryDiscoverer{}, Git: g, Receives: f.store, Branches: fixtureEnqueues{f.scheduler}, Auditor: f.store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,9 +62,9 @@ func TestDeletedReceiveReplayMustNotHideRecreatedRun(t *testing.T) {
 			}
 		}
 	}
-	checkStatus("new run queued", "queued")
+	checkStatus("new run preparing", "waiting")
 	for _, id := range []string{occupant.ID, fresh.Run.ID} {
-		claimed, err := f.store.ClaimNextRun(ctx)
+		claimed, err := f.store.StartRun(ctx, id)
 		if err != nil || claimed.ID != id {
 			t.Fatalf("claim: %+v %v", claimed, err)
 		}
@@ -75,7 +75,7 @@ func TestDeletedReceiveReplayMustNotHideRecreatedRun(t *testing.T) {
 	checkStatus("new run passed", "delivered")
 	push.EventID = "deferred"
 	replay, err := ingestor.Branch(ctx, push)
-	if err != nil || !replay.Duplicate || replay.Run == nil || replay.Run.ID != deferred.Run.ID || replay.Run.Status != model.RunInterrupted {
+	if err != nil || !replay.Duplicate || replay.Run == nil || replay.Run.ID != deferred.Run.ID || !replay.Run.Cancelled() {
 		t.Fatalf("cancelled receipt lost replay identity: %+v %v", replay, err)
 	}
 	checkStatus("after old receive replay", "delivered")

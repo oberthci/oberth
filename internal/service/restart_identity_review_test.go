@@ -15,7 +15,7 @@ func TestStartupAdoptsNonReleaseTagWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := fixture.store.ClaimNextRun(t.Context())
+	run, err := storetest.ClaimNextRun(fixture.store, t.Context())
 	if err != nil || run.ID != queued.ID {
 		t.Fatalf("claim: %v", err)
 	}

@@ -49,11 +49,11 @@ func (j *exitTokenJobs) TerminalResult(context.Context, string) (JobResult, erro
 
 func TestStoppedSettlementResumesNormalObserverForExitToken(t *testing.T) {
 	f := newControlFixture(t)
-	run, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "stop-exit-token", Repository: f.repo, Branch: f.repo.DefaultBranch, SHA: strings.Repeat("a", 40), Actor: "owner"})
+	run, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "stop-exit-token", Repository: f.repo, Branch: f.repo.DefaultBranch, SHA: strings.Repeat("a", 40), Actor: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := f.store.ClaimNextRun(t.Context())
+	claimed, err := f.store.StartRun(t.Context(), run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestStopRacedSucceededPromotionUsesNormalPublication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := f.store.ClaimNextRun(t.Context())
+	claimed, err := f.store.StartRun(t.Context(), run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

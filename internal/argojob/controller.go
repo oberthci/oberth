@@ -136,11 +136,8 @@ func (controller *Controller) WithPodLogReader(reader PodLogReader) *Controller 
 // Namespace reports where this engine creates Workflows.
 func (controller *Controller) Namespace() string { return controller.config.Namespace }
 
-// Create submits one run's Workflow. Submission is idempotent against an
-// identical object: a retry after an ambiguous create adopts the existing
-// Workflow when it belongs to the same run and carries the same spec digest,
-// and refuses otherwise rather than executing something that was not built
-// from this run's reviewed source.
+// Create submits one run directly. An existing fixed name is adopted only
+// when its immutable run metadata identifies the same owner.
 func (controller *Controller) Create(ctx context.Context, request Request) (name string, resultErr error) {
 	if err := controller.verifyCapabilityGrant(ctx, request.RepositoryID, request.Capability); err != nil {
 		return "", err
@@ -162,15 +159,8 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		if err := validateHelperStorage(existing); err != nil {
 			return "", err
 		}
-		request.SourceVolume = controller.expectedSourceVolume(request)
-		// Reconstruct the current delivery footprint without reseeding.
-		// Unsupported helper policies have already been refused.
-		intended, buildErr := Build(controller.config, request)
-		if buildErr != nil {
-			return "", buildErr
-		}
-		if subErr := sameSubmission(existing, intended); subErr != nil {
-			return "", subErr
+		if err := controller.sameCreateOwner(existing, request); err != nil {
+			return "", err
 		}
 		// Same submission exists; repair claim ownership if needed.
 		claimName := sourceClaimName(request.Name)
@@ -181,7 +171,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	if !apierrors.IsNotFound(getErr) {
 		// Non-definitive GET error: cannot tell if the Workflow exists.
 		// Do not seed — a retry will re-check.
-		return "", fmt.Errorf("argojob: pre-check Workflow %s: %w", request.Name, getErr)
+		return "", &workflowCreateFailure{name: request.Name, stage: "lookup", cause: getErr, infra: transientWorkflowCreate(getErr)}
 	}
 
 	// Workflow definitively does not exist. Seed the source claim.
@@ -216,7 +206,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		return "", saErr
 	}
 
-	created, rejected, createErr := controller.createWorkflowWithRetry(ctx, request, intended)
+	created, rejected, createErr := controller.createWorkflow(ctx, request, intended)
 	if createErr != nil {
 		if rejected {
 			controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
@@ -317,42 +307,6 @@ func (controller *Controller) isSharedServiceAccount(name string) bool {
 		name == controller.config.CredentialedServiceAccount ||
 		name == controller.config.CISecretsServiceAccount ||
 		name == controller.config.ExecutorServiceAccount
-}
-
-// An owned but altered Workflow must be cleaned up before releasing its grant.
-// The named classification crosses the engine boundary without exposing a spec.
-type workflowSpecMismatch struct{}
-
-func (*workflowSpecMismatch) Error() string {
-	return "argojob: Workflow spec mismatch: verified policy changed"
-}
-func (*workflowSpecMismatch) AmbiguousCreate() bool      { return true }
-func (*workflowSpecMismatch) WorkflowSpecMismatch() bool { return true }
-
-func sameSubmission(existing, intended *wfv1.Workflow) error {
-	// Establish the complete submission identity before classifying a mismatch
-	// as ours to clean up. A foreign run/source never enters cancellation.
-	existingRun, existingIdentity, ok := WorkflowMeta(existing)
-	if !ok {
-		return fmt.Errorf("argojob: Workflow %s already exists and is not an Oberth run", intended.Name)
-	}
-	intendedRun, intendedIdentity, _ := WorkflowMeta(intended)
-	if existingRun != intendedRun {
-		return fmt.Errorf("argojob: Workflow %s belongs to run %s, not %s", intended.Name, existingRun, intendedRun)
-	}
-	if existingIdentity != intendedIdentity {
-		return fmt.Errorf("argojob: Workflow %s exists with a different spec than this run's source produces", intended.Name)
-	}
-	sources, err := argoworkflow.PinnedSources(intended)
-	if err != nil {
-		return err
-	}
-	if err := verifyDeliveredPinnedSources(existing, sources); err != nil {
-		return &workflowSpecMismatch{}
-	}
-	// Pipelines retain the annotation-only identity check. Namespace
-	// Workflow-create RBAC remains part of that trust boundary.
-	return nil
 }
 
 // Wait supervises native Workflow watch observations, retaining node history

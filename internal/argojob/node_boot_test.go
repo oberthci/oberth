@@ -45,7 +45,7 @@ func TestNodeRebootClassifiesOwnedUnknownTerminationAcrossResume(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = db.ClaimNextRun(ctx); err != nil {
+			if _, err = storetest.ClaimNextRun(db, ctx); err != nil {
 				t.Fatal(err)
 			}
 			wf, node, pod, _ := diagnosticFixtureAt(time.Now().UTC().Add(-time.Second))

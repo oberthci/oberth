@@ -45,7 +45,7 @@ func slice2ClaimedRun(t *testing.T, kind string) (*recoveryFixture, model.Run, m
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := fixture.store.ClaimNextRun(ctx)
+	run, err := fixture.store.StartRun(ctx, enqueued.ID)
 	if err != nil || run.ID != enqueued.ID {
 		t.Fatalf("claim: %+v %v", run, err)
 	}
@@ -153,7 +153,7 @@ func startSlice2Owner(t *testing.T, scheduler *Scheduler) *slice2Owner {
 	ctx, cancel := context.WithCancel(t.Context())
 	owner := &slice2Owner{cancel: cancel, done: make(chan struct{})}
 	go func() {
-		owner.err = scheduler.Run(ctx)
+		owner.err = scheduler.runAcceptedFixtures(ctx)
 		close(owner.done)
 	}()
 	t.Cleanup(func() { owner.stop(t) })
@@ -382,7 +382,7 @@ func TestAdoptedTriggerPublicationRecoversPushBeforeLedgerFinalization(t *testin
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			done := make(chan error, 1)
-			go func() { done <- scheduler.Run(ctx) }()
+			go func() { done <- scheduler.runAcceptedFixtures(ctx) }()
 			select {
 			case err := <-done:
 				if err == nil || !strings.Contains(err.Error(), "injected crash") {
@@ -525,7 +525,7 @@ func TestLegacyNonReleaseTagAdoptsWithoutInferringRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = fixture.store.ClaimNextRun(ctx); err != nil {
+	if _, err = storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	fixture.setWorkflowName(t, enqueued.ID, "legacy-tag-job")

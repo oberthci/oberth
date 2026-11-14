@@ -46,7 +46,7 @@ func annotatedWaitTag(t *testing.T) (string, string) {
 
 func finishWaitFixtureRun(t *testing.T, fixture *controlFixture, runID string) {
 	t.Helper()
-	claimed, err := fixture.store.ClaimNextRun(context.Background())
+	claimed, err := fixture.store.StartRun(context.Background(), runID)
 	if err != nil || claimed.ID != runID {
 		t.Fatalf("claim = %s, %v; want %s", claimed.ID, err, runID)
 	}
@@ -57,7 +57,7 @@ func finishWaitFixtureRun(t *testing.T, fixture *controlFixture, runID string) {
 
 func admitWaitFixtureRelease(t *testing.T, fixture *controlFixture, objectSHA, commitSHA string) model.Run {
 	t.Helper()
-	result, err := fixture.scheduler.AdmitRelease(context.Background(), ReleaseRequest{
+	result, err := fixture.scheduler.recordReleaseForTest(context.Background(), ReleaseRequest{
 		EventID: "annotated-release", Repository: fixture.repo, Tag: "v1.0.0",
 		ObjectSHA: objectSHA, CommitSHA: commitSHA, Actor: "agent@host",
 	})
@@ -87,7 +87,7 @@ func callWaitFixture(t *testing.T, control *API, repo, sha, trigger string) (Wai
 func TestWaitResolvesAnnotatedTagAndPeeledCommit(t *testing.T) {
 	fixture := newControlFixture(t)
 	objectSHA, commitSHA := annotatedWaitTag(t)
-	branch, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
+	branch, err := fixture.scheduler.recordCIForTest(context.Background(), CIRequest{
 		EventID: "initial-branch", Repository: fixture.repo, Branch: "feature/release", SHA: commitSHA, Actor: "agent@host",
 	})
 	if err != nil {
@@ -98,14 +98,14 @@ func TestWaitResolvesAnnotatedTagAndPeeledCommit(t *testing.T) {
 	control := fixture.api(t)
 	for _, sha := range []string{objectSHA, commitSHA} {
 		response, err := callWaitFixture(t, control, fixture.repo.Name, sha, "release")
-		if err != nil || response.Run.ID != release.ID || !response.StillRunning || response.Run.Status != model.RunQueued {
+		if err != nil || response.Run.ID != release.ID || !response.StillRunning || response.Run.Status != model.RunWaiting {
 			t.Fatalf("pending release via %s = %#v, %v", sha, response, err)
 		}
 	}
 	finishWaitFixtureRun(t, fixture, release.ID)
 	// Newer opposite-trigger work for the same commit, and a newer unrelated
 	// tag, must not hide the completed release selected by either identity.
-	newerBranch, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
+	newerBranch, err := fixture.scheduler.recordCIForTest(context.Background(), CIRequest{
 		EventID: "newer-branch", Repository: fixture.repo, Branch: "feature/next", SHA: commitSHA, Actor: "agent@host",
 	})
 	if err != nil {
@@ -182,7 +182,7 @@ func (database observedWaitStore) ResolveWaitRun(ctx context.Context, repoID int
 func TestWaitWakesForReleaseAdmittedAfterTerminalBranch(t *testing.T) {
 	fixture := newControlFixture(t)
 	objectSHA, commitSHA := annotatedWaitTag(t)
-	branch, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
+	branch, err := fixture.scheduler.recordCIForTest(context.Background(), CIRequest{
 		EventID: "initial-branch", Repository: fixture.repo, Branch: "feature/release", SHA: commitSHA, Actor: "agent@host",
 	})
 	if err != nil {
@@ -236,7 +236,7 @@ func TestWaitCompletedReleaseDoesNotFollowNewerBranch(t *testing.T) {
 			if _, err := fixture.store.FinishRun(context.Background(), release.ID, model.RunResult{Status: state}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
+			if _, err := fixture.scheduler.recordCIForTest(context.Background(), CIRequest{
 				EventID: "newer-branch", Repository: fixture.repo, Branch: "feature/newer",
 				SHA: commitSHA, Actor: "agent@host",
 			}); err != nil {

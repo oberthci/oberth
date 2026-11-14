@@ -39,7 +39,7 @@ func failMergedPromotion(t *testing.T, s *Store, now *time.Time, spec model.Prom
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ClaimNextRun(ctx); err != nil {
+	if _, err := s.StartRun(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	publication, err := s.BeginPublication(ctx, model.PublicationSpec{

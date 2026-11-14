@@ -71,7 +71,7 @@ func TestArtifactDeadlineSurvivesSchedulerPublication(t *testing.T) {
 				transport = &retryPublicationGit{controlGit: f.git, failure: errors.New("connection reset by peer")}
 				f.scheduler.git = transport
 			}
-			run, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "collection-deadline", Repository: f.repo, Branch: "feature/collection", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
+			run, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "collection-deadline", Repository: f.repo, Branch: "feature/collection", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 			if err != nil {
 				t.Fatal(err)
 			}

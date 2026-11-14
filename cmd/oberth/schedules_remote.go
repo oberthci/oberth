@@ -31,7 +31,7 @@ func runRemoteSchedules(ctx context.Context, subcommand string, arguments []stri
 	flags.SetOutput(io.Discard)
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
 	reason := flags.String("reason", "", "why the entry is paused")
-	force := flags.Bool("force", false, "run despite active runs or a pause")
+	force := flags.Bool("force", false, "run a paused entry once")
 	transport := mcpTransportFlags(flags)
 	if err := parseCommandFlags(flags, arguments); err != nil {
 		return usageError(err)

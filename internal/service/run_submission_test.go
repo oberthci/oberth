@@ -35,7 +35,7 @@ func TestSchedulerStartsRunAtWeightedAdmission(t *testing.T) {
 		return nil
 	}}
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "submission-start", Repository: fixture.repo, Branch: "feature/submission-start",
 		SHA: strings.Repeat("a", 40), Actor: "agent@host",
 	})

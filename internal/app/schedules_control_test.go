@@ -87,7 +87,7 @@ func TestManualTriggerUsesTheNormalEnqueuePathAsTheCaller(t *testing.T) {
 	schedules, enqueuer, runs, _ := pausedSchedules(t)
 	repository := oneRepo()[0]
 
-	plan, err := schedules.PlanScheduleTrigger(context.Background(), repository, "nightly", false)
+	plan, err := schedules.PlanScheduleTrigger(context.Background(), repository, "nightly")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,14 +103,14 @@ func TestManualTriggerUsesTheNormalEnqueuePathAsTheCaller(t *testing.T) {
 		t.Fatalf("request = %+v", request)
 	}
 
-	if _, err := schedules.PlanScheduleTrigger(context.Background(), repository, "missing", false); !errors.Is(err, service.ErrInvalidInput) {
+	if _, err := schedules.PlanScheduleTrigger(context.Background(), repository, "missing"); !errors.Is(err, service.ErrInvalidInput) {
 		t.Fatalf("unknown entry error = %v", err)
 	}
 	runs.active[repository.ID] = true
-	if _, err := schedules.PlanScheduleTrigger(context.Background(), repository, "nightly", false); !errors.Is(err, store.ErrInvalidState) {
-		t.Fatalf("busy repository error = %v, want invalid state", err)
+	if _, err := schedules.PlanScheduleTrigger(context.Background(), repository, "nightly"); err != nil {
+		t.Fatalf("active repository blocked manual submission: %v", err)
 	}
-	if _, err := schedules.PlanScheduleTrigger(context.Background(), repository, "nightly", true); err != nil {
+	if _, err := schedules.PlanScheduleTrigger(context.Background(), repository, "nightly"); err != nil {
 		t.Fatalf("forced plan on a busy repository: %v", err)
 	}
 }

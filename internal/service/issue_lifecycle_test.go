@@ -135,7 +135,7 @@ func TestIssueLifecycleLeavesProjectedCIIssueUnlocked(t *testing.T) {
 		Steps: []model.StepResult{stepResult(model.StepFailed)},
 	})
 	ctx := context.Background()
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "lifecycle-default-red", Repository: fixture.repo, Branch: fixture.repo.DefaultBranch,
 		SHA: strings.Repeat("a", 40), Actor: "pusher@host",
 	}); err != nil {

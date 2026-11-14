@@ -98,8 +98,8 @@ func TestPinnedSourcesBuildRequiresServerBindingAndReadonlyMount(t *testing.T) {
 			if err := verifyDeliveredPinnedSources(live, []pipeline.PinnedSource{source}); err == nil {
 				t.Fatal("tampered source footprint verified")
 			}
-			if err := sameSubmission(live, wf); err == nil {
-				t.Fatal("tampered source accepted on retry")
+			if err := (&Controller{config: testConfig()}).sameCreateOwner(live, request); err == nil {
+				t.Fatal("tampered source accepted on idempotent create")
 			}
 			if _, err := (&Controller{}).bindAdoption(live, AdoptionRequest{PinnedSources: []pipeline.PinnedSource{source}}); err == nil {
 				t.Fatal("tampered source adopted")

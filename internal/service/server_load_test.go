@@ -159,7 +159,7 @@ func TestMCPUnderQueueLoad(t *testing.T) {
 func queueLoadFixture(t *testing.T) (*groupFixture, *API) {
 	t.Helper()
 	f := newGroupFixture(t, 10)
-	service, err := NewAPI(APIConfig{Runs: f.store, History: f.store, Repositories: f.store, Issues: f.store, Promotions: f.store, PromotionRuns: f.store, Enqueues: f.scheduler, Logs: f.control.logs, Auditor: f.store, Signals: f.scheduler.signals, AgentEvents: f.store, MaximumWait: 2 * time.Second})
+	service, err := NewAPI(APIConfig{Runs: f.store, History: f.store, Repositories: f.store, Issues: f.store, Promotions: f.store, PromotionRuns: f.store, Enqueues: fixtureEnqueues{f.scheduler}, Logs: f.control.logs, Auditor: f.store, Signals: f.scheduler.signals, AgentEvents: f.store, MaximumWait: 2 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,11 +168,12 @@ func queueLoadFixture(t *testing.T) (*groupFixture, *API) {
 			t.Error(err)
 		}
 	})
+	var accepted []model.Run
 	for index := range 10 {
-		f.branch(t, f.terraform, fmt.Sprintf("feature/running-%d", index), "a")
+		accepted = append(accepted, f.branch(t, f.terraform, fmt.Sprintf("feature/running-%d", index), "a"))
 	}
-	for range 10 {
-		run, err := f.store.ClaimNextRun(t.Context())
+	for _, candidate := range accepted {
+		run, err := f.store.StartRun(t.Context(), candidate.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -212,7 +213,7 @@ func assertQueueLoad(t *testing.T, f *groupFixture) {
 	for _, run := range runs {
 		counts[run.Status]++
 	}
-	if counts[model.RunQueued] != 64 || counts[model.RunRunning] != 10 {
+	if counts[model.RunQueued] != 0 || counts[model.RunRunning] != 74 {
 		t.Fatalf("load changed: %v", counts)
 	}
 }

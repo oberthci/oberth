@@ -37,7 +37,7 @@ func TestUnifiedRerunKeepsSourceAndAuditsActor(t *testing.T) {
 			retried := replay.Enqueued
 			if retried.ID == source.ID || retried.RepoID != repo.ID || retried.Ref != source.Ref ||
 				retried.SHA != sha || retried.TestedSHA != sha || retried.Actor != "reviewer@host" ||
-				retried.Status != model.RunQueued || retried.Trigger != "branch" {
+				retried.Status != model.RunRunning || retried.Trigger != "branch" {
 				t.Fatalf("retry changed run identity or admission: %#v", retried.Run)
 			}
 			audit, err := s.LatestAuditActionByType(ctx, "run.rerun", "run")

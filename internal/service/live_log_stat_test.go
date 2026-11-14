@@ -25,11 +25,11 @@ func (logs *countedLiveLogStore) ReadFrom(id string, offset, maximum int64) ([]b
 
 func TestRunLogLiveUnchangedLogSkipsReadAndStillReportsCompletion(t *testing.T) {
 	fixture := newControlFixture(t)
-	run, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "live-stat", Repository: fixture.repo, Branch: "feature/live-stat", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
+	run, err := fixture.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "live-stat", Repository: fixture.repo, Branch: "feature/live-stat", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.ClaimNextRun(t.Context()); err != nil {
+	if _, err := fixture.store.StartRun(t.Context(), run.ID); err != nil {
 		t.Fatal(err)
 	}
 	file, err := fixture.logs.Create(run.ID)

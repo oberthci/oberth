@@ -36,6 +36,9 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 	handled := make(map[string]bool, len(runs))
 	for _, run := range runs {
 		handled[run.ID] = true
+		if scheduler.submissions.ownsLiveRun(run) {
+			continue
+		}
 		if run.Cancelled() {
 			continue
 		}

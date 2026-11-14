@@ -85,9 +85,10 @@ type RunHistory interface {
 	StepResults(context.Context, string) ([]model.StepResult, error)
 }
 
-type RunQueueStore interface {
+type RunSubmissionStore interface {
 	EnqueueReceiveEvent(context.Context, model.ReceiveEventSpec, model.RunSpec) (model.EnqueueRunResult, error)
-	ClaimNextRun(context.Context) (model.Run, error)
+	StartRun(context.Context, string) (model.Run, error)
+	FailedWorkflowCreates(context.Context) ([]model.Run, error)
 	MarkRunCreatePending(context.Context, string, string, ...string) error
 	MarkRunSubmitted(context.Context, string) (model.Run, error)
 	MarkRunSubmissionStarted(context.Context, string) (model.Run, error)
@@ -242,7 +243,7 @@ type SchedulerStore interface {
 	// scoping. Required, not optional: an unavailable lookup fails the
 	// release closed before any secret fetch.
 	Upstream(context.Context, int64) (model.Upstream, error)
-	RunQueueStore
+	RunSubmissionStore
 	IssueRepository
 	PromotionRepository
 	WorkspaceCleanupStore
@@ -320,7 +321,6 @@ type ReleaseAdmission interface {
 
 type EnqueueObserver interface {
 	AcceptEnqueue(context.Context, model.EnqueueRunResult) error
-	NotifyQueue()
 	DeliverPublication(context.Context, string) (model.PublicationFinalization, error)
 	NotifyPublicationRecovery(string)
 }

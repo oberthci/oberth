@@ -18,14 +18,14 @@ func TestAdminRunStatusUsesDisplayValuesBeforeBounds(t *testing.T) {
 		phase, reason, failure, want string
 		started                      bool
 	}{
-		{status: model.RunQueued, want: "queued"},
-		{status: model.RunRunning, want: "queued"},
+		{status: model.RunQueued, want: "running"},
+		{status: model.RunRunning, want: "running"},
 		{status: model.RunRunning, started: true, want: "running"},
 		{status: model.RunRunning, phase: "publishing", want: "running"},
-		{status: model.RunRunning, phase: "infrastructure-pending", want: "queued"},
-		{status: model.RunRunning, failure: WorkflowSpecMismatchPendingMessage, want: "queued"},
-		{status: model.RunRunning, reason: PolicyRefreshWaitingReason, want: "queued"},
-		{status: model.RunRunning, phase: "infrastructure-pending", reason: "kept; " + PolicyRefreshWaitingReason, want: "queued"},
+		{status: model.RunRunning, phase: "infrastructure-pending", want: "running"},
+		{status: model.RunRunning, failure: WorkflowSpecMismatchPendingMessage, want: "running"},
+		{status: model.RunRunning, reason: PolicyRefreshWaitingReason, want: "running"},
+		{status: model.RunRunning, phase: "infrastructure-pending", reason: "kept; " + PolicyRefreshWaitingReason, want: "running"},
 		{status: model.RunPassed, want: "passed"},
 		{status: model.RunFailed, want: "failed"},
 		{status: model.RunFailed, failure: "DeadlineExceeded", want: "failed"},
