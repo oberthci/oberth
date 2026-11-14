@@ -33,20 +33,20 @@ func TestUpgradeAnnouncesItsOwnBackup(t *testing.T) {
 	} {
 		t.Run(fmt.Sprintf("%s/no-backup=%t", tc.live, tc.noBackup), func(t *testing.T) {
 			var output bytes.Buffer
-			deps := Deps{Output: &output, KubeClient: argoSecurityTestClient(), RestConfig: &rest.Config{Host: "https://cluster.example:6443"},
+			deps := testAdminDeps(Deps{Output: &output, KubeClient: argoSecurityTestClient(), RestConfig: &rest.Config{Host: "https://cluster.example:6443"},
 				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 					if out, ok := testUpgradeValuePreflight(args); ok {
 						return out, nil
 					}
 					if args[0] == "list" {
-						return json.Marshal([]helmRelease{{Name: "oberth", Namespace: "chosen", Status: "deployed", Chart: "oberth-0.16.18"}})
+						return json.Marshal([]helmRelease{{Name: "oberth", Namespace: "chosen", Status: "deployed", Chart: "oberth-0.22.7"}})
 					}
 					return nil, fmt.Errorf("unexpected mutating helm call: %v", args)
 				},
 				RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) { return []byte(tc.live), nil },
-			}
-			withValidatedDryRunRelease(t, &deps, "0.16.19")
-			_, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.16.19", BinarySchemaVersion: 17, Namespace: "chosen", Yes: true, DryRun: true, NoBackup: tc.noBackup}, deps)
+			})
+			withValidatedDryRunRelease(t, &deps, "0.22.8")
+			_, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.8", BinarySchemaVersion: 17, Namespace: "chosen", Yes: true, DryRun: true, NoBackup: tc.noBackup}, deps)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -67,23 +67,23 @@ func TestUpgradeAnnouncesItsOwnBackup(t *testing.T) {
 // change and point at the supported rollback.
 func TestUpgradeRefusesNewerLiveSchema(t *testing.T) {
 	t.Parallel()
-	deps := Deps{Output: &bytes.Buffer{}, KubeClient: argoSecurityTestClient(), RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
+	deps := testAdminDeps(Deps{Output: &bytes.Buffer{}, KubeClient: argoSecurityTestClient(), RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
 				return out, nil
 			}
 			if args[0] == "list" {
-				return json.Marshal([]helmRelease{{Name: "oberth", Namespace: "oberth", Status: "deployed", Chart: "oberth-0.16.20"}})
+				return json.Marshal([]helmRelease{{Name: "oberth", Namespace: "oberth", Status: "deployed", Chart: "oberth-0.22.8"}})
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
 		RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) { return []byte("18"), nil },
-	}
-	_, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.16.19", BinarySchemaVersion: 17, AllowDowngrade: true, DryRun: true}, deps)
+	})
+	_, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.7", BinarySchemaVersion: 17, AllowDowngrade: true, DryRun: true}, deps)
 	if err == nil || !strings.Contains(err.Error(), "--rollback") {
 		t.Fatalf("newer live schema: %v", err)
 	}
-	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.16.19", BinarySchemaVersion: 17, DryRun: true}, deps)
+	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.7", BinarySchemaVersion: 17, DryRun: true}, deps)
 	if err == nil || !strings.Contains(err.Error(), "--allow-downgrade") {
 		t.Fatalf("downgrade without the flag: %v", err)
 	}
@@ -91,7 +91,8 @@ func TestUpgradeRefusesNewerLiveSchema(t *testing.T) {
 	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
 		return nil, errors.New("container not found")
 	}
-	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.16.19", BinarySchemaVersion: 17, AllowDowngrade: true, DryRun: true}, deps)
+	refreshFixtureAdmin(&deps)
+	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.7", BinarySchemaVersion: 17, AllowDowngrade: true, DryRun: true}, deps)
 	if err == nil || !strings.Contains(err.Error(), "could not be read") {
 		t.Fatalf("downgrade on an unknown schema: %v", err)
 	}
@@ -116,7 +117,7 @@ func newUpgradeFixture(t *testing.T, installed, target, liveSchema string) upgra
 	}
 	calls := &[]string{}
 	output := &bytes.Buffer{}
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
@@ -152,18 +153,17 @@ func newUpgradeFixture(t *testing.T, installed, target, liveSchema string) upgra
 		KubeClient:  argoSecurityTestClient(deployment),
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "fixture",
-	}
+	})
 	withSignedRelease(t, &deps, target, image)
 	return upgradeFixture{deps: deps, calls: calls, output: output}
 }
 
 func TestUpgradeBacksUpBeforeTheFirstChangeAndRecordsTheRollback(t *testing.T) {
 	t.Parallel()
-	// Below v0.17.83 the fixture needs no retired-execution inventory.
-	fixture := newUpgradeFixture(t, "0.16.20", "0.16.21", "73")
+	fixture := newUpgradeFixture(t, "0.22.7", "0.22.8", "73")
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "oberth-backup-test.tar.gz.enc")
-	cfg := UpgradeConfig{BinaryVersion: "0.16.21", BinarySchemaVersion: 74, Namespace: "oberth", Timeout: 10 * time.Second,
+	cfg := UpgradeConfig{BinaryVersion: "0.22.8", BinarySchemaVersion: 74, Namespace: "oberth", Timeout: 10 * time.Second,
 		Backup: func(context.Context) (UpgradeBackup, error) {
 			for _, call := range *fixture.calls {
 				if strings.HasPrefix(call, "upgrade ") && !strings.Contains(call, "--dry-run=server") {
@@ -191,7 +191,7 @@ func TestUpgradeBacksUpBeforeTheFirstChangeAndRecordsTheRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.From != "0.16.20" || record.To != "0.16.21" || record.OberthRevision != 7 || record.SchemaBefore != 73 || record.SchemaAfter != 74 ||
+	if record.From != "0.22.7" || record.To != "0.22.8" || record.OberthRevision != 7 || record.SchemaBefore != 73 || record.SchemaAfter != 74 ||
 		record.Backup != archive || record.APIServer != "https://127.0.0.1:6443" || !record.migrates() {
 		t.Fatalf("record = %+v", record)
 	}
@@ -213,8 +213,8 @@ func TestUpgradeWithoutABackupChangesNothing(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			fixture := newUpgradeFixture(t, "0.16.20", "0.16.21", "73")
-			cfg.BinaryVersion, cfg.BinarySchemaVersion, cfg.Namespace, cfg.RecordDir = "0.16.21", 74, "oberth", t.TempDir()
+			fixture := newUpgradeFixture(t, "0.22.7", "0.22.8", "73")
+			cfg.BinaryVersion, cfg.BinarySchemaVersion, cfg.Namespace, cfg.RecordDir = "0.22.8", 74, "oberth", t.TempDir()
 			_, err := RunUpgrade(t.Context(), cfg, fixture.deps)
 			if err == nil || !strings.Contains(err.Error(), "--no-backup") {
 				t.Fatalf("err = %v", err)

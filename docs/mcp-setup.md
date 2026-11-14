@@ -5,7 +5,7 @@ Connect an AI agent (Claude Code or any MCP client) to Oberth.
 ## Prerequisites
 
 - Oberth is deployed and has at least one upstream registered
-- `kubectl` access to the Oberth namespace
+- An authenticated admin API connection (bearer or mTLS)
 
 The Claude Code plugin (step 2) can be installed before that: its server
 options are optional, and without them its session-start note offers
@@ -26,11 +26,10 @@ admin without a bearer token. The steps below describe optional bearer setups
 for automation or clients without certificate support.
 
 
-Run inside the Oberth pod:
+Run with an existing admin API identity. The installer creates the first admin with one install-time exec; later enrollments use the API:
 
 ```bash
-kubectl exec -i -n oberth deploy/oberth -- \
-  oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
+oberth uplink add ~/.ssh/id_ed25519.pub operator@host
 ```
 
 Replace `operator@host` with a descriptive identity for this uplink.
@@ -38,13 +37,12 @@ Replace `operator@host` with a descriptive identity for this uplink.
 The command prints the token exactly once:
 
 ```
-Uplink token for operator@host (shown once):
-oberth_xxxxxxxxxxxxxxxx
+{"identity":"operator@host","token":"oberth_xxxxxxxxxxxxxxxx", ...}
 ```
 
 The token is never stored or recoverable. If lost, create a new uplink. Run
 the command on a terminal, or redirect it into a new owner-only file
-(`(umask 077 && kubectl exec ... > token)`), so the token does not land in a
+(`(umask 077 && oberth uplink add key.pub operator@host > credential.json)`), so the token does not land in a
 log or an AI transcript. `oberth install --secrets-file` writes the first
 uplink's token to its secrets file for the same reason.
 
@@ -52,11 +50,10 @@ Both bearer and certificate clients trust the server through its CA,
 not through a fingerprint printed here: `oberth client pin` prints the CA's
 SHA-256 pin (step 2) from `~/.config/oberth/ca.crt`, which `oberth install`
 writes on the installing machine. On another machine, copy that file from
-there, or read it from the cluster:
+there, or retrieve its named public identity over an already trusted admin connection:
 
 ```bash
-(umask 077 && kubectl exec -n oberth deploy/oberth -c oberth -- \
-  oberth admin read-file /run/oberth-identities/server/ca.crt > ca.crt)
+oberth admin public-identity server-ca  # public content is in the content field
 ```
 
 The CLI refuses a CA file that group or others can write, so create it with
@@ -71,8 +68,7 @@ repositories of named upstreams, for example a development machine that may see 
 `github` upstream and nothing else:
 
 ```bash
-kubectl exec -i -n oberth deploy/oberth -- \
-  oberth uplink add --scope github - developer@work < developer.pub
+oberth uplink add --scope github developer.pub developer@work
 ```
 
 A scope is an upstream name as `oberth upstream list` shows it; repeat
@@ -92,8 +88,8 @@ A scope is an upstream name as `oberth upstream list` shows it; repeat
 Change or remove the limit later; the token and key stay valid:
 
 ```bash
-kubectl exec -n oberth deploy/oberth -- oberth uplink scope --set github,acme developer@work
-kubectl exec -n oberth deploy/oberth -- oberth uplink scope --clear developer@work
+oberth uplink scope --set github,acme developer@work
+oberth uplink scope --clear developer@work
 ```
 
 `oberth uplink list` shows each uplink's scope (`all` when unscoped), and
@@ -321,9 +317,8 @@ Fetch the CA (`oberth install` writes it to `~/.config/oberth/ca.crt`, with
 or without a terminal, and later installs keep that file current):
 
 ```bash
-(umask 077 && kubectl exec -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth admin read-file \
-  /run/oberth-identities/server/ca.crt /run/oberth-identities/server/tls.crt \
-  > ~/.config/oberth/ca.crt)
+oberth admin public-identity server-ca
+# Copy the public content field to ca.crt with mode 0600.
 openssl x509 -in ~/.config/oberth/ca.crt -noout -fingerprint -sha256
 ```
 
@@ -364,6 +359,20 @@ one with a non-admin token is still answered with the server's refusal.
 
 | Tool | Description |
 |------|-------------|
+| `uplink_add` | Enroll an uplink under an existing unscoped admin. Public SSH key and optional CSR only; private keys stay local. CSR enrollment mints no bearer unless requested. Administrator grants are explicit; audited without credential material. |
+| `uplink_scope` | Set an uplink repository scope; an empty array clears it. Unscoped admin only; audited. Requires an existing admin identity. |
+| `upstream_add` | Register an upstream using the server identity store. Unscoped admin only; audited. Requires an existing admin identity. SSH bootstrap uses pinned host keys and fixed identity bundles. |
+| `upstream_list` | List registered upstreams, optionally checking authentication. Unscoped admin only; audited. |
+| `upstream_remove` | Remove an upstream and its repository mappings. Unscoped admin only; audited. |
+| `upstream_provide_key` | Import an SSH private key into the fixed upstream identity bundle. Unscoped admin only; audited without key material. Never accepts a key file path. |
+| `repo_add` | Register a repository mapping; the first push confirms its default branch. Unscoped admin only; audited. |
+| `repo_verify` | Probe a registered repository using the server's existing upstream identity. Unscoped admin only; audited. |
+| `admin_access_list` | Read all active grants for installer identity production. Unscoped admin only; audited. Returns path names only. |
+| `admin_public_identity` | Read named public identity material. Unscoped admin only; audited. Never accepts a filesystem path. |
+| `admin_readiness` | Read current readiness with a safe reason code. Unscoped admin only; audited. |
+| `admin_version` | Read server binary and database schema versions. Unscoped admin only; audited. |
+| `admin_idle` | Observe the all or critical queue; the installer owns waiting. Unscoped admin only; audited. This observation never freezes admission. |
+| `admin_audit_record` | Record a completed operator lifecycle action. Unscoped admin only; actor identity comes from authentication. |
 | `status` | CI status for a SHA or branch, including the failed step |
 | `logs` | One named step's log output for a SHA, optionally filtered |
 | `run_get` | One durable run by full run ID or unique 8+ character prefix; by default repository/ref/SHA, run context, failure and compact steps; `summary:false` returns the full record with step diagnostics and retained Workflow/step timing, without admission episodes |
@@ -613,7 +622,8 @@ guesswork.
 ones, paging through bursts larger than 200 matches without gaps or repeats.
 `GET /api/audit` accepts the same filters and returns the same JSON, with an
 `X-Oberth-Next-Before` header on full pages. It requires an unscoped admin.
-`oberth audit head` and `oberth audit record` run in-pod.
+Use `oberth audit --limit 1 --json` to read the current head. Installer lifecycle
+records use the authenticated, enumerated admin API.
 
 Lifecycle records. `oberth backup` records `backup.completed` (archive SHA-256,
 bytes, scope and the snapshot's audit head) and `oberth restore` records
@@ -1031,7 +1041,7 @@ is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
 <!-- BEGIN GENERATED MCP TOOL COUNT -->
-The full server registry contains **78 tools**, including administrator-only
+The full server registry contains **92 tools**, including administrator-only
 operations. The authenticated `tools/list` response is authoritative for the
 connected identity; non-admin clients do not receive administrator-only tools.
 <!-- END GENERATED MCP TOOL COUNT -->

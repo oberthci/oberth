@@ -76,8 +76,8 @@ func TestS6Round2Guards(t *testing.T) {
 		const data = "- repo: upstream/org/repo\n  step: publish\n  secret: oberth/data/release/token\n"
 		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"}, Data: map[string]string{secretAccessConfigMapKey: data}}
 		client := fake.NewClientset(cm)
-		if identities, err := produceFromConfigMap(t.Context(), client, "oberth"); err == nil || !strings.Contains(err.Error(), "workflow") || len(identities) != 0 {
-			t.Errorf("installer silently accepted unscoped ConfigMap approval: identities=%v err=%v", identities, err)
+		if identities, err := ParseAccessListJSON([]byte(`[{"repo":"upstream/org/repo","step":"publish","secret":"oberth/data/release/token"}]`)); err == nil || !strings.Contains(err.Error(), "workflow") || len(identities) != 0 {
+			t.Errorf("installer silently accepted unscoped API approval: identities=%v err=%v", identities, err)
 		}
 		saved, err := client.CoreV1().ConfigMaps("oberth").Get(t.Context(), secretAccessConfigMapName, metav1.GetOptions{})
 		if err != nil || saved.Data[secretAccessConfigMapKey] != data {

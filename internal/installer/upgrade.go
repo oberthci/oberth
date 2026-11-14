@@ -6,18 +6,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
-
-	"github.com/oberthci/oberth/internal/releaseverify"
 
 	"golang.org/x/mod/semver"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
+
+	"github.com/oberthci/oberth/internal/client"
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/releaseverify"
 )
 
 // canonicalGARPrefix is the canonical Google Artifact Registry prefix for
@@ -350,6 +352,13 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
+	if err := checkUpgradeBackupAPI(ctx, cfg, deps, currentVersion); err != nil {
+		return result, err
+	}
+	if err := checkUpgradeVerificationConnection(ctx, cfg, deps); err != nil {
+		return result, err
+	}
+
 	liveSchema, err := announceUpgradeSchema(ctx, w, cfg, deps, cmp > 0)
 	if err != nil {
 		return result, err
@@ -517,7 +526,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	result.Upgraded = true
 	deps.Output = w
 	details := map[string]any{"from": currentVersion, "to": targetVersion}
-	recordServerAudit(ctx, deps, cfg.Namespace, "deploy/oberth", "upgrade.completed", details)
+	recordServerAudit(ctx, deps, cfg.Namespace, "upgrade.completed", details)
 	_, _ = fmt.Fprintf(w, "\nReady — Oberth deployment in namespace %s (context %s)\n", cfg.Namespace, deps.ContextName)
 	return result, nil
 }
@@ -794,31 +803,10 @@ func getOberthDeployment(ctx context.Context, deps Deps, namespace string) (*app
 	return &deployments.Items[0], nil
 }
 
-// queryRunningSchemaVersion execs into the Oberth pod and runs
-// `oberth version --schema` to obtain the integer schema version.
-// Returns 0 on any error; the caller warns loudly that migration/backup
-// safety is unknown rather than silently omitting backup guidance.
-//
-// Old binaries that do not support --schema return a usage error;
-// the caller falls through to the unknown-schema warning path.
+// queryRunningSchemaVersion reads the authenticated server API.
 func queryRunningSchemaVersion(ctx context.Context, deps Deps, cfg UpgradeConfig) (int, error) {
-	run := deps.RunCommand
-	if run == nil {
-		run = DefaultRunCommand
-	}
-	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, "deploy/oberth", "--", "/usr/local/bin/oberth", "version", "--schema"}
-	if deps.ContextName != "" {
-		args = append(args[:1], append([]string{"--context", deps.ContextName}, args[1:]...)...)
-	}
-	out, err := run(ctx, nil, "kubectl", args...)
-	if err != nil {
-		return 0, nil // old binary without --schema support, or exec failure
-	}
-	n, parseErr := strconv.Atoi(strings.TrimSpace(string(out)))
-	if parseErr != nil {
-		return 0, nil
-	}
-	return n, nil
+	_, schema, err := adminVersion(ctx, Config{Namespace: cfg.Namespace}, deps)
+	return schema, err
 }
 
 // printRecoveryGuidance writes a short recovery block to w, covering release
@@ -833,74 +821,39 @@ func printRecoveryGuidance(w io.Writer, namespace string) {
 		"(the rollback record printed above), which also restores the pre-upgrade backup when a migration ran.\n")
 }
 
-// verifyRunningVersion execs into the Oberth pod, runs `oberth version`,
-// parses the reported version, and compares it against the expected target.
-// Returns the running version on match, or an error on mismatch or parse
-// failure.
-//
-// The exec subresource can lag right after rollout, so transient exec errors
-// are retried up to verifyMaxAttempts times with pollInterval delays (the same
-// pattern as upstreamConfigured in onboard.go). Version-mismatch and
-// unparseable-output results are definitive and are NOT retried.
-//
-// verifyMaxAttempts is the number of exec attempts before giving up.
+// Read-only version observations retry transient API failures after rollout.
 const verifyMaxAttempts = 3
 
 func verifyRunningVersion(ctx context.Context, deps Deps, cfg UpgradeConfig, targetVersion string) (string, error) {
-	run := deps.RunCommand
-	if run == nil {
-		run = DefaultRunCommand
-	}
-	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, "deploy/oberth", "--", "/usr/local/bin/oberth", "version"}
-	if deps.ContextName != "" {
-		args = append(args[:1], append([]string{"--context", deps.ContextName}, args[1:]...)...)
-	}
-
-	var lastErr error
-	for attempt := 0; attempt < verifyMaxAttempts; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(pollInterval(deps)):
-			}
-		}
-		out, err := run(ctx, nil, "kubectl", args...)
+	for attempt := 1; attempt <= verifyMaxAttempts; attempt++ {
+		running, _, err := adminVersion(ctx, Config{Namespace: cfg.Namespace}, deps)
 		if err != nil {
-			lastErr = fmt.Errorf("kubectl exec oberth version: %w", err)
-			continue // transient exec error — retry
-		}
-		// Parse "oberth v0.12.35 commit=... date=..."
-		// Filter out kubectl stderr noise (e.g. "Defaulted container...")
-		var runningVersion string
-		for _, field := range strings.Fields(strings.TrimSpace(string(out))) {
-			if strings.HasPrefix(field, "v") && semver.IsValid(field) {
-				runningVersion = field
-				break
+			var status *client.AdminError
+			var network net.Error
+			transient := (errors.As(err, &status) && (status.StatusCode >= 500 || status.StatusCode == 429)) || errors.As(err, &network)
+			if !transient || attempt == verifyMaxAttempts {
+				return "", fmt.Errorf("server API version unavailable; verify manually: %w", err)
 			}
+			if err := sleepContext(ctx, pollInterval(deps)); err != nil {
+				return "", err
+			}
+			continue
 		}
-		if runningVersion == "" {
-			// Unparseable output is a definitive failure — do not retry.
-			return "", fmt.Errorf("could not parse a semantic version from pod output: %s", strings.TrimSpace(string(out)))
+		if !semver.IsValid(running) {
+			return "", fmt.Errorf("could not parse server API version %q", running)
 		}
-		targetCanonical := canonicalChartVersion(targetVersion)
-		if targetCanonical == "" {
-			return "", fmt.Errorf("target version %q is not a valid semantic version", targetVersion)
+		if semver.Compare(running, canonicalChartVersion(targetVersion)) != 0 {
+			return "", fmt.Errorf("expected %s but server API reports %s", displayVersion(targetVersion), running)
 		}
-		if semver.Compare(runningVersion, targetCanonical) != 0 {
-			// Version mismatch is a definitive failure — do not retry.
-			return "", fmt.Errorf("expected %s but pod reports %s", displayVersion(targetVersion), runningVersion)
-		}
-		return runningVersion, nil
+		return running, nil
 	}
-	return "", fmt.Errorf("upgrade applied but unverified — verify manually: "+
-		"kubectl exec -n %s deploy/oberth -- /usr/local/bin/oberth version (%w)", cfg.Namespace, lastErr)
+	return "", errors.New("server API version unavailable")
 }
 
 func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, retryFailed bool) (UpgradeResult, error) {
 	_, _ = fmt.Fprintf(w, "\nDry-run plan (no cluster changes will be made):\n\n")
 	if cfg.WaitIdle {
-		_, _ = fmt.Fprintf(w, "  Wait for %s runs in the selected live daemon queue (--wait-idle; --wait-timeout=%s).\n", upgradeWaitSelection(cfg), cfg.WaitTimeout)
+		_, _ = fmt.Fprintf(w, "  Wait for %s active Kubernetes Workflows (critical includes all active Workflows) (--wait-idle; --wait-timeout=%s).\n", upgradeWaitSelection(cfg), cfg.WaitTimeout)
 	}
 	_, _ = fmt.Fprintln(w, "  Verify Helm >= 3.14, read installed values (including defaults), pin compatibility identities, and validate stored values against the target chart schema before applying changes.")
 	if cfg.serverPKI {
@@ -965,9 +918,25 @@ func upgradeWaitSelection(cfg UpgradeConfig) string {
 	return "all"
 }
 
-// waitForUpgradeIdle observes the selected Deployment through its private admin
-// socket, preserving the full queue rather than a scoped remote API view.
+// waitForUpgradeIdle observes active native Workflows without a server-version dependency.
 func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
+	if err := waitForUpgradeWorkflows(ctx, cfg, deps); err != nil {
+		return fmt.Errorf("upgrade not attempted: %w", err)
+	}
+	return nil
+}
+
+// WaitForAdminIdle observes the complete queue with an authenticated unscoped admin.
+func WaitForAdminIdle(ctx context.Context, remote AdminAPI, mode string, timeout time.Duration, output io.Writer) error {
+	if mode != "all" && mode != "critical" || timeout <= 0 {
+		return errors.New("invalid admin idle observation options")
+	}
+	if output == nil {
+		output = io.Discard
+	}
+	return observeAdminIdle(ctx, UpgradeConfig{WaitFor: mode, WaitTimeout: timeout}, Deps{Admin: remote, Output: output, PollInterval: time.Second})
+}
+func observeAdminIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
 	limit := cfg.WaitTimeout
 	if limit == 0 {
 		limit = DefaultUpgradeWaitTimeout
@@ -975,134 +944,42 @@ func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	start := time.Now()
-	output := deps.Output
-	if output == nil {
-		output = io.Discard
-	}
-	// Only this wait owns these concurrent writes; join the heartbeat before
-	// returning so the following upgrade phase has exclusive output ownership.
-	writer := &upgradeWaitWriter{output: output}
-	if _, err := fmt.Fprintf(writer, "Waiting before upgrade: selection=%s wait-timeout=%s rollout-timeout=%s\n", upgradeWaitSelection(cfg), limit, cfg.Timeout); err != nil {
-		return err
-	}
-	stop, joined := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(joined)
-		ticker := time.NewTicker(15 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				if _, err := fmt.Fprintf(writer, "Still waiting for %s runs; elapsed=%s limit=%s\n", upgradeWaitSelection(cfg), time.Since(start).Truncate(time.Second), limit); err != nil {
-					cancel()
-					return
+	nextProgress := time.Time{}
+	var lastErr error
+	for {
+		var result struct {
+			Busy  bool                  `json:"busy"`
+			Queue model.IdleQueueStatus `json:"queue"`
+		}
+		err := CallAdmin(ctx, Config{Namespace: cfg.Namespace}, deps, "idle", map[string]string{"wait_for": upgradeWaitSelection(cfg)}, &result)
+		if err == nil {
+			if !result.Queue.Valid() {
+				return errors.New("invalid admin idle observation")
+			}
+			if !result.Busy {
+				return nil
+			}
+			lastErr = nil
+		} else {
+			var status *client.AdminError
+			var network net.Error
+			if errors.As(err, &status) {
+				if status.StatusCode < 500 && status.StatusCode != 429 {
+					return err
 				}
+			} else if !errors.As(err, &network) && !errors.Is(err, context.DeadlineExceeded) {
+				return err
 			}
+			lastErr = err
 		}
-	}()
-	defer func() { close(stop); <-joined }()
-	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, "deploy/oberth", "--", "/usr/local/bin/oberth", "wait-idle", "--timeout=" + limit.String()}
-	if cfg.WaitFor == "critical" {
-		args = append(args, "--wait-for=critical")
-	}
-	if deps.ContextName != "" {
-		args = append([]string{"--context", deps.ContextName}, args...)
-	}
-	// Keep child diagnostics separate from heartbeat writes so split messages
-	// remain recognizable without retaining unbounded subprocess output.
-	childOutput := &upgradeWaitWriter{output: writer}
-	var err error
-	if deps.RunCommandStream != nil {
-		err = deps.RunCommandStream(ctx, childOutput, "kubectl", args...)
-	} else if deps.RunCommand != nil {
-		var body []byte
-		body, err = deps.RunCommand(ctx, nil, "kubectl", args...)
-		if len(body) > 0 {
-			_, writeErr := childOutput.Write(body)
-			err = errors.Join(err, writeErr)
-		}
-	} else {
-		err = DefaultRunCommandStream(ctx, childOutput, "kubectl", args...)
-	}
-	if err != nil || ctx.Err() != nil || writer.err() != nil {
-		cause := err
-		if ctx.Err() != nil && !errors.Is(cause, ctx.Err()) {
-			cause = errors.Join(cause, ctx.Err())
-		}
-		cause = errors.Join(cause, writer.err())
-		// The local deadline may kill kubectl before the in-pod waiter can
-		// print its final error. Retain its last reported probe cause too.
-		if ctx.Err() != nil {
-			if reason := childOutput.probeFailure(); reason != "" {
-				cause = fmt.Errorf("%w; last reported idle probe failure: %s", cause, reason)
+		if !time.Now().Before(nextProgress) {
+			if _, err := fmt.Fprintf(deps.Output, "Waiting for %s queue: queued=%d running=%d critical=%d elapsed=%s\n", upgradeWaitSelection(cfg), result.Queue.Queued, result.Queue.Running, result.Queue.Critical(), time.Since(start).Truncate(time.Second)); err != nil {
+				return err
 			}
+			nextProgress = time.Now().Add(15 * time.Second)
 		}
-		if cfg.WaitFor == "critical" && childOutput.unsupportedFlag() {
-			cause = fmt.Errorf("server too old for --wait-for=critical; use --wait-for=all: %w", cause)
-		}
-		return fmt.Errorf("wait for %s queue via local kubectl exec failed (elapsed=%s limit=%s); upgrade not attempted: %w", upgradeWaitSelection(cfg), time.Since(start).Truncate(time.Millisecond), limit, cause)
-	}
-	return nil
-}
-
-type upgradeWaitWriter struct {
-	mu                 sync.Mutex
-	output             io.Writer
-	failure            error
-	diagnosticTail     string
-	unsupportedWaitFor bool
-	probeLine          string
-	lastProbeFailure   string
-}
-
-func (w *upgradeWaitWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	const unknownFlag = "flag provided but not defined: -wait-for"
-	diagnostic := w.diagnosticTail + string(p)
-	w.unsupportedWaitFor = w.unsupportedWaitFor || strings.Contains(diagnostic, unknownFlag)
-	if len(diagnostic) >= len(unknownFlag) {
-		diagnostic = diagnostic[len(diagnostic)-len(unknownFlag)+1:]
-	}
-	w.diagnosticTail = strings.Clone(diagnostic)
-	// Child stdout/stderr may split diagnostics at any byte. Keep at most one
-	// bounded line and one reason; never retain the whole subprocess output.
-	for _, part := range strings.SplitAfter(string(p), "\n") {
-		w.probeLine += part
-		if len(w.probeLine) > 4096 {
-			w.probeLine = strings.Clone(w.probeLine[len(w.probeLine)-4096:])
-		}
-		if strings.HasSuffix(w.probeLine, "\n") {
-			if strings.HasPrefix(w.probeLine, "Waiting for ") {
-				if _, reason, ok := strings.Cut(w.probeLine, " queue: transient idle probe failure: "); ok {
-					reason, _, _ = strings.Cut(reason, "; retrying (elapsed=")
-					w.lastProbeFailure = strings.TrimSpace(reason)
-				} else if strings.Contains(w.probeLine, " queue: queued=") || strings.Contains(w.probeLine, " queue: busy ") {
-					w.lastProbeFailure = ""
-				}
-			}
-			w.probeLine = ""
+		if err := sleepContext(ctx, pollInterval(deps)); err != nil {
+			return fmt.Errorf("wait for %s queue via admin API (elapsed=%s limit=%s): %w", upgradeWaitSelection(cfg), time.Since(start).Truncate(time.Millisecond), limit, errors.Join(err, lastErr))
 		}
 	}
-	n, err := w.output.Write(p)
-	if err == nil && n != len(p) {
-		err = io.ErrShortWrite
-	}
-	w.failure = errors.Join(w.failure, err)
-	return n, err
-}
-func (w *upgradeWaitWriter) err() error { w.mu.Lock(); defer w.mu.Unlock(); return w.failure }
-
-func (w *upgradeWaitWriter) unsupportedFlag() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.unsupportedWaitFor
-}
-
-func (w *upgradeWaitWriter) probeFailure() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.lastProbeFailure
 }

@@ -90,7 +90,7 @@ func TestPolicyRealHTTPConnectionPressureAndStall(t *testing.T) {
 				cleanupUID.Store(p != nil && p.UID != nil && *p.UID != "")
 				return false, nil, nil
 			})
-			deps := Deps{KubeClient: kube, RunCommand: func(ctx context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
+			deps := testAdminDeps(Deps{KubeClient: kube, RunCommand: func(ctx context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 				workers.Add(1)
 				defer workers.Add(-1)
 				ns, _, script, values := policyModelArgs(args)
@@ -171,7 +171,7 @@ func TestPolicyRealHTTPConnectionPressureAndStall(t *testing.T) {
 					return []byte("allowed"), nil
 				}
 				return nil, fmt.Errorf("unexpected script")
-			}}
+			}})
 			timing := policyProbeTiming{2 * time.Second, 100 * time.Millisecond, time.Second, 100 * time.Millisecond, time.Millisecond}
 			if mode == "held-response-stalls" {
 				timing.total = 180 * time.Millisecond
@@ -231,7 +231,7 @@ func TestPolicyIndependentAlternatingSourcesSeeded(t *testing.T) {
 							return ""
 						}}
 						random := mathrand.New(mathrand.NewSource(int64(trial + 1)))
-						result := probeNetworkPolicyWithRandom(t.Context(), Config{}, Deps{KubeClient: kube, RunCommand: model.runTimed}, policyModelTiming(), random)
+						result := probeNetworkPolicyWithRandom(t.Context(), Config{}, testAdminDeps(Deps{KubeClient: kube, RunCommand: model.runTimed}), policyModelTiming(), random)
 						if result.Status == "enforced" {
 							enforced++
 						}
@@ -282,7 +282,7 @@ func TestPolicySeededModelCanCompleteAllRounds(t *testing.T) {
 			probeNamespaceUIDFixture(kube)
 			kube.PrependReactor("create", "pods", readyPolicyModelPod)
 			model := &policyTrafficModel{kube: kube, mode: "egress-only", denial: "timeout"}
-			result := probeNetworkPolicyWithRandom(t.Context(), Config{}, Deps{KubeClient: kube, RunCommand: model.runTimed}, policyModelTiming(), mathrand.New(mathrand.NewSource(seed)))
+			result := probeNetworkPolicyWithRandom(t.Context(), Config{}, testAdminDeps(Deps{KubeClient: kube, RunCommand: model.runTimed}), policyModelTiming(), mathrand.New(mathrand.NewSource(seed)))
 			if result.Status != "enforced" {
 				t.Fatalf("seed %d positive model did not complete: %+v", seed, result)
 			}

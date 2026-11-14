@@ -183,5 +183,5 @@ func TestFreshInstallReportsNothingMissing(t *testing.T) {
 
 func certificateTestDeps(t *testing.T, names, ips []string) Deps {
 	public := secretWithCertificate(t, names, ips).Data["tls.crt"]
-	return Deps{RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) { return public, nil }}
+	return testAdminDeps(Deps{RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) { return public, nil }})
 }

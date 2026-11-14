@@ -29,7 +29,7 @@ func TestPlainPKIUpgradeNeedsNoBaoToken(t *testing.T) {
 				Status: appsv1.DeploymentStatus{ObservedGeneration: 1, UpdatedReplicas: 1, AvailableReplicas: 1},
 			}
 			applied := false
-			deps := Deps{
+			deps := testAdminDeps(Deps{
 				Output: io.Discard, KubeClient: argoSecurityTestClient(deployment),
 				RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
@@ -76,7 +76,7 @@ func TestPlainPKIUpgradeNeedsNoBaoToken(t *testing.T) {
 					t.Fatalf("plain upgrade must not inspect PKI: %s %v", name, args)
 					return nil, nil
 				},
-			}
+			})
 			result, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.17.81", ChartOverride: "fixture", DryRun: dryRun, NoBackup: true}, deps)
 			if err != nil || result.Upgraded != !dryRun || applied != !dryRun {
 				t.Fatalf("result=%+v applied=%t err=%v", result, applied, err)

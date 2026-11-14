@@ -24,17 +24,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oberthci/oberth/internal/kubeconfig"
-
 	"golang.org/x/term"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
 	"github.com/oberthci/oberth/internal/auditanchor"
+	"github.com/oberthci/oberth/internal/kubeconfig"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -151,6 +149,16 @@ func ExecuteBackup(ctx context.Context, cfg BackupConfig, host InstallDeps) erro
 // nor a token prompt.
 func prepareOperatorDeps(host InstallDeps, kubeconfigPath, contextName string, live bool) (backupDeps, error) {
 	host = host.withDefaults()
+	if contextName == "" {
+		target, err := RecordedKubernetesTarget()
+		if err != nil {
+			return backupDeps{}, err
+		}
+		contextName = target.Context
+		if kubeconfigPath == "" {
+			kubeconfigPath = target.Kubeconfig
+		}
+	}
 	if live {
 		if err := CheckHostTools(host.GOOS, host.LookPath); err != nil {
 			return backupDeps{}, err
@@ -202,7 +210,7 @@ func prepareOperatorDeps(host InstallDeps, kubeconfigPath, contextName string, l
 	}
 	deps := backupDeps{
 		Deps: Deps{
-			Output:         host.Output,
+			Admin: host.Admin, ClientConfigRoot: host.ClientConfigRoot, Output: host.Output,
 			Input:          host.Input,
 			RunHelm:        HelmWithKubeArgs(host.RunHelm, helmKubeArgs),
 			RunCommand:     runCommand,
@@ -264,7 +272,7 @@ func withKubeconfigArg(run CommandRunner, path string) CommandRunner {
 // defaultRunCommandStdout runs a host command and returns stdout alone; on
 // failure the error carries stderr for diagnosis.
 func defaultRunCommandStdout(ctx context.Context, input []byte, name string, args ...string) (result []byte, resultErr error) {
-	args, environment, lease, cleanup, prepareErr := kubeconfig.Command(name, args, installerChildEnvironment())
+	args, environment, lease, cleanup, prepareErr := pinnedKubernetesCommand(name, args, installerChildEnvironment())
 	if prepareErr != nil {
 		return nil, prepareErr
 	}
@@ -416,18 +424,11 @@ type secretAccessExport struct {
 }
 
 func readSecretAccess(ctx context.Context, deps Deps, namespace string) (secretAccessExport, error) {
-	cm, err := deps.KubeClient.CoreV1().ConfigMaps(namespace).Get(ctx, secretAccessConfigMapName, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return secretAccessExport{Data: map[string]string{}}, nil
-	}
+	data, err := activeGrantJSON(ctx, Config{Namespace: namespace}, deps)
 	if err != nil {
-		return secretAccessExport{}, fmt.Errorf("get ConfigMap %s/%s: %w", namespace, secretAccessConfigMapName, err)
+		return secretAccessExport{}, err
 	}
-	data := cm.Data
-	if data == nil {
-		data = map[string]string{}
-	}
-	return secretAccessExport{Present: true, Data: data}, nil
+	return secretAccessExport{Present: true, Data: map[string]string{secretAccessConfigMapKey: string(data)}}, nil
 }
 
 // printBackupPlan is the --dry-run plan: what would be read and written.
@@ -493,7 +494,7 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		return nil
 	}
 
-	schema, err := podSchemaVersion(ctx, deps.RunCommand, deps.ContextName, cfg.Namespace, pod, serverContainerName)
+	schema, err := podSchemaVersion(ctx, deps.Deps, cfg.Namespace)
 	if err != nil {
 		return err
 	}
@@ -558,7 +559,7 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 	if err := os.MkdirAll(filepath.Dir(databasePath), 0o700); err != nil {
 		return err
 	}
-	snapshotMode, err := snapshotServerDatabase(ctx, deps, cfg.Namespace, pod, schema, protocol, work, databasePath)
+	snapshotMode, err := snapshotServerDatabase(ctx, deps, cfg.Namespace, databasePath)
 	if err != nil {
 		return err
 	}
@@ -581,10 +582,7 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		}
 	}
 
-	serverVersion := ""
-	if out, err := deps.RunCommand(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, cfg.Namespace, pod, serverContainerName, false, "oberth", "version")...); err == nil {
-		serverVersion = strings.TrimSpace(string(out))
-	}
+	serverVersion, _, _ := adminVersion(ctx, Config{Namespace: cfg.Namespace}, deps.Deps)
 	manifest := backupManifest{
 		Format:      backupFormat,
 		CreatedAt:   deps.now().UTC().Format(time.RFC3339),
@@ -630,7 +628,7 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 	if info, err := os.Stat(cfg.Output); err == nil {
 		size = info.Size()
 	}
-	recordServerAudit(ctx, deps.Deps, cfg.Namespace, pod, "backup.completed", map[string]any{
+	recordServerAudit(ctx, deps.Deps, cfg.Namespace, "backup.completed", map[string]any{
 		"archive_sha256": cipherSHA, "bytes": size, "scope": cfg.Scope,
 		"audit_head_id": report.AuditHead.ID, "audit_head_sha256": hex.EncodeToString(report.AuditHead.SHA256),
 	})

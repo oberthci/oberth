@@ -12,22 +12,20 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
-
-	oberth "github.com/oberthci/oberth"
-	"github.com/oberthci/oberth/internal/gitcache"
-	"github.com/oberthci/oberth/internal/installer"
-	"github.com/oberthci/oberth/internal/secretstore"
-	"github.com/oberthci/oberth/pkg/pipeline"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
+
+	oberth "github.com/oberthci/oberth"
+	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/installer"
+	"github.com/oberthci/oberth/internal/secretstore"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // The secretstore command group splits secret-store work by where the
@@ -41,9 +39,6 @@ import (
 //     through the production fetch code path and proves the whole trust chain
 //     (auth mount, role binding, TokenReview, read policy, TLS) end to end
 //     without any credential beyond the identity the server already has.
-const defaultServeProcCmdline = "/proc/1/cmdline"
-
-const maximumServeCmdlineBytes = 1 << 20
 
 func runSecretStore(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) == 0 {
@@ -53,7 +48,7 @@ func runSecretStore(ctx context.Context, arguments []string, output io.Writer) e
 	case "setup":
 		return runSecretStoreSetup(arguments[1:], output)
 	case "verify":
-		return runSecretStoreVerify(ctx, arguments[1:], output, defaultServeProcCmdline)
+		return runRemoteSecretStoreVerify(ctx, arguments[1:], output)
 	case "sync":
 		return runSecretStoreSync(ctx, arguments[1:], output)
 	case "bootstrap-tls":
@@ -118,8 +113,7 @@ the server daemon uses workload identity; operator-only secretstore sync reads B
 1. Extract the setup script from this signed image (or use the identical
    scripts/setup-secretstore.sh from the Oberth repository):
 
-     kubectl exec -n oberth deploy/oberth -- \
-       oberth secretstore setup --print-script > setup-secretstore.sh
+     oberth secretstore setup --print-script > setup-secretstore.sh
      sha256sum setup-secretstore.sh   # %s
 
 2. Inspect it, then run it on the machine where your bao/vault CLI is already
@@ -129,9 +123,9 @@ the server daemon uses workload identity; operator-only secretstore sync reads B
 
 3. helm upgrade --install with the printed secretstore.* values.
 
-4. Prove the trust chain end to end from inside this pod:
+4. Prove the trust chain end to end through the authenticated server API:
 
-     kubectl exec -n oberth deploy/oberth -- /usr/local/bin/oberth secretstore verify
+     oberth secretstore verify
 `, hex.EncodeToString(digest[:]))
 	return err
 }
@@ -164,33 +158,12 @@ type releaseTierVerifyConfig struct {
 // uses rest.InClusterConfig, and tests inject a fake.
 type kubeClientFactory func() (kubernetes.Interface, error)
 
-func defaultKubeClient() (kubernetes.Interface, error) {
-	restConfig, err := rest.InClusterConfig()
-	if err != nil {
-		return nil, fmt.Errorf("load in-cluster Kubernetes config: %w (run inside the Oberth pod)", err)
-	}
-	restConfig.Timeout = 10 * time.Second
-	return kubernetes.NewForConfig(restConfig)
-}
-
 // Configuration sources keep CLI process discovery separate from the MCP
 // callback, which uses the already-parsed configuration of the running server.
 type secretStoreVerifySources struct {
 	server  func() (secretStoreVerifyConfig, error)
 	release func() (releaseTierVerifyConfig, error)
 	kube    kubeClientFactory
-}
-
-func secretStoreVerifySourcesFromCmdline(procCmdline string, kube kubeClientFactory) secretStoreVerifySources {
-	return secretStoreVerifySources{
-		server:  func() (secretStoreVerifyConfig, error) { return secretStoreConfigFromServeCmdline(procCmdline) },
-		release: func() (releaseTierVerifyConfig, error) { return releaseTierConfigFromServeCmdline(procCmdline) },
-		kube:    kube,
-	}
-}
-
-func runSecretStoreVerify(ctx context.Context, arguments []string, output io.Writer, procCmdline string) error {
-	return runSecretStoreVerifyWithSources(ctx, arguments, output, secretStoreVerifySourcesFromCmdline(procCmdline, defaultKubeClient))
 }
 
 func runSecretStoreVerifyWithSources(ctx context.Context, arguments []string, output io.Writer, sources secretStoreVerifySources) error {
@@ -783,169 +756,12 @@ func verifyExpectedKeys(output io.Writer, fetched map[string]map[string][]byte, 
 // accepts (-flag=value, --flag=value, -flag value, --flag value) and ignores
 // all non-secretstore flags; TestSecretStoreCmdlineMatchesServeParsing pins it
 // against parseServeOptions so the two can never diverge silently.
-func secretStoreConfigFromServeCmdline(path string) (secretStoreVerifyConfig, error) {
-	raw, err := os.ReadFile(path) // #nosec G304 -- fixed /proc/1/cmdline, overridden only by tests.
-	if err != nil {
-		return secretStoreVerifyConfig{}, fmt.Errorf("read serve process command line: %w", err)
-	}
-	if len(raw) > maximumServeCmdlineBytes {
-		return secretStoreVerifyConfig{}, errors.New("serve process command line exceeds the size bound")
-	}
-	fields := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
-	if len(fields) < 2 || !strings.HasSuffix(fields[0], "oberth") || fields[1] != "serve" {
-		return secretStoreVerifyConfig{}, errors.New("PID 1 is not an oberth serve process")
-	}
-	var config secretStoreVerifyConfig
-	arguments := fields[2:]
-	for index := 0; index < len(arguments); index++ {
-		argument := arguments[index]
-		if len(argument) < 2 || argument[0] != '-' {
-			continue
-		}
-		name := strings.TrimPrefix(strings.TrimPrefix(argument, "-"), "-")
-		value := ""
-		hasValue := false
-		if equals := strings.IndexByte(name, '='); equals >= 0 {
-			value = name[equals+1:]
-			name = name[:equals]
-			hasValue = true
-		}
-		consumeValue := func() error {
-			if hasValue {
-				return nil
-			}
-			index++
-			if index >= len(arguments) {
-				return fmt.Errorf("serve flag --%s has no value", name)
-			}
-			value = arguments[index]
-			return nil
-		}
-		switch name {
-		case "secretstore-address":
-			if err := consumeValue(); err != nil {
-				return secretStoreVerifyConfig{}, err
-			}
-			config.address = value
-		case "secretstore-k8s-auth-mount":
-			if err := consumeValue(); err != nil {
-				return secretStoreVerifyConfig{}, err
-			}
-			config.authMount = value
-		case "secretstore-role":
-			if err := consumeValue(); err != nil {
-				return secretStoreVerifyConfig{}, err
-			}
-			config.role = value
-		case "secretstore-ca-cert":
-			if err := consumeValue(); err != nil {
-				return secretStoreVerifyConfig{}, err
-			}
-			config.caCertPath = value
-		case "secretstore-sa-token":
-			if err := consumeValue(); err != nil {
-				return secretStoreVerifyConfig{}, err
-			}
-			config.saTokenPath = value
-		case "secretstore-kv-mount":
-			if err := consumeValue(); err != nil {
-				return secretStoreVerifyConfig{}, err
-			}
-			config.kvPath = value
-		case "secretstore-path":
-			if err := consumeValue(); err != nil {
-				return secretStoreVerifyConfig{}, err
-			}
-			config.paths = append(config.paths, value)
-		case "secretstore-insecure-http":
-			// The Go flag package accepts booleans only as -flag or -flag=value.
-			enabled := true
-			if hasValue {
-				parsed, parseErr := strconv.ParseBool(value)
-				if parseErr != nil {
-					return secretStoreVerifyConfig{}, fmt.Errorf("serve flag --secretstore-insecure-http has invalid value %q", value)
-				}
-				enabled = parsed
-			}
-			config.insecureHTTP = enabled
-		}
-	}
-	return config, nil
-}
 
 // releaseTierConfigFromServeCmdline reads the live serve process's command line
 // and extracts the --argo-* flags that configure the release-tier secret store
 // trust chain. The scanner follows the same tolerant pattern as
 // secretStoreConfigFromServeCmdline; TestReleaseTierCmdlineMatchesServeParsing
 // pins it against parseServeOptions.
-func releaseTierConfigFromServeCmdline(path string) (releaseTierVerifyConfig, error) {
-	raw, err := os.ReadFile(path) // #nosec G304 -- fixed /proc/1/cmdline, overridden only by tests.
-	if err != nil {
-		return releaseTierVerifyConfig{}, fmt.Errorf("read serve process command line: %w", err)
-	}
-	if len(raw) > maximumServeCmdlineBytes {
-		return releaseTierVerifyConfig{}, errors.New("serve process command line exceeds the size bound")
-	}
-	fields := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
-	if len(fields) < 2 || !strings.HasSuffix(fields[0], "oberth") || fields[1] != "serve" {
-		return releaseTierVerifyConfig{}, errors.New("PID 1 is not an oberth serve process")
-	}
-	var config releaseTierVerifyConfig
-	arguments := fields[2:]
-	for index := 0; index < len(arguments); index++ {
-		argument := arguments[index]
-		if len(argument) < 2 || argument[0] != '-' {
-			continue
-		}
-		name := strings.TrimPrefix(strings.TrimPrefix(argument, "-"), "-")
-		value := ""
-		hasValue := false
-		if equals := strings.IndexByte(name, '='); equals >= 0 {
-			value = name[equals+1:]
-			name = name[:equals]
-			hasValue = true
-		}
-		consumeValue := func() error {
-			if hasValue {
-				return nil
-			}
-			index++
-			if index >= len(arguments) {
-				return fmt.Errorf("serve flag --%s has no value", name)
-			}
-			value = arguments[index]
-			return nil
-		}
-		switch name {
-		case "argo-vault-address":
-			if err := consumeValue(); err != nil {
-				return releaseTierVerifyConfig{}, err
-			}
-			config.vaultAddress = value
-		case "argo-vault-ca-cert":
-			if err := consumeValue(); err != nil {
-				return releaseTierVerifyConfig{}, err
-			}
-			config.vaultCACertPath = value
-		case "argo-vault-credentialed-role":
-			if err := consumeValue(); err != nil {
-				return releaseTierVerifyConfig{}, err
-			}
-			config.vaultCredentialedRole = value
-		case "argo-credentialed-serviceaccount":
-			if err := consumeValue(); err != nil {
-				return releaseTierVerifyConfig{}, err
-			}
-			config.credentialedAccount = value
-		case "argo-namespace":
-			if err := consumeValue(); err != nil {
-				return releaseTierVerifyConfig{}, err
-			}
-			config.pipelineNamespace = value
-		}
-	}
-	return config, nil
-}
 
 // runSecretStoreSync re-derives every Vault policy and role that depends on
 // the approval table — per-repo identities (release + CI tiers) and the
@@ -992,7 +808,7 @@ func runSecretStoreSync(ctx context.Context, arguments []string, output io.Write
 			"    oberth secretstore sync")
 	}
 
-	kube, _, resolvedContext, err := installer.LoadKubeConfigForContext(*kubeContext, output)
+	kube, selectedConfig, resolvedContext, err := installer.LoadKubeConfigForContext(*kubeContext, output)
 	if err != nil {
 		return fmt.Errorf("load kubeconfig: %w", err)
 	}
@@ -1001,7 +817,7 @@ func runSecretStoreSync(ctx context.Context, arguments []string, output io.Write
 	// Read per-repo identities from the running Oberth server.
 	_, _ = fmt.Fprintln(output, "Reading per-repo identities from the running server...")
 	identities, warnings, produceErr := installer.ProducePerRepoIdentitiesForSync(
-		ctx, kube, installer.DefaultRunCommand, *kubeContext, *namespace,
+		ctx, installer.Config{Namespace: *namespace}, installer.Deps{KubeClient: kube, RestConfig: selectedConfig, ContextName: resolvedContext},
 	)
 	for _, warn := range warnings {
 		_, _ = fmt.Fprintf(output, "  WARNING: %s\n", warn)
@@ -1028,7 +844,7 @@ func runSecretStoreSync(ctx context.Context, arguments []string, output io.Write
 	// Issue #623, finding 1.
 	_, _ = fmt.Fprintln(output, "Reading per-step identities from the running server...")
 	stepIdentities, stepErr := installer.ProducePerStepIdentities(
-		ctx, installer.DefaultRunCommand, *kubeContext, *namespace,
+		ctx, installer.Config{Namespace: *namespace}, installer.Deps{KubeClient: kube, RestConfig: selectedConfig, ContextName: resolvedContext},
 	)
 	if stepErr != nil {
 		return fmt.Errorf("read per-step identities: %w (aborting sync to prevent orphan removal with an empty desired set)", stepErr)

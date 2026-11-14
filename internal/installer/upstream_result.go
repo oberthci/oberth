@@ -36,7 +36,7 @@ func installUpstreamResult(cfg Config, deps Deps, name, baseURL, public string, 
 			verifyArgs = append(verifyArgs, arg)
 		}
 	}
-	result.NextCommand = printedKubectl(cfg, kubectlOberthArgs(cfg, deps, false, verifyArgs...))
+	result.NextCommand = printedAdminCommand(verifyArgs...)
 	return result
 }
 

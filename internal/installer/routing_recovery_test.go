@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -37,11 +38,14 @@ func TestPrintedRoutingRemedyRestoresBothVerifiedEndpoints(t *testing.T) {
 	ca := newTestServerCA(t, []string{"api.example.test"})
 	var output bytes.Buffer
 	deployed, verifying, applies := false, false, 0
-	host := InstallDeps{Output: &output, LookPath: func(s string) (string, error) { return s, nil }, ProbeNetworkPolicy: enforcedPolicyFixture,
+	host := testAdminInstallDeps(InstallDeps{Output: &output, LookPath: func(s string) (string, error) { return s, nil }, ProbeNetworkPolicy: enforcedPolicyFixture,
 		LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 			return kube, &rest.Config{Host: "https://192.0.2.10:6443", TLSClientConfig: rest.TLSClientConfig{CAData: ca}}, "chosen", nil
 		},
 		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+			if slices.Contains(args, "create-first-admin") {
+				return (&fakeOberthHost{t: t}).run(ctx, input, name, args...)
+			}
 			joined := strings.Join(args, " ")
 			if strings.Contains(joined, "port-forward") || strings.Contains(joined, "config set") {
 				t.Fatalf("user routing/config action executed: %s", joined)
@@ -94,7 +98,7 @@ func TestPrintedRoutingRemedyRestoresBothVerifiedEndpoints(t *testing.T) {
 				}
 			}
 			return nil, nil
-		}}
+		}})
 	cfg := Config{ContextName: "chosen", ChartPath: testLocalChart, ImageRef: fakeChartImageRef, ClientHost: "127.0.0.1", ClientHTTPSPort: port, ClientSSHPort: sshPort, ClientAccess: "none", Timeout: time.Second}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()

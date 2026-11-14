@@ -1,14 +1,7 @@
 package installer
 
-// First-run onboarding. A fresh Oberth deployment is deliberately NotReady
-// until its first upstream is registered — the vault-pre-init pattern: the
-// pod runs and accepts in-pod administration while the readiness probe keeps
-// it out of Service endpoints. The install therefore never waits blindly for
-// Ready. It waits for a Running pod, then either confirms an existing
-// upstream, or — on an interactive terminal — walks the operator through
-// upstream (deploy key) and uplink (bearer token) setup by driving the
-// product's own in-pod `oberth upstream add` / `oberth uplink add` commands
-// over kubectl exec, and only then waits for readiness.
+// First-run onboarding uses one exec to create the first admin. Every later
+// operation uses the authenticated admin API, including while the Pod is not ready.
 
 import (
 	"bytes"
@@ -26,11 +19,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // ErrInterrupted is returned when the user presses Ctrl+C (sends ETX / 0x03)
@@ -57,6 +51,20 @@ const (
 // results are appended to the table via AppendRow so the table grows in
 // place. Credentials are flushed after the table.
 func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, creds *heldCredentials) error {
+	if deps.ContextName != "" {
+		if err := recordKubernetesTarget(cfg, deps); err != nil {
+			return err
+		}
+	}
+	if cfg.enrollment == nil {
+		cfg.enrollment = &installerEnrollment{}
+	}
+	defer func() {
+		if cfg.enrollment != nil {
+			clear(cfg.enrollment.key)
+		}
+	}()
+
 	var endpointErr error
 	deps, endpointErr = configureClientEndpoint(ctx, cfg.Namespace, cfg.ServiceType, deps)
 	if endpointErr != nil {
@@ -74,6 +82,30 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		deps.StepProgressSink("rollout ready", "done")
 	}
 
+	var current any
+	cfg.uplinkOnboarded = CallAdmin(ctx, cfg, deps, "version", nil, &current) == nil
+	if !cfg.uplinkOnboarded {
+		if err := reusePendingInstallerEnrollment(&cfg, deps); err != nil {
+			return err
+		}
+		if cfg.enrollment == nil || len(cfg.enrollment.csr) == 0 {
+			var err error
+			if cfg.enrollment != nil {
+				clear(cfg.enrollment.key)
+			}
+			cfg.enrollment, err = newInstallerEnrollment()
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if !cfg.uplinkOnboarded && cfg.AdminSSHPublicKeyPath == "" {
+		if err := defaultOnboardingIdentity(&cfg, deps, tw); err != nil {
+			return err
+		}
+		cfg.AdminSSHPublicKeyPath = cfg.SSHPublicKeyPath
+	}
+
 	// The admin identity is independent of forge registration. Save its token
 	// immediately, including when subsequent onboarding is partial.
 	if cfg.AdminSSHPublicKeyPath != "" && !cfg.uplinkOnboarded {
@@ -82,7 +114,9 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		}
 		_, identity, token, _, err := onboardUplink(ctx, cfg, deps, tw)
 		if err != nil {
-			return errors.New("first admin uplink could not be created; inspect cluster administration")
+			tw.AppendRow("First admin", "manual action required", "⚠ partial", false)
+			_ = PrintNextSteps(cfg, deps.Output)
+			return errors.Join(ErrOnboardingPartial, &installStepError{check: CheckResult{Code: "first_admin", Reason: err.Error(), Remedy: "Retry with the original installer key or use authenticated administrative APIs; the deployment remains installed."}})
 		}
 		if token == "" && (cfg.AdminCSRPath == "" || cfg.AdminBearer) {
 			return errors.New("first admin uplink did not return a recognized credential")
@@ -113,7 +147,7 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 				if upstream.BaseURL != cfg.ForgeURL {
 					continue
 				}
-				raw, readErr := deps.RunCommand(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "admin", "read-file", "/run/oberth-identities/upstream/id_ed25519.pub")...)
+				raw, readErr := readPublicIdentity(ctx, cfg, deps, "upstream-public-key")
 				public := ""
 				if readErr == nil && len(raw) <= 16384 {
 					public = string(raw)
@@ -308,22 +342,13 @@ func waitAndAnnounceReady(ctx context.Context, cfg Config, deps Deps) error {
 	return nil
 }
 
-// kubectlOberthArgs builds kubectl-exec argv for one in-pod oberth command
-// against deploy/oberth. stdinAttached adds -i for commands that read stdin.
-func kubectlOberthArgs(cfg Config, deps Deps, stdinAttached bool, command ...string) []string {
-	ns := cfg.Namespace
-	if ns == "" {
-		ns = DefaultNamespace
+// printedAdminCommand formats a native authenticated API command.
+func printedAdminCommand(command ...string) string {
+	words := append([]string{"oberth"}, command...)
+	for i := range words {
+		words[i] = shellQuoteWord(words[i])
 	}
-	args := []string{"exec"}
-	if stdinAttached {
-		args = append(args, "-i")
-	}
-	if deps.ContextName != "" {
-		args = append(args, "--context", deps.ContextName)
-	}
-	args = append(args, "-c", "oberth", "-n", ns, "deploy/oberth", "--", "/usr/local/bin/oberth")
-	return append(args, command...)
+	return strings.Join(words, " ")
 }
 
 // printedKubectl is a kubectl command line printed for the operator (or an
@@ -347,85 +372,22 @@ func printedKubectl(cfg Config, args []string) string {
 // listing them in-pod. Right after the pod turns Running the exec subresource
 // and the admin database may need a moment, so transient failures are
 // retried briefly.
-func upstreamConfigured(ctx context.Context, cfg Config, deps Deps) (bool, error) {
-	rows, err := listUpstreams(ctx, cfg, deps)
-	return len(rows) > 0, err
-}
 
 // listUpstreams lists the registered upstreams in-pod (name and base URL).
 func listUpstreams(ctx context.Context, cfg Config, deps Deps) ([]NextStepsUpstream, error) {
-	run := deps.RunCommand
-	if run == nil {
-		run = DefaultRunCommand
+	var result struct {
+		Upstreams []struct {
+			Upstream model.Upstream `json:"upstream"`
+		} `json:"upstreams"`
 	}
-	var out []byte
-	var err error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(pollInterval(deps)):
-			}
-		}
-		out, err = run(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "upstream", "list")...)
-		if err == nil {
-			return upstreamListRows(out), nil
-		}
+	if err := CallAdmin(ctx, cfg, deps, "upstream-list", nil, &result); err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("list upstreams in pod: %w%s", err, commandOutputSuffix(out))
-}
-
-// upstreamListRows reads the rows upstreamListHasRows counts: the first
-// column is the name, the field holding "://" the base URL.
-func upstreamListRows(out []byte) []NextStepsUpstream {
-	if !upstreamListHasRows(out) {
-		return nil
+	rows := make([]NextStepsUpstream, 0, len(result.Upstreams))
+	for _, row := range result.Upstreams {
+		rows = append(rows, NextStepsUpstream{Name: row.Upstream.Name, BaseURL: row.Upstream.BaseURL})
 	}
-	var rows []NextStepsUpstream
-	headerSeen := false
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		if !headerSeen {
-			headerSeen = fields[0] == "NAME"
-			continue
-		}
-		row := NextStepsUpstream{Name: fields[0], Connected: true}
-		for _, f := range fields[1:] {
-			if strings.Contains(f, "://") {
-				row.BaseURL = f
-				break
-			}
-		}
-		rows = append(rows, row)
-	}
-	return rows
-}
-
-// upstreamListHasRows parses `oberth upstream list` output: a tab-separated
-// table whose header starts with NAME; any further non-empty line is a
-// configured upstream. Lines before the header are ignored — they are kubectl
-// stderr noise (e.g., "Defaulted container..." from multi-container pods)
-// merged by CombinedOutput.
-func upstreamListHasRows(out []byte) bool {
-	headerSeen := false
-	for _, line := range strings.Split(string(out), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "NAME") {
-			headerSeen = true
-			continue
-		}
-		if headerSeen {
-			return true
-		}
-	}
-	return false
+	return rows, nil
 }
 
 // runOnboarding drives the interactive first-run setup. Results are appended
@@ -504,7 +466,7 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	if uplinkErr != nil {
 		tw.WriteFooter()
 		_, _ = fmt.Fprintf(w, "Uplink setup did not complete (%v).\nAdd one later with:\n\n    %s < ~/.ssh/id_ed25519.pub\n\n", uplinkErr,
-			printedKubectl(cfg, kubectlOberthArgs(cfg, deps, true, "uplink", "add", "-", "you@host")))
+			printedAdminCommand("uplink", "invite", "you@host", "--out", "invitation.json"))
 		if deps.StepProgressSink != nil {
 			deps.StepProgressSink("mint uplink", "pending")
 		}
@@ -624,7 +586,7 @@ func printAlsoUpstreamCommands(w io.Writer, cfg Config, deps Deps, existing []Ne
 	}
 	_, _ = fmt.Fprintln(w, "\nThe further organizations (--also-upstream) were not connected. Once the first upstream works, connect each with:")
 	for _, u := range PlanAlsoUpstreams(firstName, firstURL, cfg.AlsoUpstreams) {
-		_, _ = fmt.Fprintln(w, "    "+printedKubectl(cfg, kubectlOberthArgs(cfg, deps, false, "upstream", "add", "--yes", u.Name, u.BaseURL)))
+		_, _ = fmt.Fprintln(w, "    "+printedAdminCommand("upstream", "add", "--yes", u.Name, u.BaseURL))
 	}
 }
 
@@ -742,7 +704,7 @@ func upstreamFromInput(raw string) (string, string, error) {
 
 func prepareUpstreamRecovery(ctx context.Context, cfg Config, deps Deps, creds *heldCredentials, keyProvided bool) (bool, error) {
 	if !keyProvided && cfg.SecretsFile != "" {
-		public, readErr := deps.RunCommand(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "admin", "read-file", "/run/oberth-identities/upstream/id_ed25519.pub")...)
+		public, readErr := readPublicIdentity(ctx, cfg, deps, "upstream-public-key")
 		if readErr != nil || validatePublicKeyFile(public) != nil {
 			_, private, err := ed25519.GenerateKey(rand.Reader)
 			if err != nil {
@@ -956,47 +918,14 @@ func CheckUpstreamPrivateKey(path string) error {
 }
 
 func applyProvidedDeployKey(ctx context.Context, cfg Config, deps Deps, privateKey []byte) error {
-	if err := parseUpstreamPrivateKey(privateKey); err != nil {
-		return err
-	}
-	run := deps.RunCommand
-	if run == nil {
-		run = DefaultRunCommand
+	if _, err := ssh.ParsePrivateKey(privateKey); err != nil {
+		return errors.New("invalid upstream private key")
 	}
 	name, _, err := cfg.primaryUpstream()
 	if err != nil {
-		name = "default"
+		return err
 	}
-	timeout := cfg.Timeout
-	if timeout <= 0 {
-		timeout = DefaultTimeout
-	}
-	readyCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	announced := false
-	for {
-		out, importErr := run(readyCtx, privateKey, "kubectl", kubectlOberthArgs(cfg, deps, true, "upstream", "provide-key", name)...)
-		if importErr == nil {
-			break
-		}
-		// The daemon's witness recovery can lag behind Pod Running. Only the
-		// live audit gate may approve the import; retries never bypass it.
-		gatePending := strings.Contains(string(out), "daemon audit mutation gate rejected upstream.identity.import:") || strings.Contains(string(out), "request daemon audit mutation gate for upstream.identity.import:")
-		if !gatePending {
-			return fmt.Errorf("import existing work key into OpenBao: %w", importErr)
-		}
-		if !announced && deps.Output != nil {
-			_, _ = fmt.Fprintln(deps.Output, "Waiting for audit integrity before importing the work key...")
-			announced = true
-		}
-		select {
-		case <-readyCtx.Done():
-			return fmt.Errorf("waiting for audit integrity before work-key import: %w", readyCtx.Err())
-		case <-time.After(pollInterval(deps)):
-		}
-	}
-
-	return nil
+	return CallAdmin(ctx, cfg, deps, "upstream-provide-key", api.UpstreamKeyRequest{Name: name, PrivateKey: string(privateKey)}, nil)
 }
 
 // registerUpstreamQuiet registers without a forge auth probe. The durable
@@ -1016,10 +945,6 @@ type upstreamRegistration struct {
 	reusedKey bool
 }
 
-// persistedDeployKeyMarker is how the pod-side bootstrap introduces a key it
-// loaded rather than generated (app.UpstreamSSHBootstrap.printPersistedIdentity).
-const persistedDeployKeyMarker = "Persisted upstream deploy public key"
-
 // appendDeployKeyRow reports the upstream identity the server used: a reused
 // key with its fingerprint, or a freshly generated one to register.
 func appendDeployKeyRow(tw *tableWriter, registration upstreamRegistration) {
@@ -1035,52 +960,14 @@ func appendDeployKeyRow(tw *tableWriter, registration upstreamRegistration) {
 }
 
 func registerUpstream(ctx context.Context, cfg Config, deps Deps, name, baseURL string) (upstreamRegistration, error) {
-	run := deps.RunCommand
-	if run == nil {
-		run = DefaultRunCommand
+	var result struct {
+		Identity api.UpstreamIdentity `json:"identity"`
 	}
-	addArgs := cfg.upstreamAddArgs(name, baseURL)
-
-	// The admin socket (/run/oberth/admin.sock) is bound just before the
-	// server prints "ready for bootstrap". A pod that is Running but not
-	// yet bootstrapped rejects exec commands with "connection refused".
-	// The command is idempotent, so retrying is safe. We retry only when
-	// the server produced no meaningful output (no public key) — once it
-	// responds with a key, any remaining error is a real classification
-	// (auth rejection, knownhosts mismatch) and must not be masked.
-	var out []byte
-	var err error
-	var pubKey string
-	for attempt := 0; attempt < 5; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return upstreamRegistration{pubKey: pubKey}, ctx.Err()
-			case <-time.After(pollInterval(deps)):
-			}
-		}
-		out, err = run(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, addArgs...)...)
-		pubKey = extractDeployPublicKey(string(out))
-		if err == nil {
-			break
-		}
-
-		// Server responded with a key but a non-auth error (knownhosts
-		// mismatch, handshake EOF) — a real failure, not a startup race.
-		if pubKey != "" {
-			break
-		}
-		// No key in the output: the admin socket likely is not ready yet.
+	request := api.UpstreamAddRequest{Name: name, BaseURL: baseURL, NoWait: true, ExpectedHostFingerprint: cfg.expectedFingerprintFor(baseURL)}
+	if err := CallAdmin(ctx, cfg, deps, "upstream-add", request, &result); err != nil {
+		return upstreamRegistration{}, err
 	}
-	if err != nil {
-		return upstreamRegistration{pubKey: pubKey}, fmt.Errorf("upstream add: %w%s", err, commandOutputSuffix(out))
-	}
-	configured, _ := upstreamConfigured(ctx, cfg, deps)
-	return upstreamRegistration{
-		configured: configured && !strings.Contains(string(out), "registered; deploy key pending."),
-		pubKey:     pubKey,
-		reusedKey:  strings.Contains(string(out), persistedDeployKeyMarker),
-	}, nil
+	return upstreamRegistration{configured: !result.Identity.Pending, pubKey: result.Identity.PublicKey, reusedKey: !result.Identity.Generated}, nil
 }
 
 // terseInstallError compresses an error to one bounded line for warning
@@ -1096,17 +983,6 @@ func terseInstallError(err error) string {
 		text = "..." + string(runes[len(runes)-157:])
 	}
 	return text
-}
-
-// extractDeployPublicKey finds the first SSH public key line in command output.
-func extractDeployPublicKey(output string) string {
-	for _, line := range strings.Split(output, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "ssh-") {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 // hostnameFromURL extracts the hostname from a URL string, falling back to the
@@ -1232,37 +1108,18 @@ func onboardUplink(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) 
 		erasePromptLines(w, color, 1)
 	}
 
-	run := deps.RunCommand
-	if run == nil {
-		run = DefaultRunCommand
-	}
-	args := []string{"uplink", "add"}
-	if cfg.AdminSSHPublicKeyPath != "" {
-		args = append(args, "--admin")
-	}
-	commandInput := publicKey
-	if cfg.AdminCSRPath != "" {
-		args = append(args, "--csr", "-")
-		if cfg.AdminBearer {
-			args = append(args, "--bearer")
-		}
-		args = append(args, strings.TrimSpace(string(publicKey)), identity)
-		commandInput = cfg.adminCSR
-	} else {
-		args = append(args, "-", identity)
-	}
-	out, cmdErr := run(ctx, commandInput, "kubectl", kubectlOberthArgs(cfg, deps, true, args...)...)
-	if cmdErr != nil {
-		return "", "", "", "", fmt.Errorf("uplink add: %w%s", cmdErr, commandOutputSuffix([]byte(sanitizeExecOutput(string(out)))))
+	result, createErr := createFirstAdmin(ctx, cfg, deps, publicKey, identity)
+	if createErr != nil {
+		return "", "", "", "", createErr
 	}
 	if cfg.AdminCSRPath != "" {
-		if err := writeAdminCertificate(cfg.AdminCSRPath+".crt", out, cfg.adminCSR); err != nil {
+		if err := writeAdminCertificate(cfg.AdminCSRPath+".crt", []byte(result.Certificate), cfg.adminCSR); err != nil {
 			return "", "", "", "", err
 		}
 		tw.AppendRow("Client certificate", cfg.AdminCSRPath+".crt", "✓ saved", false)
 	}
-	token = extractUplinkToken(string(out))
-	return expanded, identity, token, sanitizeExecOutput(string(out)), nil
+	return expanded, identity, result.Token, "", nil
+
 }
 
 // offerSSHConfig prompts the user to add an SSH config block, appending the
@@ -1360,29 +1217,10 @@ func offerSSHConfig(ctx context.Context, deps Deps, pubKeyPath string, tw *table
 	return nil
 }
 
-// extractUplinkToken parses the token value from the uplink add command output.
-// The output format is "Uplink token for ...(shown once):\n<token>\n".
-func extractUplinkToken(output string) string {
-	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
-	for i, line := range lines {
-		if strings.HasPrefix(line, "Uplink token for ") && i+1 < len(lines) {
-			return strings.TrimSpace(lines[i+1])
-		}
-	}
-	// Fallback: if only one non-empty line that looks like a token
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "oberth_") {
-			return trimmed
-		}
-	}
-	return ""
-}
-
 // validatePublicKeyFile checks that the file content is an SSH public key (in
 // authorized_keys format), not a private key. A common operator mistake is
 // pointing the public-key prompt at id_ed25519 instead of id_ed25519.pub;
-// without this check the private key is sent to the pod via kubectl exec stdin.
+// The check prevents private material from entering public enrollment.
 func validatePublicKeyFile(data []byte) error {
 	// Check for private key material first — ssh.ParsePrivateKey accepts PEM
 	// private keys, so if it succeeds this is a private key, not a public one.
@@ -1398,21 +1236,6 @@ func validatePublicKeyFile(data []byte) error {
 		return errors.New("file must contain exactly one SSH public key and no other material")
 	}
 	return nil
-}
-
-// sanitizeExecOutput strips lines containing bearer tokens (oberth_*) from
-// kubectl exec output before embedding it in error messages or non-credential
-// display, so tokens are never leaked through error strings or log lines.
-func sanitizeExecOutput(output string) string {
-	var cleaned []string
-	for _, line := range strings.Split(output, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "oberth_") {
-			continue
-		}
-		cleaned = append(cleaned, line)
-	}
-	return strings.Join(cleaned, "\n")
 }
 
 func defaultUplinkIdentity() string {
@@ -1987,23 +1810,30 @@ func orgFromBaseURL(baseURL string) string {
 // not yet fully written — the rename is atomic on POSIX filesystems, so the
 // target is either the old content or the complete new content.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
 	file, err := os.CreateTemp(filepath.Dir(path), ".oberth-config-*")
 	if err != nil {
 		return err
 	}
-	tmp := file.Name()
-	defer func() { _ = os.Remove(tmp) }() //nolint:gosec // G703: temporary file created by this function in the selected configuration directory.
+	tmp := filepath.Base(file.Name())
+	defer func() { _ = root.Remove(tmp) }()
 	if err = file.Chmod(perm); err == nil {
 		_, err = file.Write(data)
 	}
-	closeErr := file.Close()
-	if err != nil {
+	if err == nil {
+		err = file.Sync()
+	}
+	if err := errors.Join(err, file.Close()); err != nil {
 		return err
 	}
-	if closeErr != nil {
-		return closeErr
+	if err := root.Rename(tmp, filepath.Base(path)); err != nil {
+		return err
 	}
-	return os.Rename(tmp, path) //nolint:gosec // G703: atomic publication in the operator-selected configuration directory.
+	return syncConfigDirectory(filepath.Dir(path))
 }
 
 // ---------------------------------------------------------------------------

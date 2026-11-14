@@ -97,6 +97,7 @@ func TestRekorBaoProvisioningPreservesCredentials(t *testing.T) {
 		t.Fatalf("unexpected command %s", command)
 		return nil, nil
 	}
+	refreshFixtureAdmin(&deps)
 	store := newOpenBaoExec(deps, "openbao", "openbao-0")
 	first, err := configureRekorBao(ctx, Config{}, deps, store, token)
 	if err != nil {

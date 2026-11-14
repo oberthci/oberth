@@ -210,6 +210,11 @@ func (s *Store) SetUplinkScope(ctx context.Context, actor, identity, fingerprint
 	if err != nil {
 		return model.Uplink{}, err
 	}
+	if len(normalized) > 0 {
+		if err := guardLastActiveAdmin(ctx, tx, value.ID, now); err != nil {
+			return model.Uplink{}, err
+		}
+	}
 	if err := replaceUplinkScopes(ctx, tx, value.ID, normalized); err != nil {
 		return model.Uplink{}, err
 	}

@@ -231,3 +231,38 @@ unresolved substitutions are refused. A file written on the step's own root
 filesystem remains a supported output parameter. Native output artifacts remain
 refused. Argo wait retains its native mirrors, including CA and helper mounts;
 the executor-token delivery and read-only source protections remain in place.
+
+Administrative onboarding uses exactly one operator-authorized server Pod exec,
+`admin create-first-admin`. It accepts only public SSH and certificate requests.
+The installer saves its private key and CSR in the owner-only local configuration
+directory before that exec. An interrupted response can be retried with the same
+identity, SSH fingerprint and installer key; the server reissues credentials in
+one audited transaction. A different key is refused while an active unscoped
+administrator exists. If none remains active, that same exec privilege permits
+audited recovery. Scoping, demoting or replacing the last active unscoped admin is
+refused by the normal administrative APIs.
+
+An unscoped admin may configure an SSH upstream at any reachable host and port
+and approve its first host key. This SSH destination and first-use trust authority
+is accepted as part of administrative access (review L2). Supply
+`expected_host_fingerprint` to require a previously verified host key.
+
+Only one database backup download may be open at once; another receives HTTP
+429. The server verifies a single snapshot on the database volume and streams
+its archive directly. It requires snapshot and live WAL headroom, creates no
+second archive in `/tmp`, and applies a 30-second rolling write idle deadline
+instead of the ordinary three-minute response write timeout. Lifecycle audit
+details accept only the documented action's keys and scalar values, up to 2 KiB.
+
+For `backup.completed`, audit detail keys are `archive_sha256`, `bytes`, `scope`,
+`audit_head_id`, and `audit_head_sha256`. For `restore.completed`, they are
+`archive_sha256`, `history`, `secrets`, `from_audit_head_id`, and
+`from_audit_head_sha256`. For `upgrade.completed`, they are `from`, `to`, and
+`rollback`. Arrays, objects, null values and all other keys are refused.
+
+First-admin recovery requires the database to have no active unscoped admin.
+A lost credential that is still valid continues to count as active and prevents
+a different installer key from taking over. This route cannot recover such a
+credential until it expires or is revoked; a bearer without an expiry does not
+become recoverable by waiting. A retry with the original installer key remains
+eligible for credential redelivery.

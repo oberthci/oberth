@@ -29,10 +29,3 @@ func TestHTTPSPreflightListsNamesAndRefusesBeforeUpgrade(t *testing.T) {
 		t.Fatalf("safe inventory: %v %v", names, err)
 	}
 }
-func TestHTTPSUpstreamRegistrationRefusesBeforeAnySideEffect(t *testing.T) {
-	var output bytes.Buffer
-	err := runUpstreamWithDependencies(t.Context(), []string{"add", "name", "https://forge.example/acme"}, &output, upstreamDependencies{})
-	if err == nil || !strings.Contains(err.Error(), "built without curl") {
-		t.Fatalf("registration advanced to mutation/database/key access: %v", err)
-	}
-}

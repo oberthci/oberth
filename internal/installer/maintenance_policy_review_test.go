@@ -26,7 +26,7 @@ func TestExistingUpgradeDoesNotRequireFreshProbe(t *testing.T) {
 			reads := 0
 			probeCalls := 0
 			kube := argoSecurityTestClient(preflightNode(), preflightStorage())
-			host := InstallDeps{Output: &output, CredentialSink: func(string, string) {},
+			host := testAdminInstallDeps(InstallDeps{Output: &output, CredentialSink: func(string, string) {},
 				LookPath:     func(name string) (string, error) { return name, nil },
 				KubeContexts: func(string) ([]string, error) { return []string{"chosen"}, nil },
 				LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
@@ -52,7 +52,7 @@ func TestExistingUpgradeDoesNotRequireFreshProbe(t *testing.T) {
 					}
 					return nil, stopped
 				},
-			}
+			})
 			err := Execute(t.Context(), Config{ContextName: "chosen", Upgrade: true, NetworkPolicy: "auto", InstallSecretStoreDev: true, ChartPath: testLocalChart, ClientAccess: "none"}, host)
 			t.Logf("stored=%s helmReads=%d preflightRejected=%v", stored, reads, errors.Is(err, errInstallPreflight))
 			want := stored
@@ -82,7 +82,7 @@ func TestRunUpgradePreservesPolicyWithoutProbePrivileges(t *testing.T) {
 				values["networkPolicy"] = map[string]any{"enabled": stored == "true"}
 			}
 			raw, _ := json.Marshal(values)
-			deps := Deps{Output: &output, ContextName: "chosen", KubeClient: argoSecurityTestClient(deployment), ProbeNetworkPolicy: func(context.Context, Config, Deps) NetworkPolicyProbeResult {
+			deps := testAdminDeps(Deps{Output: &output, ContextName: "chosen", KubeClient: argoSecurityTestClient(deployment), ProbeNetworkPolicy: func(context.Context, Config, Deps) NetworkPolicyProbeResult {
 				t.Fatal("dedicated upgrade required fresh probe")
 				return NetworkPolicyProbeResult{Status: "unverified"}
 			},
@@ -132,7 +132,7 @@ func TestRunUpgradePreservesPolicyWithoutProbePrivileges(t *testing.T) {
 					}
 					return nil, fmt.Errorf("unexpected helm %v", args)
 				},
-			}
+			})
 			result, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.21.11", Namespace: "oberth", Yes: true, NoBackup: true, ChartOverride: testLocalChart, Timeout: time.Second}, deps)
 			if err != nil || !result.Upgraded || !applied {
 				t.Fatal("maintenance refused", err, output.String())

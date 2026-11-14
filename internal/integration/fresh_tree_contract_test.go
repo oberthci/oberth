@@ -114,20 +114,16 @@ func TestChartValidationIsClusterIndependent(t *testing.T) {
 			t.Fatalf("chart validation retains cluster-dependent command %q", forbidden)
 		}
 	}
-	// The required list pins the trimmed NOTES contract established by #838
-	// and encoded in hack/test-chart.sh by e4ff640: namespaced in-pod exec
-	// commands for the two bootstrap actions, the vault-like not-ready
-	// explanation, the docs pointer, and the no-curl-k rule. The exec pin
-	// matches the script's quote-concatenated pattern, which keeps the raw
-	// script body free of the cluster-dependent command text forbidden above.
+	// Pin the rendered NOTES contract: one initial enrollment exec, subsequent
+	// upstream administration through the API, the readiness explanation, the
+	// documentation pointer, and verified HTTPS.
 	for _, required := range []string{
 		`notes_template=$chart/templates/NOTES.txt`,
 		`notes_chart=$package_dir/notes-chart`,
 		`--show-only templates/notes-contract.yaml`,
-		`'kubectl'' exec -it -n default deploy/oberth'`,
-		`oberth upstream add github ssh://git@github.com/your-org`,
-		`oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub`,
-		`stays Running but not ready (0/1)`,
+		`installation exec creates that identity`,
+		`oberth upstream add --yes --no-wait github ssh://git@github.com/your-org`,
+		`Running but not ready`,
 		`https://github.com/oberthci/oberth#documentation`,
 		`curl[[:space:]]+(-[^[:space:]]*[[:space:]]+)*-k([[:space:]]|$)`,
 	} {

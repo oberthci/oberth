@@ -51,87 +51,117 @@ func WriteStableVerifiedBackup(ctx context.Context, path string, expected int, o
 	return writeVerifiedBackup(ctx, path, expected, opts, output, true)
 }
 
+type preparedDatabaseBackup struct {
+	snapshot string
+	members  []backupMember
+	report   BackupReport
+	manifest []byte
+	cleanup  func() error
+}
+
 func writeVerifiedBackup(ctx context.Context, path string, expected int, opts Options, output io.Writer, stable bool) (report BackupReport, resultErr error) {
-	if ctx == nil || output == nil || expected < 3 || expected > latestMigrationVersion {
-		return report, errors.New("backup arguments refused")
+	if output == nil {
+		return report, errors.New("backup output required")
 	}
-	limit, err := BackupMaxBytes(opts.BackupMaxBytes)
+	prepared, err := prepareVerifiedBackup(ctx, path, expected, opts, stable)
 	if err != nil {
 		return report, err
 	}
-	if err := ctx.Err(); err != nil {
-		return report, err
+	defer func() { resultErr = errors.Join(resultErr, prepared.cleanup()) }()
+	return prepared.report, prepared.write(ctx, output)
+}
+
+func prepareVerifiedBackup(ctx context.Context, path string, expected int, opts Options, stable bool) (*preparedDatabaseBackup, error) {
+	if ctx == nil || expected < 3 || expected > latestMigrationVersion {
+		return nil, errors.New("backup arguments refused")
 	}
-	output = backupContextWriter{Writer: output, ctx: ctx}
+	limit, err := BackupMaxBytes(opts.BackupMaxBytes)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var snapshot string
 	var cleanup func() error
 	if stable {
 		if _, err := backupMembers(ctx, path, limit); err != nil {
-			return report, err
+			return nil, err
 		}
 		snapshot, cleanup, err = snapshotCurrentDatabase(path)
 	} else {
 		snapshot, cleanup, err = snapshotOnlineDatabase(ctx, path, limit)
 	}
 	if err != nil {
-		return report, err
+		return nil, err
 	}
-	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
+	keep := false
+	defer func() {
+		if !keep {
+			_ = cleanup()
+		}
+	}()
 	if err := ctx.Err(); err != nil {
-		return report, err
+		return nil, err
 	}
 	members, err := backupMembers(ctx, snapshot, limit)
 	if err != nil {
-		return report, err
+		return nil, err
 	}
-	report, err = verifyBackupSnapshot(ctx, snapshot, expected, opts)
+	report, err := verifyBackupSnapshot(ctx, snapshot, expected, opts)
 	if err != nil {
-		return BackupReport{}, err
+		return nil, err
 	}
 	current, err := backupMembers(ctx, snapshot, limit)
 	if err != nil {
-		return BackupReport{}, err
+		return nil, err
 	}
 	if len(current) != len(members) {
-		return BackupReport{}, errors.New("backup snapshot changed")
+		return nil, errors.New("backup snapshot changed")
 	}
 	for i := range current {
 		if current[i] != members[i] {
-			return BackupReport{}, errors.New("backup snapshot changed")
+			return nil, errors.New("backup snapshot changed")
 		}
 	}
 	manifest, err := json.Marshal(backupManifest{Format: "oberth.database-backup/v1", BackupReport: report, Members: members})
 	if err != nil {
-		return BackupReport{}, err
+		return nil, err
 	}
+	keep = true
+	return &preparedDatabaseBackup{snapshot: snapshot, members: members, report: report, manifest: manifest, cleanup: cleanup}, nil
+}
+
+func (p *preparedDatabaseBackup) write(ctx context.Context, output io.Writer) error {
+	output = backupContextWriter{Writer: output, ctx: ctx}
 	archive := tar.NewWriter(output)
-	for _, member := range members {
+	for _, member := range p.members {
 		if err := ctx.Err(); err != nil {
-			return BackupReport{}, err
+			return err
 		}
 		if err := archive.WriteHeader(&tar.Header{Name: member.Name, Mode: 0600, Size: member.Size, Typeflag: tar.TypeReg, Format: tar.FormatUSTAR}); err != nil {
-			return BackupReport{}, err
+			return err
 		}
-		f, err := os.Open(filepath.Join(filepath.Dir(snapshot), member.Name))
+		f, err := os.Open(filepath.Join(filepath.Dir(p.snapshot), member.Name))
 		if err != nil {
-			return BackupReport{}, err
+			return err
 		}
 		_, copyErr := io.CopyN(archive, f, member.Size)
 		closeErr := f.Close()
 		if err := errors.Join(copyErr, closeErr); err != nil {
-			return BackupReport{}, err
+			return err
 		}
 	}
-	if err := archive.WriteHeader(&tar.Header{Name: "manifest.json", Mode: 0600, Size: int64(len(manifest)), Typeflag: tar.TypeReg, Format: tar.FormatUSTAR}); err != nil {
-		return BackupReport{}, err
+	if err := archive.WriteHeader(&tar.Header{Name: "manifest.json", Mode: 0600, Size: int64(len(p.manifest)), Typeflag: tar.TypeReg, Format: tar.FormatUSTAR}); err != nil {
+		return err
 	}
-	if _, err := archive.Write(manifest); err != nil {
-		return BackupReport{}, err
+	if _, err := archive.Write(p.manifest); err != nil {
+		return err
 	}
 	if err := archive.Close(); err != nil {
-		return BackupReport{}, err
+		return err
 	}
-	return report, ctx.Err()
+	return ctx.Err()
 }
 
 func backupMembers(ctx context.Context, path string, maxBytes int64) ([]backupMember, error) {

@@ -4,147 +4,99 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
-	"reflect"
+	"net/http"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/oberthci/oberth/internal/client"
+	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestUpgradeWaitIdleTargetsSelectedDeploymentAndStopsOnFailure(t *testing.T) {
-	wantErr := errors.New("queue observation failed")
-	cfg := UpgradeConfig{Namespace: "chosen", Timeout: time.Second, WaitIdle: true}
-	calls := 0
-	deps := Deps{ContextName: "chosen-context", RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
-		calls++
-		want := []string{"--context", "chosen-context", "exec", "-c", "oberth", "-n", "chosen", "deploy/oberth", "--", "/usr/local/bin/oberth", "wait-idle", "--timeout=2h0m0s"}
-		if name != "kubectl" || !reflect.DeepEqual(args, want) || len(input) != 0 {
-			t.Fatalf("unexpected command %s %v", name, args)
-		}
-		if _, ok := ctx.Deadline(); !ok {
-			t.Fatal("idle wait has no deadline")
-		}
-		return nil, wantErr
-	}}
-	if err := waitForUpgradeIdle(t.Context(), cfg, deps); !errors.Is(err, wantErr) {
-		t.Fatalf("lost refusal: %v", err)
-	}
-	if calls != 1 {
-		t.Fatalf("blindly retried upgrade preparation: %d", calls)
-	}
+type idleAdminFunc func(context.Context, string, any, any) error
+
+func (f idleAdminFunc) Admin(ctx context.Context, action string, args, into any) error {
+	return f(ctx, action, args, into)
+}
+func (f idleAdminFunc) DownloadAdminBackup(context.Context, int64, io.Writer) error {
+	return errors.New("unexpected download")
 }
 
-func TestUpgradeWaitTimeoutIndependentAndCancelable(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		var output bytes.Buffer
-		start := time.Now()
-		err := waitForUpgradeIdle(t.Context(), UpgradeConfig{WaitIdle: true, WaitTimeout: 3 * time.Minute, Timeout: time.Minute}, Deps{Output: &output, RunCommand: func(ctx context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
-			if !strings.Contains(strings.Join(args, " "), "--timeout=3m0s") {
-				t.Fatal(args)
+func TestAdminIdleObservation(t *testing.T) {
+	t.Run("BusyThenIdleAndCriticalSelection", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			calls := 0
+			var out bytes.Buffer
+			deps := Deps{Output: &out, PollInterval: time.Second, Admin: idleAdminFunc(func(ctx context.Context, action string, args, into any) error {
+				calls++
+				if action != "idle" || args.(map[string]string)["wait_for"] != "critical" {
+					t.Fatal(action, args)
+				}
+				if _, ok := ctx.Deadline(); !ok {
+					t.Fatal("missing deadline")
+				}
+				busy := calls == 1
+				queue := model.IdleQueueStatus{Version: 1}
+				if busy {
+					queue.Running = 1
+					queue.Tag = 1
+				}
+				return fixtureDecode(map[string]any{"busy": busy, "queue": queue}, into)
+			})}
+			if err := observeAdminIdle(t.Context(), UpgradeConfig{WaitFor: "critical", WaitTimeout: time.Minute}, deps); err != nil || calls != 2 || !strings.Contains(out.String(), "critical=1") {
+				t.Fatal(err, calls, out.String())
 			}
-			<-ctx.Done()
-			return nil, errors.New("signal: killed")
-		}})
-		if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 3*time.Minute || !strings.Contains(err.Error(), "upgrade not attempted") || !strings.Contains(output.String(), "elapsed=2m0s") {
-			t.Fatalf("elapsed=%s error=%v output=%s", time.Since(start), err, &output)
+		})
+	})
+	t.Run("TransientThenRecovery", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			calls := 0
+			deps := Deps{Output: io.Discard, PollInterval: time.Second, Admin: idleAdminFunc(func(_ context.Context, _ string, _ any, into any) error {
+				calls++
+				if calls == 1 {
+					return &client.AdminError{StatusCode: 503, Cause: errors.New("temporarily unavailable")}
+				}
+				return fixtureDecode(map[string]any{"busy": false, "queue": model.IdleQueueStatus{Version: 1}}, into)
+			})}
+			if err := observeAdminIdle(t.Context(), UpgradeConfig{}, deps); err != nil || calls != 2 {
+				t.Fatal(err, calls)
+			}
+		})
+	})
+	t.Run("AuthorizationStopsImmediately", func(t *testing.T) {
+		calls := 0
+		deps := Deps{Output: io.Discard, Admin: idleAdminFunc(func(context.Context, string, any, any) error {
+			calls++
+			return &client.AdminError{StatusCode: http.StatusForbidden, Cause: errors.New("forbidden")}
+		})}
+		if err := observeAdminIdle(t.Context(), UpgradeConfig{}, deps); err == nil || calls != 1 {
+			t.Fatal(err, calls)
 		}
 	})
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	err := waitForUpgradeIdle(ctx, UpgradeConfig{WaitTimeout: time.Hour}, Deps{RunCommand: func(ctx context.Context, _ []byte, _ string, _ ...string) ([]byte, error) { return nil, ctx.Err() }})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatal(err)
-	}
-}
-
-func TestUpgradeWaitCriticalAndStreamProgress(t *testing.T) {
-	var output bytes.Buffer
-	err := waitForUpgradeIdle(t.Context(), UpgradeConfig{WaitFor: "critical", WaitTimeout: time.Hour}, Deps{Output: &output, RunCommandStream: func(ctx context.Context, w io.Writer, name string, args ...string) error {
-		if name != "kubectl" || !strings.Contains(strings.Join(args, " "), "--wait-for=critical") {
-			t.Fatal(name, args)
+	t.Run("OwnDeadlineAndCancellation", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			start := time.Now()
+			deps := Deps{Output: io.Discard, Admin: idleAdminFunc(func(ctx context.Context, _ string, _ any, _ any) error { <-ctx.Done(); return ctx.Err() })}
+			err := observeAdminIdle(t.Context(), UpgradeConfig{Timeout: time.Second, WaitTimeout: 3 * time.Minute}, deps)
+			if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 3*time.Minute {
+				t.Fatal(err, time.Since(start))
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			err = observeAdminIdle(ctx, UpgradeConfig{}, deps)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
+			}
+		})
+	})
+	t.Run("InvalidObservationRefused", func(t *testing.T) {
+		deps := Deps{Admin: idleAdminFunc(func(_ context.Context, _ string, _ any, into any) error {
+			return fixtureDecode(map[string]any{"busy": false, "queue": model.IdleQueueStatus{}}, into)
+		})}
+		if err := observeAdminIdle(t.Context(), UpgradeConfig{}, deps); err == nil {
+			t.Fatal("invalid queue accepted")
 		}
-		_, err := io.WriteString(w, "queued=2 running=1 branch=1 critical=2\n")
-		return err
-	}})
-	if err != nil || !strings.Contains(output.String(), "queued=2 running=1 branch=1 critical=2") {
-		t.Fatalf("%v %s", err, &output)
-	}
-}
-
-func TestUpgradeWaitOldBinaryDiagnostic(t *testing.T) {
-	for _, test := range []struct {
-		name, mode, diagnostic string
-		stream, failed, mapped bool
-	}{
-		{"buffered", "critical", "flag provided but not defined: -wait-for", false, true, true},
-		{"streamed in chunks", "critical", "flag provided but not defined: -wait-for", true, true, true},
-		{"all selection", "all", "flag provided but not defined: -wait-for", true, true, false},
-		{"other flag", "critical", "flag provided but not defined: -timeout", true, true, false},
-		{"successful child", "critical", "flag provided but not defined: -wait-for", true, false, false},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			wantErr := errors.New("child exit status 2")
-			if !test.failed {
-				wantErr = nil
-			}
-			deps := Deps{}
-			if test.stream {
-				deps.RunCommandStream = func(_ context.Context, output io.Writer, _ string, _ ...string) error {
-					// Model arbitrary stdout/stderr write boundaries.
-					for _, b := range []byte(test.diagnostic) {
-						if _, err := output.Write([]byte{b}); err != nil {
-							return err
-						}
-					}
-					return wantErr
-				}
-			} else {
-				deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
-					return []byte(test.diagnostic), wantErr
-				}
-			}
-			err := waitForUpgradeIdle(t.Context(), UpgradeConfig{WaitFor: test.mode}, deps)
-			if test.failed && !errors.Is(err, wantErr) || !test.failed && err != nil {
-				t.Fatalf("child failure lost: %v", err)
-			}
-			mapped := err != nil && strings.Contains(err.Error(), "server too old for --wait-for=critical; use --wait-for=all")
-			if mapped != test.mapped {
-				t.Fatalf("mapped=%v want=%v: %v", mapped, test.mapped, err)
-			}
-		})
-	}
-}
-
-func TestUpgradeWaitDeadlineRetainsChildProbeDiagnostic(t *testing.T) {
-	for _, recovered := range []bool{false, true} {
-		t.Run(fmt.Sprint(recovered), func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				cfg := UpgradeConfig{WaitFor: "critical", WaitTimeout: time.Minute}
-				err := waitForUpgradeIdle(t.Context(), cfg, Deps{RunCommandStream: func(ctx context.Context, w io.Writer, _ string, _ ...string) error {
-					line := "Waiting for critical queue: transient idle probe failure: fixture socket timeout; retrying (elapsed=5s)\n"
-					if recovered {
-						line += "Waiting for critical queue: queued=1 running=0 branch=0 critical=1\n"
-					}
-					for _, b := range []byte(line) {
-						if _, err := w.Write([]byte{b}); err != nil {
-							return err
-						}
-					}
-					<-ctx.Done()
-					return errors.New("signal: killed")
-				}})
-				if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "upgrade not attempted") {
-					t.Fatal(err)
-				}
-				if strings.Contains(err.Error(), "; retrying (elapsed=") {
-					t.Fatalf("retry progress suffix leaked into final error: %v", err)
-				}
-				if strings.Contains(err.Error(), "last reported idle probe failure: fixture socket timeout") == recovered {
-					t.Fatalf("recovered=%t err=%v", recovered, err)
-				}
-			})
-		})
-	}
+	})
 }

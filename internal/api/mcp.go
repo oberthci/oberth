@@ -600,6 +600,11 @@ func knownTool(name string) bool { return registeredToolNames()[name] }
 // is not offered 46 tools it can only be refused; a call is still answered
 // with the server's refusal.
 var adminOnlyTools = map[string]bool{
+	"uplink_add":   true,
+	"uplink_scope": true,
+	"upstream_add": true, "upstream_list": true, "upstream_remove": true, "upstream_provide_key": true,
+	"repo_add": true, "repo_verify": true, "admin_access_list": true, "admin_public_identity": true,
+	"admin_readiness": true, "admin_version": true, "admin_idle": true, "admin_audit_record": true,
 	"publication_abandon": true, "run_purge": true, "issue_unlock": true, "issue_close_many": true,
 	"uplink_invite": true, "uplink_cert": true, "uplink_list": true, "uplink_revoke": true, "uplink_rotate": true,
 	"access_dismiss": true, "access_allow": true, "access_revoke": true,
@@ -687,7 +692,7 @@ func toolDefinitions() []map[string]any {
 	tool := func(name, description string, schema map[string]any) map[string]any {
 		return map[string]any{"name": name, "description": description, "inputSchema": schema, "outputSchema": toolOutputSchema(name)}
 	}
-	return append([]map[string]any{
+	return append(append(administrationToolDefinitions(tool, object, stringProperty), []map[string]any{
 		tool("status", "Return concise CI status for a full SHA, short SHA, or branch, including the failed step.", object(map[string]any{"repo": stringProperty("Repository name when the selector is ambiguous"), "ref": stringProperty("Full SHA, short SHA, or branch")}, "ref")),
 		tool("logs", "Return one named step log for a SHA, optionally filtered server-side. Prefer a pattern over retrieving a whole step: counts are lower bounds unless scan_complete is true; continue has_more pages with next_byte_offset as byte_offset and offset:0.", object(logFilterProperties(map[string]any{"repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full or short SHA"), "step": stringProperty("Step name")}), "sha", "step")),
 		tool("run_get", "Return one run by full durable ID or unique hexadecimal prefix (at least 8 characters). Default (summary): id/repo/ref/sha, status/phase/failed_burn/failed_step/error, display_status/display_reason and compact steps (burn, name, status, started_at, finished_at). display_status is one of queued, running, passed, failed or cancelled; display_reason names the cause. Set summary:false for the full record: step results with diagnostics, versioned retained Workflow/step timing without admission episodes (missing timing is unknown; unavailable=pruned once the run is older than the retained timing window), the repository record and Scheduling.", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"), "summary": map[string]any{"type": "boolean", "description": "true (default) returns run identity, run context, failure and compact steps; false returns the full record"}}, "id")),
@@ -904,7 +909,7 @@ func toolDefinitions() []map[string]any {
 			"sha":    stringProperty("Filter by exact full source SHA"),
 			"status": map[string]any{"type": "string", "enum": []string{"active", "revoked", "expired", "consumed", "all"}, "description": "Filter by grant status (default: all)"},
 		})),
-	}, agentLoopToolDefinitions(tool, object, stringProperty)...)
+	}...), agentLoopToolDefinitions(tool, object, stringProperty)...)
 }
 
 // IssueReadFields is the public MCP field allowlist; persistence-only fields
@@ -1000,5 +1005,28 @@ func agentLoopToolDefinitions(tool func(string, string, map[string]any) map[stri
 			"since": stringProperty("History window such as 6h or 7d (default 24h, maximum 30d)"),
 			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 2000, "description": "Maximum stored intervals, newest first (default 2000)"},
 		})),
+	}
+}
+
+func administrationToolDefinitions(tool func(string, string, map[string]any) map[string]any, object func(map[string]any, ...string) map[string]any, stringProperty func(string) map[string]any) []map[string]any {
+	return []map[string]any{
+		tool("uplink_add", "Enroll an uplink under an existing unscoped admin. Public SSH key and optional CSR only; private keys stay local. CSR enrollment mints no bearer unless requested. Administrator grants are explicit; audited without credential material.", object(map[string]any{"identity": stringProperty("Uplink identity@host"), "ssh_public_key": stringProperty("One bare SSH public key, never a path"), "csr": stringProperty("Optional public PEM CSR"), "admin": map[string]any{"type": "boolean"}, "bearer": map[string]any{"type": "boolean"}, "ttl": stringProperty("Credential lifetime, bounded by server policy"), "scope": map[string]any{"type": "array", "maxItems": 128, "items": stringProperty("Upstream name or metrics")}}, "identity", "ssh_public_key")),
+		tool("uplink_scope", "Set an uplink repository scope; an empty array clears it. Unscoped admin only; audited. Requires an existing admin identity.", object(map[string]any{"identity": stringProperty("Uplink identity@host"), "fingerprint": stringProperty("Optional SHA256 SSH public-key fingerprint to disambiguate"), "scope": map[string]any{"type": "array", "maxItems": 128, "items": stringProperty("Registered upstream name or metrics")}}, "identity", "scope")),
+		tool("upstream_add", "Register an upstream using the server identity store. Unscoped admin only; audited. Requires an existing admin identity. SSH bootstrap uses pinned host keys and fixed identity bundles.", object(map[string]any{
+			"name": stringProperty("Upstream name"), "base_url": stringProperty("SSH repository namespace URL; local filesystem paths are refused"),
+			"dedicated_key": map[string]any{"type": "boolean"}, "expected_host_fingerprint": stringProperty("Expected SHA256 SSH host fingerprint"),
+			"repin": map[string]any{"type": "boolean"}, "check_repo": stringProperty("Repository name to probe"), "no_wait": map[string]any{"type": "boolean"},
+		}, "name", "base_url")),
+		tool("upstream_list", "List registered upstreams, optionally checking authentication. Unscoped admin only; audited.", object(map[string]any{"check": map[string]any{"type": "boolean"}})),
+		tool("upstream_remove", "Remove an upstream and its repository mappings. Unscoped admin only; audited.", object(map[string]any{"name": stringProperty("Upstream name")}, "name")),
+		tool("upstream_provide_key", "Import an SSH private key into the fixed upstream identity bundle. Unscoped admin only; audited without key material. Never accepts a key file path.", object(map[string]any{"name": stringProperty("Upstream name"), "private_key": stringProperty("Unencrypted SSH private key material, at most 64 KiB"), "dedicated_key": map[string]any{"type": "boolean"}}, "name", "private_key")),
+		tool("repo_add", "Register a repository mapping; the first push confirms its default branch. Unscoped admin only; audited.", object(map[string]any{"repo": stringProperty("Relative repository identity"), "upstream": stringProperty("Registered upstream name"), "default_branch": stringProperty("Default branch, main when omitted")}, "repo", "upstream")),
+		tool("repo_verify", "Probe a registered repository using the server's existing upstream identity. Unscoped admin only; audited.", object(map[string]any{"repo": stringProperty("Relative repository identity")}, "repo")),
+		tool("admin_access_list", "Read all active grants for installer identity production. Unscoped admin only; audited. Returns path names only.", object(map[string]any{})),
+		tool("admin_public_identity", "Read named public identity material. Unscoped admin only; audited. Never accepts a filesystem path.", object(map[string]any{"name": map[string]any{"type": "string", "enum": []string{"server-certificate", "server-ca", "upstream-public-key"}}}, "name")),
+		tool("admin_readiness", "Read current readiness with a safe reason code. Unscoped admin only; audited.", object(map[string]any{})),
+		tool("admin_version", "Read server binary and database schema versions. Unscoped admin only; audited.", object(map[string]any{})),
+		tool("admin_idle", "Observe the all or critical queue; the installer owns waiting. Unscoped admin only; audited. This observation never freezes admission.", object(map[string]any{"wait_for": map[string]any{"type": "string", "enum": []string{"all", "critical"}}})),
+		tool("admin_audit_record", "Record a completed operator lifecycle action. Unscoped admin only; actor identity comes from authentication.", object(map[string]any{"action": map[string]any{"type": "string", "enum": []string{"backup.completed", "restore.completed", "upgrade.completed"}}, "details": map[string]any{"type": "object"}}, "action")),
 	}
 }

@@ -19,14 +19,14 @@ func TestUnsealTrustGatePrecedesClusterAndRecoveryAccess(t *testing.T) {
 	ca := newTestServerCA(t, []string{"api.example.test"})
 	for _, config := range []*rest.Config{nil, {Host: "http://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: ca}}, {Host: "https://api.example.test"}, {Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: ca, Insecure: true}}} {
 		kube := fake.NewClientset()
-		_, err := ExecuteUnseal(t.Context(), UnsealConfig{SecretsFile: "/missing/not-read"}, InstallDeps{
+		_, err := ExecuteUnseal(t.Context(), UnsealConfig{SecretsFile: "/missing/not-read"}, testAdminInstallDeps(InstallDeps{
 			LookPath:       func(name string) (string, error) { return name, nil },
 			LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) { return kube, config, "chosen", nil },
 			RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
 				t.Fatal("untrusted cluster reached a subprocess")
 				return nil, nil
 			},
-		})
+		}))
 		if err == nil || !strings.Contains(err.Error(), "explicit trusted cluster CA") || len(kube.Actions()) != 0 {
 			t.Fatal("unseal bypassed cluster trust gate")
 		}
@@ -34,9 +34,9 @@ func TestUnsealTrustGatePrecedesClusterAndRecoveryAccess(t *testing.T) {
 }
 
 func TestUnsealRejectsFailedUnsealedStatus(t *testing.T) {
-	deps := Deps{KubeClient: fake.NewClientset(runningOpenBaoPod(), runningOpenBaoStatefulSet()), RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
+	deps := testAdminDeps(Deps{KubeClient: fake.NewClientset(runningOpenBaoPod(), runningOpenBaoStatefulSet()), RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
 		return []byte(`{"initialized":true,"sealed":false}`), errors.New("transport failed")
-	}}
+	}})
 	if _, err := unsealWithDeps(t.Context(), UnsealConfig{OpenBaoNamespace: "openbao", StatusOnly: true}, deps); err == nil {
 		t.Fatal("failed status claimed unsealed")
 	}
@@ -61,7 +61,13 @@ esac
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("UNSEAL_TEST_TRACE", trace)
-	deps := Deps{KubeClient: fake.NewClientset(runningOpenBaoPod(), runningOpenBaoStatefulSet()), ContextName: "chosen", RunCommand: privateUnsealCommand}
+	configPath := filepath.Join(t.TempDir(), "kubeconfig")
+	if err := os.WriteFile(configPath, []byte(strings.ReplaceAll(testKubeconfig, "test", "chosen")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", configPath)
+
+	deps := testAdminDeps(Deps{KubeClient: fake.NewClientset(runningOpenBaoPod(), runningOpenBaoStatefulSet()), ContextName: "chosen", RunCommand: privateUnsealCommand})
 	_, err := unsealWithDeps(t.Context(), UnsealConfig{SecretsFile: path, OpenBaoNamespace: "openbao"}, deps)
 	if err == nil || strings.Contains(err.Error(), string(key)) {
 		t.Fatal("unsafe subprocess failure")

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,6 +22,7 @@ import (
 // only the Kubernetes and subprocess transports are simulated.
 func TestInstallUnreachableClientEndpoint(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	ca := newTestServerCA(t, []string{"api.example.test"})
 	for _, jsonOutput := range []bool{false, true} {
 		t.Run(strconv.FormatBool(jsonOutput), func(t *testing.T) {
 			listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -32,11 +34,14 @@ func TestInstallUnreachableClientEndpoint(t *testing.T) {
 			kube := argoSecurityTestClient(preflightNode(), preflightStorage(), readyOberthPod(), readyArgoControllerPod())
 			var output bytes.Buffer
 			deployed := false
-			host := InstallDeps{Output: &output, LookPath: func(name string) (string, error) { return name, nil }, ProbeNetworkPolicy: enforcedPolicyFixture,
+			host := testAdminInstallDeps(InstallDeps{Output: &output, LookPath: func(name string) (string, error) { return name, nil }, ProbeNetworkPolicy: enforcedPolicyFixture,
 				LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
-					return kube, &rest.Config{Host: "https://192.0.2.10:6443", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA(t, []string{"api.example.test"})}}, "chosen", nil
+					return kube, &rest.Config{Host: "https://192.0.2.10:6443", TLSClientConfig: rest.TLSClientConfig{CAData: ca}}, "chosen", nil
 				},
 				RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+					if slices.Contains(args, "create-first-admin") {
+						return (&fakeOberthHost{t: t}).run(ctx, input, name, args...)
+					}
 					if strings.Contains(strings.Join(args, " "), "upstream list") {
 						return []byte("NAME KIND URL KEY FINGERPRINT\nforge ssh ssh://git@forge.example.test/repos SHA256:public\n"), nil
 					}
@@ -58,7 +63,7 @@ func TestInstallUnreachableClientEndpoint(t *testing.T) {
 					}
 					return nil, nil
 				},
-			}
+			})
 			cfg := Config{ContextName: "chosen", ChartPath: testLocalChart, ImageRef: fakeChartImageRef, ClientHost: "localhost", ClientHTTPSPort: port, ClientAccess: "none", Timeout: time.Second}
 			if jsonOutput {
 				err = ExecuteJSON(t.Context(), cfg, host)
@@ -144,6 +149,7 @@ func TestFreshInstallChecksEndpointAfterRegistrationMakesServiceReady(t *testing
 		}
 		return out, err
 	}
+	refreshFixtureAdmin(&deps)
 	cfg := Config{ForgeType: "github", ForgeOrg: "acme", SSHPublicKeyPath: key, UplinkIdentity: "admin@workstation", ClientAccess: "none", ClientHost: "127.0.0.1", ClientHTTPSPort: port, Timeout: time.Second}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)

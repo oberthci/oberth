@@ -28,6 +28,11 @@ const (
 )
 
 type Config struct {
+	ServerName           string
+	ClientCertificatePEM []byte
+	//nolint:gosec // G117: Caller-owned inline client key, used only for the TLS handshake.
+	ClientKeyPEM []byte
+
 	ClientCert   string
 	ClientKey    string
 	BaseURL      string
@@ -53,7 +58,7 @@ func (config Config) ResolveToken(ctx context.Context) (string, error) {
 	if config.Token != "" {
 		return config.Token, nil
 	}
-	if config.TokenCommand == "" && config.ClientCert != "" && config.ClientKey != "" {
+	if config.TokenCommand == "" && (config.ClientCert != "" && config.ClientKey != "" || len(config.ClientCertificatePEM) > 0 && len(config.ClientKeyPEM) > 0) {
 		return "", nil
 	}
 	if config.TokenCommand == "" {
@@ -94,7 +99,7 @@ func New(ctx context.Context, config Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if config.ClientCert != "" && base.Scheme != "https" {
+	if (config.ClientCert != "" || len(config.ClientCertificatePEM) > 0) && base.Scheme != "https" {
 		return nil, errors.New("client certificate authentication requires https")
 	}
 	token, err := config.ResolveToken(ctx)
@@ -104,6 +109,20 @@ func New(ctx context.Context, config Config) (*Client, error) {
 	transport, err := newTransport(config.CACert)
 	if err != nil {
 		return nil, err
+	}
+	tlsTransport, ok := transport.(*http.Transport)
+	if !ok {
+		return nil, errors.New("client TLS transport unavailable")
+	}
+	if config.ServerName != "" {
+		tlsTransport.TLSClientConfig.ServerName = config.ServerName
+	}
+	if len(config.ClientCertificatePEM) > 0 || len(config.ClientKeyPEM) > 0 {
+		pair, pairErr := tls.X509KeyPair(config.ClientCertificatePEM, config.ClientKeyPEM)
+		if pairErr != nil {
+			return nil, errors.New("cannot load installer client certificate")
+		}
+		tlsTransport.TLSClientConfig.Certificates = []tls.Certificate{pair}
 	}
 	transport, err = WithClientCertificate(transport, config.ClientCert, config.ClientKey)
 	if err != nil {

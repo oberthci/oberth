@@ -30,7 +30,7 @@ fixture.
 The cell records the existing rest race run once and requires an explicit pass
 event for every required (Go package, top-level test) pair. A same-named test in
 another package cannot satisfy that requirement, and a later skip cannot replace
-the required terminal pass. It does not compile/run the 18 fixtures a second
+the required terminal pass. It does not compile/run the required fixtures a second
 time. The CLI build and one adverse fixture reuse the same race build flags/cache. Those tests cover:
 
 - The fixed-origin fetcher, real OpenSSL checksum signature verification,
@@ -38,6 +38,12 @@ time. The CLI build and one adverse fixture reuse the same race build flags/cach
   tampering, and preservation of an earlier verified installation.
 - Current answers schema and recovery-file path/mode/output validation;
   multi-file and explicit kubeconfig/context selection.
+- First-admin command issuance through the real daemon gate and SQLite Store:
+  first run, same-key redelivery, active-admin refusal and inactive-admin recovery.
+  The recorded rest events must also include the complete non-interactive JSON
+  onboarding/resume flow, interrupted enrollment with and without a saved pending key,
+  and the released-server upgrade path with absent admin routes. These tests
+  cannot be silently skipped.
 - Connect pin refusal, CA verification, CA bundle/settings merge and idempotence;
   client certificate enrollment, invite redemption and add-repo context binding.
 
@@ -69,7 +75,7 @@ because its JSON result says `ok: true`.
 ## Captured output boundary
 
 Captured subprocess stdout/stderr and MCP responses stay in an owner-only
-scratch directory. The 17 installer contract fixtures export private inventories
+scratch directory. The 19 installer contract fixtures export private inventories
 through Go's standard test output directory before their keys/temp files vanish;
 the remaining public-pin fixture generates no credential. Inventories include
 private CA/leaf/signing keys recorded by their helpers, script-generated client
@@ -138,3 +144,7 @@ The manual procedure supersedes the unused `fresh_machine.py` root/systemd VM
 harness and its private tool-provisioning/round-trip helpers and pins, which have
 been removed. It needs no VM runner or additional CI wiring. The existing
 contract-cell entry points and release dependencies remain in place.
+
+Mandatory flow events also cover native upgrade process handling, kubeconfig-only
+upgrade refusals, current-release missing routes, cached enrollment without a CSR,
+and the structured partial result after an enrollment refusal.

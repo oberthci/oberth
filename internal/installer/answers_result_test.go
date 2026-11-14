@@ -243,12 +243,13 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 	forgeAuthorized := true
 	readinessJSON := `{"status":"not ready","code":"no_upstream"}`
 	argoReads, argoResourceReads := 0, 0
-	deps := InstallDeps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+	deps := testAdminInstallDeps(InstallDeps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 		command := " " + strings.Join(args, " ") + " "
 		if strings.Contains(command, " list ") {
 			if strings.Contains(command, "-n "+DefaultArgoNamespace+" ") {
 				return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"deployed"}]`), nil
 			}
+
 			return []byte(`[{"name":"oberth"}]`), nil
 		}
 		if strings.Contains(command, " get values argo-workflows ") {
@@ -280,7 +281,7 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 			return []byte(readinessJSON), nil
 		}
 		return nil, errors.New("unexpected command")
-	}}
+	}})
 	cfg := Config{ClientHost: "127.0.0.1", ClientHTTPSPort: port, ClientSSHPort: port}
 	result := VerifyInstall(context.Background(), cfg, deps)
 	digest := sha256.Sum256(server.Certificate().Raw)
@@ -402,7 +403,7 @@ func TestUpstreamRecoverySavedBeforeImport(t *testing.T) {
 		}
 	}}
 	calls := 0
-	deps := Deps{RunCommand: func(_ context.Context, input []byte, _ string, args ...string) ([]byte, error) {
+	deps := testAdminDeps(Deps{RunCommand: func(_ context.Context, input []byte, _ string, args ...string) ([]byte, error) {
 		calls++
 		if strings.Contains(strings.Join(args, " "), "admin read-file") {
 			return nil, errors.New("not present")
@@ -417,7 +418,7 @@ func TestUpstreamRecoverySavedBeforeImport(t *testing.T) {
 			t.Fatal("key on argv")
 		}
 		return nil, nil
-	}}
+	}})
 	provided, err := prepareUpstreamRecovery(context.Background(), Config{SecretsFile: "/secure/recovery", ForgeURL: "ssh://git@forge.example/acme"}, deps, &creds, false)
 	if err != nil || !provided || calls != 2 {
 		t.Fatal("recovery generation failed")
@@ -433,6 +434,7 @@ func TestUpstreamRecoverySavedBeforeImport(t *testing.T) {
 	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
 		return ssh.MarshalAuthorizedKey(key), nil
 	}
+	refreshFixtureAdmin(&deps)
 	saved = false
 	provided, err = prepareUpstreamRecovery(context.Background(), Config{SecretsFile: "/secure/recovery"}, deps, &creds, false)
 	if err != nil || provided || saved {

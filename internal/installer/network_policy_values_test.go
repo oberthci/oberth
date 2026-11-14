@@ -9,15 +9,14 @@ import (
 	"testing"
 
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 )
 
 func TestStoredDisabledPolicySurvivesPreflightAndUpgrade(t *testing.T) {
 	cfg := Config{Namespace: "oberth", NetworkPolicy: "auto"}
 	var output bytes.Buffer
-	deps := Deps{Output: &output, KubeClient: fake.NewClientset(preflightNode(), preflightStorage()), RunCommand: preflightStats, ProbeNetworkPolicy: enforcedPolicyFixture}
+	deps := testAdminDeps(Deps{Output: &output, KubeClient: fake.NewClientset(preflightNode(), preflightStorage()), RunCommand: preflightStats, ProbeNetworkPolicy: enforcedPolicyFixture})
 	result := InstallResult{OK: true}
 	inspectCluster(t.Context(), &cfg, deps, &ClusterIdentity{}, &result, false, true)
 	if !result.OK {
@@ -56,7 +55,7 @@ func TestStoredDisabledPolicySurvivesPreflightAndUpgrade(t *testing.T) {
 func TestVerifyReportsStoredDisabledPolicyWithOmittedOrTrueFlag(t *testing.T) {
 	for _, flag := range []string{"", "true"} {
 		t.Run(flag, func(t *testing.T) {
-			host := InstallDeps{Output: io.Discard, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
+			host := testAdminInstallDeps(InstallDeps{Output: io.Discard, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 				return fake.NewClientset(preflightNode(), preflightStorage()), &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA(t, []string{"api.example.test"})}}, "chosen", nil
 			},
 				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
@@ -69,7 +68,7 @@ func TestVerifyReportsStoredDisabledPolicyWithOmittedOrTrueFlag(t *testing.T) {
 					t.Fatal("disabled installed policy was presented as enforced capability")
 					return NetworkPolicyProbeResult{}
 				},
-			}
+			})
 			result := VerifyInstall(t.Context(), Config{NetworkPolicy: flag}, host)
 			found := false
 			for _, check := range result.Checks {

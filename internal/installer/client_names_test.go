@@ -94,14 +94,14 @@ func TestPreflightRotatesForClientAddresses(t *testing.T) {
 		t.Fatalf("unscripted command %q", command)
 		return nil, nil
 	}
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:     &bytes.Buffer{},
 		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: runner,
 		RunHelm: func(context.Context, []string) ([]byte, error) {
 			return liveValuesJSON, nil
 		},
-	}
+	})
 	cfg := Config{
 		ReissueServerCA:    true,
 		InstallSecretStore: true,
@@ -131,7 +131,7 @@ func TestPreflightWithoutStoreRequiresReissueConsent(t *testing.T) {
 	t.Setenv(baoTokenEnvVar, "")
 	certPEM, _ := testCertAndKey(t, []string{"oberth"})
 	liveValuesJSON, _ := json.Marshal(liveHelmValuesSubset{})
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:     &bytes.Buffer{},
 		KubeClient: fake.NewClientset(currentDeployment()),
 		RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
@@ -142,7 +142,7 @@ func TestPreflightWithoutStoreRequiresReissueConsent(t *testing.T) {
 			return nil, nil
 		},
 		RunHelm: func(context.Context, []string) ([]byte, error) { return liveValuesJSON, nil },
-	}
+	})
 	cfg := Config{TLSExtraIPs: []string{"127.0.0.1", "::1"}}
 	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err == nil || !strings.Contains(err.Error(), "--reissue-server-ca") {
 		t.Fatalf("preflight must require explicit reissue: %v", err)
@@ -159,7 +159,7 @@ func TestPreflightReissuesLegacyLeafAsConstrainedAnchor(t *testing.T) {
 	t.Setenv(baoTokenEnvVar, "test-root-token")
 	certPEM, keyPEM := testCertAndKeyShape(t, []string{"oberth", "localhost"}, false)
 	liveValuesJSON, _ := json.Marshal(liveHelmValuesSubset{})
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:     &bytes.Buffer{},
 		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
@@ -171,7 +171,7 @@ func TestPreflightReissuesLegacyLeafAsConstrainedAnchor(t *testing.T) {
 			})), nil
 		},
 		RunHelm: func(context.Context, []string) ([]byte, error) { return liveValuesJSON, nil },
-	}
+	})
 	cfg := Config{InstallSecretStore: true}
 	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
 		t.Fatalf("preflight: %v", err)
@@ -196,7 +196,7 @@ func TestPreflightStandsDownForServerPKI(t *testing.T) {
 	certPEM, keyPEM := testCertAndKeyShape(t, []string{"oberth"}, false)
 	liveValues := liveHelmValuesSubset{}
 	liveValuesJSON, _ := json.Marshal(liveValues)
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:     &bytes.Buffer{},
 		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
@@ -208,7 +208,7 @@ func TestPreflightStandsDownForServerPKI(t *testing.T) {
 			})), nil
 		},
 		RunHelm: func(context.Context, []string) ([]byte, error) { return liveValuesJSON, nil },
-	}
+	})
 	cfg := Config{InstallSecretStore: true, serverPKI: true, TLSExtraIPs: []string{"127.0.0.1", "::1"}}
 	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
 		t.Fatalf("preflight: %v", err)

@@ -17,17 +17,12 @@ func TestRestorePreviewRespectsServerSnapshotSpaceRefusal(t *testing.T) {
 	deps := source.deps(&output)
 	calls := 0
 	refusal := "backup space refused: volume /data has 10 bytes free, needs 268435456 bytes; grow/free the volume"
-	deps.runIO = func(_ context.Context, _ io.Reader, _ io.Writer, _ string, args ...string) error {
-		calls++
-		if !strings.Contains(strings.Join(args, " "), "backup database") {
-			t.Fatal("space refusal bypassed with a utility transfer", args)
-		}
-		return errors.New(refusal)
-	}
+	deps.Admin = streamingFixtureAdmin{AdminAPI: deps.Admin, download: func(context.Context, int64, io.Writer) error { calls++; return errors.New(refusal) }}
 	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
 		t.Fatal("preview must not bypass refusal with a utility Pod")
 		return nil, nil
 	}
+	refreshFixtureAdmin(&deps)
 	target := &restoreTarget{Pod: "oberth-1", Schema: store.LatestMigrationVersion()}
 	target.Server.Compatibility = sourceCompat
 	readTargetContents(t.Context(), RestoreConfig{Namespace: DefaultNamespace}, deps, target, t.TempDir())

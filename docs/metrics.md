@@ -27,8 +27,7 @@ the chart changes, and the cluster needs the Prometheus Operator CRDs.
    in a Secret in the release namespace:
 
    ```sh
-   kubectl exec -i -n oberth deploy/oberth -- \
-     oberth uplink add --scope metrics - metrics@prometheus < metrics.pub
+   oberth uplink add --scope metrics metrics.pub metrics@prometheus
    kubectl -n oberth create secret generic oberth-metrics-token --from-file=token=./metrics.token
    ```
 

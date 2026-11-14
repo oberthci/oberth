@@ -61,7 +61,7 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 			}
 			kube := fake.NewClientset(preflightNode(), preflightStorage(), &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}}, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}, Spec: appsv1.DeploymentSpec{Replicas: &replicas}, Status: appsv1.DeploymentStatus{ReadyReplicas: readyReplicas}})
 			var output bytes.Buffer
-			host := InstallDeps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			host := testAdminInstallDeps(InstallDeps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 				if strings.Contains(" "+strings.Join(args, " ")+" ", " list ") {
 					return []byte(`[{"name":"oberth"}]`), nil
 				}
@@ -85,7 +85,7 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 				}
 				t.Fatal("pending install probed forge authentication")
 				return nil, nil
-			}}
+			}})
 			cfg := Config{ForgeType: "github", ForgeOrg: "acme", ClientAccess: "none", ClientHost: "127.0.0.1", ClientHTTPSPort: port, ClientSSHPort: port, ContextName: "selected", KubeconfigPath: "/secure/kube config", UplinkIdentity: "admin@workstation", uplinkOnboarded: true, SSHPublicKeyPath: "-"}
 			if tc.additionalFailure {
 				cfg.AlsoUpstreams = []string{"ssh://git@codeberg.org/another-org"}
@@ -112,12 +112,18 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 				}
 				var discarded bytes.Buffer
 				onboard := onboardingDeps(t, pod, &discarded, strings.NewReader(""), false)
+				if fixture, ok := onboard.Admin.(fixtureAdmin); ok {
+					// This fixture starts with an admin, independently of forge state.
+					fixture.authenticated = func() bool { return true }
+					onboard.Admin = fixture
+				}
 				onboard.RunCommand = func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 					if strings.Contains(strings.Join(args, " "), "admin read-file /run/oberth-identities/upstream/id_ed25519.pub") {
 						return []byte(keyLine), nil
 					}
 					return pod.run(ctx, input, name, args...)
 				}
+				refreshFixtureAdmin(&onboard)
 				onboard.Output = deps.Output
 				onboard.ContextName = "selected"
 				onboard.upstreamResult = deps.upstreamResult
@@ -145,7 +151,7 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 			if u.Name != "github" || u.URL != "ssh://git@github.com/acme" || u.State != wantState || u.DeployPublicKey != keyLine || u.Fingerprint != ssh.FingerprintSHA256(key) || u.ForgeSettingsURL != "https://github.com/settings/keys" {
 				t.Fatal("missing public upstream action")
 			}
-			if !strings.Contains(u.NextCommand, "--kubeconfig '/secure/kube config'") || !strings.Contains(u.NextCommand, "--context selected") || !strings.Contains(u.NextCommand, "upstream add --yes github ssh://git@github.com/acme") || strings.Contains(u.NextCommand, "--no-wait") {
+			if !strings.HasPrefix(u.NextCommand, "oberth ") || !strings.Contains(u.NextCommand, "upstream add --yes github ssh://git@github.com/acme") || strings.Contains(u.NextCommand, "--no-wait") {
 				t.Fatal("next command lost its target or skipped verification")
 			}
 			pending := false

@@ -14,10 +14,6 @@ import (
 	"github.com/oberthci/oberth/internal/recordjson"
 )
 
-func requestLiveUplinkTokenPolicy(ctx context.Context, databasePath string) (model.UplinkTokenPolicy, error) {
-	return requestUplinkTokenPolicy(ctx, defaultAdminSocket, databasePath)
-}
-
 // Issuance runs in a separate in-pod process. Read policy from the live daemon
 // over its UID-protected socket instead of assuming this CLI's defaults.
 func requestUplinkTokenPolicy(ctx context.Context, socket, databasePath string) (model.UplinkTokenPolicy, error) {

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -623,39 +625,60 @@ func TestAdoptStaleFlagAfterSuccessIsNoOp(t *testing.T) {
 
 // T16: AuditHeadPrintsAcknowledgmentString
 func TestAuditHeadPrintsAcknowledgmentString(t *testing.T) {
-	t.Run("seeded database", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "oberth.sqlite")
-		head := seedAdoptionDatabase(t, path, 5)
-		var output bytes.Buffer
-		err := runAuditHead(context.Background(), []string{"--database", path}, &output)
-		if err != nil {
-			t.Fatal(err)
-		}
-		expected := fmt.Sprintf("%d:%s\n", head.ID, hex.EncodeToString(head.SHA256))
-		if output.String() != expected {
-			t.Fatalf("output = %q, want %q", output.String(), expected)
-		}
-	})
-
-	t.Run("empty chain", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "oberth.sqlite")
-		_ = seedAdoptionDatabase(t, path, 0)
-		var output bytes.Buffer
-		err := runAuditHead(context.Background(), []string{"--database", path}, &output)
-		if err != nil {
-			t.Fatal(err)
-		}
-		expected := "0:" + strings.Repeat("0", 64) + "\n"
-		if output.String() != expected {
-			t.Fatalf("output = %q, want %q", output.String(), expected)
-		}
-	})
-
-	t.Run("missing file errors", func(t *testing.T) {
-		var output bytes.Buffer
-		err := runAuditHead(context.Background(), []string{"--database", filepath.Join(t.TempDir(), "nonexistent.sqlite")}, &output)
-		if err == nil {
-			t.Fatal("expected error for missing file")
-		}
-	})
+	for _, count := range []int{5, 0, -1} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "oberth.sqlite")
+			var expected model.AuditHead
+			if count >= 0 {
+				expected = seedAdoptionDatabase(t, path, count)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request struct {
+					ID json.RawMessage `json:"id"`
+				}
+				if json.NewDecoder(r.Body).Decode(&request) != nil {
+					http.Error(w, "bad request", 400)
+					return
+				}
+				inspection, err := store.InspectCurrent(r.Context(), path, configuredStoreOptions(r.Context()))
+				if err != nil {
+					http.Error(w, "unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				defer func() { _ = inspection.Close() }()
+				head, err := inspection.AuditHeadHint(r.Context())
+				if err != nil {
+					http.Error(w, "unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				entries := []map[string]any{}
+				if head.ID > 0 {
+					entries = append(entries, map[string]any{"id": head.ID, "sha256": hex.EncodeToString(head.SHA256), "verified": true})
+				}
+				payload, err := json.Marshal(map[string]any{"head_id": head.ID, "entries": entries})
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]any{"content": []any{map[string]string{"type": "text", "text": string(payload)}}}})
+			}))
+			defer server.Close()
+			t.Setenv("OBERTH_TOKEN", "fixture-admin")
+			var output bytes.Buffer
+			err := runAuditHead(t.Context(), []string{"--url", server.URL + "/mcp"}, &output)
+			if count < 0 {
+				if err == nil {
+					t.Fatal("unavailable head accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := fmt.Sprintf("%d:%s\n", expected.ID, hex.EncodeToString(expected.SHA256))
+			if output.String() != want {
+				t.Fatal(output.String(), want)
+			}
+		})
+	}
 }

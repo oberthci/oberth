@@ -11,7 +11,7 @@ both SSH and bearer authentication for subsequent requests. Specify a fingerprin
 when the identity has several keys. The last active unscoped administrator
 credential is protected. Revoked registrations remain visible in the list.
 
-Rotation uses the existing in-pod `oberth uplink add` issuance path to provision
+Rotation uses the authenticated `oberth uplink add` API to provision
 and deliver the replacement token first. Then call:
 
 ```
@@ -21,11 +21,18 @@ uplink_rotate {"identity":"agent@host","fingerprint":"SHA256:old","replacement_f
 The replacement must be active and have the same identity, admin status and
 scope. The server validates that condition and revokes the old credential in
 one audited transaction. A failed check leaves the old credential usable.
-MCP never issues or accepts a plaintext bearer or private key.
+Enrollment uses the authenticated `oberth uplink add` API with a public SSH
+key and, for client certificates, a CSR. The client keeps its private key.
+Bearer enrollment returns the new bearer once over the authenticated connection;
+store it privately. The `upstream_provide_key` administrator operation accepts a
+private upstream key for import into OpenBao. Inventory and revocation responses
+never return existing bearer or private-key material.
 
-Revocation retains the registration and reserves its fingerprint. In-pod
-`oberth uplink remove` deletes that registration and frees the fingerprint
-for reuse. Remove revoked registrations before using the in-pod rotate loop.
+Remote revocation retains the registration and reserves its fingerprint.
+Use a new SSH key for a replacement and provision it before rotation; rotation
+needs the old registration to validate identity, privilege and scope. Revoked
+registrations remain visible as history and their fingerprints stay reserved.
+There is no in-Pod removal step in this remote lifecycle.
 
 `access_list {"pending":true}` tracks both pipeline files at the latest admitted
 commit. Removed paths disappear on the next successful admission snapshot;

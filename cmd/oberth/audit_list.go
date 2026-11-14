@@ -1,7 +1,7 @@
 package main
 
 // `oberth audit [--tail]` (#1104): the remote form of the admin-only MCP
-// audit_list tool. `audit head` and `audit record` stay in-pod.
+// audit_list tool. Head and lifecycle records also use authenticated APIs.
 
 import (
 	"context"
@@ -19,8 +19,8 @@ import (
 const auditUsage = "Usage: oberth audit [--tail] [--action <prefix>] [--actor <identity>] [--repo <repo>] [--since <time|24h>]\n" +
 	"         [--until <time|24h>] [--limit N] [--before ID] [--json]\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
-	"       oberth audit head [--database <path>]   (in-pod)\n" +
-	"       oberth audit record <action> [--details JSON]   (in-pod)"
+	"       oberth audit head [transport flags]\n" +
+	"       oberth audit record <action> [--details JSON] [transport flags]"
 
 // auditTailInterval is how often --tail asks for new entries.
 var auditTailInterval = 2 * time.Second

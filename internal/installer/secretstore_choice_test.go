@@ -68,7 +68,7 @@ func TestSecretStoreChoiceKeepsAnAlreadyResolvedMode(t *testing.T) {
 func TestFreshNonInteractiveInstallRefusesBeforeAnyWrite(t *testing.T) {
 	client := fake.NewClientset()
 	var output bytes.Buffer
-	deps := Deps{Output: &output, KubeClient: client, RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
+	deps := testAdminDeps(Deps{Output: &output, KubeClient: client, RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if args[0] != "list" {
 				t.Fatalf("fresh install continued past secret-store selection: %v", args)
@@ -79,7 +79,7 @@ func TestFreshNonInteractiveInstallRefusesBeforeAnyWrite(t *testing.T) {
 			t.Fatal("fresh undecided install must not execute commands")
 			return nil, nil
 		},
-	}
+	})
 	err := Run(t.Context(), Config{SecretStoreUndecided: true}, deps)
 	if err == nil || !strings.Contains(err.Error(), "--install-secretstore") {
 		t.Fatalf("missing explicit OpenBao selection did not stop installation: %v", err)

@@ -21,6 +21,10 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	fixtureAdminRoot = filepath.Join(home, "api-fixtures")
+	if err := os.MkdirAll(fixtureAdminRoot, 0700); err != nil {
+		panic(err)
+	}
 	for key, value := range map[string]string{
 		"HOME":            home,
 		"XDG_CONFIG_HOME": filepath.Join(home, ".config"),

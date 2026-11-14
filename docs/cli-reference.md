@@ -15,61 +15,109 @@ Use oberth access <command> --help for command flags.
 
 ```text
 Usage: oberth access allow [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
-  -namespace string
-        Kubernetes namespace (default "oberth")
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -json
+        emit structured JSON
+  -repo string
+        repository filter
+  -revoked
+        include revoked grants
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth access list
 
 ```text
 Usage: oberth access list [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -json
-        emit grants as a JSON array (machine-readable)
+        emit structured JSON
   -repo string
-        filter by repository name; use upstream/org/name when ambiguous
+        repository filter
   -revoked
         include revoked grants
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth access revoke
 
 ```text
 Usage: oberth access revoke [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
-  -namespace string
-        Kubernetes namespace (default "oberth")
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -json
+        emit structured JSON
+  -repo string
+        repository filter
+  -revoked
+        include revoked grants
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth admin
 
 ```text
-Usage: oberth admin <read-file|readiness>
-Read allowed public identity files or cached readiness inside the Oberth pod.
+Usage: oberth admin <public-identity|readiness|version|idle|create-first-admin>
+Named public identity reads and administration use authenticated APIs. Only install creates the first admin through one operator-authorized exec.
 ```
 
-## oberth admin read-file
+## oberth admin public-identity
 
 ```text
-Usage: oberth admin read-file <public-identity-path> [fallback-path]
-Read allowed public identity files inside the Oberth pod.
+Usage: oberth admin public-identity [flags]
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
+  -wait-for string
+        idle observation: all or critical (default "all")
 ```
 
 ## oberth admin readiness
 
 ```text
-Usage: oberth admin readiness
-Print cached readiness as JSON with a safe reason code. A not-ready state is a successful diagnostic read.
+Usage: oberth admin readiness [flags]
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
+  -wait-for string
+        idle observation: all or critical (default "all")
 ```
 
 ## oberth artifacts
@@ -101,30 +149,42 @@ Lists a run's artifacts, or writes one artifact to stdout or --output.
 Usage: oberth audit [--tail] [--action <prefix>] [--actor <identity>] [--repo <repo>] [--since <time|24h>]
          [--until <time|24h>] [--limit N] [--before ID] [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
-       oberth audit head [--database <path>]   (in-pod)
-       oberth audit record <action> [--details JSON]   (in-pod)
+       oberth audit head [transport flags]
+       oberth audit record <action> [--details JSON] [transport flags]
 ```
 
 ## oberth audit head
 
 ```text
 Usage: oberth audit head [flags]
-
-Flags:
-  -database string
-        SQLite database path (default "/data/oberth.sqlite")
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth audit record
 
 ```text
-Usage: oberth audit record [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
+Usage: oberth audit record <action> [--details JSON]
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -details string
-        JSON details to record (default "{}")
+        public lifecycle audit details as a JSON object (default "{}")
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth backup
@@ -1094,12 +1154,18 @@ Use oberth repo <command> --help for command flags.
 
 ```text
 Usage: oberth repo add [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -default-branch string
-        repository default branch until the first push confirms it (default "main")
+        initial default branch; the first push confirms it (default "main")
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth repo archive
@@ -1112,12 +1178,18 @@ Usage: oberth repo archive <repository> [--url <mcp-url>] [--token-file <path>] 
 
 ```text
 Usage: oberth repo remove [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
-  -git-cache-root string
-        root directory for bare Git caches (default "/data/git")
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -default-branch string
+        initial default branch; the first push confirms it (default "main")
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth repo unarchive
@@ -1130,18 +1202,18 @@ Usage: oberth repo unarchive <repository> [--url <mcp-url>] [--token-file <path>
 
 ```text
 Usage: oberth repo verify [flags]
-
-Flags:
-  -all
-        verify every registered repository
-  -database string
-        SQLite database path (default "/data/oberth.sqlite")
-  -git-cache-root string
-        root directory for bare Git caches (default "/data/git")
-  -known-hosts string
-        pinned upstream known_hosts (default "/run/oberth-identities/hosts/known_hosts")
-  -upstream-key string
-        upstream SSH private key (default "/run/oberth-identities/upstream/id_ed25519")
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -default-branch string
+        initial default branch; the first push confirms it (default "main")
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth repos
@@ -1494,37 +1566,31 @@ Flags:
 ## oberth secretstore verify
 
 ```text
-Usage: oberth secretstore verify [flags]
-
-Flags:
-  -address string
-        OpenBao API base URL (default: discovered from the running serve process)
-  -ca-cert string
-        optional PEM file pinning the OpenBao TLS trust anchors
+Usage: oberth secretstore verify [flags] [paths]
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -expect value
-        expected fields: <path-base>/<field>[,<field>,...] (repeatable, implies -keys)
-  -insecure-http
-        DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address
-  -k8s-auth-mount string
-        OpenBao Kubernetes auth mount path
+        expected field names (repeatable)
   -keys
-        verify or list KV field names; use with --expect to assert
-  -kv-mount string
-        KV v2 mount backing the virtual oberth/upstream/ namespace (default: discovered from serve, else oberth)
+        report field names, never values
   -path value
-        KV path to verify (repeatable; alternative to positional paths)
+        secret path to verify (repeatable)
   -release-tier
-        verify the release-tier OpenBao trust chain (Argo pipeline namespace, release ServiceAccount, --argo-vault-* flags)
+        verify the release ServiceAccount trust chain
   -repo string
-        verify a per-repo identity (upstream/org/repo); with --release-tier, overrides the shared SA
-  -role string
-        OpenBao Kubernetes auth role
-  -sa-token string
-        optional ServiceAccount token path override
+        canonical repository whose identity to verify
   -tier string
-        which per-repo tier to verify: release or ci (only with --repo or --release-tier) (default "release")
+        repository identity tier: ci or release (default "release")
   -timeout duration
         overall verification deadline (default 45s)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth serve
@@ -1835,9 +1901,9 @@ Flags:
   -values value
         values file to pass to helm upgrade (repeatable)
   -wait-for string
-        enable waiting for all or critical (tag/promotion/plan/apply/unknown) runs
+        enable native Workflow observation; critical conservatively waits for all active Workflows
   -wait-idle
-        wait for all queued/running runs before upgrading (advisory, not an admission freeze)
+        wait for active Kubernetes Workflows before upgrading (advisory, not an admission freeze)
   -wait-timeout duration
         maximum queue wait, independent of --timeout (default 2h0m0s)
   -yes
@@ -1855,38 +1921,56 @@ Use oberth uplink <command> --help for command flags.
 
 ```text
 Usage: oberth uplink add [flags]
-
-Flags:
   -admin
-        Grant admin privileges (required for access_allow/access_revoke)
+        grant administrative authority
   -bearer
-        also mint a bearer token when enrolling with --csr
+        issue a bearer credential alongside a certificate
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -clear
+        clear the repository scope
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -csr string
-        enroll with a PEM client CSR (file or -); no bearer token unless --bearer
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
+        local public certificate signing request
+  -fingerprint string
+        SSH fingerprint to disambiguate an identity
+  -replacement-fingerprint string
+        already-enrolled replacement SSH fingerprint
   -scope value
-        limit the uplink to these upstreams' repositories (repeatable or comma-separated; default: every repository); metrics alone: read only /metrics
-  -tls-cert string
-        HTTPS certificate path (in-pod; requires the live admin daemon) (default "/run/oberth-identities/server/tls.crt")
+        upstream scope (repeatable or comma-separated)
+  -set value
+        upstream scope (repeatable or comma-separated)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
   -ttl string
-        bearer token lifetime (positive Go duration; default and maximum come from the live server)
+        credential lifetime within the server policy
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth uplink cert
 
 ```text
-Usage: oberth uplink cert [flags]
-
-Flags:
+Usage: oberth uplink cert <identity> --csr <file|->
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -csr string
-        PEM CSR file or - for stdin (private key remains local)
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
+        public PEM CSR file, or - for stdin
   -fingerprint string
-        SSH fingerprint to disambiguate the uplink
+        SSH fingerprint to disambiguate
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
   -ttl duration
-        certificate lifetime (default 2160h; 1h–8760h)
+        certificate lifetime; zero uses the server default
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth uplink invite
@@ -1917,52 +2001,136 @@ Flags:
 
 ```text
 Usage: oberth uplink list [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
+  -admin
+        grant administrative authority
+  -bearer
+        issue a bearer credential alongside a certificate
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -clear
+        clear the repository scope
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -csr string
+        local public certificate signing request
+  -fingerprint string
+        SSH fingerprint to disambiguate an identity
+  -replacement-fingerprint string
+        already-enrolled replacement SSH fingerprint
+  -scope value
+        upstream scope (repeatable or comma-separated)
+  -set value
+        upstream scope (repeatable or comma-separated)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -ttl string
+        credential lifetime within the server policy
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth uplink remove
 
 ```text
 Usage: oberth uplink remove [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
+  -admin
+        grant administrative authority
+  -bearer
+        issue a bearer credential alongside a certificate
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -clear
+        clear the repository scope
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -csr string
+        local public certificate signing request
   -fingerprint string
-        disambiguating SSH public-key fingerprint when one identity has several uplinks
+        SSH fingerprint to disambiguate an identity
+  -replacement-fingerprint string
+        already-enrolled replacement SSH fingerprint
+  -scope value
+        upstream scope (repeatable or comma-separated)
+  -set value
+        upstream scope (repeatable or comma-separated)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -ttl string
+        credential lifetime within the server policy
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth uplink rotate
 
 ```text
 Usage: oberth uplink rotate [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
-  -tls-cert string
-        HTTPS certificate path passed to uplink add (default: the add default)
+  -admin
+        grant administrative authority
+  -bearer
+        issue a bearer credential alongside a certificate
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -clear
+        clear the repository scope
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -csr string
+        local public certificate signing request
+  -fingerprint string
+        SSH fingerprint to disambiguate an identity
+  -replacement-fingerprint string
+        already-enrolled replacement SSH fingerprint
+  -scope value
+        upstream scope (repeatable or comma-separated)
+  -set value
+        upstream scope (repeatable or comma-separated)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
   -ttl string
-        new bearer token lifetime (default: preserve the earliest existing expiry)
+        credential lifetime within the server policy
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth uplink scope
 
 ```text
 Usage: oberth uplink scope [flags]
-
-Flags:
+  -admin
+        grant administrative authority
+  -bearer
+        issue a bearer credential alongside a certificate
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -clear
-        remove the limit: the uplink reaches every repository again
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
+        clear the repository scope
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -csr string
+        local public certificate signing request
   -fingerprint string
-        disambiguating SSH public-key fingerprint when one identity has several uplinks
+        SSH fingerprint to disambiguate an identity
+  -replacement-fingerprint string
+        already-enrolled replacement SSH fingerprint
+  -scope value
+        upstream scope (repeatable or comma-separated)
   -set value
-        limit the uplink to these upstreams (repeatable or comma-separated)
+        upstream scope (repeatable or comma-separated)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -ttl string
+        credential lifetime within the server policy
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth upstream
@@ -1976,70 +2144,136 @@ Use oberth upstream <command> --help for command flags.
 
 ```text
 Usage: oberth upstream add [flags]
-
-Flags:
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -check
+        probe upstream authentication and repository access
   -check-repo string
-        existing repository name to read through the new upstream before registering it (proves the organization path)
-  -database string
-
+        repository to probe through the upstream
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -dedicated-key
-        provision a dedicated SSH identity for this upstream
+        use a dedicated upstream SSH identity
   -expected-host-fingerprint string
-        expected SSH host-key fingerprint (SHA256:...)
-  -known-hosts string
-
-  -namespace string
-        Kubernetes namespace (default "oberth")
+        authoritative SHA256 SSH host fingerprint
+  -json
+        emit structured JSON
+  -key-file string
+        owner-only local upstream private key to import
   -no-wait
-        register pending and print the deploy key without probing forge authentication
+        return the deploy key without waiting for forge authorization
   -repin
-        rescan the forge's SSH host keys and replace this endpoint's pins (same trust rules as the first pin); keeps an identical registration
-  -upstream-key string
-
+        replace this endpoint's pins using the same trust rules
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
   -yes
-        auto-accept key generation and host-key prompts
+        approve generation of the upstream identity
 ```
 
 ## oberth upstream list
 
 ```text
 Usage: oberth upstream list [flags]
-
-Flags:
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -check
-        authenticate to each SSH upstream now and read one registered repository through it, reporting whether the forge accepts the key and serves the organization path
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
-  -known-hosts string
-        upstream known_hosts (default "/run/oberth-identities/hosts/known_hosts")
-  -upstream-key string
-        upstream SSH private key (default "/run/oberth-identities/upstream/id_ed25519")
+        probe upstream authentication and repository access
+  -check-repo string
+        repository to probe through the upstream
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -dedicated-key
+        use a dedicated upstream SSH identity
+  -expected-host-fingerprint string
+        authoritative SHA256 SSH host fingerprint
+  -json
+        emit structured JSON
+  -key-file string
+        owner-only local upstream private key to import
+  -no-wait
+        return the deploy key without waiting for forge authorization
+  -repin
+        replace this endpoint's pins using the same trust rules
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
+  -yes
+        approve generation of the upstream identity
 ```
 
 ## oberth upstream provide-key
 
 ```text
 Usage: oberth upstream provide-key [flags]
-
-Flags:
-  -database string
-        SQLite database path (default "/data/oberth.sqlite")
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -check
+        probe upstream authentication and repository access
+  -check-repo string
+        repository to probe through the upstream
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -dedicated-key
-        store as a per-upstream dedicated key
-  -namespace string
-        Kubernetes namespace (default "oberth")
+        use a dedicated upstream SSH identity
+  -expected-host-fingerprint string
+        authoritative SHA256 SSH host fingerprint
+  -json
+        emit structured JSON
+  -key-file string
+        owner-only local upstream private key to import
+  -no-wait
+        return the deploy key without waiting for forge authorization
+  -repin
+        replace this endpoint's pins using the same trust rules
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
+  -yes
+        approve generation of the upstream identity
 ```
 
 ## oberth upstream remove
 
 ```text
 Usage: oberth upstream remove [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -check
+        probe upstream authentication and repository access
+  -check-repo string
+        repository to probe through the upstream
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -dedicated-key
+        use a dedicated upstream SSH identity
+  -expected-host-fingerprint string
+        authoritative SHA256 SSH host fingerprint
+  -json
+        emit structured JSON
+  -key-file string
+        owner-only local upstream private key to import
+  -no-wait
+        return the deploy key without waiting for forge authorization
+  -repin
+        replace this endpoint's pins using the same trust rules
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
   -yes
-        skip the interactive confirmation
+        approve generation of the upstream identity
 ```
 
 ## oberth validate
@@ -2063,38 +2297,18 @@ Print build information, or the database schema version.
 
 ```text
 Usage: oberth wait-idle [flags]
-
-Flags:
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -timeout duration
-        maximum time to wait for the live daemon queue (in-pod) (default 2h0m0s)
+        maximum time to observe the authenticated admin queue (default 2h0m0s)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
   -wait-for string
-        runs to wait for: all or critical (tag/promotion/plan/apply/unknown) (default "all")
-```
-
-## oberth upstream add (in-pod)
-
-```text
-Usage: oberth upstream add [flags]
-
-Flags:
-  -check-repo string
-        existing repository name to read through the new upstream before registering it (proves the organization path)
-  -database string
-        SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
-  -dedicated-key
-        provision a dedicated SSH identity for this upstream instead of the shared key (stored in the OpenBao upstream-key bundle)
-  -expected-host-fingerprint string
-        expected SSH host-key fingerprint (SHA256:...) for unattended bootstrap of unknown forges
-  -known-hosts string
-        upstream known_hosts (default "/run/oberth-identities/hosts/known_hosts")
-  -namespace string
-        Kubernetes namespace (default "oberth")
-  -no-wait
-        register pending and print the deploy key without probing forge authentication
-  -repin
-        rescan the forge's SSH host keys and replace this endpoint's pins (same trust rules as the first pin); keeps an identical registration
-  -upstream-key string
-        upstream SSH private key (default "/run/oberth-identities/upstream/id_ed25519")
-  -yes
-        auto-accept key generation and host-key prompts
+        runs to wait for: all or critical (default "all")
 ```

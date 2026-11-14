@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
 )
 
 // NextStepsUpstream is one organization the server is connected to.
@@ -52,21 +51,14 @@ func NextSteps(in NextStepsInput) []string {
 	if ns == "" {
 		ns = DefaultNamespace
 	}
-	exec := func(stdin bool, command ...string) string {
-		parts := []string{"kubectl"}
-		if in.Kubeconfig != "" {
-			parts = append(parts, "--kubeconfig", shellQuoteWord(in.Kubeconfig))
-		}
-		if in.Context != "" {
-			parts = append(parts, "--context", in.Context)
-		}
-		parts = append(parts, "exec")
-		if stdin {
-			parts = append(parts, "-i")
-		}
-		parts = append(parts, "-n", ns, "deploy/oberth", "-c", "oberth", "--", "/usr/local/bin/oberth")
-		return strings.Join(append(parts, command...), " ")
+	target := ""
+	if in.Kubeconfig != "" {
+		target += " --kubeconfig " + shellQuoteWord(in.Kubeconfig)
 	}
+	if in.Context != "" {
+		target += " --context " + shellQuoteWord(in.Context)
+	}
+	command := func(words ...string) string { return printedAdminCommand(words...) }
 
 	var lines []string
 	add := func(s ...string) { lines = append(lines, s...) }
@@ -74,7 +66,7 @@ func NextSteps(in NextStepsInput) []string {
 	var pending []NextStepsUpstream
 	firstRepo := ""
 	if in.ServiceType == "ClusterIP" {
-		add("ClusterIP is reachable only through an internal route. For workstation access, keep this port-forward running:", "   kubectl -n "+ns+" port-forward service/oberth 30022:"+sshPort+" 30443:"+httpsPort, "   Then use localhost:30022 for SSH and https://localhost:30443 for HTTPS.", "")
+		add("ClusterIP is reachable only through an internal route. For workstation access, keep this port-forward running:", "   kubectl"+target+" -n "+ns+" port-forward service/oberth 30022:"+sshPort+" 30443:"+httpsPort, "   Then use localhost:30022 for SSH and https://localhost:30443 for HTTPS.", "")
 	}
 	add("Clone a repository through Oberth (the first clone registers it):")
 	for _, u := range in.Upstreams {
@@ -102,7 +94,7 @@ func NextSteps(in NextStepsInput) []string {
 	}
 	for _, u := range pending {
 		add("", "Finish "+u.Name+" ("+hostnameFromURL(u.BaseURL)+"/"+orgFromBaseURL(u.BaseURL)+"): add the upstream public key to that account, then:",
-			"   "+exec(false, "upstream", "add", "--yes", "--no-wait", u.Name, u.BaseURL))
+			"   "+command("upstream", "add", "--yes", u.Name, u.BaseURL))
 	}
 
 	other, otherURL := "codeberg", "ssh://git@codeberg.org/<org>"
@@ -113,18 +105,18 @@ func NextSteps(in NextStepsInput) []string {
 		}
 	}
 	add("", "Connect another organization with the same upstream key (add the key to that forge account first):",
-		"   "+exec(false, "upstream", "add", "--yes", other, otherURL),
+		"   "+command("upstream", "add", "--yes", other, otherURL),
 		"   upstream list --check shows which forges accept the key")
 
 	add("", "Promote green code to a target branch: an admin issues a single-use grant first (the uplinks above are not admins).",
 		"   Register an admin uplink for a person, with a key no agent holds (the token prints once, on that terminal):",
-		"   "+exec(true, "uplink", "add", "--admin", "-", "admin@host")+" < admin.pub",
+		"   "+command("uplink", "invite", "admin@host", "--out", "admin-invitation.json"),
 		"   then:  oberth mcp call --token-file <admin token file> promote_grant '{\"repo\":\"<upstream>/<org>/<repo>\",\"sha\":\"<green sha>\",\"branch\":\"main\"}'",
 		"   and the agent promotes that exact SHA with the promote tool (docs/mcp-setup.md)")
 
 	add("", "Give another machine or agent access (an uplink):",
 		"   1. there:  cat ~/.ssh/id_ed25519.pub   and copy it here as you@laptop.pub",
-		"   2. here:   "+exec(true, "uplink", "add", "-", "you@laptop")+" < you@laptop.pub",
+		"   2. here:   "+command("uplink", "invite", "you@laptop", "--out", "invitation.json"),
 		"   3. there:  export OBERTH_BASE_URL=https://"+host+":"+httpsPort+" OBERTH_CA_CERT=<a copy of ~/.config/oberth/ca.crt>",
 		"              and store the token step 2 printed once (docs/remote-cli.md, docs/mcp-setup.md)")
 	if local {

@@ -183,10 +183,7 @@ type backupDatabaseSummary struct {
 	Schema          int    `json:"schema"`
 	AuditHeadID     int64  `json:"audit_head_id"`
 	AuditHeadSHA256 string `json:"audit_head_sha256"`
-	// Snapshot names how the consistent copy was taken: "in-pod" (the server
-	// binary's own verified snapshot) or "stable-copy" (an older server
-	// without it: both files streamed and hash-checked unchanged across the
-	// copy, then snapshotted and verified locally).
+	// Snapshot names the authenticated server snapshot transport: "admin-api".
 	Snapshot string `json:"snapshot"`
 }
 
