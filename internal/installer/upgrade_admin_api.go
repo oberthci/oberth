@@ -64,8 +64,18 @@ func upgradeRetryCommand(cfg UpgradeConfig, deps Deps) string {
 func checkUpgradeVerificationConnection(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	_, closeConnection, err := adminAPI(ctx, Config{Namespace: cfg.Namespace}, deps)
-	closeConnection()
+	if deps.RestConfig != nil {
+		if err := verifyRecordedCluster(deps.ContextName, deps.RestConfig); err != nil {
+			return err
+		}
+	}
+	if deps.Admin != nil {
+		return nil
+	}
+	configured, err := resolveAdminClientConfig(Config{Namespace: cfg.Namespace}, deps)
+	if err == nil {
+		_, err = client.New(ctx, configured)
+	}
 	if err != nil {
 		return fmt.Errorf("upgrade requires this machine's client connected to this server as an unscoped admin; configure it with `export OBERTH_BASE_URL='https://<server>:<port>' OBERTH_CLIENT_CERT='/path/admin.crt' OBERTH_CLIENT_KEY='/path/admin.key' OBERTH_CA_CERT='/path/server-ca.crt'`, then retry (nothing changed): %w", err)
 	}
