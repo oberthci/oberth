@@ -63,7 +63,7 @@ func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao Open
 		ns = DefaultNamespace
 	}
 
-	// Only preview when upgrading an existing release.
+	// Fresh dry runs also render, but have no live values to read.
 	_, exists, err := findHelmRelease(ctx, deps, "oberth", ns)
 	if err != nil {
 		return err
@@ -71,22 +71,28 @@ func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao Open
 	if !exists && !cfg.DryRun {
 		return nil // Fresh apply has no existing objects to conflict with.
 	}
+	var live liveHelmValuesSubset
+	if exists && ((cfg.wantsSecretStore() && openbao.ServiceAddress == "") || (cfg.InstallRekor && cfg.rekorPublicKey == "")) {
+		live, err = readLiveHelmValuesSubset(ctx, deps, ns)
+		if err != nil {
+			return fmt.Errorf("helm server-side preview: read live values: %w", err)
+		}
+	}
 
 	// The preview runs before the OpenBao phase, so callers pass a zero
 	// result. Rendering it as-is sets secretstore.address to "" and the
 	// chart schema rejects the preview on every re-run of an install with a
 	// secret store. Plan the values the real upgrade will set instead.
 	if cfg.wantsSecretStore() && openbao.ServiceAddress == "" {
-		planned, err := plannedOpenBaoResult(ctx, cfg, deps, ns)
-		if err != nil {
-			return fmt.Errorf("helm server-side preview: %w", err)
+		openbao = plannedOpenBaoResult(cfg, live)
+		if !exists && cfg.InstallSecretStore {
+			openbao.CACertPEM = previewOpenBaoCA
 		}
-		openbao = planned
 	}
 
 	// Build the same args the real upgrade will use, plus the preview flags.
 	previewCfg := cfg
-	rekor, err := plannedRekorResult(ctx, cfg, deps, ns)
+	rekor, err := plannedRekorResult(cfg, live)
 	if err != nil {
 		return err
 	}
@@ -312,21 +318,32 @@ func detectFailedHelmRevision(ctx context.Context, deps Deps, namespace string) 
 // plannedOpenBaoResult derives, without touching OpenBao, the secret-store
 // values the real upgrade will pass: the installer-managed service address,
 // and the trust anchor the live release already carries.
-func plannedOpenBaoResult(ctx context.Context, cfg Config, deps Deps, ns string) (OpenBaoResult, error) {
+func plannedOpenBaoResult(cfg Config, live liveHelmValuesSubset) OpenBaoResult {
 	planned := OpenBaoResult{ServiceAddress: openBaoServiceAddress(cfg)}
 	if cfg.InstallSecretStoreDev {
-		return planned, nil
-	}
-	live, err := readLiveHelmValuesSubset(ctx, deps, ns)
-	if err != nil {
-		return planned, fmt.Errorf("read live secret-store values: %w", err)
+		return planned
 	}
 	planned.CACertPEM = live.Secretstore.CACert
 	planned.PKIEnabled = live.TLS.PKI.Enabled
-	return planned, nil
+	return planned
 }
 
-func plannedRekorResult(ctx context.Context, cfg Config, deps Deps, ns string) (RekorResult, error) {
+// Public-only certificate for a fresh preview before OpenBao provisions its CA.
+// It is supplied only to the nonmutating render, never to apply or the plan.
+const previewOpenBaoCA = `-----BEGIN CERTIFICATE-----
+MIIBkzCCATmgAwIBAgIUFSMhSd6UPuR/ctvUN0UyzvvBx54wCgYIKoZIzj0EAwIw
+HjEcMBoGA1UEAwwTT2JlcnRoIHByZXZpZXcgb25seTAgFw0yNjExMTQwMDQ1MDJa
+GA8yMTI2MTAyMTAwNDUwMlowHjEcMBoGA1UEAwwTT2JlcnRoIHByZXZpZXcgb25s
+eTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABL6tvwfbjENNWZriF4XVkQKdSTVg
+o05y7HAwgV3tOZnrS1i/RkqlohLOznhP8IVtbDqiwMUv2fvOlOqyQfYR2pujUzBR
+MB0GA1UdDgQWBBRwP1OIlbw7wqccIoAU7xXf8iWurDAfBgNVHSMEGDAWgBRwP1OI
+lbw7wqccIoAU7xXf8iWurDAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0gA
+MEUCIFRlQXfzGasOKT1kyKw7fsKf1hdUJqiGr1KXf4rePlEMAiEA/IdUEgWZnCAe
+NuJ4ihs7293rt9TUjR9jOiuDtUJebi4=
+-----END CERTIFICATE-----
+`
+
+func plannedRekorResult(cfg Config, live liveHelmValuesSubset) (RekorResult, error) {
 	if !cfg.InstallRekor {
 		return RekorResult{}, nil
 	}
@@ -336,10 +353,6 @@ func plannedRekorResult(ctx context.Context, cfg Config, deps Deps, ns string) (
 	}
 	result := RekorResult{Namespace: rekorNS, ServiceAddress: fmt.Sprintf("http://rekor-server.%s.svc:80", rekorNS), LogPublicKeyPEM: cfg.rekorPublicKey}
 	if result.LogPublicKeyPEM == "" {
-		live, err := readLiveHelmValuesSubset(ctx, deps, ns)
-		if err != nil {
-			return result, err
-		}
 		result.LogPublicKeyPEM = live.AuditAnchor.RekorPublicKey
 	}
 	if result.LogPublicKeyPEM == "" {
