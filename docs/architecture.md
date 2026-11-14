@@ -15,24 +15,24 @@ network publication happens outside those locks.
 
 Branch pushes resolve `.oberth/build.yaml`; tag runs resolve
 `.oberth/release.yaml`. A run retains the exact commit, actor and trigger.
-A newer push can supersede an older run on the same branch. The scheduler
-claims eligible records in acceptance order and starts their submission work.
-Archived repositories, unfinished cancellations and pending publication on the
-same ref can delay a claim. Oberth has no capacity scheduler, run ceiling,
-priority queue, resource reservation or queue-position field.
+The accepting push, promotion, rerun or cron handler validates the request,
+records its run history, and creates its Workflow before returning. A new push
+leaves older Workflows running. Oberth has no run dispatch queue, claim scan,
+capacity scheduler or execution throttle. Argo parallelism and Kubernetes
+scheduling decide when submitted Workflows execute.
 
-The cron service resolves scheduled work from the current default-branch
-schedule and enqueues ordinary runs. Promotion work has its own durable order
-for Git merge and publication. These are CI lifecycle policies; Argo controls
-Workflow parallelism and Kubernetes controls Pod scheduling.
+The cron ticker remains until the CronWorkflow replacement. Each distinct due
+occurrence uses the same direct submission path, including when an earlier
+occurrence is still running. Receive-event and occurrence identities prevent
+replays from creating duplicate runs. Git publication checks the branch head so
+an older result never overwrites a newer commit.
 
 ## Source resolution and Workflow submission
 
 The source resolver pins the exact source graph in a source receipt.
 Submission checks that binding again. Admission validates dangerous content and
 credential boundaries while preserving admitted native Argo fields. Trusted
-upstream policy refresh can delay submission; it counts no capacity and rewrites
-no requests.
+upstream policy is checked once; an unavailable policy fails this attempt.
 
 The server creates a per-run source claim in the pipeline namespace and fills
 it with the resolved checkout through a short-lived seed Pod. Containers receive
@@ -60,10 +60,13 @@ projection and does not load that timing record.
 
 Run observations explain native parallelism, lock and Pending-Pod waits using
 existing statuses and reason lines. Authored deadlines and retry strategies
-belong to Argo. Oberth cancellation and supersession delete the owned Workflow.
+belong to Argo. Oberth cancellation requests native Stop or Terminate.
 On restart, recovery verifies bindings before adopting existing Workflows.
-Ambiguous creates have a durable cleanup obligation and a background settlement
-task. After restart, stranded runs fail with a restart reason; Oberth does not
+A Workflow create posts once under a fixed name. An existing object is adopted
+only for the same run owner. An uncertain acknowledgement is checked in the
+shared watch hub by run label; a miss gets one live GET. Create failure records
+a reason and requires an explicit new attempt, without background resubmission.
+After restart, stranded runs fail with a restart reason; Oberth does not
 resubmit them. Existing Workflows are adopted only after binding verification. See [restart handover](restart-handover.md).
 
 ## Promotion and publication

@@ -2,9 +2,9 @@
 
 Live file-backed stores use WAL, one primary writer (`_txlock=immediate`),
 and an eight-connection read-only ordinary reader pool. Repository, run-list,
-run-detail, step-result, queue-pattern and next-queued-run reads use that pool.
-`NextQueuedRun` is a peek; claiming work still selects and updates atomically
-on the writer. Reads inside mutation transactions stay in those transactions.
+run-detail and step-result reads use that pool. Accepting a run starts its
+specific history row on the writer; production never scans for queued work.
+Reads inside mutation transactions stay in those transactions.
 
 Authentication, audit scans, idle sampling and readiness use separate reserved
 readers. In particular, readiness has a single read-only connection and does

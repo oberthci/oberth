@@ -133,9 +133,9 @@ changing its values, adding audit actions, or requiring a schema migration.
 HTTP probes read only process memory and never acquire the writer or background task
 locks.
 
-The scheduler dispatch loop is monitored after startup recovery, including idle
-priority polling and local admission locking. Admission head-wait persistence
-has its own heartbeat. Each queued promotion is monitored independently until
+The Workflow observer lifecycle is monitored after startup recovery. Idle
+waiting is excluded from its heartbeat; there is no run claim scan or
+submission polling. Each queued promotion is monitored independently until
 merge planning starts, then removed from the local queue checks. Explicit waits
 on Kubernetes admission, audit witnesses, upstream policy/ref reads and pushes,
 and the delivery permit are excluded from the dispatch window. A dependency
