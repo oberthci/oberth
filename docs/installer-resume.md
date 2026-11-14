@@ -130,3 +130,9 @@ or saves a new enrollment if the earlier attempt never reached that step. A lost
 exec response does not require uninstalling the release. A starting daemon socket
 gets a short bounded retry; a credential refusal or interrupted response does not
 trigger automatic repeated issuance. The server's active-admin guard still applies.
+
+If first-admin enrollment is refused, the partial installation remains available
+and the result includes the server's refusal and manual steps. Use the original
+installer key for redelivery or an already authenticated administrative client.
+An interrupted stdout response is never printed as a diagnostic, because it may
+contain a newly issued credential.

@@ -434,7 +434,9 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 	var failure *installStepError
 	if errors.As(installErr, &failure) {
 		result.Checks[len(result.Checks)-1] = failure.check
-		result.ServerURL = failure.endpoint
+		if failure.endpoint != "" {
+			result.ServerURL = failure.endpoint
+		}
 	}
 	if cfg.SecretsFile != "" {
 		if raw, err := os.ReadFile(cfg.SecretsFile); err == nil { //nolint:gosec // G304: operator-selected credential sink; only its digest is public

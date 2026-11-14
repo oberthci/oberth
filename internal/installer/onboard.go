@@ -88,8 +88,11 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		if err := reusePendingInstallerEnrollment(&cfg, deps); err != nil {
 			return err
 		}
-		if cfg.enrollment == nil || len(cfg.enrollment.key) == 0 {
+		if cfg.enrollment == nil || len(cfg.enrollment.csr) == 0 {
 			var err error
+			if cfg.enrollment != nil {
+				clear(cfg.enrollment.key)
+			}
 			cfg.enrollment, err = newInstallerEnrollment()
 			if err != nil {
 				return err
@@ -111,7 +114,9 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		}
 		_, identity, token, _, err := onboardUplink(ctx, cfg, deps, tw)
 		if err != nil {
-			return errors.New("first admin uplink could not be created; inspect cluster administration")
+			tw.AppendRow("First admin", "manual action required", "⚠ partial", false)
+			_ = PrintNextSteps(cfg, deps.Output)
+			return errors.Join(ErrOnboardingPartial, &installStepError{check: CheckResult{Code: "first_admin", Reason: err.Error(), Remedy: "Retry with the original installer key or use authenticated administrative APIs; the deployment remains installed."}})
 		}
 		if token == "" && (cfg.AdminCSRPath == "" || cfg.AdminBearer) {
 			return errors.New("first admin uplink did not return a recognized credential")

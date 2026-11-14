@@ -3,6 +3,8 @@ package installer
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -20,12 +22,26 @@ func runFirstAdminExec(ctx context.Context, deps Deps, body []byte, args []strin
 		}
 		message := string(raw) + " " + err.Error()
 		starting := (strings.Contains(message, "daemon audit mutation gate") || strings.Contains(message, "inspect admin socket directory")) && (strings.Contains(message, "no such file") || strings.Contains(message, "connection refused"))
+		failure := firstAdminExecError(err)
 		clear(raw)
 		if !starting {
-			return nil, errors.New("create first admin failed")
+			return nil, failure
 		}
 		if err := sleepContext(ctx, pollInterval(deps)); err != nil {
 			return nil, errors.Join(errors.New("first-admin daemon gate did not become available"), err)
 		}
 	}
+}
+
+// Only stderr is diagnostic. A lost stdout response may contain credentials.
+func firstAdminExecError(err error) error {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+		message := exit.Stderr
+		if len(message) > 2048 {
+			message = message[:2048]
+		}
+		return fmt.Errorf("create first admin refused: %s", strings.TrimSpace(string(message)))
+	}
+	return fmt.Errorf("create first admin failed: %w", err)
 }

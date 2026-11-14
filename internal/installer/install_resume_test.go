@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -39,6 +40,10 @@ func testJSONFirstOnboarding(t *testing.T) {
 	for _, pending := range []bool{false, true} {
 		t.Run(fmt.Sprintf("FirstRunPending=%t", pending), func(t *testing.T) { testJSONFirstOnboardingCase(t, pending, "none") })
 	}
+}
+
+func TestFirstAdminRerunRefusalPreservesPartialResult(t *testing.T) {
+	testJSONFirstOnboardingCase(t, false, "refused")
 }
 
 func TestFirstAdminInterruptedInstallResumes(t *testing.T) {
@@ -119,6 +124,9 @@ func testJSONFirstOnboardingCase(t *testing.T, pending bool, interruption string
 			} else if enrollment.InstallerCSR != firstCSR {
 				t.Fatal("resumed install replaced the persisted enrollment key")
 			}
+			if interruption == "refused" {
+				return []byte(`{"token":"never-print-this-stdout"}`), &exec.ExitError{Stderr: []byte("oberth: an active unscoped admin exists; retry with the original installer key or use authenticated administrative APIs")}
+			}
 			if interruption == "lost-response" && firstExec == 1 {
 				return nil, io.ErrUnexpectedEOF
 			}
@@ -181,6 +189,21 @@ func testJSONFirstOnboardingCase(t *testing.T, pending bool, interruption string
 	var result InstallResult
 	if json.Unmarshal(output.Bytes(), &result) != nil {
 		t.Fatal("invalid JSON", output.String())
+	}
+	if interruption == "refused" {
+		if err == nil || result.OK || len(result.ManualSteps) == 0 || result.Context != "selected" || result.Review == nil {
+			t.Fatal("partial install result lost", result, err)
+		}
+		found := false
+		for _, check := range result.Checks {
+			if check.Code == "first_admin" && strings.Contains(check.Reason, "an active unscoped admin exists") {
+				found = true
+			}
+		}
+		if !found || strings.Contains(output.String(), "never-print-this-stdout") {
+			t.Fatal("server refusal lost or credential stdout exposed", result.Checks)
+		}
+		return
 	}
 	if result.OK == pending || (err == nil) == pending {
 		t.Fatal(result.Checks, err)

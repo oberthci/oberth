@@ -201,7 +201,7 @@ func createFirstAdmin(ctx context.Context, cfg Config, deps Deps, publicKey []by
 	raw, err := runFirstAdminExec(ctx, deps, body, args)
 	defer clear(raw)
 	if err != nil {
-		return api.FirstAdminResult{}, errors.New("create first admin failed")
+		return api.FirstAdminResult{}, err
 	}
 	var result api.FirstAdminResult
 	if json.Unmarshal(raw, &result) != nil || result.InstallerCertificate == "" || result.ServerCA == "" {
