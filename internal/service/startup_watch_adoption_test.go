@@ -251,6 +251,10 @@ func TestStartupWatchAdoptionSkipsCancelledRuns(t *testing.T) {
 	if _, err := f.store.CancelRun(t.Context(), model.RunCancelRequest{RunID: run.ID, Actor: "agent@host"}); err != nil {
 		t.Fatal(err)
 	}
+	rows, err := f.store.RunningRunsWithJobs(t.Context())
+	if err != nil || len(rows) != 1 || rows[0].ID != run.ID || rows[0].Status != model.RunRunning || rows[0].Phase != "cancelled" {
+		t.Fatal("fixture must remain in startup adoption query", rows, err)
+	}
 	jobs := &startupWatchJobs{adoptingJobs: &adoptingJobs{found: true}}
 	scheduler := f.scheduler(t, jobs)
 	dispatched := 0
@@ -258,7 +262,7 @@ func TestStartupWatchAdoptionSkipsCancelledRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	current, err := f.store.Run(t.Context(), run.ID)
-	if err != nil || !current.Cancelled() || dispatched != 0 || len(jobs.adopted) != 0 || len(jobs.deleted) != 0 {
+	if err != nil || current.Status != model.RunRunning || !current.Cancelled() || dispatched != 0 || len(jobs.adopted) != 0 || len(jobs.deleted) != 0 {
 		t.Fatal(current, err, dispatched, jobs.adopted)
 	}
 }
