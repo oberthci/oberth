@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
@@ -42,8 +41,12 @@ func TestUpgradePinsTLSOverridesOnlyForLivePKI(t *testing.T) {
 					}
 					applied := false
 					stop := errors.New("stop after Helm apply")
-					deps := testAdminDeps(Deps{Output: io.Discard, KubeClient: fake.NewClientset(), RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
+					deps := testAdminDeps(Deps{Output: io.Discard, KubeClient: argoSecurityTestClient(), RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 						RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+							if out, ok := testUpgradeArgoSecurityPreflight(args); ok {
+								return out, nil
+							}
+
 							switch args[0] {
 							case "list":
 								// A failed latest revision must not select the TLS pin policy.

@@ -394,7 +394,7 @@ DELETE FROM schema_migrations WHERE id='20261113193452-remove-run-credentialed-1
 DELETE FROM schema_migrations WHERE id='20261113193519-scope-secret-approvals-to-workflow-4e48838f64a9b32ddba9d914280daa25';
 `
 
-const PostWorkflowCapabilityUIDDowngrade = historicalRestartTimingSchema + postRunGrantClassificationDowngrade + `
+const PostWorkflowCapabilityUIDDowngrade = PostExecutionTargetRemovalDowngrade + historicalRestartTimingSchema + postRunGrantClassificationDowngrade + `
 DELETE FROM schema_migrations WHERE id='20261113181825-remove-restart-timings-370d05c58486149250a7139eb6afdca7';
 DELETE FROM schema_migrations WHERE id='20261113153226-stop-restart-resubmission-c9820cdaf74239b4216c84bafb350153';
 DELETE FROM schema_migrations WHERE id='20261113190600-remove-admission-timing-18a8ff23a732be469158310b6aab30a5';
@@ -494,8 +494,14 @@ CREATE TABLE resource_attempts (
 DELETE FROM schema_migrations WHERE id='20261113013336-remove-step-measurement-32ae7f0f09084618bddcb8f20fd0fbac';
 `
 
+// PostFragmentIndexDowngrade restores the lookup index only in disposable historical fixtures.
+const PostFragmentIndexDowngrade = `
+CREATE INDEX IF NOT EXISTS runs_passed_tested_sha_idx ON runs(repo_id,tested_sha) WHERE status='passed';
+DELETE FROM schema_migrations WHERE id='20261113213557-remove-fragment-run-index-8c4f9bbfa3c091b95cecdb689775370b';
+`
+
 // Historical schema reconstruction for disposable migration fixtures only.
-const historicalRestartTimingSchema = `
+const historicalRestartTimingSchema = PostFragmentIndexDowngrade + `
 CREATE TABLE IF NOT EXISTS restart_workflow_timings (
  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
  epoch INTEGER NOT NULL CHECK(epoch > 0),
@@ -521,4 +527,60 @@ WHEN NEW.run_id != OLD.run_id OR NEW.epoch != OLD.epoch OR NEW.node_id != OLD.no
  OR (OLD.pod_uid != '' AND NEW.pod_uid != OLD.pod_uid)
  OR (OLD.available = 1 AND NEW.timing_json != OLD.timing_json)
 BEGIN SELECT RAISE(ABORT,'restart step timing attempt is immutable'); END;
+`
+
+// PostExecutionTargetRemovalDowngrade restores empty custody tables only in
+// disposable historical migration fixtures. Production migration only drops.
+const PostExecutionTargetRemovalDowngrade = `
+CREATE TABLE execution_target_bindings (
+ run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+ workflow_name TEXT NOT NULL UNIQUE,
+ binding_json TEXT NOT NULL CHECK(json_valid(binding_json) AND length(binding_json)<=2097152),
+ cancelled INTEGER NOT NULL DEFAULT 0 CHECK(cancelled IN (0,1)),
+ admission_json TEXT NOT NULL DEFAULT '',
+ cleanup_receipt TEXT NOT NULL DEFAULT ''
+);
+CREATE TRIGGER execution_target_binding_immutable BEFORE UPDATE OF run_id,workflow_name,binding_json ON execution_target_bindings BEGIN
+ SELECT RAISE(ABORT,'immutable execution target binding');
+END;
+CREATE TRIGGER execution_target_cancel_monotonic BEFORE UPDATE OF cancelled ON execution_target_bindings WHEN OLD.cancelled=1 AND NEW.cancelled!=1 BEGIN
+ SELECT RAISE(ABORT,'execution target cancellation cannot be revoked');
+END;
+CREATE TRIGGER execution_target_admission_immutable BEFORE UPDATE OF admission_json ON execution_target_bindings WHEN OLD.admission_json!='' AND OLD.admission_json!=NEW.admission_json BEGIN
+ SELECT RAISE(ABORT,'immutable execution target admission');
+END;
+CREATE TRIGGER execution_target_cleanup_immutable BEFORE UPDATE OF cleanup_receipt ON execution_target_bindings WHEN OLD.cleanup_receipt!='' AND OLD.cleanup_receipt!=NEW.cleanup_receipt BEGIN
+ SELECT RAISE(ABORT,'immutable execution target cleanup receipt');
+END;
+CREATE TABLE execution_target_resources (
+ run_id TEXT NOT NULL REFERENCES execution_target_bindings(run_id) ON DELETE RESTRICT,
+ kind TEXT NOT NULL CHECK(kind IN ('Workflow','Pod','PersistentVolumeClaim','VirtualMachineInstance')),
+ namespace TEXT NOT NULL,
+ name TEXT NOT NULL,
+ uid TEXT NOT NULL DEFAULT '',
+ object_json TEXT NOT NULL CHECK(json_valid(object_json) AND length(object_json)<=4194304),
+ not_before INTEGER NOT NULL,
+ PRIMARY KEY(run_id,kind,namespace,name)
+);
+CREATE TRIGGER execution_target_resource_immutable BEFORE UPDATE OF run_id,kind,namespace,name,object_json,not_before ON execution_target_resources BEGIN
+ SELECT RAISE(ABORT,'immutable execution target create intent');
+END;
+CREATE TRIGGER execution_target_uid_immutable BEFORE UPDATE OF uid ON execution_target_resources WHEN OLD.uid!='' AND OLD.uid!=NEW.uid BEGIN
+ SELECT RAISE(ABORT,'immutable execution target object UID');
+END;
+ALTER TABLE execution_target_bindings ADD COLUMN custody_digest TEXT NOT NULL DEFAULT ''
+ CHECK(custody_digest='' OR (length(custody_digest)=64 AND custody_digest NOT GLOB '*[^0-9a-f]*'));
+
+ALTER TABLE execution_target_bindings ADD COLUMN quarantine_reason TEXT NOT NULL DEFAULT ''
+ CHECK(quarantine_reason IN ('','inconsistent-placement-custody'));
+
+CREATE TRIGGER execution_target_custody_digest_immutable BEFORE UPDATE OF custody_digest ON execution_target_bindings
+ WHEN OLD.custody_digest!=NEW.custody_digest BEGIN
+ SELECT RAISE(ABORT,'immutable execution target custody digest');
+END;
+CREATE TRIGGER execution_target_quarantine_immutable BEFORE UPDATE OF quarantine_reason ON execution_target_bindings
+ WHEN OLD.quarantine_reason!=NEW.quarantine_reason BEGIN
+ SELECT RAISE(ABORT,'immutable execution target quarantine');
+END;
+DELETE FROM schema_migrations WHERE id='20261113211418-drop-execution-targets-0c8c62c219d8b3115aa50e87dde3701f';
 `

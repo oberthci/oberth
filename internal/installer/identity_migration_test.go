@@ -81,7 +81,6 @@ func legacyDeployment() *appsv1.Deployment {
 		{Name: "host-key", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "oberth-ssh-host-key"}}},
 		{Name: "upstream-key", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "oberth-upstream-key"}}},
 		{Name: "known-hosts", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "oberth-known-hosts"}}},
-		{Name: "goproxy-tls", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "oberth-goproxy-tls"}}},
 	}
 	return d
 }
@@ -176,7 +175,6 @@ func TestPreflightLegacyAllBundlesPresentCertCoversNames(t *testing.T) {
 
 	certPEM, keyPEM := testCertAndKey(t, []string{
 		"oberth", "oberth.oberth", "oberth.oberth.svc", "oberth.oberth.svc.cluster.local",
-		"oberth-goproxy", "oberth-goproxy.oberth", "oberth-goproxy.oberth.svc", "oberth-goproxy.oberth.svc.cluster.local",
 	})
 
 	runner := &fakeBaoRunner{t: t, responses: map[string]fakeBaoResponse{
@@ -211,20 +209,17 @@ func TestPreflightLegacyAllBundlesPresentCertCoversNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	// No Helm calls should have been made by the preflight itself.
-	// The helm call from readLiveHelmValuesSubset is expected (returns nil → goProxy disabled).
-	// But this test scenario has no goproxy SANs missing, so no write.
 }
 
-func TestPreflightCertLacksGoProxySANsRotates(t *testing.T) {
+func TestPreflightCertLacksClientSANRotates(t *testing.T) {
 	t.Setenv(baoTokenEnvVar, "test-root-token")
 
-	// Cert with only server names, no goproxy names.
+	// Certificate lacks the requested client name.
 	certPEM, keyPEM := testCertAndKey(t, []string{
 		"oberth", "oberth.oberth", "oberth.oberth.svc", "oberth.oberth.svc.cluster.local",
 	})
 
 	liveValues := liveHelmValuesSubset{}
-	liveValues.Argo.GoProxy.Enabled = true
 	liveValuesJSON, _ := json.Marshal(liveValues)
 
 	serverV1 := baoIdentityJSON(1, map[string]string{
@@ -293,7 +288,7 @@ func TestPreflightCertLacksGoProxySANsRotates(t *testing.T) {
 		ContextName: "test-ctx",
 	})
 
-	cfg := Config{InstallSecretStore: true, ReissueServerCA: true}
+	cfg := Config{InstallSecretStore: true, ReissueServerCA: true, TLSExtraDNSNames: []string{"server.example.test"}}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
 	if err != nil {
 		t.Fatalf("preflight failed: %v", err)
@@ -507,7 +502,7 @@ func TestPreflightDryRunLegacyAbsentBundleRefuses(t *testing.T) {
 func TestPreflightDryRunMissingSANsPrintsPlanNoWrite(t *testing.T) {
 	t.Setenv(baoTokenEnvVar, "test-root-token")
 
-	// Cert without goproxy names.
+	// Certificate lacks the requested client name.
 	certPEM, keyPEM := testCertAndKey(t, []string{
 		"oberth", "oberth.oberth", "oberth.oberth.svc", "oberth.oberth.svc.cluster.local",
 	})
@@ -526,7 +521,6 @@ func TestPreflightDryRunMissingSANsPrintsPlanNoWrite(t *testing.T) {
 	pr := &preflightRunner{t: t, baoRunner: runner, podCertPEM: certPEM}
 
 	liveValues := liveHelmValuesSubset{}
-	liveValues.Argo.GoProxy.Enabled = true
 	liveValuesJSON, _ := json.Marshal(liveValues)
 
 	var buf bytes.Buffer
@@ -543,7 +537,7 @@ func TestPreflightDryRunMissingSANsPrintsPlanNoWrite(t *testing.T) {
 		ContextName: "test-ctx",
 	})
 
-	cfg := Config{InstallSecretStore: true, ReissueServerCA: true}
+	cfg := Config{InstallSecretStore: true, ReissueServerCA: true, TLSExtraDNSNames: []string{"server.example.test"}}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, true)
 	if err != nil {
 		t.Fatalf("dry-run should succeed: %v", err)
@@ -578,25 +572,6 @@ func TestCertSHA256Fingerprint(t *testing.T) {
 	}
 }
 
-func TestGoProxyDNSNames(t *testing.T) {
-	t.Parallel()
-	names := goProxyDNSNames("oberth", "oberth")
-	want := []string{
-		"oberth-goproxy",
-		"oberth-goproxy.oberth",
-		"oberth-goproxy.oberth.svc",
-		"oberth-goproxy.oberth.svc.cluster.local",
-	}
-	if len(names) != len(want) {
-		t.Fatalf("got %v, want %v", names, want)
-	}
-	for i := range want {
-		if names[i] != want[i] {
-			t.Errorf("names[%d] = %q, want %q", i, names[i], want[i])
-		}
-	}
-}
-
 func TestRotateCertificatePreservesKeyAndAddsNames(t *testing.T) {
 	t.Parallel()
 	certPEM, keyPEM := testCertAndKey(t, []string{"oberth", "oberth.oberth.svc"})
@@ -604,7 +579,7 @@ func TestRotateCertificatePreservesKeyAndAddsNames(t *testing.T) {
 	block, _ := pem.Decode(certPEM)
 	cert, _ := x509.ParseCertificate(block.Bytes)
 
-	newCertPEM, err := rotateCertificate(cert, keyPEM, []string{"oberth-goproxy.oberth.svc"}, nil)
+	newCertPEM, err := rotateCertificate(cert, keyPEM, []string{"server.example.test"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +594,7 @@ func TestRotateCertificatePreservesKeyAndAddsNames(t *testing.T) {
 	}
 
 	// Verify the new cert has the original and new names.
-	for _, want := range []string{"oberth", "oberth.oberth.svc", "oberth-goproxy.oberth.svc"} {
+	for _, want := range []string{"oberth", "oberth.oberth.svc", "server.example.test"} {
 		if !stringSliceContains(newCert.DNSNames, want) {
 			t.Errorf("rotated cert missing DNS name %q", want)
 		}
@@ -801,159 +776,9 @@ func TestPreflightLegacyPlusUnknownVolumeRefuses(t *testing.T) {
 	}
 }
 
-// --- Fix 3 tests: only URL name is hard-required for goProxy SAN check ---
-
-func TestPreflightCertWithOnlySvcNameNoRotation(t *testing.T) {
-	// Cert has only oberth-goproxy.oberth.svc (the URL name) — no rotation.
-	t.Setenv(baoTokenEnvVar, "test-root-token")
-
-	certPEM, keyPEM := testCertAndKey(t, []string{
-		"oberth", "oberth.oberth", "oberth.oberth.svc", "oberth.oberth.svc.cluster.local",
-		"oberth-goproxy.oberth.svc", // only the URL name
-	})
-
-	liveValues := liveHelmValuesSubset{}
-	liveValues.Argo.GoProxy.Enabled = true
-	liveValuesJSON, _ := json.Marshal(liveValues)
-
-	// Use a current-shape deployment (no Secret volumes) so no legacy checks.
-	var buf bytes.Buffer
-	deps := testAdminDeps(Deps{
-		Output:     &buf,
-		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
-		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
-			// Pod cert reads.
-			return certPEM, nil
-		},
-		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			if len(args) > 0 && args[0] == "get" {
-				return liveValuesJSON, nil
-			}
-			return nil, nil
-		},
-		ContextName: "test-ctx",
-	})
-
-	// Wire the bao store to serve the server identity.
-	baoRunner := &fakeBaoRunner{t: t, responses: map[string]fakeBaoResponse{
-		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/server": {
-			out: baoIdentityJSON(1, map[string]string{
-				"tls.crt": string(certPEM), "tls.key": string(keyPEM), "ssh_host_key": "ssh",
-			}),
-		},
-	}}
-
-	// Override RunCommand to dispatch between pod cert and bao calls.
-	deps.RunCommand = func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
-		for _, arg := range args {
-			if arg == "deploy/oberth" {
-				return certPEM, nil
-			}
-		}
-		return baoRunner.run(ctx, input, name, args...)
-	}
-	refreshFixtureAdmin(&deps)
-
-	cfg := Config{InstallSecretStore: true}
-	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
-	if err != nil {
-		t.Fatalf("cert with the URL name should not trigger rotation: %v", err)
-	}
-	// Verify no kv patch was issued.
-	for _, call := range baoRunner.calls {
-		if strings.Contains(call.command, "kv patch") {
-			t.Fatal("should not rotate when the URL name is present")
-		}
-	}
-}
-
-func TestPreflightCertWithoutSvcNameRotatesAllFour(t *testing.T) {
-	// Cert without the goproxy URL name → rotation adds all four forms.
-	t.Setenv(baoTokenEnvVar, "test-root-token")
-
-	certPEM, keyPEM := testCertAndKey(t, []string{
-		"oberth", "oberth.oberth", "oberth.oberth.svc", "oberth.oberth.svc.cluster.local",
-	})
-
-	liveValues := liveHelmValuesSubset{}
-	liveValues.Argo.GoProxy.Enabled = true
-	liveValuesJSON, _ := json.Marshal(liveValues)
-
-	patchSeen := false
-	serverReadCount := 0
-
-	runner := func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
-		if name != "kubectl" {
-			t.Fatalf("unexpected command %q", name)
-		}
-		for _, arg := range args {
-			if arg == "deploy/oberth" {
-				return certPEM, nil
-			}
-		}
-		command, _, err := stripKubectlBaoPlumbing(args)
-		if err != nil {
-			t.Fatalf("%v", err)
-		}
-		switch {
-		case command == "read -format=json "+defaultKVPrefix+"/data/identities/oberth/server":
-			serverReadCount++
-			if patchSeen {
-				return []byte(baoIdentityJSON(2, map[string]string{
-					"tls.crt": string(certPEM), "tls.key": string(keyPEM), "ssh_host_key": "ssh",
-				})), nil
-			}
-			return []byte(baoIdentityJSON(1, map[string]string{
-				"tls.crt": string(certPEM), "tls.key": string(keyPEM), "ssh_host_key": "ssh",
-			})), nil
-		case strings.HasPrefix(command, "kv patch"):
-			patchSeen = true
-			return []byte(`{"data":{"version":2}}`), nil
-		default:
-			t.Fatalf("unscripted command %q", command)
-			return nil, nil
-		}
-	}
-
-	var buf bytes.Buffer
-	deps := testAdminDeps(Deps{
-		Output:     &buf,
-		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
-		RunCommand: runner,
-		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			if len(args) > 0 && args[0] == "get" {
-				return liveValuesJSON, nil
-			}
-			return nil, nil
-		},
-		ContextName: "test-ctx",
-	})
-
-	cfg := Config{InstallSecretStore: true, ReissueServerCA: true}
-	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
-	if err != nil {
-		t.Fatalf("rotation should succeed: %v", err)
-	}
-	// With deferred writes (#812), the preflight computes the rotation but
-	// does not write it. Verify the pending state is set.
-	if cfg.pendingCertRotation == nil {
-		t.Fatal("expected pending cert rotation after preflight")
-	}
-	if patchSeen {
-		t.Fatal("preflight must NOT write to OpenBao before the Helm SSA preview")
-	}
-	// Commit the deferred rotation.
-	if err := commitServerIdentityRotation(context.Background(), &cfg, deps); err != nil {
-		t.Fatalf("commit rotation should succeed: %v", err)
-	}
-	if !patchSeen {
-		t.Fatal("expected kv patch after commitServerIdentityRotation")
-	}
-}
-
 // --- Fix 4 test: Helm error propagates from the preflight ---
 
-func TestPreflightHelmErrorPropagates(t *testing.T) {
+func TestReadLiveHelmValuesErrorPropagates(t *testing.T) {
 	t.Setenv(baoTokenEnvVar, "test-root-token")
 
 	certPEM, keyPEM := testCertAndKey(t, []string{
@@ -986,12 +811,9 @@ func TestPreflightHelmErrorPropagates(t *testing.T) {
 	})
 
 	cfg := Config{InstallSecretStore: true}
-	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
+	_, err := readLiveHelmValuesSubset(context.Background(), deps, cfg.Namespace)
 	if err == nil {
 		t.Fatal("expected error when RunHelm fails")
-	}
-	if !strings.Contains(err.Error(), "read live Helm values for the identity preflight") {
-		t.Fatalf("error should mention the identity preflight context: %v", err)
 	}
 	if !strings.Contains(err.Error(), "release not found") {
 		t.Fatalf("error should include the Helm error: %v", err)
@@ -1039,7 +861,6 @@ func TestPreflightClearsIdentityReadBuffers(t *testing.T) {
 		"oberth", "oberth.oberth", "oberth.oberth.svc", "oberth.oberth.svc.cluster.local",
 	})
 	liveValues := liveHelmValuesSubset{}
-	liveValues.Argo.GoProxy.Enabled = true
 	liveValuesJSON, _ := json.Marshal(liveValues)
 
 	var handedOut [][]byte
@@ -1099,7 +920,7 @@ func TestPreflightClearsIdentityReadBuffers(t *testing.T) {
 		},
 		ContextName: "test-ctx",
 	})
-	cfg := Config{InstallSecretStore: true, ReissueServerCA: true}
+	cfg := Config{InstallSecretStore: true, ReissueServerCA: true, TLSExtraDNSNames: []string{"server.example.test"}}
 	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
 		t.Fatalf("preflight failed: %v", err)
 	}

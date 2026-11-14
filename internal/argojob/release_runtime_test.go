@@ -93,6 +93,7 @@ func newReleaseRuntimeFixture(t *testing.T) *releaseRuntimeFixture {
 	f.absolute(filepath.Join(f.candidate, "chart-sha256.txt"), fmt.Sprintf("sha256:%x\n", sha256.Sum256([]byte(chart))), 0600)
 	digest := "sha256:" + strings.Repeat("b", 64)
 	f.absolute(filepath.Join(f.candidate, "server-image.txt"), "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@"+digest+"\n", 0600)
+	f.absolute(filepath.Join(f.candidate, "helper-image.txt"), "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-helper@"+digest+"\n", 0600)
 	f.absolute(filepath.Join(f.candidate, "chart-image.txt"), "europe-west4-docker.pkg.dev/skipopsmain/oberth-helm/oberth@"+digest+"\n", 0600)
 	f.write("objects/oberth/"+chartName, chart)
 	f.write("objects/oberth/"+chartName+".sigstore.json", "valid")
@@ -235,7 +236,8 @@ func (f *releaseRuntimeFixture) version(tag, key string, mutate bool) {
 	}
 	record, err := json.Marshal(map[string]any{"schemaVersion": 1, "component": "oberth", "version": tag,
 		"source":    map[string]string{"repository": "github.com/oberthci/oberth", "sha": runtimeFixtureSHA},
-		"images":    map[string]any{"server": map[string]string{"ref": serverRef}},
+		"images":    map[string]any{"server": map[string]string{"ref": serverRef}, "helper": map[string]string{"ref": strings.Replace(serverRef, "/oberth@", "/oberth-helper@", 1)}},
+		"notes":     "Optional helper image: " + strings.Replace(serverRef, "/oberth@", "/oberth-helper@", 1),
 		"artifacts": artifacts, "chart": map[string]string{"digest": fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(chart)))}})
 	if err != nil {
 		f.t.Fatal(err)

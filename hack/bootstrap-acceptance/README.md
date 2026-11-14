@@ -51,7 +51,10 @@ answers context; an unknown or ambiguous selection fails. Explicit native Argo
 parallelism and namespaceParallelism answers must reach the plan Review. The fixture asserts
 that no API mutation occurs. Narrow Helm stubs model an existing release with
 stored policy enabled, and then no release. The TLS fixture accepts reads only;
-both maintenance and fresh plans succeed with an unverified warning explaining
+the maintenance fixture supplies a live controller Deployment and its referenced
+ConfigMap with native Argo security defaults. The inert kubectl executable
+satisfies the prerequisite check and refuses every invocation. Both maintenance
+and fresh plans succeed with an unverified warning explaining
 that the enforcement check runs first at install after approval. Every mutation
 attempt, including scratch namespace creation, fails the contract. This restricted-cluster contract does not claim CNI
 enforcement: the
@@ -63,8 +66,8 @@ unknown remote host preparation may warn while aggregate `ok` remains true.
 Every non-warning check and aggregate result must still pass; malformed warning
 flags, empty checks and duplicate check identities refuse verification.
 Failed JSON plans are checked before their nonzero exit is reported, so the
-failure names the hard check. An adverse real CLI plan with zero available disk
-must exit 1 and identify `disk`; a nonzero command can never become a pass merely
+failure names the hard check. An adverse real CLI plan with an unready node
+must exit 1 and identify `node_ready`; a nonzero command can never become a pass merely
 because its JSON result says `ok: true`.
 
 ## Captured output boundary
@@ -76,7 +79,12 @@ the remaining public-pin fixture generates no credential. Inventories include
 private CA/leaf/signing keys recorded by their helpers, script-generated client
 key files and the designated synthetic recovery credentials. The parent scans
 both raw/base64 credential values and PEM body lines in captures and decoded
-Go event Output strings, including split writes.
+Go event Output strings, including split writes. Each channel uses a bounded
+eight-byte prefix automaton followed by full literal credential comparisons
+for the complete inventory. Decoded Go
+output is scanned in bounded blocks, retaining overlap and the completing
+event identity across block boundaries without rescanning that overlap for
+every tiny event.
 An adverse rerun of the CSR fixture deliberately prints its freshly generated
 private CA key: its Go test must pass, while the parent scan must reject it.
 That adverse capture is deleted and never published. The flag

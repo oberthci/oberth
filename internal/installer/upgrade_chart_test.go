@@ -150,9 +150,22 @@ func TestUpgradeActualHelmPreservesValuesAndAddsDefaults(t *testing.T) {
 	if access, exists := upgraded.Config["sourceAccess"]; !exists || access != nil {
 		t.Fatal("explicit null sourceAccess changed")
 	}
-	proxy := upgraded.Config["argo"].(map[string]any)["goProxy"].(map[string]any)
-	if proxy["enabled"] != false || upgraded.Config["pushBannerURL"] != "" {
-		t.Fatalf("explicit false/empty configuration changed: %+v", upgraded.Config)
+	if _, exists := upgraded.Config["argo"].(map[string]any)["goProxy"]; exists {
+		t.Fatal("retired proxy configuration survived actual upgrade")
+	}
+	if upgraded.Config["pushBannerURL"] != "" {
+		t.Fatal("explicit empty configuration changed")
+	}
+	// Proxy retirement is proved above. The remaining historical fixtures
+	// exercise retained settings independently of this removed subtree.
+	dropStoredGoProxy(values, nil)
+	dropStoredGoProxy(config, nil)
+	retained, err := json.Marshal(release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(history, retained, 0600); err != nil {
+		t.Fatal(err)
 	}
 	fixture := historicalHelmUpgrade{cfg: cfg, deps: deps, values: values, config: config, release: release, history: history, chart: chart, image: image}
 	fixture.checkOperatorOverrides(t, applyCfg, compat)
@@ -176,6 +189,9 @@ func testUpgradeValuePreflight(args []string) ([]byte, bool) {
 	if len(args) == 0 {
 		return nil, false
 	}
+	if out, ok := testUpgradeArgoSecurityPreflight(args); ok {
+		return out, true
+	}
 	if args[0] == "upgrade" && slices.Contains(args, "--dry-run=server") {
 		return []byte(`{"config":{}}`), true
 	}
@@ -194,6 +210,37 @@ func testUpgradeValuePreflight(args []string) ([]byte, bool) {
 		}
 		return []byte(`{}`), true
 	}
+	return nil, false
+}
+
+func testUpgradeArgoSecurityPreflight(args []string) ([]byte, bool) {
+	if len(args) == 0 {
+		return nil, false
+	}
+	if args[0] == "list" && slices.Contains(args, DefaultArgoNamespace) {
+		return []byte(`[{"name":"argo-workflows","namespace":"oberth-argo","status":"deployed","chart":"argo-workflows-1.0.24"}]`), true
+	}
+	if len(args) >= 3 && args[0] == "get" && args[1] == "values" && args[2] == "argo-workflows" {
+		flags, _, err := argoSecurityDefaults(nil)
+		if err != nil {
+			panic(err)
+		}
+		values := map[string]any{}
+		for i := 0; i+1 < len(flags); i += 2 {
+			key, raw, _ := strings.Cut(flags[i+1], "=")
+			var value any
+			if err := json.Unmarshal([]byte(raw), &value); err != nil {
+				panic(err)
+			}
+			setAbsentArgoSecurityValue(values, strings.Split(key, "."), value)
+		}
+		body, err := json.Marshal(values)
+		if err != nil {
+			panic(err)
+		}
+		return body, true
+	}
+
 	return nil, false
 }
 
@@ -349,7 +396,6 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T) {
 				want["image"].(map[string]any)["ref"] = image
 				argo := want["argo"].(map[string]any)
 				argo["namespace"] = DefaultArgoNamespace
-				argo["goProxy"].(map[string]any)["port"] = float64(8444)
 			}
 			if !reflect.DeepEqual(result.Config, want) {
 				t.Fatalf("stored user key set changed: got %#v, want %#v", result.Config, want)
@@ -360,7 +406,7 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T) {
 			if _, exists := result.Config["secretstore"].(map[string]any)["transit"]; exists {
 				t.Fatal("retired installer values survived", mode)
 			}
-			if result.Config["argo"].(map[string]any)["goProxy"].(map[string]any)["enabled"] != false || result.Config["pushBannerURL"] != "" || result.Config["retention"].(map[string]any)["keepNewestPerRef"] != float64(0) {
+			if result.Config["pushBannerURL"] != "" || result.Config["retention"].(map[string]any)["keepNewestPerRef"] != float64(0) {
 				t.Fatal("live operator values changed", mode)
 			}
 			for _, forbidden := range []string{"--git-backend", "OBERTH_GITCACHE_SHADOW"} {

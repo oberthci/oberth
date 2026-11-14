@@ -18,7 +18,9 @@ class ArgoSchemaTests(unittest.TestCase):
         for enabled in (True, False):
             result = self.render({'podPolicy': {'enabled': enabled}})
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual('kind: ValidatingAdmissionPolicy\n' in result.stdout, enabled)
+            self.assertEqual('name: oberth-default-argo-pods\n' in result.stdout, enabled)
+            self.assertIn('name: oberth-default-argo-task-results\n', result.stdout)
+            self.assertIn('name: oberth-default-argo-executor-holders\n', result.stdout)
         for enabled in ('false', 0, None):
             self.assert_schema_refuses({'podPolicy': {'enabled': enabled}})
 
@@ -83,7 +85,7 @@ class ArgoSchemaTests(unittest.TestCase):
         cases = [
             {'enabled': 'false'},
             {'vault': {'adress': 'https://bao.example.com'}},
-            {'goProxy': {'enabeld': True}},
+            {'goProxy': {'enabled': False}},
             {'ciSecrets': 17},
             {'ciSecrets': {'serviceAccount': 17}},
             {'ciSecrets': {'vaultRole': []}},

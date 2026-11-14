@@ -9,9 +9,8 @@ vm.runInContext(`
  replaceApp=html=>{combinedHTML=html};
  api=async path=>path==='/api/status'?{version:'test',database:'ready',audit:'ready',cluster:'ready',vcs:'ready'}:[];
 `,sandbox);
-vm.runInContext("api=async path=>path==='/api/status'?{version:'test',execution_target_recovery:{quarantined_bindings:2,reason:'Custody <inconsistent>',remedy:'Inspect <original objects>'}}:[];",sandbox);
 await vm.runInContext('renderStatus(0)',sandbox);
-const recovery=vm.runInContext('combinedHTML',sandbox);
-for(const text of ['execution target recovery','2 quarantined bindings','Custody &lt;inconsistent&gt;','Inspect &lt;original objects&gt;'])assert.ok(recovery.includes(text),text);
-assert.ok(!recovery.includes('Custody <inconsistent>'));
-console.log('quarantined target recovery status rendering passed');
+const first=vm.runInContext('combinedHTML',sandbox);
+for(const text of ['server','database','audit'])assert.ok(first.includes(text),text);
+for(const text of ['execution target recovery','controller verification','8 admitted','host pressure','admission paused'])assert.ok(!first.includes(text),text);
+console.log('ordinary runtime status rendering passed');

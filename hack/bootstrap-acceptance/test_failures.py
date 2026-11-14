@@ -14,22 +14,20 @@ class PlanResultSemantics(unittest.TestCase):
     def result(self, **changes):
         return dict(version=1, ok=True, context='selected', checks=[
             dict(code='cluster_ca', ok=True),
-            dict(code='host_swap/selected-node', ok=False, warning=True),
-            dict(code='host_inotify/selected-node', ok=False, warning=True),
-            dict(code='host_kubelet/selected-node', ok=False, warning=True),
+            dict(code='network_policy', ok=False, warning=True),
         ]) | changes
 
-    def test_advisory_host_checks_do_not_reject_a_green_plan(self):
+    def test_advisory_policy_check_does_not_reject_a_green_plan(self):
         verify_result(self.result(), 'selected')
 
     def test_hard_failure_is_named_despite_advisory_warnings(self):
         result = self.result()
-        result['checks'].append(dict(code='disk/selected-node', ok=False,
+        result['checks'].append(dict(code='node_ready/selected-node', ok=False,
                                      reason='private diagnostic', remedy='private remedy'))
         result['ok'] = False
         with self.assertRaises(Refused) as caught:
             verify_result(result, 'selected')
-        self.assertEqual(caught.exception.check, 'disk')
+        self.assertEqual(caught.exception.check, 'node_ready')
         self.assertNotIn('private', str(caught.exception))
 
     def test_warning_flags_cannot_override_aggregate_failure_or_malformed_checks(self):
@@ -67,11 +65,11 @@ class PlanResultSemantics(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             probe = Probe(root, root, 'selected', root / 'unused')
-            original = Refused('time budget exceeded', stage='plan-disk-refusal',
+            original = Refused('time budget exceeded', stage='plan-node-refusal',
                                check='command-timeout', package=ci.CLI_PACKAGE)
             with patch.object(ci, 'verify_plan', side_effect=original):
                 with self.assertRaises(Refused) as caught:
-                    ci.require_disk_refusal(probe, [])
+                    ci.require_node_refusal(probe, [])
             self.assertIs(caught.exception, original)
 
 
@@ -143,12 +141,12 @@ class FailurePathBudget(unittest.TestCase):
             def fail(probe, command):
                 probe.stage = 'plan-selected'
                 verify_result(dict(version=1, ok=False, context='selected',
-                                   checks=[dict(code='disk/selected-node', ok=False)]), 'selected')
+                                   checks=[dict(code='node_ready/selected-node', ok=False)]), 'selected')
             with patch.object(ci, 'run_cell', side_effect=fail), patch.object(ci, 'final_scan') as scan:
                 with self.assertRaises(Refused) as caught:
                     ci.checked_cell(probe, [])
             scan.assert_called_once_with(probe)
-            self.assertIn('stage=plan-selected check=disk', diagnostic(caught.exception))
+            self.assertIn('stage=plan-selected check=node_ready', diagnostic(caught.exception))
 
     def test_expired_cell_alarm_gets_an_independent_bounded_failure_scan(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -95,21 +95,6 @@ despite caller-file replacement, exercise stdout/stderr bounds with actual
 subprocesses, reject malformed first PEM blocks even before valid certificates,
 and detect drift in already-owned objects during partial forward repair.
 
-Private routing #764: `TestPrivateRoutingAllShapes` and
-`TestPrivateRoutingCacheFailures` cover private root/unknown/nested modules,
-malformed requests, unsupported and missing versions, and every cache fault.
-`TestLatestAndListUseSupportedTags` checks canonical tag-only resolution.
-`TestGoResolverPrivateRouting`, `TestGoResolverLatestEndpoint`,
-`TestGoResolverPublicFallback`, `TestGoResolverOriginal404Control` and
-`TestGoResolverUntrustedMirrorStops` run actual Go subprocesses with cold caches
-against verified TLS loopback mirror/public endpoints and a non-forwarding TLS
-CONNECT trap: private coordinates never reach either fallback, the original
-404 control reaches both, and public availability behavior is preserved. The
-fixture disables public sumdb and VCS access to prohibit external traffic; the
-production environment test separately verifies public sumdb is untouched.
-`TestGoProxyEnvironmentPreventsAmbientBypass` checks CI/release and inline
-containers override ambient proxy values while preserving public checksum policy.
-
 `TestClientRejectsAmbientAuthorityOnEveryRequest` (#770) asserts actual verified
 TLS 1.3 seal-status, login, KV read and revoke requests under hostile synthetic
 Vault environment metadata, set both before and after client construction.
@@ -331,21 +316,16 @@ Old preflight execution is terminalized rather than reattached. Native
 execution keeps exact source, UID, target and operator identity custody;
 historical execution journals do not authorize new work.
 
-Upgrade idle-probe retries: `TestUpgradeWaitRetriesTimeoutBeforeUpgrade` uses a
-fake HTTP transport and clock through the real installer wait path: a five-second
-probe timeout followed by idle reaches Helm upgrade, while persistent timeouts
-consume exactly the two-minute wait budget, refuse upgrade and preserve the last
-probe cause with throttled diagnostics. `TestWaitIdleTransientFailuresBackOffAndRecover`
-checks transport/503/truncated-body recovery and backoff reset on a valid busy
-sample; protocol-error and cancellation tests pin immediate refusal and prompt
-cancellation. `TestIdleSnapshotAdminProbeDoesNotWaitForStorage` blocks a background
-read while 100 admin probes answer from memory, then proves expiry, refresh and
-failure invalidation. Missing/invalid/late samples cannot establish idle.
-
-`TestUpgradeWaitDeadlineRetainsChildProbeDiagnostic` splits child output at every
-byte and proves the local deadline retains its last reported probe cause even
-when kubectl is killed; a subsequent busy snapshot clears that stale cause.
-
+Upgrade idle-probe retries: `TestUpgradeAdminIdleObservation` drives the
+installer's authenticated API wait path through transient failures, busy/idle
+samples, critical selection, authorization refusal, deadline and cancellation.
+`TestWaitIdleTransientFailuresBackOffAndRecover` checks transport, 503 and
+truncated-body recovery and backoff reset on a valid busy sample; protocol-error
+and cancellation tests pin immediate refusal and prompt cancellation.
+`TestIdleSnapshotAdminProbeDoesNotWaitForStorage` blocks a background read while
+100 probes answer from memory, then proves expiry, refresh and failure
+invalidation. Missing, invalid or late samples cannot establish idle. Upgrade
+observation uses the API directly and preserves the last failure at its deadline.
 
 Idle sampler freshness follow-up: `TestIdleSnapshotSlowReadsRemainAvailableToWaiter`
 uses 4.5-second reads at six waiter start phases; the waiter gets idle within
@@ -607,3 +587,10 @@ immutable security evidence; current helper budgets are tested independently.
 `TestAdmittedUsageCommandSurvivesCreateRetryAndAdoption` compiles an admitted
 command under `/run/oberth/usage/`, reconciles a lost create acknowledgement,
 then retries and adopts without reseeding, recreating or changing the command.
+
+Install verification #1585: `TestVerifyCreatesNoObjectsUnlessProbeRequested`
+counts fake Kubernetes mutations and probe invocations. Default verification
+creates no objects and reports `not-retested`; explicit verification with
+`--probe` invokes the live measurement. CLI tests refuse `--probe` outside
+verification and alongside `--plan` or `--dry-run`. Existing install refusal
+and real probe cleanup tests remain in place.

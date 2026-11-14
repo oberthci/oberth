@@ -24,7 +24,7 @@ func TestSchedulingPlacementReasonsReadOnly(t *testing.T) {
 			foreign.Status.Conditions = pod.Status.Conditions
 			kube := fake.NewClientset(pod, foreign)
 			controller := &Controller{workflows: &schedulingWorkflowClient{workflow: workflow}, kube: kube, config: Config{Namespace: "pipeline"}}
-			got, err := controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+			got, err := withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha")
 			if err != nil {
 				t.Fatal(err)
 			}

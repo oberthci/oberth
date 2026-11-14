@@ -134,7 +134,7 @@ func TestIsolationMatchesActualControllerObservation(t *testing.T) {
 						}
 					}
 					if env["PATH"] != "/private/bin" || env["GOCACHE"] != "/private/cache" || env["OBERTH_SHA"] != testSHA {
-						t.Errorf("%s lost private environment or run identity", c.Name)
+						t.Errorf("%s historical capture lost private environment or run identity", c.Name)
 					}
 				}
 			}

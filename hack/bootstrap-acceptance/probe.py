@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Private capture, strict verification and selected-CA mTLS for the contract cell."""
+from array import array
 import base64
+from collections import deque
 import json
 import os
 import re
@@ -89,17 +91,62 @@ def secret_values(path):
     return values
 
 
+class CredentialMatcher:
+    def __init__(self, values):
+        if not values or any(not value for value in values):
+            raise Refused('secret scan has no complete credential inventory', check='credential-inventory')
+        edges, candidates = [{}], [[]]
+        for value in values:
+            state = 0
+            for byte in value[:8]:
+                if byte not in edges[state]:
+                    edges[state][byte] = len(edges)
+                    edges.append({})
+                    candidates.append([])
+                state = edges[state][byte]
+            candidates[state].append(value)
+        # A bounded eight-byte prefix automaton filters candidate credentials.
+        # Full byte comparisons preserve literal semantics for every value.
+        # Dense rows keep scanning linear even for heterogeneous inventories.
+        table = array('I', [0]) * (256 * len(edges))
+        failure = [0] * len(edges)
+        for byte, target in edges[0].items():
+            table[byte] = target
+        pending = deque(edges[0].values())
+        while pending:
+            state = pending.popleft()
+            fallback = failure[state]
+            row = state * 256
+            table[row:row + 256] = table[fallback * 256:(fallback + 1) * 256]
+            candidates[state].extend(candidates[fallback])
+            for byte, target in edges[state].items():
+                table[row + byte] = target
+                failure[target] = table[fallback * 256 + byte]
+                pending.append(target)
+        self.table, self.candidates = table, candidates
+
+    def search(self, block):
+        state = 0
+        table, candidates = self.table, self.candidates
+        for index, byte in enumerate(block):
+            state = table[state * 256 + byte]
+            for value in candidates[state]:
+                start = index + 1 - min(8, len(value))
+                if block.startswith(value, start):
+                    return start + len(value)
+        return None
+
+
 def scan_logs(paths, values):
     """Never report matching values or snippets, even when the scan fails."""
-    if not values or any(not value for value in values):
-        raise Refused('secret scan has no complete credential inventory', check='credential-inventory')
+    matcher = CredentialMatcher(values)
     for path in paths:
         with path.open('rb') as stream:
             overlap = max(map(len, values)) - 1
             tail = b''
             while chunk := stream.read(65536):
                 block = tail + chunk
-                if any(value in block for value in values):
+                if matcher.search(block) is not None:
                     raise Refused('secret detected in captured output; artifacts withheld', check='credential-exposure',
                                   channel='stderr' if path.suffix == '.stderr' else 'stdout')
                 tail = block[-overlap:] if overlap else b''
@@ -158,12 +205,27 @@ def go_inventory(directory):
     return list(set(values)), tests
 
 
+def scan_output_block(outputs, tail, matcher, overlap):
+    block = tail + b''.join(output for output, _, _ in outputs)
+    end = matcher.search(block)
+    if end is not None:
+        # Attribute a split credential to the event that completes its bytes.
+        end -= len(tail)
+        for output, package, test in outputs:
+            end -= len(output)
+            if end <= 0:
+                raise Refused('secret detected in decoded Go output; artifacts withheld',
+                              check='credential-exposure', package=package,
+                              test=safe_go_test(test), channel='go-output')
+    return block[-overlap:] if overlap else b''
+
+
 def scan_go_events(path, values):
-    # test2json escapes PEM newlines and other bytes. Scan decoded Output,
-    # retaining an overlap across events so split writes cannot evade a match.
-    if not values:
-        raise Refused('Go output scan has no credential inventory', check='credential-inventory')
+    # Decode/validate every event, then scan bounded output blocks. Overlap is
+    # retained between blocks, rather than rescanned for every tiny Go event.
+    matcher = CredentialMatcher(values)
     overlap, tail = max(map(len, values)) - 1, b''
+    outputs, size = [], 0
     with path.open('rb') as stream:
         for line in stream:
             if len(line) > 16 * 1024 * 1024:
@@ -177,12 +239,15 @@ def scan_go_events(path, values):
             output = event.get('Output', '')
             if not isinstance(output, str):
                 raise Refused('invalid Go output event', check='event-output')
-            block = tail + output.encode()
-            if any(value in block for value in values):
-                raise Refused('secret detected in decoded Go output; artifacts withheld',
-                              check='credential-exposure', package=event.get('Package'),
-                              test=safe_go_test(event.get('Test')), channel='go-output')
-            tail = block[-overlap:] if overlap else b''
+            if output:
+                encoded = output.encode()
+                outputs.append((encoded, event.get('Package'), event.get('Test')))
+                size += len(encoded)
+            if size >= 65536:
+                tail = scan_output_block(outputs, tail, matcher, overlap)
+                outputs, size = [], 0
+    if outputs:
+        scan_output_block(outputs, tail, matcher, overlap)
 
 
 class Probe:

@@ -2,10 +2,13 @@
 
 Run this manual procedure on each release candidate before tagging. It tests
 the first-time user path on a fresh macOS or Linux machine with a working local
-`~/.kube/config` pointing at any suitable Kubernetes cluster. A fresh macOS VM
-with user-provisioned colima k3s is one example; a Linux host with a remote
-cluster works too. Neither a VM nor a particular cluster distribution is
-required. The client and cluster may be separate machines.
+`~/.kube/config` pointing at a suitable Kubernetes cluster. A macOS guest has
+no nested virtualization: use a cluster reachable through that local kubeconfig,
+either remote or running on the host. The client and cluster may be separate
+machines; neither a virtual machine nor a particular cluster distribution is
+required. The Kubernetes API address in kubeconfig must be covered by the API
+server certificate's DNS or IP SANs. Use that reachable address for the installer
+client-host answer; the Oberth server certificate must cover it as well.
 
 The [bootstrap contract cell](bootstrap-cell.md) is the automated part in CI.
 Record its result separately from this manual result. A green contract cell
@@ -69,12 +72,12 @@ check leaves fresh-machine acceptance incomplete for that candidate.
 
 2. **Cluster and prerequisites (user steps).** Supply the host dependencies and
    a working local `~/.kube/config` for the chosen cluster, outside Claude's
-   Oberth session. Existing remote clusters are valid. For the optional macOS
-   example, the operator installs Homebrew, kubectl, Helm, colima and Docker CLI,
-   then runs `colima start --kubernetes --cpu 4 --memory 8`. These are example
-   environment settings, not Oberth's measured resource requirements. If colima
-   fails because nested virtualization is unavailable, record the exact error
-   with secrets masked and stop the scenario as an environment blocker.
+   Oberth session. For a macOS guest, use a remote cluster or one on the host;
+   do not start a nested Kubernetes virtual machine inside the guest. Prepare
+   the kubeconfig with an API address reachable from the guest and present in
+   the API server certificate's SANs. Use that same reachable address when the
+   installer asks for the client host, and ensure the Oberth server certificate
+   covers it. Record an environment blocker if cluster access cannot be supplied.
    Record `kubectl config current-context`, select that context explicitly,
    confirm `kubectl --context '<context>' get nodes` reports Ready, and record
    the Kubernetes version. Save an exact private copy of

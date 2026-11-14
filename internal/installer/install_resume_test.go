@@ -170,7 +170,7 @@ func testJSONDependencyResume(t *testing.T) {
 					version = DefaultArgoChartVersion
 				}
 				applies, previews := 0, 0
-				deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+				deps := Deps{Output: io.Discard, KubeClient: argoSecurityTestClient(), RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 					switch args[0] {
 					case "list":
 						return json.Marshal([]helmRelease{{Name: name, Status: "deployed", Chart: name + "-" + version}})
@@ -229,7 +229,7 @@ func testJSONOberthResume(t *testing.T) {
 			}
 			applies := 0
 			previews := 0
-			deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			deps := Deps{Output: io.Discard, KubeClient: argoSecurityTestClient(), RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 				joined := " " + strings.Join(args, " ") + " "
 				switch {
 				case strings.Contains(joined, " list "):

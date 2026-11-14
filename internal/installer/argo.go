@@ -30,14 +30,6 @@ const (
 	// argoControllerLabelSelector matches the workflow-controller Pod the
 	// chart deploys.
 	argoControllerLabelSelector = "app.kubernetes.io/name=argo-workflows-workflow-controller"
-
-	// podNamesEnv pins the controller's pod naming scheme. Oberth stamps
-	// workflows.argoproj.io/pod-name-format: v2 on every submission so it can
-	// compute a step Pod's name to stream its log; if the controller disagrees,
-	// nothing errors — the logs simply never appear. Pinning both ends removes
-	// the disagreement rather than relying on a shared default.
-	podNamesEnv    = "POD_NAMES"
-	podNamesFormat = "v2"
 )
 
 // ArgoResult describes the outcome of the Argo Workflows install phase.
@@ -93,6 +85,16 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		return result, err
 	}
 	if cfg.SkipArgo {
+		if err := readArgoSecurityReview(ctx, &cfg, deps); err != nil {
+			return result, err
+		}
+		if len(cfg.argoSecurityArgs) > 0 {
+			plan := &upgradeArgoSecurity{namespace: ns, consent: cfg.ArgoSecurityDefaults}
+			if err := plan.reconcile(ctx, deps); err != nil {
+				return result, err
+			}
+			result.Upgraded = true
+		}
 		result.Skipped = true
 		return result, nil
 	}
@@ -113,6 +115,19 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	release, exists, err := findHelmRelease(ctx, deps, "argo-workflows", ns)
 	if err != nil {
 		return result, err
+	}
+	cfg.argoReviewRelease = &release
+	cfg.argoReleaseRead = true
+	if err := readArgoSecurityReview(ctx, &cfg, deps); err != nil {
+		return result, err
+	}
+	securityChanged := exists && len(cfg.argoSecurityArgs) > 0
+	if securityChanged {
+		plan := &upgradeArgoSecurity{namespace: ns, consent: cfg.ArgoSecurityDefaults}
+		if err := plan.reconcile(ctx, deps); err != nil {
+			return result, err
+		}
+		cfg.argoSecurityArgs = []string{}
 	}
 	cfg.argoExecutorResources, err = readArgoExecutorResources(ctx, deps, ns, exists)
 	if err != nil {
@@ -162,7 +177,8 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	}
 	switch action {
 	case actionSkip:
-		result.AlreadyInstalled = true
+		result.AlreadyInstalled = !securityChanged
+		result.Upgraded = securityChanged
 		return result, nil
 	case actionUpgrade:
 		result.Upgraded = true
@@ -191,6 +207,9 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return result, fmt.Errorf("helm install Argo Workflows: %w", err)
+	}
+	if err := checkLiveArgoSecurity(ctx, deps, ns); err != nil {
+		return result, argoSecurityUpgradeRemedy(ns, err)
 	}
 	return result, nil
 }
@@ -225,8 +244,6 @@ func ArgoHelmArgs(cfg Config) []string {
 		"--set", "crds.install=true",
 		"--set", "crds.keep=true",
 		"--set", "crds.full=false",
-		"--set", "controller.extraEnv[0].name=" + podNamesEnv,
-		"--set-string", "controller.extraEnv[0].value=" + podNamesFormat,
 		"--version", chartVersion,
 		// Idempotent re-runs must not reset values set on a previous install;
 		// the --set flags above still override reused values.
@@ -236,6 +253,11 @@ func ArgoHelmArgs(cfg Config) []string {
 	if canonicalChartVersion(chartVersion) == canonicalChartVersion(DefaultArgoChartVersion) {
 		args = append(args, "--set-string", "executor.image.tag="+strings.SplitN(argoworkflow.ExecutorImage, ":", 2)[1])
 	}
+	securityArgs := cfg.argoSecurityArgs
+	if securityArgs == nil {
+		securityArgs, _, _ = argoSecurityDefaults(nil)
+	}
+	args = append(args, securityArgs...)
 	args = append(args, argoLimitArgs(cfg)...)
 	return append(args, argoExecutorResourceArgs(cfg)...)
 }
@@ -343,10 +365,5 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	for i, name := range PerStepIdentityNames(cfg.PerStepIdentities) {
 		values = append(values, "--set", fmt.Sprintf("argo.perStepIdentities[%d]=%s", i, name))
 	}
-	// Preserve proxy enablement and its administrator-selected namespace in
-	// reused values. Fresh installs leave it disabled until a mapping is supplied.
-	values = append(values,
-		"--set", "argo.goProxy.port=8444",
-	)
 	return values
 }

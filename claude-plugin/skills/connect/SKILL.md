@@ -86,7 +86,11 @@ counterpart stays here and is the push key to use when adding repositories.
 5. Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" credentials` to validate
    the key pair and merge `CLAUDE_CODE_CLIENT_CERT` and
    `CLAUDE_CODE_CLIENT_KEY` into settings.json env beside NODE_EXTRA_CA_CERTS.
-   Then run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" configure '<server URL>'`.
+   Take `mcp_url` from the public verify result, validate it with the URL rule
+   above, then run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" configure '<mcp_url>'`.
+   A bare server URL is normalized to `/mcp`; an explicit endpoint is checked
+   before registration. A failed authenticated MCP probe leaves the existing
+   registration in place.
    This creates the MCP entry with no Authorization header. No entry exists
    before configuration. For an explicitly requested bearer setup, skip
    keygen/credentials and pass an existing 0600 token file as configure's
@@ -141,7 +145,7 @@ without checking evidence that establishes that fact.
 ## Report the connected tool count
 
 <!-- BEGIN GENERATED MCP TOOL COUNT -->
-The full server registry contains **93 tools**, including administrator-only
+The full server registry contains **92 tools**, including administrator-only
 operations. The authenticated `tools/list` response is authoritative for the
 connected identity; non-admin clients do not receive administrator-only tools.
 <!-- END GENERATED MCP TOOL COUNT -->

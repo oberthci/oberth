@@ -17,7 +17,6 @@ func admitHelperMounts(location string, mounts []corev1.VolumeMount, devices []c
 		problems = append(problems, admitExecutorVolumeName(fmt.Sprintf("%s.volumeMounts[%d]", location, i), mount.Name)...)
 		if !path.IsAbs(mount.MountPath) {
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.volumeMounts[%d].mountPath %q must be an absolute path", location, i, mount.MountPath))
-			continue
 		}
 		if helperPathMayBeShadowed(mount.MountPath) {
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.volumeMounts[%d].mountPath %q uses a reserved server helper path; Oberth helper and executor identity paths are reserved", location, i, mount.MountPath))
@@ -27,7 +26,6 @@ func admitHelperMounts(location string, mounts []corev1.VolumeMount, devices []c
 		problems = append(problems, admitExecutorVolumeName(fmt.Sprintf("%s.volumeDevices[%d]", location, i), device.Name)...)
 		if !path.IsAbs(device.DevicePath) {
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.volumeDevices[%d].devicePath %q must be an absolute path", location, i, device.DevicePath))
-			continue
 		}
 		if helperPathMayBeShadowed(device.DevicePath) {
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.volumeDevices[%d].devicePath %q uses a reserved server helper path; Oberth helper and executor identity paths are reserved", location, i, device.DevicePath))
@@ -42,7 +40,7 @@ func helperPathMayBeShadowed(value string) bool {
 	if strings.Contains(value, "{{") || strings.Contains(value, "}}") {
 		return true
 	}
-	cleaned := path.Clean(value)
+	cleaned := path.Clean("/" + value)
 	for _, root := range []string{"/run/oberth", "/var/run/oberth", ExecutorIdentityMountPath, "/run/secrets/kubernetes.io/serviceaccount"} {
 		if cleaned == root || strings.HasPrefix(cleaned, root+"/") {
 			return true

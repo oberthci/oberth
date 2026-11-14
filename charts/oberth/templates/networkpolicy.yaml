@@ -1,9 +1,8 @@
 {{- if .Values.networkPolicy.enabled }}
-{{- $goProxy := .Values.argo.goProxy | default dict }}
 # Default-deny egress for the pipeline namespace with targeted allowlist.
 #
-# Pipeline pods need outbound HTTPS for container registries (GAR), object
-# storage (R2), Go module proxy, GitHub, and Trivy DB downloads. They need
+# Pipeline pods need outbound HTTPS for container registries, object
+# storage, public module sources and dependency downloads. They need
 # DNS resolution and, for release-tier runs, the OpenBao/Vault API.
 #
 # The Kubernetes API server is intentionally NOT blocked: Argo's emissary
@@ -20,8 +19,7 @@
 #
 # Everything else is denied by the policyTypes declaration. In particular:
 #   - Oberth's own NodePorts (30022 SSH, 30443 HTTPS) — implicitly blocked
-#     by the port allowlist. The optional Go proxy rule permits only its
-#     configured listener port on this release's server pods.
+#     by the port allowlist.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -47,8 +45,8 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.dnsNamespace | default "kube-system" | quote }}
       {{- end }}
-    # HTTPS outbound: container registries, object storage, module proxy,
-    # GitHub, Trivy DB, and the Kubernetes API server (Argo emissary).
+    # HTTPS outbound: container registries, object storage, public module sources,
+    # dependency downloads, and the Kubernetes API server (Argo emissary).
     # No destination restriction — ipBlock cannot match cluster-internal IPs
     # and namespaceSelector cannot match the host-networked API server, so any
     # "to" block here breaks Argo on policy-enforcing CNIs.
@@ -57,21 +55,6 @@ spec:
           protocol: TCP
         - port: 6443
           protocol: TCP
-    {{- if $goProxy.enabled }}
-    # The private Go module proxy uses a separate listener from public HTTPS.
-    # Both selectors belong to one peer: only this release's server pods in
-    # the server namespace are reachable on the configured proxy port.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Release.Namespace }}
-          podSelector:
-            matchLabels:
-              {{- include "oberth.selectorLabels" . | nindent 14 }}
-      ports:
-        - port: {{ $goProxy.port | default 8444 }}
-          protocol: TCP
-    {{- end }}
     # In-namespace egress for sidecar services the pipeline needs on
     # non-standard ports (for example a Docker API shim backing Testcontainers).
     # Scoped to the pipeline namespace itself via an empty podSelector, so it

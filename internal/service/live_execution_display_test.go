@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	clocktesting "k8s.io/utils/clock/testing"
-
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -41,8 +39,6 @@ func TestFirstRunListReadReportsNativeQueueAndSuspensionWithoutStepHistory(t *te
 			queued := submittedDisplayRun(t, f, "queue")
 			suspended := submittedDisplayRun(t, f, "suspended")
 			s := f.api(t)
-			fake := clocktesting.NewFakeClock(time.Now())
-			s.waitClock = fake
 			var resumed atomic.Bool
 			s.schedulingObserver = schedulingObserverFunc(func(_ context.Context, run model.Run) (*model.ExecutionObservation, error) {
 				observation := &model.ExecutionObservation{State: "observed", Phase: "Running", Message: "Workflow execution is running."}
@@ -82,7 +78,6 @@ func TestFirstRunListReadReportsNativeQueueAndSuspensionWithoutStepHistory(t *te
 				t.Fatal("detail missed suspension", detail, err)
 			}
 			resumed.Store(true)
-			fake.Step(executionDiagnosticTTL)
 			value, err = s.Runs(t.Context(), actor, api.RunFilter{})
 			if err != nil {
 				t.Fatal(err)
@@ -100,15 +95,14 @@ func TestFirstRunListReadReportsNativeQueueAndSuspensionWithoutStepHistory(t *te
 	}
 }
 
-func TestRunListNativeObservationHasOnePageBudget(t *testing.T) {
+func TestRunListUnavailableObservationReturnsWholePage(t *testing.T) {
 	f := newControlFixture(t)
 	for i := range 12 {
 		submittedDisplayRun(t, f, fmt.Sprint(i))
 	}
 	s := f.api(t)
-	s.schedulingObserver = schedulingObserverFunc(func(ctx context.Context, _ model.Run) (*model.ExecutionObservation, error) {
-		<-ctx.Done()
-		return nil, ctx.Err()
+	s.schedulingObserver = schedulingObserverFunc(func(_ context.Context, _ model.Run) (*model.ExecutionObservation, error) {
+		return &model.ExecutionObservation{State: "unavailable"}, nil
 	})
 	start := time.Now()
 	value, err := s.Runs(t.Context(), api.Actor{Identity: "owner"}, api.RunFilter{})

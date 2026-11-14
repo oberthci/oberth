@@ -25,30 +25,13 @@ import (
 	"github.com/oberthci/oberth/internal/secretstore"
 )
 
-// goProxyDNSNames returns the four DNS names a goproxy service requires on
-// the server certificate. fullname is the Helm release fullname ("oberth").
-func goProxyDNSNames(fullname, namespace string) []string {
-	base := fullname + "-goproxy"
-	return []string{
-		base,
-		base + "." + namespace,
-		base + "." + namespace + ".svc",
-		base + "." + namespace + ".svc.cluster.local",
-	}
-}
-
 // liveHelmValuesSubset is the subset of a Helm release's values the identity
-// preflight and the Helm SSA preview inspect: goProxy enablement, the
-// and the deployed secret-store connection.
+// preflight and the Helm SSA preview inspect: TLS, audit and the
+// deployed secret-store connection.
 type liveHelmValuesSubset struct {
 	AuditAnchor struct {
 		RekorPublicKey string `json:"rekorPublicKey"`
 	} `json:"auditAnchor"`
-	Argo struct {
-		GoProxy struct {
-			Enabled bool `json:"enabled"`
-		} `json:"goProxy"`
-	} `json:"argo"`
 	TLS struct {
 		ExtraDNSNames []string `json:"extraDNSNames"`
 		ExtraIPs      []string `json:"extraIPs"`
@@ -85,8 +68,6 @@ func readLiveHelmValuesSubset(ctx context.Context, deps Deps, ns string) (liveHe
 }
 
 // identityBundleSpec maps a legacy Secret name to its required OpenBao bundle.
-// oberth-goproxy-tls is not mapped: its identity is absorbed by the server
-// bundle (identity_store.go:189).
 var legacySecretToBaoBundle = map[string]identityBundleSpec{
 	"oberth-tls":          {baoName: "server", fields: []string{"tls.crt", "tls.key", "ssh_host_key"}},
 	"oberth-ssh-host-key": {baoName: "server", fields: []string{"tls.crt", "tls.key", "ssh_host_key"}},
@@ -116,8 +97,8 @@ type pendingRotation struct {
 
 // preflightServerIdentities verifies that server identities are present in
 // OpenBao before the Helm upgrade replaces the Deployment. It runs on both the
-// real and dry-run paths. When the server certificate lacks SANs required by
-// the live goProxy configuration and an admin token is available, the rotation
+// real and dry-run paths. When the server certificate lacks requested client
+// SANs and an admin token is available, the rotation
 // is COMPUTED but NOT WRITTEN: the pending rotation is stored on cfg so the
 // caller can run a Helm SSA preview first, then call
 // commitServerIdentityRotation to apply the write.
@@ -185,7 +166,7 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 		// Refuse unknown Secret volumes before any OpenBao reads or token checks.
 		var unknownVolumes []string
 		for _, secretName := range legacySecretNames {
-			if _, ok := legacySecretToBaoBundle[secretName]; !ok && secretName != "oberth-goproxy-tls" { // #nosec G101 — Secret object name, not a credential
+			if _, ok := legacySecretToBaoBundle[secretName]; !ok {
 				unknownVolumes = append(unknownVolumes, secretName)
 			}
 		}
@@ -307,7 +288,7 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 		return checkServerPKIRole(ctx, *cfg, deps, store, token, cfg.InstallSecretStore)
 	}
 
-	// -- SAN check: goproxy names required when goProxy is enabled --
+	// Check the server certificate against requested client names.
 	// Read server identity from OpenBao when not already loaded above.
 	if server == nil && haveStore {
 		path := defaultKVPrefix + "/data/identities/" + ns + "/server"
@@ -356,30 +337,10 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 
 	oldFingerprint := certSHA256Fingerprint(cert.Raw)
 
-	// Read live Helm values for the module proxy.
-	liveValues, liveErr := readLiveHelmValuesSubset(ctx, deps, ns)
-	if liveErr != nil {
-		return fmt.Errorf("read live Helm values for the identity preflight: %w", liveErr)
-	}
-
-	// Build the required name set. The only hard-required name is the URL
-	// name that pipeline pods use: <fullname>-goproxy.<ns>.svc. When
-	// rotation is needed, all four goproxy forms are added.
-	const fullname = "oberth"
-	urlName := fullname + "-goproxy." + ns + ".svc"
-	var missingNames []string
-	if liveValues.Argo.GoProxy.Enabled && !stringSliceContains(cert.DNSNames, urlName) {
-		for _, name := range goProxyDNSNames(fullname, ns) {
-			if !stringSliceContains(cert.DNSNames, name) {
-				missingNames = append(missingNames, name)
-			}
-		}
-	}
-	goProxyMissing := len(missingNames) > 0
 	// Addresses clients use (--tls-extra-dns-name/--tls-extra-ip, plus the
 	// host the installer itself advertises) join the same rotation. The key
 	// is kept, so clients that trust it keep working.
-	missingNames, missingIPs, err := missingClientSANs(cert, cfg, missingNames)
+	missingNames, missingIPs, err := missingClientSANs(cert, cfg, nil)
 	if err != nil {
 		return err
 	}
@@ -396,15 +357,8 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	}
 
 	if !haveStore || server == nil {
-		if !goProxyMissing {
-			// Only client addresses are missing: the install still works,
-			// and warnCertificateNamesWillNotTakeEffect names them later.
-			return nil
-		}
-		return fmt.Errorf("the server certificate does not cover the goproxy service names (%s); "+
-			"every Go pipeline step will fail after the upgrade. Re-run with --install-secretstore "+
-			"and %s set so the installer can rotate the certificate",
-			strings.Join(missingNames, ", "), baoTokenEnvVar)
+		// Client address warnings are emitted later if rotation is unavailable.
+		return nil
 	}
 
 	missingSANs := slices.Clone(missingNames)

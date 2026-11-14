@@ -105,6 +105,8 @@ const (
 type Config struct {
 	enrollment *installerEnrollment
 
+	// ArgoSecurityDefaults explicitly permits absent-only changes to an existing Argo release.
+	ArgoSecurityDefaults   bool `json:"-"`
 	ReissueServerCA        bool
 	KubeconfigPath         string
 	ContextName            string
@@ -157,6 +159,7 @@ type Config struct {
 	ArgoParallelism           *int
 	ArgoNamespaceParallelism  *int
 	argoReleaseRead           bool
+	argoReviewRelease         *helmRelease
 	argoValuesRead            bool
 	existingArgoRelease       bool
 	liveArgoValues            map[string]any
@@ -203,6 +206,8 @@ type Config struct {
 	existingRelease         bool
 	installValuesRequested  bool
 	liveInstallValues       map[string]any
+	argoSecurityArgs        []string
+	argoSecurityReview      []ArgoSecurityReview
 	// ServiceType is the Oberth Service type: NodePort, LoadBalancer or
 	// ClusterIP. Empty means NodePort on a fresh install and whatever the
 	// existing release has on an upgrade.
@@ -473,6 +478,7 @@ func isValidDNS1123Label(s string) bool {
 type Deps struct {
 	Admin AdminAPI
 
+	installResolved func(Config)
 	// Host installs verify the advertised endpoint after server readiness.
 	checkClientReachability bool
 
@@ -870,6 +876,9 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 
 	if cfg.DryRun {
+		if deps.installResolved != nil {
+			deps.installResolved(cfg)
+		}
 		return printDryRunPlan(cfg, deps.Output, cluster)
 	}
 	cleanupRelease, err := preflightInstallRelease(ctx, &cfg, deps)

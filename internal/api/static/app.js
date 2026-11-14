@@ -1626,7 +1626,6 @@ async function renderStatus(seq) {
       ${svcCard("audit anchor", s.audit || "unavailable", chain && chain.detail ? esc(chain.detail) : s.audit_mode === "local" ? "local hash chain — external anchoring off" : "")}
       ${svcCard("secret store", storeValue, store && store.address ? esc(store.address) : "OpenBao release secrets disabled", storeMood)}
       ${svcCard("server", s.version || document.body.dataset.version || "dev", "", "ok")}
-      ${s.execution_target_recovery ? svcCard("execution target recovery", String(s.execution_target_recovery.quarantined_bindings) + " quarantined bindings", esc(s.execution_target_recovery.reason + " " + s.execution_target_recovery.remedy), "warn") : ""}
     </div>
     ${uplinkExpiryWarnings(uplinks)}
     <div class="vcs-panel">

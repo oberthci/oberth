@@ -21,6 +21,15 @@ tests:
       - equal:
           path: spec.matchConditions[0].expression
           value: 'request.namespace == "pipeline-system"'
+      - lengthEqual:
+          path: spec.validations
+          count: 9
+      - equal:
+          path: spec.variables[0].expression
+          value: 'object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])'
+      - equal:
+          path: spec.matchConditions[1].expression
+          value: "request.operation == 'CREATE' || request.subResource == 'ephemeralcontainers'"
   - it: denies only in the configured Argo namespace
     documentIndex: 1
     asserts:

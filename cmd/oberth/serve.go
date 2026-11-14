@@ -36,7 +36,6 @@ import (
 	"github.com/oberthci/oberth/internal/auth"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitoid"
-	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/liveness"
 	"github.com/oberthci/oberth/internal/model"
@@ -46,6 +45,8 @@ import (
 	"github.com/oberthci/oberth/internal/sshserver"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/pipeline"
+
+	"k8s.io/client-go/kubernetes"
 )
 
 type stringList []string
@@ -94,7 +95,6 @@ type serveOptions struct {
 	scheduleMinInterval   time.Duration
 	scheduleMaxEntries    int
 	sourceAllowlist       string
-	fragmentAllowlist     string
 	artifactsLimitBytes   int64
 	artifactsBudgetBytes  int64
 	logRetention          time.Duration
@@ -136,8 +136,6 @@ type serveOptions struct {
 	argoVaultCredentialedRole    string
 	argoVaultCISecretsRole       string
 	argoVaultCACert              string
-	argoExecutionPlacementConfig string
-	argoExecutionTargetConfig    string
 	argoReleaseWIFConfig         string
 	argoReleaseTagRoutesConfig   string
 
@@ -147,19 +145,9 @@ type serveOptions struct {
 	// default, which is what a single-node install wants.
 	argoSourceStorageClass string
 
-	// argoGoProxyListen is the listen address for the read-only Go module
-	// proxy. Empty disables the listener.
-	argoGoProxyListen           string
-	argoGoProxyCert             string
-	argoGoProxyKey              string
-	argoGoProxyCA               string
-	argoGoProxyURL              string
-	argoGoProxyPseudoNonDefault bool
-
 	// serverLeafRenewal is set when the HTTPS leaf was issued by OpenBao's
 	// PKI engine: serve renews it in place before it expires.
-	serverLeafRenewal    *serverLeafRenewal
-	argoGoProxyNamespace goproxy.NamespaceConfig
+	serverLeafRenewal *serverLeafRenewal
 
 	// Promotion grant maximum lifetime. Default 24h, hard ceiling 168h (7 days).
 	promotionGrantMaxLifetime time.Duration
@@ -219,7 +207,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.DurationVar(&options.scheduleMinInterval, "schedule-min-interval", defaultScheduleMinInterval, "shortest interval a repository may schedule itself at")
 	flags.IntVar(&options.scheduleMaxEntries, "schedule-max-entries", defaultScheduleMaxEntries, "most schedule entries one repository may declare")
 	flags.StringVar(&options.sourceAllowlist, "source-allowlist", "{}", "JSON map of consumer upstream/org/repository to allowed pinned source repositories; empty denies all")
-	flags.StringVar(&options.fragmentAllowlist, "fragment-allowlist", "", "comma-separated repositories usable as pipeline fragments; empty permits every registered repository")
 	flags.Int64Var(&options.artifactsLimitBytes, "artifacts-limit-bytes", defaultArtifactsLimitBytes, "maximum total bytes of artifacts kept per run")
 	flags.Int64Var(&options.artifactsBudgetBytes, "artifacts-budget-bytes", defaultArtifactsBudgetBytes, "total artifact storage before the oldest runs are evicted")
 	flags.DurationVar(&options.logRetention, "log-retention", 0, "maximum age of terminal run logs (0 disables age retention)")
@@ -276,19 +263,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoVaultCISecretsRole, "argo-vault-ci-secrets-role", "", "OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI granted steps at admission)")
 	flags.StringVar(&options.argoVaultCACert, "argo-vault-ca-cert", "", "PEM file pinning the trust anchors granted step containers verify --argo-vault-address against")
 	flags.StringVar(&options.argoReleaseTagRoutesConfig, "argo-release-tag-routes-config", "", "absolute path to administrator-owned release tag pattern -> workflow file JSON")
-	flags.StringVar(&options.argoExecutionPlacementConfig, "argo-execution-placement-config", "", "absolute path to administrator-owned isolated execution placement JSON")
-	flags.StringVar(&options.argoExecutionTargetConfig, "argo-execution-target-config", "", "absolute path to administrator-owned branch execution target policy")
 	flags.StringVar(&options.argoReleaseWIFConfig, "argo-release-wif-config", "", "absolute path to administrator-owned public JSON release WIF capabilities (empty disables federation)")
-	flags.StringVar(&options.argoGoProxyListen, "argo-goproxy-listen", "", "listen address for the read-only Go module proxy (e.g. :8444); empty disables the proxy (#662)")
-	flags.StringVar(&options.argoGoProxyCert, "argo-goproxy-cert", "", "TLS certificate for the Go module proxy")
-	flags.StringVar(&options.argoGoProxyKey, "argo-goproxy-key", "", "TLS private key for the Go module proxy")
-	flags.StringVar(&options.argoGoProxyCA, "argo-goproxy-ca", "", "PEM CA certificate that signed the Go module proxy's TLS certificate; delivered to pipeline pods")
-	flags.StringVar(&options.argoGoProxyURL, "argo-goproxy-url", "", "HTTPS URL pipeline pods use to reach the module proxy (e.g. https://oberth-goproxy.oberth.svc:8444)")
-	flags.BoolVar(&options.argoGoProxyPseudoNonDefault, "argo-goproxy-pseudo-non-default-branches", false, "Allow pseudo-versions from non-default public branches and existing allowed tags; default is default-branch-only")
-	flags.StringVar(&options.argoGoProxyNamespace.ModulePrefix, "argo-goproxy-module-prefix", "", "Administrator-owned private module namespace")
-	flags.StringVar(&options.argoGoProxyNamespace.RepositoryPrefix, "argo-goproxy-repository-prefix", "", "Repository-name prefix within the configured owner")
-	flags.StringVar(&options.argoGoProxyNamespace.Upstream, "argo-goproxy-upstream", "", "Exact upstream owning private module repositories")
-	flags.StringVar(&options.argoGoProxyNamespace.Organization, "argo-goproxy-organization", "", "Exact organization owning private module repositories")
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
@@ -554,7 +529,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		}
 	}
 	restConfig = serverKubernetesConfig(restConfig, options)
-	kube, targets, err := schedulingClients(ctx, restConfig, &options)
+	kube, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		return fmt.Errorf("create Kubernetes client: %w", err)
 	}
@@ -751,10 +726,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	fragmentLoader, err := app.NewGitFragmentLoader(git, database, splitRunnerImagePrefixes(options.fragmentAllowlist))
-	if err != nil {
-		return err
-	}
 	// Retirement inventory runs only through the authenticated admin route.
 	// Upstream availability and repository declarations must not gate startup.
 	artifactStore, err := artifacts.Open(filepath.Join(options.dataRoot, "artifacts"))
@@ -783,17 +754,13 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		logger.Printf("per-step identities: %d (repo, step) pairs with named grants", len(perStepIdentities))
 	}
 	identityStore := argojob.NewIdentityStoreWithSteps(perRepoIdentities, buildPerRepoCIIdentities(perRepoIdentities), perStepIdentities)
-	argoJobs, err := buildArgoEngine(options, restConfig, kube, database, database, fragmentLoader,
+	argoJobs, err := buildArgoEngine(options, restConfig, kube, database, database,
 		artifactStoreAdapter{store: artifactStore, scanPatterns: artifacts.DefaultScanPatterns},
 		options.artifactsLimitBytes, perRepoIdentities, identityStore)
 	if err != nil {
 		return err
 	}
 	releaseWIF := argoJobs.ReleaseWIFRuntime()
-	argoJobs, err = app.WithExecutionTargets(argoJobs, database, targets)
-	if err != nil {
-		return err
-	}
 	argoJobs.SetReleaseWIFRuntime(releaseWIF)
 	inactiveWIF, err := service.ReloadReleaseWIF(ctx, database, releaseWIF)
 	if err != nil {
@@ -1010,7 +977,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		UplinkLifecycle:    database, DeclarationDismissal: database,
 		IssueLifecycle:     database,
 		SchedulingObserver: argoJobs,
-		Runs:               database, History: database, RunRetries: database, Repositories: database, Issues: database,
+		Runs:               database, History: database, Repositories: database, Issues: database,
 		IssueStaleAfter: options.issueStaleAfter, IssueActiveStaleAfter: options.issueActiveStaleAfter,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Git: git,
 		Refs: git, Logs: logs, Artifacts: artifactStore, Auditor: database, Health: health, Signals: signals,
@@ -1121,48 +1088,10 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		defer stopRenewal()
 	}
 	httpsServer := newAPIHTTPServer(httpAPI.Handler(), served, clientAuthority)
-	// Go module proxy (#662): a read-only GOPROXY-protocol HTTPS listener
-	// serving configured private modules from Oberth's own git cache. Pipeline pods
-	// resolve private modules through this instead of needing git credentials.
-	var goProxyServer *http.Server
-	if strings.TrimSpace(options.argoGoProxyListen) != "" {
-		repoMap, err := buildGoProxyRepoMap(ctx, database, options.argoGoProxyNamespace)
-		if err != nil {
+	activateScheduler := func(activationCtx context.Context) error {
+		if err := argoJobs.WaitForWatchSync(activationCtx); err != nil {
 			return err
 		}
-		proxyHandler, err := goproxy.NewHandler(git, options.argoGoProxyNamespace.ModulePrefix, repoMap).WithPseudoVersionsOnNonDefaultBranches(options.argoGoProxyPseudoNonDefault).WithArtifactCache(filepath.Join(options.dataRoot, "goproxy"))
-		if err != nil {
-			return fmt.Errorf("open Go module artifact cache: %w", err)
-		}
-		proxyHandler.WithLogger(logger)
-		// Route directly: ServeMux cleans paths before invoking handlers, which
-		// could redirect a malformed private path out of its namespace. The
-		// handler enforces GET-only and classifies before parsing (#764).
-		// The proxy shares the server identity when it is the same files, so a
-		// renewed leaf reaches both listeners.
-		goProxyServed := served
-		if options.argoGoProxyCert != options.tlsCert || options.argoGoProxyKey != options.tlsKey {
-			goProxyServed, err = loadServedCertificate(options.argoGoProxyCert, options.argoGoProxyKey)
-			if err != nil {
-				return fmt.Errorf("load Go module proxy TLS identity: %w", err)
-			}
-		}
-		goProxyServer = &http.Server{
-			ErrorLog:          log.New(logger.Writer(), "goproxy http: ", logger.Flags()),
-			Handler:           proxyHandler,
-			ReadHeaderTimeout: 10 * time.Second,
-			IdleTimeout:       30 * time.Second,
-			ReadTimeout:       30 * time.Second,
-			WriteTimeout:      2 * time.Minute,
-			MaxHeaderBytes:    1 << 16,
-			TLSConfig: &tls.Config{
-				MinVersion:     tls.VersionTLS13,
-				GetCertificate: goProxyServed.getCertificate,
-			},
-		}
-		logger.Printf("go module proxy: %s → %s (%d repo mappings)", options.argoGoProxyListen, options.argoGoProxyURL, len(repoMap))
-	}
-	activateScheduler := func(activationCtx context.Context) error {
 		// During a witness outage the writable handle was opened without
 		// recovery. Verify the original history before repairing it here.
 		if witnessRecoveryDeferred {
@@ -1215,7 +1144,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	defer func() { stopTokenWarnings(); <-tokenWarningsDone }()
 	stopBootstrap()
 	adminServer := newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current)
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, adminServer, activateScheduler, accessReconciler, schedules, ciIssues, branchDeletions, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, adminServer, activateScheduler, argoJobs.RunWatch, accessReconciler, schedules, ciIssues, branchDeletions, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
 }
 
 type startupContinuity interface {
@@ -1612,9 +1541,9 @@ func runComponents(
 	git *gitcache.Cache,
 	sshService *sshserver.Server,
 	httpsServer *http.Server,
-	goProxyServer *http.Server,
 	adminServer *http.Server,
 	activateScheduler func(context.Context) error,
+	runWatch func(context.Context),
 	accessReconciler *service.AccessReconciler,
 	schedules *app.Schedules,
 	ciIssues *service.CIIssueReconciler,
@@ -1640,25 +1569,10 @@ func runComponents(
 		_ = httpsRaw.Close()
 		return fmt.Errorf("listen SSH: %w", err)
 	}
-	// Go module proxy listener (optional). When the server is nil the proxy
-	// is disabled and no listener or component is started.
-	var goProxyListener net.Listener
-	if goProxyServer != nil && strings.TrimSpace(options.argoGoProxyListen) != "" {
-		raw, listenErr := listenerConfig.Listen(runCtx, "tcp", options.argoGoProxyListen)
-		if listenErr != nil {
-			_ = httpsRaw.Close()
-			_ = sshListener.Close()
-			return fmt.Errorf("listen Go module proxy: %w", listenErr)
-		}
-		goProxyListener = tls.NewListener(raw, goProxyServer.TLSConfig)
-	}
 	adminListener, err := listenAdminSocket(runCtx, defaultAdminSocket)
 	if err != nil {
 		_ = httpsRaw.Close()
 		_ = sshListener.Close()
-		if goProxyListener != nil {
-			_ = goProxyListener.Close()
-		}
 		return err
 	}
 	defer func() { _ = removeStaleAdminSocket(defaultAdminSocket) }()
@@ -1667,7 +1581,7 @@ func runComponents(
 		name string
 		err  error
 	}
-	results := make(chan componentResult, 6)
+	results := make(chan componentResult, 7)
 	var workers sync.WaitGroup
 	start := func(name string, operation func() error) {
 		workers.Add(1)
@@ -1683,6 +1597,7 @@ func runComponents(
 			}
 		}()
 	}
+	start("Argo watch", func() error { runWatch(runCtx); return nil })
 	schedulerActivated := make(chan struct{})
 	start("scheduler", func() error {
 		if activateScheduler != nil {
@@ -1721,17 +1636,59 @@ func runComponents(
 		}
 		return err
 	})
-	if goProxyServer != nil && goProxyListener != nil {
-		start("goproxy", func() error {
-			logger.Printf("goproxy listener serving: %s", goProxyListener.Addr())
-			err := goProxyServer.Serve(goProxyListener)
-			logger.Printf("goproxy listener stopped: %v", err)
-			if errors.Is(err, http.ErrServerClosed) {
-				return nil
-			}
-			return err
-		})
+	startBackgroundLoops(runCtx, &workers, schedulerActivated, options, git, schedules, ciIssues, branchDeletions, accessReconciler, logger)
+	logger.Printf("ready for bootstrap: SSH %s, HTTPS %s", options.sshListen, options.httpsListen)
+
+	var componentErr error
+	select {
+	case <-ctx.Done():
+	case result := <-results:
+		if result.err != nil {
+			componentErr = fmt.Errorf("%s: %w", result.name, result.err)
+		}
 	}
+	if beginDrain != nil {
+		beginDrain()
+	}
+	cancel()
+	_ = sshListener.Close()
+	_ = adminListener.Close()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer shutdownCancel()
+	shutdownErr := shutdownHTTP(shutdownCtx, httpsServer)
+	adminShutdownErr := shutdownHTTP(shutdownCtx, adminServer)
+	workers.Wait()
+	// The scheduler (a background task) can start API background work, an automatic
+	// moved-promotion retry, so the API shuts down after it has stopped.
+	// Shutdown refuses later background starts, cancels queued-promotion
+	// waits and waits, bounded, before the store closes.
+	if apiShutdown != nil {
+		apiCtx, apiCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if apiErr := apiShutdown(apiCtx); apiErr != nil {
+			logger.Printf("shutdown: %v", apiErr)
+		}
+		apiCancel()
+	}
+	if ctx.Err() != nil {
+		componentErr = nil
+	}
+	return errors.Join(componentErr, shutdownErr, adminShutdownErr)
+}
+
+// startBackgroundLoops starts the best-effort background loops tracked by
+// workers; they log their own failures and never stop the server.
+func startBackgroundLoops(
+	runCtx context.Context,
+	workers *sync.WaitGroup,
+	schedulerActivated <-chan struct{},
+	options serveOptions,
+	git *gitcache.Cache,
+	schedules *app.Schedules,
+	ciIssues *service.CIIssueReconciler,
+	branchDeletions *service.BranchDeletionPropagator,
+	accessReconciler *service.AccessReconciler,
+	logger *log.Logger,
+) {
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
@@ -1784,49 +1741,6 @@ func runComponents(
 			}
 		}()
 	}
-	logger.Printf("ready for bootstrap: SSH %s, HTTPS %s", options.sshListen, options.httpsListen)
-
-	var componentErr error
-	select {
-	case <-ctx.Done():
-	case result := <-results:
-		if result.err != nil {
-			componentErr = fmt.Errorf("%s: %w", result.name, result.err)
-		}
-	}
-	if beginDrain != nil {
-		beginDrain()
-	}
-	cancel()
-	_ = sshListener.Close()
-	_ = adminListener.Close()
-	if goProxyListener != nil {
-		_ = goProxyListener.Close()
-	}
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer shutdownCancel()
-	shutdownErr := shutdownHTTP(shutdownCtx, httpsServer)
-	adminShutdownErr := shutdownHTTP(shutdownCtx, adminServer)
-	var goProxyShutdownErr error
-	if goProxyServer != nil {
-		goProxyShutdownErr = shutdownHTTP(shutdownCtx, goProxyServer)
-	}
-	workers.Wait()
-	// The scheduler (a background task) can start API background work, an automatic
-	// moved-promotion retry, so the API shuts down after it has stopped.
-	// Shutdown refuses later background starts, cancels queued-promotion
-	// waits and waits, bounded, before the store closes.
-	if apiShutdown != nil {
-		apiCtx, apiCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if apiErr := apiShutdown(apiCtx); apiErr != nil {
-			logger.Printf("shutdown: %v", apiErr)
-		}
-		apiCancel()
-	}
-	if ctx.Err() != nil {
-		componentErr = nil
-	}
-	return errors.Join(componentErr, shutdownErr, adminShutdownErr, goProxyShutdownErr)
 }
 
 func waitForAuditIntegrity(ctx context.Context, gate func(context.Context) error) error {
@@ -2016,53 +1930,6 @@ func perUpstreamSSHEntries(ctx context.Context, database *store.Store, options s
 }
 
 func pathWithin(root, path string) bool { return gitoid.StrictPathWithin(root, path) }
-
-// buildGoProxyRepoMap discovers only repositories owned by the administrator's
-// exact configured upstream and organization. Source go.mod declarations never
-// grant authority over a namespace, and qualified cache names prevent aliases.
-func buildGoProxyRepoMap(ctx context.Context, db *store.Store, config goproxy.NamespaceConfig) (map[string]string, error) {
-	if err := config.Validate(); err != nil {
-		return nil, err
-	}
-	upstreams, err := db.ListUpstreams(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("module proxy upstream catalog: %w", err)
-	}
-	var owner *model.Upstream
-	for i := range upstreams {
-		if upstreams[i].Name != config.Upstream {
-			continue
-		}
-		if upstreams[i].Org() != config.Organization {
-			return nil, errors.New("module proxy configured organization differs from registered upstream")
-		}
-		owner = &upstreams[i]
-	}
-	result := make(map[string]string)
-	// A new deployment can configure its namespace before enrolling upstreams.
-	// The handler still denies the entire private namespace until enrollment.
-	if owner == nil {
-		return result, nil
-	}
-	repos, err := db.ListRepositories(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("module proxy repository catalog: %w", err)
-	}
-	for _, repo := range repos {
-		if repo.UpstreamID != owner.ID || !strings.HasPrefix(repo.Name, config.RepositoryPrefix) {
-			continue
-		}
-		suffix := strings.TrimPrefix(repo.Name, config.RepositoryPrefix)
-		if suffix == "" || strings.Contains(suffix, "/") {
-			continue
-		}
-		if _, duplicate := result[suffix]; duplicate {
-			return nil, errors.New("module proxy repository mapping is ambiguous")
-		}
-		result[suffix] = owner.QualifiedRepo(repo.Name)
-	}
-	return result, nil
-}
 
 // classifyViewError maps service-layer sentinel errors to HTTP status codes.
 // Wired into the API server at construction so the api package does not import

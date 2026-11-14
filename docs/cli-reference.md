@@ -394,37 +394,6 @@ classed default-branch, tag, unreachable or not-commit; with a selection it plan
 and --confirm --plan-id deletes them on the mirror only (they are never mirrored upstream).
 ```
 
-## oberth fragments
-
-```text
-Usage: oberth fragments <list|show> [flags]
-Use oberth fragments <command> --help for command flags.
-```
-
-## oberth fragments list
-
-```text
-Usage: oberth fragments list [flags]
-
-Flags:
-  -data-root string
-        Oberth data root holding the git cache (default "/data")
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
-```
-
-## oberth fragments show
-
-```text
-Usage: oberth fragments show [flags]
-
-Flags:
-  -data-root string
-        Oberth data root holding the git cache (default "/data")
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
-```
-
 ## oberth git-ssh
 
 ```text
@@ -469,6 +438,8 @@ Flags:
         Argo controller namespaceParallelism: Workflows running at once per namespace, 0 for no limit; default: 0 for a new release; preserve existing values unless explicitly chosen
   -argo-parallelism int
         Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; default: 4 for a new release; preserve existing values unless explicitly chosen (default 4)
+  -argo-security-defaults
+        consent to filling absent native security defaults on an existing Argo release; preserve operator values
   -argo-vault-address string
         OpenBao/Vault base URL injected into granted step containers as VAULT_ADDR (https only)
   -argo-vault-credentialed-role string
@@ -523,6 +494,8 @@ Flags:
         upstream organization
   -plan
         inspect the selected cluster and preflight checks without installing
+  -probe
+        with --verify, run the live NetworkPolicy enforcement probe (creates a scratch namespace and Pods)
   -push-banner-url string
         push feedback URL; omitted preserves the live URL, explicit empty clears it
   -reissue-server-ca
@@ -576,7 +549,7 @@ Flags:
   -values value
         helm values file applied to the Oberth release (repeatable, applied in order); the installer's own settings still win, so a value it computed cannot be overridden by a stale one in a file
   -verify
-        check an existing installation without changing it
+        read an existing installation; add --probe to measure NetworkPolicy enforcement
   -yes
         confirm the reviewed install on the selected kubeconfig context
 ```
@@ -948,15 +921,15 @@ TCP success does not establish server readiness or TLS trust. Nothing is install
 ## oberth client repository
 
 ```text
-Usage: oberth client repository --path <repo> --installation <public install JSON> --registered-repo <upstream/org/repo> --ssh-key <local private key> --ca-file <public CA> --client-cert <certificate> --client-key <TLS key> [flags]
+Usage: oberth client repository --path <repo> --installation <public install JSON> --registered-repo <slug or upstream/org/repo> --ssh-key <local private key> [--ca-file <public CA>] --client-cert <certificate> --client-key <TLS key> [flags]
 Read the selected server's registered repository path and SSH host key over mTLS.
 Print the exact push URL and per-install SSH binding as JSON. --consent writes
 that binding and repository-local configuration. No global SSH alias is used.
-Explicit connection files are required; ambient credentials are not selected.
+The CA defaults to the file stored by plugin trust; other connection files are explicit.
   -assist
         enable repository-local assisted pushes
   -ca-file string
-        public server CA matching the install result's pin
+        public server CA matching the install pin (default: plugin trust CA)
   -client-cert string
         explicit mTLS client certificate
   -client-key string
@@ -970,7 +943,7 @@ Explicit connection files are required; ambient credentials are not selected.
   -path string
         local Git repository
   -registered-repo string
-        canonical repository path registered on that server
+        repository slug or canonical path registered on that server
   -ssh-key string
         local private SSH identity registered for this uplink
 ```
@@ -1310,7 +1283,7 @@ Guide: https://github.com/oberthci/oberth/blob/main/docs/backup-restore.md
 
 ```text
 Usage: oberth run <run-id> [flags]
-       oberth run wait|resources|retry|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)
+       oberth run wait|resources|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -client-cert string
@@ -1435,12 +1408,6 @@ Usage: oberth run purge <run-id> --what logs|artifacts|both --reason <text> [--j
 ```text
 Usage: oberth run rerun <run-id> [--reason <text>] [--force] [--assist] [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
-```
-
-## oberth run retry
-
-```text
-Usage: oberth run retry <run-id> [--json] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 ```
 
 ## oberth runs
@@ -1654,34 +1621,10 @@ Flags:
         ServiceAccount for CI templates with approved upstream-scoped secrets; its Vault role never carries release grants (default "oberth-argo-ci-secrets")
   -argo-credentialed-serviceaccount string
         ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth (default "oberth-argo-credentialed")
-  -argo-execution-placement-config string
-        absolute path to administrator-owned isolated execution placement JSON
-  -argo-execution-target-config string
-        absolute path to administrator-owned branch execution target policy
   -argo-executor-scratch-size-limit string
         per-Pod Argo executor scratch size limit (Kubernetes quantity) (default "1Gi")
   -argo-executor-serviceaccount string
         ServiceAccount for Argo's own executor containers; must differ from all pipeline identities (default "oberth-argo-executor")
-  -argo-goproxy-ca string
-        PEM CA certificate that signed the Go module proxy's TLS certificate; delivered to pipeline pods
-  -argo-goproxy-cert string
-        TLS certificate for the Go module proxy
-  -argo-goproxy-key string
-        TLS private key for the Go module proxy
-  -argo-goproxy-listen string
-        listen address for the read-only Go module proxy (e.g. :8444); empty disables the proxy (#662)
-  -argo-goproxy-module-prefix string
-        Administrator-owned private module namespace
-  -argo-goproxy-organization string
-        Exact organization owning private module repositories
-  -argo-goproxy-pseudo-non-default-branches
-        Allow pseudo-versions from non-default public branches and existing allowed tags; default is default-branch-only
-  -argo-goproxy-repository-prefix string
-        Repository-name prefix within the configured owner
-  -argo-goproxy-upstream string
-        Exact upstream owning private module repositories
-  -argo-goproxy-url string
-        HTTPS URL pipeline pods use to reach the module proxy (e.g. https://oberth-goproxy.oberth.svc:8444)
   -argo-namespace string
         namespace for Argo Workflow pipelines (required)
   -argo-pipeline-serviceaccount string
@@ -1754,8 +1697,6 @@ Flags:
         persistent data root (default "/data")
   -database string
         SQLite database path (default "/data/oberth.sqlite")
-  -fragment-allowlist string
-        comma-separated repositories usable as pipeline fragments; empty permits every registered repository
   -git-gc-interval duration
         periodic Git GC interval (default 24h0m0s)
   -git-timeout duration
@@ -1795,7 +1736,7 @@ Flags:
   -run-log-limit-bytes int
         maximum retained log bytes per run (default 67108864)
   -runner-image-prefixes string
-        comma-separated allowlist of permitted runner image prefixes (default "golang:,debian:,aquasec/trivy:")
+        comma-separated allowlist of permitted runner image prefixes
   -schedule-max-entries int
         most schedule entries one repository may declare (default 8)
   -schedule-min-interval duration
@@ -1915,6 +1856,8 @@ Usage: oberth upgrade [flags]
 Flags:
   -allow-downgrade
         accept a CLI older than the installed release (a deliberate rollback within one database schema)
+  -argo-security-defaults
+        consent to filling absent native security defaults on an existing Argo release; preserve operator values
   -backup-dir DIR
         write the pre-upgrade backup and the rollback record to DIR (default: the current directory)
   -backup-recipient CERT
@@ -2341,10 +2284,8 @@ Usage: oberth upstream remove [flags]
 Usage: oberth validate [flags]
 
 Flags:
-  -allow-unresolved-fragments
-        deprecated: unresolved fragments still fail validation because admission requires their pinned contents
   -runner-image-prefixes string
-        comma-separated allowlist of permitted runner image prefixes (default "golang:,debian:,aquasec/trivy:")
+        comma-separated allowlist of permitted runner image prefixes
 ```
 
 ## oberth version

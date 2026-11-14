@@ -27,7 +27,7 @@ func TestObserveSynchronizationReadsNativeLockStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation, err := controller.ObserveSynchronization(context.Background(), "wf", "run-1")
+	observation, err := withTestObservationCache(t, controller).ObserveSynchronization(context.Background(), "wf", "run-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,11 +35,11 @@ func TestObserveSynchronizationReadsNativeLockStatus(t *testing.T) {
 		!slices.Equal(observation.Waiting, []string{testNamespace + "/ConfigMap/oberth-sync-limits/heavy-go", testNamespace + "/Mutex/oberth-release"}) {
 		t.Fatalf("observation = %+v", observation)
 	}
-	if _, err := controller.ObserveSynchronization(context.Background(), "wf", "run-2"); err == nil {
+	if _, err := withTestObservationCache(t, controller).ObserveSynchronization(context.Background(), "wf", "run-2"); err == nil {
 		t.Fatal("foreign run accepted")
 	}
 	workflow.Status.Phase = wfv1.WorkflowSucceeded
-	if observation, err := controller.ObserveSynchronization(context.Background(), "wf", "run-1"); err != nil || len(observation.Holding)+len(observation.Waiting) != 0 {
+	if observation, err := withTestObservationCache(t, controller).ObserveSynchronization(context.Background(), "wf", "run-1"); err != nil || len(observation.Holding)+len(observation.Waiting) != 0 {
 		t.Fatalf("completed workflow = %+v, %v", observation, err)
 	}
 }

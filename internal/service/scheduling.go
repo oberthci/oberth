@@ -77,8 +77,6 @@ func (s *API) observeScheduling(ctx context.Context, run model.Run, steps []mode
 		result.State = "startup"
 		return result, "starting"
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
 	execution, err := s.schedulingObserver.ObserveScheduling(ctx, run)
 	if err != nil || execution == nil {
 		result.Execution = &model.ExecutionObservation{State: "unavailable", Message: "Execution observation is unavailable."}
@@ -105,6 +103,10 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 		run.DisplayStatus = model.DisplayQueued
 		run.DisplayReason = queuedDisplayReason(scheduling)
 	}
+	if scheduling.Execution.State == "unavailable" && strings.HasPrefix(scheduling.Execution.Message, "status unknown: cluster API unreachable since ") {
+		run.DisplayReason = scheduling.Execution.Message
+		return
+	}
 	if strings.HasPrefix(scheduling.Execution.Reason, "SourceSeed") {
 		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(scheduling.Execution.Message))
 		return
@@ -120,7 +122,7 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 		}
 	}
 	if wait := lockWaitReason(scheduling.Execution); wait != "" {
-		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(wait))
+		run.DisplayReason = parkPolicyDisplayReason(*run, wait)
 		return
 	}
 	switch scheduling.Execution.State {
@@ -135,12 +137,8 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 	}
 }
 
-// lockWaitReason turns the fixed-form synchronization wait of the Workflow
-// or of one Pending step into the reason line: "waiting for lock <key> (0 of
-// 1 free)". The key is the controller's lock name, already bounded to the
-// lock-key grammar by the observation. A Workflow the Argo controller
-// postponed for its parallelism reads "waiting for an Argo workflow slot
-// (controller parallelism)".
+// lockWaitReason preserves Argo's wait message for the reason line.
+// Controller parallelism retains its existing presentation.
 func lockWaitReason(execution *model.ExecutionObservation) string {
 	if execution.Message == model.ParallelismWaitMessage {
 		return "w" + strings.TrimSuffix(strings.TrimPrefix(model.ParallelismWaitMessage, "W"), ".")
@@ -152,10 +150,10 @@ func lockWaitReason(execution *model.ExecutionObservation) string {
 		}
 	}
 	for _, message := range messages {
-		if !strings.HasPrefix(message, model.LockWaitMessagePrefix) {
+		if !strings.HasPrefix(message, "Waiting for ") || !strings.Contains(message, " lock. Lock status: ") {
 			continue
 		}
-		return "w" + strings.TrimSuffix(strings.TrimPrefix(message, "W"), ".")
+		return message
 	}
 	return ""
 }

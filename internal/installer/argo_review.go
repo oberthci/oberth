@@ -23,12 +23,13 @@ func readArgoReviewValues(ctx context.Context, cfg *Config, deps Deps) error {
 	}
 	exists := cfg.existingArgoRelease
 	if !cfg.argoReleaseRead {
-		_, found, err := findHelmRelease(ctx, deps, "argo-workflows", ns)
+		release, found, err := findHelmRelease(ctx, deps, "argo-workflows", ns)
 		if err != nil {
 			return err
 		}
 		exists = found
 		cfg.existingArgoRelease, cfg.argoReleaseRead = exists, true
+		cfg.argoReviewRelease = &release
 	}
 	if exists {
 		raw, err := deps.RunHelm(ctx, []string{"get", "values", "argo-workflows", "-n", ns, "--all", "-o", "json"})

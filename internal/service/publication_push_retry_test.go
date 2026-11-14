@@ -233,7 +233,7 @@ func TestPublicationDeadlineUsesFreshFinalizationContext(t *testing.T) {
 }
 
 func TestPublishRetryQueuedResponseAndRunRetryDoNotRepeatCI(t *testing.T) {
-	for _, tool := range []string{"publish_retry", "run_retry", "run_rerun"} {
+	for _, tool := range []string{"publish_retry", "run_rerun"} {
 		t.Run(tool, func(t *testing.T) {
 			f := newControlFixture(t)
 			run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/retry", SHA: retrySourceSHA, Actor: "agent@host", Trigger: "branch"})
@@ -252,7 +252,6 @@ func TestPublishRetryQueuedResponseAndRunRetryDoNotRepeatCI(t *testing.T) {
 			}
 			f.scheduler.git = &retryPublicationGit{controlGit: f.git, failure: errors.New("remote: Internal Server Connection Error\npre-receive hook declined")}
 			control := f.api(t)
-			control.runRetries = f.store
 			control.runReruns = f.store
 			value, err := control.CallTool(t.Context(), api.Actor{Identity: "admin@host", Admin: true}, tool, json.RawMessage(`{"id":"`+run.ID+`"}`))
 			if err != nil {

@@ -20,7 +20,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 
 	"github.com/oberthci/oberth/internal/client"
@@ -98,7 +97,7 @@ func TestRunUpgradeAlreadyUpToDate(t *testing.T) {
 					}
 					return nil, fmt.Errorf("unexpected helm call: %v", args)
 				},
-				KubeClient: fake.NewClientset(),
+				KubeClient: argoSecurityTestClient(),
 				RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 			})
 
@@ -136,7 +135,7 @@ func TestRunUpgradeSameVersionValuesDryRunPlansReapply(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected Helm call in dry-run: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -165,7 +164,7 @@ func TestRunUpgradeFailedSameVersionDryRunPlansRepair(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected Helm mutation in dry-run: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -206,7 +205,7 @@ func TestRunUpgradeSameVersionRefusesPendingAndUnknownStates(t *testing.T) {
 						}
 						return nil, fmt.Errorf("unexpected helm call: %v", args)
 					},
-					KubeClient: fake.NewClientset(),
+					KubeClient: argoSecurityTestClient(),
 					RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 				}
 				result, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -268,7 +267,7 @@ func TestRunUpgradeRetriesFailedSameVersionWithPinnedImage(t *testing.T) {
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("oberth v0.16.6 commit=abc123 date=2026-09-28T00:00:00Z\n"), nil
 		},
-		KubeClient: fake.NewClientset(deployment),
+		KubeClient: argoSecurityTestClient(deployment),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	})
 	withSignedRelease(t, &deps, targetVersion, targetImage)
@@ -341,7 +340,7 @@ func TestRunUpgradeReappliesValuesAtSameVersion(t *testing.T) {
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("oberth v0.16.6 commit=abc123 date=2026-09-28T00:00:00Z\n"), nil
 		},
-		KubeClient: fake.NewClientset(deployment),
+		KubeClient: argoSecurityTestClient(deployment),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	})
 	valuesFile := filepath.Join(t.TempDir(), "watch.yaml")
@@ -394,7 +393,7 @@ func TestRunUpgradeFailedSameVersionRejectsTagOnlyImage(t *testing.T) {
 				return nil, fmt.Errorf("unexpected helm call: %v", args)
 			}
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 	withSignedRelease(t, &deps, "0.16.6", fakeChartImageRef)
@@ -419,7 +418,7 @@ func TestRunUpgradeNoRelease(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -455,7 +454,7 @@ func TestRunUpgradeRejectsDowngrade(t *testing.T) {
 					}
 					return nil, fmt.Errorf("unexpected helm call: %v", args)
 				},
-				KubeClient: fake.NewClientset(),
+				KubeClient: argoSecurityTestClient(),
 				RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 			}
 			_, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -488,7 +487,7 @@ func TestRunUpgradeRejectsUnparseableInstalledVersion(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -528,7 +527,7 @@ func TestRunUpgradeDryRun(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	})
 
@@ -584,47 +583,6 @@ func TestUpgradeHelmArgs(t *testing.T) {
 	}
 	if !strings.Contains(joined, "--wait") {
 		t.Fatalf("missing --wait: %q", joined)
-	}
-	// The reviewed proxy port stays pinned; enablement remains configurable (#662).
-	if strings.Contains(joined, "argo.goProxy.enabled=") {
-		t.Fatalf("upgrade overwrites the existing proxy enablement: %q", joined)
-	}
-	if !strings.Contains(joined, "--set argo.goProxy.port=8444") {
-		t.Fatalf("missing argo.goProxy.port pin: %q", joined)
-	}
-}
-
-func TestUpgradeHelmArgsPinsGoProxyBeforeVersion(t *testing.T) {
-	t.Parallel()
-	cfg := UpgradeConfig{
-		Namespace:     "oberth",
-		BinaryVersion: "0.16.20",
-		Timeout:       5 * time.Minute,
-	}
-	args, flags := upgradeHelmArgs(cfg, "oberth-charts/oberth", "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", testUpgradeCompatibility)
-	args = append(args, flags...)
-
-	// The goProxy pins must appear between --set-string image.ref and
-	// --version in the shared dry-run/actual argument builder.
-	var imageIdx, portIdx, versionIdx int
-	for i, arg := range args {
-		switch {
-		case strings.HasPrefix(arg, "image.ref="):
-			imageIdx = i
-		case arg == "argo.goProxy.port=8444":
-			portIdx = i
-		case arg == "0.16.20" && i > 0 && args[i-1] == "--version":
-			versionIdx = i
-		}
-	}
-	if portIdx == 0 {
-		t.Fatalf("goProxy pins not found in args: %v", args)
-	}
-	if portIdx <= imageIdx {
-		t.Fatalf("goProxy.port (idx %d) must come after image.ref (idx %d)", portIdx, imageIdx)
-	}
-	if versionIdx <= portIdx {
-		t.Fatalf("--version (idx %d) must come after goProxy.port (idx %d)", versionIdx, portIdx)
 	}
 }
 
@@ -915,7 +873,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, installed, target str
 		},
 	}
 
-	kubeClient := fake.NewClientset(deployment)
+	kubeClient := argoSecurityTestClient(deployment)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected Kubernetes API request: %s %s", r.Method, r.URL.Path)
 	}))
@@ -1146,7 +1104,7 @@ func TestRunUpgradeTargetsAnyCluster(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 	}
 	withSignedRelease(t, &deps, "0.12.35", fakeChartImageRef)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -1215,7 +1173,7 @@ func TestRunUpgradeRejectsEmptyInstalledVersion(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -1265,7 +1223,7 @@ func TestRunUpgradeRetriesTransientVerifyExecFailure(t *testing.T) {
 		},
 	}
 
-	kubeClient := fake.NewClientset(deployment)
+	kubeClient := argoSecurityTestClient(deployment)
 
 	execAttempts := 0
 	deps := testAdminDeps(Deps{
@@ -1351,7 +1309,7 @@ func TestRunUpgradeFailsWhenVersionUnverifiable(t *testing.T) {
 		},
 	}
 
-	kubeClient := fake.NewClientset(deployment)
+	kubeClient := argoSecurityTestClient(deployment)
 
 	execAttempts := 0
 	deps := testAdminDeps(Deps{
@@ -1442,7 +1400,7 @@ func TestRunUpgradeFailsOnVersionMismatchFullFlow(t *testing.T) {
 		},
 	}
 
-	kubeClient := fake.NewClientset(deployment)
+	kubeClient := argoSecurityTestClient(deployment)
 
 	execAttempts := 0
 	deps := testAdminDeps(Deps{
@@ -1531,7 +1489,7 @@ func TestRunUpgradeRecoveryGuidanceOnHelmFailure(t *testing.T) {
 				return nil, fmt.Errorf("unexpected: %v", args)
 			}
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -1591,7 +1549,7 @@ func TestRunUpgradeRecoveryGuidanceOnRolloutFailure(t *testing.T) {
 		},
 	}
 
-	kubeClient := fake.NewClientset(deployment)
+	kubeClient := argoSecurityTestClient(deployment)
 
 	deps := Deps{
 		Output: &output,
@@ -1655,17 +1613,6 @@ func TestCheckPinnedKeyConflictsRefusesImageRef(t *testing.T) {
 	var pinned *ErrPinnedKeyOverride
 	if !errors.As(err, &pinned) || pinned.Key != "image.ref" {
 		t.Fatalf("expected ErrPinnedKeyOverride for image.ref, got %v", err)
-	}
-}
-
-func TestCheckPinnedKeyConflictsRefusesGoProxy(t *testing.T) {
-	t.Parallel()
-	for _, key := range []string{"argo.goProxy.enabled=false", "argo.goProxy.port=9999"} {
-		err := checkPinnedKeyConflicts([]string{key}, nil)
-		var pinned *ErrPinnedKeyOverride
-		if !errors.As(err, &pinned) {
-			t.Fatalf("expected ErrPinnedKeyOverride for %q, got %v", key, err)
-		}
 	}
 }
 
@@ -1759,29 +1706,29 @@ func TestUpgradeHelmArgsUserValuesAfterPins(t *testing.T) {
 	}
 	args, flags := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
 	args = append(args, flags...)
-	var goProxyIdx, valuesIdx, userSetIdx int
+	var imageIdx, valuesIdx, userSetIdx int
 	for i, arg := range args {
 		switch {
-		case arg == "argo.goProxy.port=8444":
-			goProxyIdx = i
+		case strings.HasPrefix(arg, "image.ref="):
+			imageIdx = i
 		case arg == "/tmp/custom.yaml" && i > 0 && args[i-1] == "--values":
 			valuesIdx = i
 		case arg == "replicaCount=5" && i > 0 && args[i-1] == "--set":
 			userSetIdx = i
 		}
 	}
-	if valuesIdx == 0 || userSetIdx == 0 || goProxyIdx == 0 {
-		t.Fatalf("missing expected args: goProxy=%d values=%d set=%d in %v", goProxyIdx, valuesIdx, userSetIdx, args)
+	if valuesIdx == 0 || userSetIdx == 0 || imageIdx == 0 {
+		t.Fatalf("missing expected args: image=%d values=%d set=%d in %v", imageIdx, valuesIdx, userSetIdx, args)
 	}
-	if valuesIdx <= goProxyIdx {
-		t.Fatalf("user --values (idx %d) must come after goProxy pin (idx %d)", valuesIdx, goProxyIdx)
+	if valuesIdx <= imageIdx {
+		t.Fatalf("user --values (idx %d) must come after image pin (idx %d)", valuesIdx, imageIdx)
 	}
 	if userSetIdx <= valuesIdx {
 		t.Fatalf("user --set (idx %d) must come after --values (idx %d)", userSetIdx, valuesIdx)
 	}
 }
 
-func TestDryRunRendersGoProxyPins(t *testing.T) {
+func TestDryRunOmitsRetiredGoProxyPins(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
 	deps := Deps{
@@ -1800,7 +1747,7 @@ func TestDryRunRendersGoProxyPins(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -1815,11 +1762,8 @@ func TestDryRunRendersGoProxyPins(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := output.String()
-	if strings.Contains(text, "argo.goProxy.enabled=") {
-		t.Fatalf("dry-run output unexpected goProxy.enabled override: %q", text)
-	}
-	if !strings.Contains(text, "argo.goProxy.port=8444") {
-		t.Fatalf("dry-run output missing goProxy.port pin: %q", text)
+	if strings.Contains(text, "argo.goProxy") {
+		t.Fatalf("dry-run unexpectedly configures the retired proxy: %q", text)
 	}
 }
 
@@ -1842,7 +1786,7 @@ func TestDryRunIncludesUserValues(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -1951,7 +1895,7 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("16\n"), nil
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	})
 
@@ -1998,7 +1942,7 @@ func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("17\n"), nil
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	})
 

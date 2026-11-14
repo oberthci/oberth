@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testdb"
 )
 
 const removeRestartTimingsMigrationID = "20261113181825-remove-restart-timings-370d05c58486149250a7139eb6afdca7"
@@ -18,7 +19,7 @@ func historicalRestartTimingSQL(t *testing.T) string {
 	t.Helper()
 	for _, migration := range legacyMigrations {
 		if migration.version == 44 {
-			return migration.sql
+			return testdb.PostFragmentIndexDowngrade + migration.sql
 		}
 	}
 	t.Fatal("missing frozen v44 migration")
@@ -70,6 +71,9 @@ func TestRemoveRestartTimingsPreservesCurrentDurableEvidence(t *testing.T) {
 				if history == "missing-current-attempt" {
 					appendHistoricalRestart()
 				}
+			}
+			if _, err := s.db.Exec(testdb.PostExecutionTargetRemovalDowngrade); err != nil {
+				t.Fatal(err)
 			}
 			_, err = s.db.Exec(`-- Reconstruct the old column because this fixture rewinds past its drop migration.
 ALTER TABLE runs ADD COLUMN credentialed INTEGER NOT NULL DEFAULT 0 CHECK (credentialed IN (0, 1));

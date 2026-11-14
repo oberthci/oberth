@@ -24,6 +24,10 @@ import (
 // Evaluate the rendered policy itself, including CEL's absent-field semantics.
 // A separate Go approximation would not catch a broken admission expression.
 func renderedPodPolicy(t *testing.T) func(*corev1.Pod) bool {
+	return renderedPodPolicyRequest(t, "CREATE", "")
+}
+
+func renderedPodPolicyRequest(t *testing.T, operation, subresource string) func(*corev1.Pod) bool {
 	t.Helper()
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Fatal("helm is required for the pod admission contract")
@@ -37,10 +41,10 @@ func renderedPodPolicy(t *testing.T) func(*corev1.Pod) bool {
 	if err := yaml.Unmarshal([]byte(strings.Split(string(data), "\n---")[0]), &policy); err != nil {
 		t.Fatal(err)
 	}
-	if policy.Spec.FailurePolicy == nil || *policy.Spec.FailurePolicy != admissionv1.Fail || len(policy.Spec.Validations) != 4 {
+	if policy.Spec.FailurePolicy == nil || *policy.Spec.FailurePolicy != admissionv1.Fail || len(policy.Spec.Validations) != 9 {
 		t.Fatalf("incomplete fail-closed policy: %+v", policy.Spec)
 	}
-	env, err := cel.NewEnv(cel.Variable("object", cel.DynType), cel.Variable("variables", cel.DynType), ext.Strings())
+	env, err := cel.NewEnv(cel.Variable("object", cel.DynType), cel.Variable("variables", cel.DynType), cel.Variable("request", cel.DynType), ext.Strings())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,6 +59,10 @@ func renderedPodPolicy(t *testing.T) func(*corev1.Pod) bool {
 			t.Fatal(err)
 		}
 		return program
+	}
+	matches := make([]cel.Program, len(policy.Spec.MatchConditions))
+	for i, m := range policy.Spec.MatchConditions {
+		matches[i] = compile(m.Expression)
 	}
 	vars := make([]cel.Program, len(policy.Spec.Variables))
 	for i, v := range policy.Spec.Variables {
@@ -75,7 +83,16 @@ func renderedPodPolicy(t *testing.T) func(*corev1.Pod) bool {
 			t.Fatal(err)
 		}
 		variables := map[string]any{}
-		activation := map[string]any{"object": object, "variables": variables}
+		activation := map[string]any{"object": object, "variables": variables, "request": map[string]any{"namespace": "oberth-argo", "operation": operation, "subResource": subresource}}
+		for _, condition := range matches {
+			value, _, err := condition.Eval(activation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if value != types.True {
+				return true
+			}
+		}
 		for i, program := range vars {
 			value, _, err := program.Eval(activation)
 			if err != nil {
@@ -98,7 +115,7 @@ func renderedPodPolicy(t *testing.T) func(*corev1.Pod) bool {
 
 func TestPodPolicyRejectsNodeAccess(t *testing.T) {
 	accepts := renderedPodPolicy(t)
-	baseline := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}, InitContainers: []corev1.Container{{Name: "init"}}, EphemeralContainers: []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug"}}}}}
+	baseline := podPolicyBaseline()
 	if !accepts(baseline) {
 		t.Fatal("ordinary pod refused")
 	}
@@ -107,22 +124,22 @@ func TestPodPolicyRejectsNodeAccess(t *testing.T) {
 		"host IPC":     func(p *corev1.Pod) { p.Spec.HostIPC = true },
 		"host network": func(p *corev1.Pod) { p.Spec.HostNetwork = true },
 		"privileged main": func(p *corev1.Pod) {
-			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Privileged: ptr.To(true)}
+			p.Spec.Containers[0].SecurityContext.Privileged = ptr.To(true)
 		},
 		"privileged init": func(p *corev1.Pod) {
-			p.Spec.InitContainers[0].SecurityContext = &corev1.SecurityContext{Privileged: ptr.To(true)}
+			p.Spec.InitContainers[0].SecurityContext.Privileged = ptr.To(true)
 		},
 		"privileged ephemeral": func(p *corev1.Pod) {
-			p.Spec.EphemeralContainers[0].SecurityContext = &corev1.SecurityContext{Privileged: ptr.To(true)}
+			p.Spec.EphemeralContainers[0].SecurityContext.Privileged = ptr.To(true)
 		},
 		"main capabilities": func(p *corev1.Pod) {
-			p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"SYS_ADMIN"}}}
+			p.Spec.Containers[0].SecurityContext.Capabilities.Add = []corev1.Capability{"SYS_ADMIN"}
 		},
 		"init capabilities": func(p *corev1.Pod) {
-			p.Spec.InitContainers[0].SecurityContext = &corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"CHOWN"}}}
+			p.Spec.InitContainers[0].SecurityContext.Capabilities.Add = []corev1.Capability{"CHOWN"}
 		},
 		"ephemeral capabilities": func(p *corev1.Pod) {
-			p.Spec.EphemeralContainers[0].SecurityContext = &corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}}}
+			p.Spec.EphemeralContainers[0].SecurityContext.Capabilities.Add = []corev1.Capability{"NET_ADMIN"}
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -183,7 +200,7 @@ func TestPodPolicyAcceptsEmittedShapes(t *testing.T) {
 			t.Fatal(err)
 		}
 		walkTemplates(wf, func(template *wfv1.Template) {
-			pod := &corev1.Pod{Spec: corev1.PodSpec{Volumes: wf.Spec.Volumes}}
+			pod := &corev1.Pod{Spec: corev1.PodSpec{Volumes: wf.Spec.Volumes, SecurityContext: wf.Spec.SecurityContext}}
 			templateContainers(template, func(c *corev1.Container) { pod.Spec.Containers = append(pod.Spec.Containers, *c) })
 			if len(pod.Spec.Containers) > 0 && !accepts(pod) {
 				t.Errorf("%s template %s refused", trigger, template.Name)
@@ -207,7 +224,7 @@ func TestPodPolicyAcceptsEmittedShapes(t *testing.T) {
 			t.Fatal(err)
 		}
 		walkTemplates(wf, func(template *wfv1.Template) {
-			pod := &corev1.Pod{Spec: corev1.PodSpec{Volumes: wf.Spec.Volumes}}
+			pod := &corev1.Pod{Spec: corev1.PodSpec{Volumes: wf.Spec.Volumes, SecurityContext: wf.Spec.SecurityContext}}
 			templateContainers(template, func(c *corev1.Container) { pod.Spec.Containers = append(pod.Spec.Containers, *c) })
 			if len(pod.Spec.Containers) > 0 && !accepts(pod) {
 				t.Errorf("%s template %s refused", entry.source, template.Name)

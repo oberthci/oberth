@@ -43,7 +43,7 @@ func TestManagedArgoExecutorPinFollowsEffectiveChartVersion(t *testing.T) {
 			if test.storedPin {
 				stored = `{"executor":{"resources":{},"image":{"tag":"` + storedTag + `"}}}`
 			}
-			deps := Deps{Output: &output, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			deps := Deps{KubeClient: argoSecurityTestClient(), Output: &output, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 				switch args[0] {
 				case "list":
 					if test.installed == "" {
@@ -118,7 +118,7 @@ func TestManagedArgoExternalConfigMapNotice(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var output strings.Builder
-			deps := Deps{Output: &output, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			deps := Deps{KubeClient: argoSecurityTestClient(), Output: &output, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 				switch args[0] {
 				case "list":
 					return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"deployed"}]`), nil

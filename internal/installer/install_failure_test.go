@@ -15,7 +15,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
@@ -32,7 +31,7 @@ func TestInstallUnreachableClientEndpoint(t *testing.T) {
 			}
 			port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
 			_ = listener.Close()
-			kube := fake.NewClientset(preflightNode(), preflightStorage(), readyOberthPod(), readyArgoControllerPod())
+			kube := argoSecurityTestClient(preflightNode(), preflightStorage(), readyOberthPod(), readyArgoControllerPod())
 			var output bytes.Buffer
 			deployed := false
 			host := testAdminInstallDeps(InstallDeps{Output: &output, LookPath: func(name string) (string, error) { return name, nil }, ProbeNetworkPolicy: enforcedPolicyFixture,

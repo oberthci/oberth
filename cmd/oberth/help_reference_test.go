@@ -37,9 +37,6 @@ branch deletions
 branch prune
 branch prune-refs
 branch resolve
-fragments
-fragments list
-fragments show
 git-ssh
 init
 install
@@ -94,7 +91,6 @@ run hold list
 run hold patch
 run purge
 run rerun
-run retry
 runs
 runs cancel
 schedules
@@ -236,7 +232,6 @@ func TestHelpIncludesRegisteredFlags(t *testing.T) {
 		"parseCancelOptions": {"runs cancel"},
 		"parseMCPFlags":      {"mcp call", "mcp tools"},
 		"remoteFlags":        {"run", "repos", "status", "issues"},
-		"fragmentFlags":      {"fragments list", "fragments show"},
 		"runRepoArchive":     {"repo archive", "repo unarchive"},
 		"runRemoteSchedules": {"schedules list", "schedules pause", "schedules resume", "schedules trigger"},
 	}

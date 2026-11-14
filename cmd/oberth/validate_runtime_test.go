@@ -235,3 +235,67 @@ func assertValidateRuntimeParity(t *testing.T, document, secretPath string, trig
 		t.Fatalf("validate did not report the identical server refusal %q:\n%s", serverErr, output.String())
 	}
 }
+
+// Native allowances and ownership refusals use the same server and CLI boundary.
+func TestValidateRefusalRuntimeParity(t *testing.T) {
+	const document = `apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: unit
+  templates:
+  - name: unit
+    container:
+      image: registry.example.test/runner:1
+      command: [/bin/true]
+`
+	for _, tc := range []struct {
+		name    string
+		trigger pipeline.Trigger
+		mutate  func(*wfv1.Workflow)
+		refusal string
+	}{
+		{"native-image-and-pull-secrets", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Spec.Templates[0].Container.Image = "registry.example.test/runner:latest"
+			wf.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: "registry"}}
+			wf.GenerateName = "author-"
+		}, ""},
+		{"native-resource-env", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Spec.Templates[0].Container.Env = []corev1.EnvVar{{Name: "CPU", ValueFrom: &corev1.EnvVarSource{ResourceFieldRef: &corev1.ResourceFieldSelector{Resource: "limits.cpu"}}}}
+		}, ""},
+		{"workflow-owned-label", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Labels = map[string]string{"oberth.ci/run": "forged"}
+		}, "metadata.labels"},
+		{"workflow-owned-annotation", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Annotations["workflows.argoproj.io/controller-instanceid"] = "forged"
+		}, "metadata.annotations"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wf, err := argoworkflow.Decode([]byte(document))
+			if err != nil {
+				t.Fatal(err)
+			}
+			wf.Annotations = map[string]string{}
+			tc.mutate(wf)
+			source, err := json.Marshal(wf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config := argojob.Config{Namespace: "pipelines", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release", CISecretsServiceAccount: "ci-secrets", ExecutorServiceAccount: "executor"}
+			request := argojob.Request{RunID: "parity", RepositoryID: 1, Name: "parity", Repo: "project", UpstreamName: "upstream", UpstreamOrg: "example", Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), Trigger: tc.trigger, Source: source, ApprovedSecrets: map[string]bool{}, SourceVolume: argojob.SourceVolume{ClaimName: "source", SubPath: "src", BinarySubPath: "bin"}}
+			root := writeConsumer(t, document)
+			if err := os.WriteFile(filepath.Join(root, ".oberth", "build.yaml"), source, 0600); err != nil {
+				t.Fatal(err)
+			}
+			_, serverErr := argojob.Build(config, request)
+			var output bytes.Buffer
+			cliErr := runValidate(context.Background(), []string{root}, &output)
+			if tc.refusal == "" {
+				if serverErr != nil || cliErr != nil {
+					t.Fatalf("server=%v CLI=%v: %s", serverErr, cliErr, output.String())
+				}
+			} else if serverErr == nil || cliErr == nil || !strings.Contains(serverErr.Error(), tc.refusal) || !strings.Contains(output.String(), serverErr.Error()) {
+				t.Fatalf("refusal mismatch: server=%v CLI=%v: %s", serverErr, cliErr, output.String())
+			}
+		})
+	}
+}

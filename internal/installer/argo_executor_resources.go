@@ -65,12 +65,13 @@ func resolveArgoExecutorResources(ctx context.Context, cfg *Config, deps Deps) e
 	}
 	exists := cfg.existingArgoRelease
 	if !cfg.argoReleaseRead {
-		_, found, err := findHelmRelease(ctx, deps, "argo-workflows", namespace)
+		release, found, err := findHelmRelease(ctx, deps, "argo-workflows", namespace)
 		if err != nil {
 			return err
 		}
 		exists = found
 		cfg.existingArgoRelease, cfg.argoReleaseRead = exists, true
+		cfg.argoReviewRelease = &release
 	}
 	resources, err := readArgoExecutorResources(ctx, deps, namespace, exists)
 	cfg.argoExecutorResources = resources

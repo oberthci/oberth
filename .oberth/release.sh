@@ -533,6 +533,7 @@ files = {
     "release.json": 65536,
     "release.json.sigstore.json": 1 << 20,
     "server-image.txt": 1024,
+    "helper-image.txt": 1024,
     "chart-image.txt": 1024,
     "chart-sha256.txt": 1024,
     "oberth-" + tag[1:] + ".tgz": 16 << 20,
@@ -754,8 +755,13 @@ publish_images() {
 	prepare_registry_auth
 	created=$(source_created)
 	"$release_image_tool" publish "$tag" "$sha" "$created" "$release_dir" "$gar_key"
-	reference=$(sed -n '1p' "$release_dir/server-image.txt")
-	[ -n "$reference" ] || fail "release image helper produced an empty reference"
+	published_server_ref=$(sed -n '1p' "$release_dir/server-image.txt")
+	published_helper_ref=$(sed -n '1p' "$release_dir/helper-image.txt")
+	if [ -n "$published_server_ref" ] && [ -n "$published_helper_ref" ]; then
+		:
+	else
+		fail "release image helper produced an empty reference"
+	fi
 	# Bind the static C SBOM to every published Git byte before scanning/signing.
 	"$release_image_tool" verify "$tag" "$sha" "$created" "$release_dir" "$gar_key"
 	for architecture in amd64 arm64; do
@@ -763,9 +769,13 @@ publish_images() {
 	done
 	"$release_image_tool" static-sbom amd64 "$release_dir/static-git-control.cdx.json" control
 	GO="$go_tool" /bin/sh hack/scan-static-git.sh "$release_dir" amd64 arm64
-	scan_image "$reference"
+	for release_image_ref in "$published_server_ref" "$published_helper_ref"; do
+		scan_image "$release_image_ref"
+	done
 	prepare_signing_identity
-	sign_registry_object "$reference"
+	for release_image_ref in "$published_server_ref" "$published_helper_ref"; do
+		sign_registry_object "$release_image_ref"
+	done
 	clear_signing_identity
 	"$release_image_tool" verify "$tag" "$sha" "$created" "$release_dir" "$gar_key"
 }
@@ -839,8 +849,15 @@ generate_release_json() {
 	require_artifacts
 	require_chart
 	test -s "$release_dir/server-image.txt" || fail "server-image.txt is required for release.json"
+	test -s "$release_dir/helper-image.txt" || fail "helper-image.txt is required for release.json"
 	test -s "$release_dir/chart-sha256.txt" || fail "chart-sha256.txt is required for release.json"
 	server_ref=$(sed -n '1p' "$release_dir/server-image.txt")
+	helper_ref=$(sed -n '1p' "$release_dir/helper-image.txt")
+	case "$helper_ref" in ${gar_host}/skipopsmain/oberth/oberth-helper@sha256:*) ;;
+		*) fail "helper image reference is not an immutable Oberth GAR digest" ;;
+	esac
+	printf '%s\n' "${helper_ref#*@sha256:}" | grep -Eq '^[0-9a-f]{64}$' || \
+		fail "helper image reference is not an immutable Oberth GAR digest"
 	chart_version=${tag#v}
 	chart_digest=$(sed -n '1p' "$release_dir/chart-sha256.txt")
 	# Read binary digests from SHA256SUMS.
@@ -873,7 +890,8 @@ record = {
     "version": tag,
     "source": {"repository": "github.com/oberthci/oberth", "sha": sha, "created": created},
     "artifacts": {"sha256:" + v: k for k, v in digests.items()},
-    "images": {"server": {"ref": server_ref}},
+    "images": {"server": {"ref": server_ref}, "helper": {"ref": sys.argv[13]}},
+    "notes": "Optional helper image: " + sys.argv[13] + ". Contains only the static Oberth binary and CA certificates; steps select it explicitly.",
     "chart": {"version": chart_version, "digest": chart_digest},
 }
 for k, v in digests.items():
@@ -886,7 +904,7 @@ with open(sys.argv[12], "w") as f:
     f.write("\n")
 ' "$tag" "$sha" "$created" "$server_ref" "$chart_version" "$chart_digest" \
 		"$chart_gar_ref" "$linux_amd64" "$linux_arm64" "$darwin_amd64" "$darwin_arm64" \
-		"$release_dir/release.json" \
+		"$release_dir/release.json" "$helper_ref" \
 		|| fail "release.json generation failed"
 	test -s "$release_dir/release.json" || fail "release.json is empty"
 	# Validate the generated JSON is well-formed and contains the tag.
@@ -995,7 +1013,11 @@ assert record["images"]["server"]["ref"] == server_ref, \
     "release.json server image ref does not match server-image.txt"
 assert record["version"] == sys.argv[3], "release.json version mismatch"
 assert record["source"]["sha"] == sys.argv[4], "release.json sha mismatch"
-' "$verify_dir/release.json" "$release_dir/server-image.txt" "$tag" "$sha" || \
+with open(sys.argv[5]) as f:
+    helper_ref = f.read().strip().split("\n")[0]
+assert record["images"]["helper"]["ref"] == helper_ref, "release.json helper image mismatch"
+assert helper_ref in record["notes"], "release notes omit helper digest"
+' "$verify_dir/release.json" "$release_dir/server-image.txt" "$tag" "$sha" "$release_dir/helper-image.txt" || \
 		fail "release.json cross-check failed"
 }
 
@@ -1122,9 +1144,11 @@ verify_release() {
 	verify_public_binaries
 	created=$(source_created)
 	"$release_image_tool" verify "$tag" "$sha" "$created" "$release_dir" "$gar_key"
-	reference=$(sed -n '1p' "$release_dir/server-image.txt")
-	"$cosign_tool" verify --key "$release_dir/cosign.pub" "$reference" >/dev/null || fail "GAR image signature is invalid"
-	scan_image "$reference"
+	for release_image_kind in server helper; do
+		reference=$(sed -n '1p' "$release_dir/$release_image_kind-image.txt")
+		"$cosign_tool" verify --key "$release_dir/cosign.pub" "$reference" >/dev/null || fail "GAR image signature is invalid"
+		scan_image "$reference"
+	done
 
 	verify_chart
 }

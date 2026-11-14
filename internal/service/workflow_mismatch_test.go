@@ -146,8 +146,9 @@ func TestWorkflowMismatchCleanupReleasesOriginalBeforeManualRetry(t *testing.T) 
 	}
 	awaitCreateState(t, f.scheduler, source.ID, 0, true)
 	control := f.api(t)
-	control.runRetries = f.store
-	manual, err := control.retryRun(t.Context(), api.Actor{Identity: "pusher"}, source.ID)
+	control.runReruns = f.store
+	control.refs = stubRefResolver{branches: map[string]map[string]string{control.cacheInputFor(t.Context(), f.repo): {source.Ref: source.SHA}}}
+	manual, err := control.rerunRun(t.Context(), api.Actor{Identity: "pusher"}, source.ID, "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +159,7 @@ func TestWorkflowMismatchCleanupReleasesOriginalBeforeManualRetry(t *testing.T) 
 		t.Fatal("confirmed cleanup did not admit the manual retry")
 	}
 	original, err = f.store.Run(t.Context(), source.ID)
-	if err != nil || original.Status != model.RunFailed || retry.Run.ID != manual.ID || retry.Run.ID == source.ID || !strings.Contains(original.Error, "cleanup confirmed") {
+	if err != nil || original.Status != model.RunFailed || retry.Run.ID != manual.RunID || retry.Run.ID == source.ID || !strings.Contains(original.Error, "cleanup confirmed") {
 		t.Fatalf("retry lost original cleanup verdict or lineage: original=%+v retry=%+v err=%v", original, retry.Run, err)
 	}
 	state = f.scheduler.submissionStateForTest()

@@ -396,3 +396,19 @@ func TestClientAccessDecidedInAdvanceNeedsNoTerminal(t *testing.T) {
 		t.Fatalf("an unknown client-access choice must be rejected, got %v", err)
 	}
 }
+
+func TestClientAccessWithoutBearerExplainsCertificateConnect(t *testing.T) {
+	var output bytes.Buffer
+	deps := Deps{Output: &output}
+	if err := offerClientAccess(t.Context(), Config{}, deps, newTableWriter(&output, false), ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Client access", "mutual TLS", "no token needed", "/oberth:connect"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatal("missing certificate connection guidance", output.String())
+		}
+	}
+	if strings.Contains(output.String(), "no uplink token") || strings.Contains(output.String(), "manual") {
+		t.Fatal("obsolete manual-token guidance", output.String())
+	}
+}

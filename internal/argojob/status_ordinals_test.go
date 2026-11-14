@@ -95,14 +95,14 @@ func TestRetryOrdinalsSurviveParallelPollsInRealJournal(t *testing.T) {
 						t.Fatalf("poll %d: changed ordinal %+v", poll, event)
 					}
 				}
-				final := StepResults(wf)
+				final := fixtureStepResults(wf)
 				for i := 1; i < len(final); i++ {
 					if final[i-1].Ordinal >= final[i].Ordinal {
 						t.Fatalf("poll %d: final rows moved out of first-attempt order: %+v", poll, final)
 					}
 				}
 				// Assert both the public final rows and superseded attempt rows.
-				for _, rows := range [][]StepResult{stepAttempts(wf), final} {
+				for _, rows := range [][]StepResult{fixtureStepAttempts(wf), final} {
 					for _, step := range rows {
 						if step.Ordinal != want[step.Stage+"/"+step.Step] {
 							t.Fatalf("poll %d: %s/%s ordinal %d: %+v", poll, step.Stage, step.Step, step.Ordinal, rows)

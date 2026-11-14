@@ -22,7 +22,7 @@ The single definition lives in `GrantedSecretSteps` in
 Container or Script must invoke a recognized store consumer and consume at
 least one static path. Every consumed path must be declared, approved for the
 selected repository/upstream and exact workflow file, and granted to the stable template name
-or `*`. Inline and fragment-renamed templates require wildcard grants. Missing
+or `*`. Inline and unnamed templates require wildcard grants. Missing
 step grants confer no authority. Token opt-outs receive no store settings.
 Admission and Build delivery use this same decision. The grant table is keyed by repository/upstream, exact repository-relative workflow file, template name, and path. The workflow field is required; no default, alias, or wildcard file selector is accepted. `*` grants cover steps only within that exact file. Pending declarations, revocation, policy names, and store identities retain the same file scope.
 
@@ -96,3 +96,13 @@ return the workflow file; `access_dismiss` requires it too. After re-approval,
 run `oberth secretstore sync` to prune the old OpenBao roles and policies, then install the scoped identities.
 
 For upstream-scoped paths, the step and workflow-file scope is enforced at admission. The current OpenBao policy still grants the repository upstream subtree; a follow-up narrows that policy.
+
+The optional helper image is published for Linux amd64 and arm64 alongside each
+release. It contains only the static Oberth binary at `/usr/local/bin/oberth`
+and CA certificates. Select its immutable reference from `images.helper.ref`
+in the signed `release.json`; that record also includes the helper digest in
+its release-note paragraph. The image uses the same release signing key as the
+server image. Use it directly for Oberth commands, or copy its binary into a
+step image with the tools that `oberth secretstore exec` must launch; the helper
+contains no shell or build tools. It provides no grants, credentials or automatic
+Workflow injection.

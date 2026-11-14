@@ -1,7 +1,6 @@
 package gitcache
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -656,7 +655,8 @@ func (c *Cache) materialize(ctx context.Context, path string, old map[string]str
 }
 
 // cleanInvalidPublicRefsLocked removes public refs with names that fail
-// validation and returns the count of valid public refs remaining. The scan
+// structural storage validation and returns the remaining public-ref count.
+// Run-fact alphabet restrictions never delete stored refs. The scan
 // is bounded by maximumReceiveSnapshotRefs to stay within the capture buffer
 // while accommodating both the normal cap and one recovery deletion batch.
 func (c *Cache) cleanInvalidPublicRefsLocked(ctx context.Context, path string) (int, error) {
@@ -666,7 +666,7 @@ func (c *Cache) cleanInvalidPublicRefsLocked(ctx context.Context, path string) (
 	}
 	var invalidRefs []string
 	for ref := range public {
-		if !publicReceiveRef(ref) {
+		if reversePublicRef(ref) == "" {
 			invalidRefs = append(invalidRefs, ref)
 		}
 	}
@@ -683,13 +683,13 @@ func publicRef(tracking string) (string, bool) {
 	switch {
 	case strings.HasPrefix(tracking, upstreamRefPrefix+"heads/"):
 		branch := strings.TrimPrefix(tracking, upstreamRefPrefix+"heads/")
-		if ValidateBranch(branch) != nil {
+		if validateStoredRefPart("branch", branch) != nil {
 			return "", false
 		}
 		return "refs/heads/" + branch, true
 	case strings.HasPrefix(tracking, upstreamRefPrefix+"tags/"):
 		tag := strings.TrimPrefix(tracking, upstreamRefPrefix+"tags/")
-		if ValidateTag(tag) != nil {
+		if validateStoredRefPart("tag", tag) != nil {
 			return "", false
 		}
 		return "refs/tags/" + tag, true
@@ -720,13 +720,13 @@ func reversePublicRef(ref string) string {
 	switch {
 	case strings.HasPrefix(ref, "refs/heads/"):
 		branch := strings.TrimPrefix(ref, "refs/heads/")
-		if ValidateBranch(branch) != nil {
+		if validateStoredRefPart("branch", branch) != nil {
 			return ""
 		}
 		return upstreamRefPrefix + "heads/" + branch
 	case strings.HasPrefix(ref, "refs/tags/"):
 		tag := strings.TrimPrefix(ref, "refs/tags/")
-		if ValidateTag(tag) != nil {
+		if validateStoredRefPart("tag", tag) != nil {
 			return ""
 		}
 		return upstreamRefPrefix + "tags/" + tag
@@ -1317,114 +1317,6 @@ func cloneMap(source map[string]string) map[string]string {
 		result[key] = value
 	}
 	return result
-}
-
-// ListTags returns all tag names (without refs/tags/) in the cached bare
-// repository. Used by the GOPROXY handler (#662).
-func (c *Cache) ListTags(ctx context.Context, input string) ([]string, error) {
-	_, path, err := c.modulePath(ctx, input)
-	if err != nil {
-		return nil, err
-	}
-	unlock, err := c.lockModuleRepository(ctx, path)
-	if err != nil {
-		return nil, err
-	}
-	defer unlock()
-	if !c.isBare(ctx, path) {
-		return nil, fmt.Errorf("repository is not cached")
-	}
-	refs, err := c.listRefs(ctx, path, "refs/tags/")
-	if err != nil {
-		return nil, err
-	}
-	tags := make([]string, 0, len(refs))
-	for ref := range refs {
-		tags = append(tags, strings.TrimPrefix(ref, "refs/tags/"))
-	}
-	sort.Strings(tags)
-	return tags, nil
-}
-
-// ShowFile returns the verbatim contents of a single file at the given ref.
-// Used by the GOPROXY handler (#662) to serve go.mod. The bytes are returned
-// exactly as stored in the git tree — no trimming or normalisation — because
-// Go's checksum verification (go.sum /go.mod h1: lines) hashes the exact
-// file bytes and any whitespace change breaks the hash (#726).
-func (c *Cache) ShowFile(ctx context.Context, input, ref, filePath string) ([]byte, error) {
-	if err := validateModuleRef(ref); err != nil {
-		return nil, err
-	}
-	if err := validateBlobPath(filePath); err != nil {
-		return nil, err
-	}
-	_, repoPath, err := c.modulePath(ctx, input)
-	if err != nil {
-		return nil, err
-	}
-	unlock, err := c.lockModuleRepository(ctx, repoPath)
-	if err != nil {
-		return nil, err
-	}
-	defer unlock()
-	if !c.isBare(ctx, repoPath) {
-		return nil, fmt.Errorf("repository is not cached")
-	}
-	// Use run() with a raw bytes.Buffer instead of capture(): capture()
-	// returns via tailBuffer.String() which applies bytes.TrimSpace,
-	// stripping trailing newlines. That is correct for SHA/URL/ref output
-	// but destroys the go.mod trailing newline that go.sum hashes over.
-	var buf bytes.Buffer
-	if err := c.run(ctx, commandSpec{
-		dir:    repoPath,
-		args:   []string{"show", "--end-of-options", ref + ":" + filePath, "--"},
-		stdout: &buf,
-	}); err != nil {
-		return nil, c.classifyModuleReadFailure(ctx, repoPath, ref, filePath, err)
-	}
-	return buf.Bytes(), nil
-}
-
-// ArchiveTar writes a tar archive of the tree at the given ref.
-// Used by the GOPROXY handler (#662) to build module zip files.
-func (c *Cache) ArchiveTar(ctx context.Context, input, ref string, w io.Writer) error {
-	if err := validateModuleRef(ref); err != nil {
-		return err
-	}
-	_, repoPath, err := c.modulePath(ctx, input)
-	if err != nil {
-		return err
-	}
-	unlock, err := c.lockModuleRepository(ctx, repoPath)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	if !c.isBare(ctx, repoPath) {
-		return fmt.Errorf("repository is not cached")
-	}
-	err = c.run(ctx, commandSpec{
-		dir:    repoPath,
-		args:   []string{"archive", "--format=tar", "--", ref},
-		stdout: w,
-	})
-	if err != nil {
-		return c.classifyModuleReadFailure(ctx, repoPath, ref, "", err)
-	}
-	return nil
-}
-
-func validateModuleRef(ref string) error {
-	if ValidateSHA(ref) == nil {
-		return nil
-	}
-	if strings.HasPrefix(ref, "refs/heads/") {
-		return ValidateBranch(strings.TrimPrefix(ref, "refs/heads/"))
-	}
-	if strings.HasPrefix(ref, "refs/tags/") {
-		return ValidateTag(strings.TrimPrefix(ref, "refs/tags/"))
-	}
-	return ValidateTag(ref)
 }
 
 // CacheRoot identifies the daemon-owned repository cache for removal requests.

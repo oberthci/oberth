@@ -506,3 +506,25 @@ func testAdministrationCertificateOnlyEnrollment(t *testing.T) {
 		t.Fatal("invalid certificate request created an uplink")
 	}
 }
+
+func TestAdministrationRepoVerifySelectors(t *testing.T) {
+	control, _, handler := newAdministrationFixture(t)
+	called := ""
+	control.administration.VerifyRepository = func(_ context.Context, repo string) (any, error) {
+		called = repo
+		return map[string]bool{"verified": true}, nil
+	}
+	for _, selector := range []string{"new-repo", "south/team/new-repo"} {
+		called = ""
+		body, _ := json.Marshal(map[string]string{"repo": selector})
+		response := adminRequest(handler, "repo-verify", "admin", string(body))
+		if response.Code != http.StatusOK || called != "south/team/new-repo" {
+			t.Fatalf("selector %s: status=%d target=%s", selector, response.Code, called)
+		}
+	}
+	called = ""
+	response := adminRequest(handler, "repo-verify", "admin", `{"repo":"other/team/new-repo"}`)
+	if response.Code == http.StatusOK || called != "" {
+		t.Fatal("another upstream selector reached verification")
+	}
+}

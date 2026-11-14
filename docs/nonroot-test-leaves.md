@@ -51,7 +51,7 @@ the step's output as well as its declared resource requests.
 
 Kubelet evictions (including executor emptyDir limits and node memory or
 ephemeral-storage pressure) are infrastructure failures with the kubelet reason.
-They retain failed step rows, permit `run_retry` for eligible branch runs, and
+They retain failed step rows, permit `run_rerun` for eligible branch runs, and
 do not open, update, or resolve repository CI-red issues. A container killed at
 its own declared memory limit remains a test failure; `OOMKilled` or exit 137/143
 alone does not establish node pressure. Scheduler-side infrastructure failures

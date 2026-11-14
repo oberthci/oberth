@@ -20,8 +20,6 @@ const (
 	ReleaseFile = ".oberth/release.yaml"
 )
 
-const FragmentFile = ".oberth/fragment.yaml"
-
 // MaxSourceBytes bounds one pipeline document before decoding.
 const MaxSourceBytes = pipeline.MaxSourceBytes
 

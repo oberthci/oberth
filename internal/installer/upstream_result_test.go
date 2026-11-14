@@ -70,12 +70,6 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 				return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: ca}}, "selected", nil
 			}, RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 				command := strings.Join(args, " ")
-				if strings.Contains(command, "/proxy/configz") {
-					return []byte(`{}`), nil
-				}
-				if strings.Contains(command, "stats/summary") {
-					return preflightStats(t.Context(), nil, "kubectl")
-				}
 				if strings.Contains(command, "admin read-file") {
 					return ca, nil
 				}
@@ -140,6 +134,9 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 			var result InstallResult
 			if json.Unmarshal(output.Bytes(), &result) != nil || result.OK != wantOK || result.Upstream == nil {
 				t.Fatal("invalid JSON partial result")
+			}
+			if result.ClientAccess == nil || result.ClientAccess.Authentication != "mutual_tls" || result.ClientAccess.TokenRequired || !strings.Contains(result.ClientAccess.NextStep, "/oberth:connect") {
+				t.Fatal("JSON result lacks certificate connection guidance", result.ClientAccess)
 			}
 			u := result.Upstream
 			wantState := "pending"

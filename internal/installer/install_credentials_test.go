@@ -3,6 +3,9 @@ package installer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,5 +135,87 @@ func TestReusedSecretsFilePreservesInputAndReservesNewOutput(t *testing.T) {
 	files, err := filepath.Glob(path + ".new-*")
 	if err != nil || len(files) != 0 {
 		t.Fatal("empty credential output was retained")
+	}
+}
+
+func TestDryRunReadsRecoveryFlagsWithoutWriting(t *testing.T) {
+	bootstrapCredentialInventory(t, []byte("s.dry-run-read-only"))
+	for _, flag := range []string{"resume-secrets-file", "secrets-file"} {
+		for _, valid := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/valid=%t", flag, valid), func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "credentials")
+				raw := []byte("OPENBAO_ROOT_TOKEN=s.dry-run-read-only\n")
+				mode := os.FileMode(0600)
+				if !valid {
+					mode = 0644
+				}
+				if err := os.WriteFile(path, raw, mode); err != nil {
+					t.Fatal(err)
+				}
+				cfg := Config{DryRun: true, InstallSecretStore: true}
+				if flag == "resume-secrets-file" {
+					cfg.ResumeSecretsFile = path
+				} else {
+					cfg.SecretsFile = path
+				}
+				err := prepareInstallInputs(t.Context(), &cfg, InstallDeps{})
+				defer clear(cfg.resumeRootToken)
+				if valid && (err != nil || string(cfg.resumeRootToken) != "s.dry-run-read-only") {
+					t.Fatal("recovery file not read", err)
+				}
+				if !valid && err == nil {
+					t.Fatal("public recovery file accepted")
+				}
+				after, readErr := os.ReadFile(path)
+				entries, dirErr := os.ReadDir(filepath.Dir(path))
+				if readErr != nil || !bytes.Equal(after, raw) || dirErr != nil || len(entries) != 1 {
+					t.Fatal("dry run changed recovery files")
+				}
+			})
+		}
+	}
+}
+
+func TestDryRunJSONReturnsResolvedReviewWithoutVerification(t *testing.T) {
+	var output bytes.Buffer
+	cfg := Config{DryRun: true}
+	err := executeJSON(t.Context(), cfg, InstallDeps{Output: &output}, func(_ context.Context, got Config, deps InstallDeps) error {
+		if !got.DryRun {
+			t.Fatal("lost dry-run mode")
+		}
+		got.ContextName, got.ClientHost = "selected", "ci.example.test"
+		deps.installResolved(got)
+		_, _ = deps.Output.Write([]byte("private dry-run diagnostics"))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Version              int           `json:"version"`
+		Review               InstallReview `json:"review"`
+		ConfirmationRequired bool          `json:"confirmation_required"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Version != 1 || result.Review.Context != "selected" || result.Review.ClientHost != "ci.example.test" || !result.ConfirmationRequired || strings.Contains(output.String(), "private dry-run diagnostics") {
+		t.Fatal("invalid public review", output.String())
+	}
+}
+
+func TestDryRunJSONFailureReturnsSafeChecks(t *testing.T) {
+	var output bytes.Buffer
+	failure := errors.New("private dependency diagnostic")
+	err := executeJSON(t.Context(), Config{DryRun: true, ContextName: "chosen"}, InstallDeps{Output: &output}, func(context.Context, Config, InstallDeps) error { return failure })
+	if !errors.Is(err, failure) {
+		t.Fatal("failure lost", err)
+	}
+	var result InstallResult
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal("no JSON on failure", err)
+	}
+	if result.Version != 1 || result.OK || result.Review == nil || result.Review.Context != "chosen" || len(result.Checks) != 1 || result.Checks[0].OK || result.Checks[0].Code != "dry_run" || strings.Contains(output.String(), failure.Error()) {
+		t.Fatal("invalid or unsafe failure JSON", output.String())
 	}
 }

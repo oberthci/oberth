@@ -25,9 +25,8 @@ import (
 
 // stepsOrDagSeparator and the naming below are transcribed from
 // argo-workflows/workflow/controller/operator.go (initializeNode), dag.go and
-// steps.go. It is a deliberate second copy for the same reason
-// upstreamGeneratePodName in this package is: a fixture that agrees with
-// Oberth's own derivation because it was written from it proves nothing.
+// steps.go. The fixture follows Argo independently so agreement with
+// Oberth's node-tree projection checks the integration.
 var stepsOrDagSeparator = regexp.MustCompile(`^(\[\d+\])?\.`)
 
 // simulateArgoNodes builds the node tree Argo's controller writes for a
@@ -146,7 +145,7 @@ func observedKeys(t *testing.T, workflow *wfv1.Workflow) []string {
 	t.Helper()
 	executed := workflow.DeepCopy()
 	executed.Status = wfv1.WorkflowStatus{Phase: wfv1.WorkflowSucceeded, Nodes: simulateArgoNodes(t, executed)}
-	results := StepResults(executed)
+	results := fixtureStepResults(executed)
 	keys := make([]string, 0, len(results))
 	for _, result := range results {
 		keys = append(keys, result.Stage+"/"+result.Step)

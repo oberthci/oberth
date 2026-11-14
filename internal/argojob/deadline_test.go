@@ -131,13 +131,13 @@ func TestWorkflowDeadlineObservationOnlyUsesOwnedPods(t *testing.T) {
 	pod.Status.Phase, pod.Status.Reason, pod.Status.Message = corev1.PodFailed, "DeadlineExceeded", "PRIVATE controller text"
 	kube := fake.NewClientset(pod)
 	controller := &Controller{workflows: &schedulingWorkflowClient{workflow: workflow}, kube: kube, config: Config{Namespace: "pipeline"}}
-	result, err := controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+	result, err := withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha")
 	if err != nil || result.Reason == "DeadlineExceeded" {
 		t.Fatalf("foreign Pod influenced status: %+v %v", result, err)
 	}
 	pod.OwnerReferences[0].UID = workflow.UID
 	controller.kube = fake.NewClientset(pod)
-	result, err = controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+	result, err = withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha")
 	if err != nil || result.State != "deadline_exceeded" {
 		t.Fatalf("owned deadline not visible: %+v %v", result, err)
 	}
@@ -147,7 +147,7 @@ func TestWorkflowDeadlineObservationOnlyUsesOwnedPods(t *testing.T) {
 	}
 	pod.Annotations["workflows.argoproj.io/node-id"] = "earlier-attempt"
 	controller.kube = fake.NewClientset(pod)
-	result, err = controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+	result, err = withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha")
 	if err != nil || result.State == "deadline_exceeded" {
 		t.Fatal("an earlier attempt's Pod supplied the current failure reason")
 	}
@@ -155,7 +155,7 @@ func TestWorkflowDeadlineObservationOnlyUsesOwnedPods(t *testing.T) {
 	controller.kube = fake.NewClientset(pod)
 	workflow.Status.Phase = wfv1.WorkflowSucceeded
 	workflow.Status.Message = "Step exceeded its deadline"
-	result, err = controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+	result, err = withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha")
 	if err != nil || result.State == "deadline_exceeded" || workflowDeadlineExceeded(workflow) {
 		t.Fatal("a successful retry inherited an earlier attempt's deadline failure")
 	}

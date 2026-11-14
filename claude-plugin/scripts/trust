@@ -688,15 +688,67 @@ redeem() {
  echo "Local SSH push key registered; private key remains on this machine."
 }
 
+# Match the CLI address resolver: trim trailing slashes, then append /mcp
+# unless the decoded URL path already ends there. Decode only for the suffix
+# check; retain the original escaped URL when registering it.
+mcp_endpoint() {
+ endpoint=$1
+ while [ "${endpoint%/}" != "$endpoint" ]; do endpoint=${endpoint%/}; done
+ authority_path=${endpoint#https://}
+ has_mcp_path=$(printf '%s\n' "$authority_path" | awk '
+  function hex(c) { return index("0123456789abcdef", tolower(c)) - 1 }
+  {
+   start = index($0, "/")
+   if (!start) { print 0; next }
+   path = substr($0, start); suffix = ""
+   for (i = 1; i <= length(path); i++) {
+    c = substr(path, i, 1)
+    if (c == "%") {
+     a = hex(substr(path, i + 1, 1)); b = hex(substr(path, i + 2, 1))
+     if (i + 2 > length(path) || a < 0 || b < 0) exit 2
+     c = sprintf("%c", a * 16 + b); i += 2
+    }
+    suffix = suffix c
+    if (length(suffix) > 4) suffix = substr(suffix, length(suffix) - 3)
+   }
+   print (suffix == "/mcp") ? 1 : 0
+  }') || fail "invalid MCP URL escape"
+ if [ "$has_mcp_path" != 1 ]; then endpoint="$endpoint/mcp"; fi
+ printf '%s\n' "$endpoint"
+}
+
 # Register only a configured endpoint. No empty MCP server exists at plugin install.
 configure() {
  url=${1:-}; token_file=${2:-}
  case "$url" in https://*) ;; *) fail "MCP URL must use https://";; esac
  case "$url" in *[!]A-Za-z0-9._~:/%[-]*) fail "invalid MCP URL";; esac
+ if [ -n "$token_file" ]; then
+  case "$token_file" in *[!A-Za-z0-9/@._-]*) fail "token file path must contain only letters, digits, / . _ -";; esac
+ fi
  command -v claude >/dev/null 2>&1 || fail "Claude Code CLI is required"
+ # Resolve once, then probe and register exactly that endpoint.
+ origin=${url#https://}
+ case "$origin" in ''|/*|*@*) fail "invalid MCP URL";; esac
+ url=$(mcp_endpoint "$url")
+ claude=$(claude_directory)
+ ca="$claude/oberth/ca.crt"
+ [ -r "$ca" ] || fail "stored server CA is missing; run trust connect first"
+ cli=$(command -v oberth || true)
+ if [ -z "$cli" ] && [ -x "$HOME/.local/bin/oberth" ]; then cli="$HOME/.local/bin/oberth"; fi
+ [ -n "$cli" ] || fail "verified Oberth CLI is required; run /oberth:install first"
+ if [ -n "$token_file" ]; then
+  set -- --token-file "$token_file"
+ else
+  variable=CLAUDE_CODE_CLIENT_CERT; cert=$(current_trust "$claude/settings.json")
+  variable=CLAUDE_CODE_CLIENT_KEY; key=$(current_trust "$claude/settings.json")
+  variable=NODE_EXTRA_CA_CERTS
+  [ -n "$cert" ] && [ -n "$key" ] || fail "client certificate and key are missing; run trust credentials first"
+  set -- --client-cert "$cert" --client-key "$key"
+ fi
+ "$cli" mcp tools --url "$url" --ca-file "$ca" --timeout 15s --reconnect-window 1ms "$@" >/dev/null 2>&1 ||
+  fail "URL did not answer as authenticated MCP over verified TLS: $(shown "$url"); check the endpoint and client identity. MCP registration unchanged."
  if [ -n "$token_file" ]; then
   # The helper, not an argv value, supplies the bearer to Claude Code.
-  case "$token_file" in *[!A-Za-z0-9/@._-]*) fail "token file path must contain only letters, digits, / . _ -";; esac
   source_helper=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/bearer-headers
   helper_store=$(claude_directory)/oberth
   mkdir -p "$helper_store"; chmod 700 "$helper_store"

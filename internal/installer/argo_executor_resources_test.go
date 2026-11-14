@@ -58,7 +58,7 @@ func TestArgoExecutorDefaultsReconcileAnExistingReleaseOnlyOnce(t *testing.T) {
 	stored := `{}`
 	writes := 0
 	var output strings.Builder
-	deps := Deps{Output: &output, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+	deps := Deps{KubeClient: argoSecurityTestClient(), Output: &output, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 		switch args[0] {
 		case "list":
 			return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"deployed"}]`), nil
@@ -98,7 +98,7 @@ func TestArgoExecutorDefaultsReconcileAnExistingReleaseOnlyOnce(t *testing.T) {
 func TestArgoExecutorResourcesReadFailureDoesNotApplyDefaults(t *testing.T) {
 	for _, raw := range []string{`{"executor":`, `{} {"executor":{"resources":{}}}`} {
 		writes := 0
-		deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+		deps := Deps{KubeClient: argoSecurityTestClient(), Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			switch args[0] {
 			case "list":
 				return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"deployed"}]`), nil

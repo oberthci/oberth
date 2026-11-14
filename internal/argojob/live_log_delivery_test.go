@@ -27,7 +27,7 @@ func TestLiveLogDeliveryMatchesPodOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	runID := fmt.Sprintf("oberth-live-logs-%d", time.Now().UnixNano())
-	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: runID, Namespace: cluster.namespace, Annotations: map[string]string{runIDAnnotation: runID, identityAnnotation: "live-log-delivery", PodNameVersionAnnotation: podNameVersionV2}}, Spec: wfv1.WorkflowSpec{
+	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: runID, Namespace: cluster.namespace, Annotations: map[string]string{runIDAnnotation: runID, identityAnnotation: "live-log-delivery"}}, Spec: wfv1.WorkflowSpec{
 		Entrypoint: "logs", ServiceAccountName: config.PipelineServiceAccount, Executor: &wfv1.ExecutorConfig{ServiceAccountName: config.ExecutorServiceAccount}, AutomountServiceAccountToken: ptr.To(false), ActiveDeadlineSeconds: ptr.To(int64(120)),
 		Templates: []wfv1.Template{
 			{Name: "logs", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "noisy", Template: "noisy"}, {Name: "quiet", Template: "quiet"}, {Name: "retry", Template: "retry"}}}},
@@ -107,7 +107,7 @@ func TestLiveLogDeliveryMatchesPodOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := map[string][]string{}
-	attempts := stepAttempts(final)
+	attempts := controller.observedStepAttempts(ctx, final)
 	if len(attempts) != 4 {
 		t.Fatalf("expected noisy, quiet, and two retry attempts; got %d", len(attempts))
 	}

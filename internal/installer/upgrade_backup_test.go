@@ -17,7 +17,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
@@ -34,7 +33,7 @@ func TestUpgradeAnnouncesItsOwnBackup(t *testing.T) {
 	} {
 		t.Run(fmt.Sprintf("%s/no-backup=%t", tc.live, tc.noBackup), func(t *testing.T) {
 			var output bytes.Buffer
-			deps := testAdminDeps(Deps{Output: &output, KubeClient: fake.NewClientset(), RestConfig: &rest.Config{Host: "https://cluster.example:6443"},
+			deps := testAdminDeps(Deps{Output: &output, KubeClient: argoSecurityTestClient(), RestConfig: &rest.Config{Host: "https://cluster.example:6443"},
 				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 					if out, ok := testUpgradeValuePreflight(args); ok {
 						return out, nil
@@ -67,7 +66,7 @@ func TestUpgradeAnnouncesItsOwnBackup(t *testing.T) {
 // change and point at the supported rollback.
 func TestUpgradeRefusesNewerLiveSchema(t *testing.T) {
 	t.Parallel()
-	deps := testAdminDeps(Deps{Output: &bytes.Buffer{}, KubeClient: fake.NewClientset(), RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
+	deps := testAdminDeps(Deps{Output: &bytes.Buffer{}, KubeClient: argoSecurityTestClient(), RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
 				return out, nil
@@ -150,7 +149,7 @@ func newUpgradeFixture(t *testing.T, installed, target, liveSchema string) upgra
 			}
 			return nil, nil
 		},
-		KubeClient:  fake.NewClientset(deployment),
+		KubeClient:  argoSecurityTestClient(deployment),
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "fixture",
 	})

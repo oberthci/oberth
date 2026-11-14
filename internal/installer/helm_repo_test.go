@@ -45,9 +45,13 @@ func TestChartConsumersRefreshHelmRepo(t *testing.T) {
 				var repoCalls [][]string
 				consumed := false
 				deps := Deps{
-					Output: io.Discard, KubeClient: fake.NewClientset(),
+					Output: io.Discard, KubeClient: fake.NewClientset(argoSecurityLiveObjects(DefaultArgoNamespace, true)...),
 					RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 					RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+						if tc.name == "argo" && args[0] == "list" {
+							return []byte(`[]`), nil
+						}
+
 						if out, ok := testUpgradeValuePreflight(args); ok {
 							return out, nil
 						}

@@ -113,3 +113,11 @@ Losing a still-valid admin credential does not enable first-admin recovery with
 a new key. Until that credential expires or is revoked it remains active; an
 unexpiring bearer remains active indefinitely. Keep the original local installer
 key so an interrupted response can be retried with the same enrollment.
+
+An owner-only empty `--secrets-file` left by an interrupted install can be reused
+at the same path. Group- or world-readable empty files are refused; changing
+their permissions cannot revoke another process's already-open descriptor.
+A non-empty conflicting file is refused. Existing recovery input is never
+overwritten; use `--resume-secrets-file` for input and a separate output path.
+While the live NetworkPolicy probe runs, install prints its start and a progress
+heartbeat every ten seconds, including owned cleanup.

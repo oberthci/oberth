@@ -160,7 +160,7 @@ func TestInstallReservesTheSecretsFileFirst(t *testing.T) {
 	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("a secrets file without credentials was kept: %v", statErr)
 	}
-	// A dry run reviews without reserving or inspecting output paths.
+	// A dry run reviews without reserving output paths.
 	dry := Config{InstallSecretStore: true, SecretsFile: path, DryRun: true}
 	if err := Execute(context.Background(), dry, noClusterInstallDeps(t, false)); err == nil || !strings.Contains(err.Error(), "stop: cluster reached") {
 		t.Fatalf("dry run with a usable path: %v", err)
@@ -180,8 +180,11 @@ func TestInstallReservesTheSecretsFileFirst(t *testing.T) {
 		t.Fatalf("dry run with existing output: %v", err)
 	}
 	err = Execute(context.Background(), Config{InstallSecretStore: true, SecretsFile: path}, noClusterInstallDeps(t, false))
-	if err == nil || !strings.Contains(err.Error(), "no OPENBAO_ROOT_TOKEN") {
-		t.Fatalf("an existing recovery file without a root token: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "stop: cluster reached") {
+		t.Fatalf("empty output was not reusable on retry: %v", err)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("retry retained empty output after creating no credentials: %v", statErr)
 	}
 }
 

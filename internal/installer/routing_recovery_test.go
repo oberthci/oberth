@@ -19,7 +19,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
@@ -35,7 +34,7 @@ func TestPrintedRoutingRemedyRestoresBothVerifiedEndpoints(t *testing.T) {
 	}
 	sshListener.Close()
 	_, sshPort, _ := net.SplitHostPort(sshListener.Addr().String())
-	kube := fake.NewClientset(preflightNode(), preflightStorage(), readyOberthPod(), readyArgoControllerPod())
+	kube := argoSecurityTestClient(preflightNode(), preflightStorage(), readyOberthPod(), readyArgoControllerPod())
 	ca := newTestServerCA(t, []string{"api.example.test"})
 	var output bytes.Buffer
 	deployed, verifying, applies := false, false, 0

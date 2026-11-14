@@ -11,7 +11,7 @@ func TestRunnerImageAllowlistUsesRegistryAndRepositoryBoundaries(t *testing.T) {
 		prefixes []string
 		allowed  bool
 	}{
-		{"golang:5000/evil", nil, false},
+		{"golang:5000/evil", nil, true},
 		{"ghcr.io/org-evil/x", []string{"ghcr.io/org"}, false},
 		{"ghcr.io/org/x", []string{"ghcr.io/org"}, true},
 		{"ghcr.io/org/x", []string{"ghcr.io/org/"}, true},
@@ -41,10 +41,10 @@ func TestRunnerImageAllowlistUsesRegistryAndRepositoryBoundaries(t *testing.T) {
 
 func TestRunnerImageAllowedAgainstPrefixes(t *testing.T) {
 	if !RunnerImageAllowed("golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil) {
-		t.Fatal("empty allowlist must admit the built-in golang: prefix")
+		t.Fatal("empty allowlist must admit authored images")
 	}
-	if RunnerImageAllowed("evil.example/golang:1.26@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil) {
-		t.Fatal("foreign registry admitted by the default prefix")
+	if !RunnerImageAllowed("evil.example/golang:1.26@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil) {
+		t.Fatal("empty allowlist refused an authored image")
 	}
 	prefixes := []string{"golang:", "registry.example/base/"}
 	if !RunnerImageAllowed("registry.example/base/go:1.26@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", prefixes) {

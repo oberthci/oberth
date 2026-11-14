@@ -17,6 +17,11 @@ func resolveInstallRerunValues(ctx context.Context, cfg *Config, deps Deps, clus
 	if err := readInstallValues(ctx, cfg, deps); err != nil {
 		return err
 	}
+	if cfg.existingRelease {
+		if err := refuseRemovedReleaseValues(cfg.liveInstallValues, "oberth install"); err != nil {
+			return err
+		}
+	}
 	if err := resolveArgoExecutorResources(ctx, cfg, deps); err != nil {
 		return err
 	}

@@ -22,7 +22,7 @@ func TestVerbInRunIDPositionIsRefused(t *testing.T) {
 }
 
 func TestRunAndRunsHelpListSubcommands(t *testing.T) {
-	for command, want := range map[string]string{"run": "resources|retry|rerun|cancel|purge|hold", "runs": "oberth runs cancel", "issues": "oberth issues update"} {
+	for command, want := range map[string]string{"run": "resources|rerun|cancel|purge|hold", "runs": "oberth runs cancel", "issues": "oberth issues update"} {
 		var out bytes.Buffer
 		if err := runCLI(t.Context(), []string{command, "--help"}, strings.NewReader(""), &out); err != nil {
 			t.Fatal(err)
@@ -44,7 +44,7 @@ func TestUsageErrorIsNotDoubled(t *testing.T) {
 // SQLite's "unable to open database file".
 func TestInPodCommandOffPodNamesWhereToRunIt(t *testing.T) {
 	missing := t.TempDir() + "/absent/oberth.sqlite"
-	for command, remote := range map[string]string{"schedules": "oberth schedules list", "fragments list": "no remote form"} {
+	for command, remote := range map[string]string{"schedules": "oberth schedules list"} {
 		arguments := append(strings.Fields(command), "--database", missing)
 		err := withInPodHint(arguments, runCLI(t.Context(), arguments, strings.NewReader(""), &bytes.Buffer{}))
 		var hint inPodCommandError

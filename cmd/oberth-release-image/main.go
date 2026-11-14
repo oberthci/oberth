@@ -64,13 +64,13 @@ func run(ctx context.Context, arguments []string) error {
 		}
 		return closed
 	case "publish", "verify":
-		return runServer(ctx, arguments)
+		return runImages(ctx, arguments)
 	default:
 		return fmt.Errorf("unknown command %q", arguments[0])
 	}
 }
 
-func runServer(ctx context.Context, arguments []string) error {
+func runImages(ctx context.Context, arguments []string) error {
 	if len(arguments) != 6 {
 		return errors.New("usage: oberth-release-image publish|verify TAG SHA CREATED DIST GAR_ACCESS_TOKEN")
 	}
@@ -93,7 +93,11 @@ func runServer(ctx context.Context, arguments []string) error {
 		if err != nil {
 			return err
 		}
-		return releaseimage.Verify(ctx, config, releaseimage.Published{Server: server})
+		helper, err := readReference(filepath.Join(arguments[4], "helper-image.txt"))
+		if err != nil {
+			return err
+		}
+		return releaseimage.Verify(ctx, config, releaseimage.Published{Server: server, Helper: helper})
 	}
 	published, err := releaseimage.Publish(ctx, config)
 	if err != nil {
@@ -103,7 +107,8 @@ func runServer(ctx context.Context, arguments []string) error {
 		Schema int    `json:"schema"`
 		SHA    string `json:"source_commit"`
 		Server string `json:"server_image"`
-	}{Schema: 2, SHA: arguments[2], Server: published.Server}
+		Helper string `json:"helper_image"`
+	}{Schema: 2, SHA: arguments[2], Server: published.Server, Helper: published.Helper}
 	body, err := json.Marshal(result)
 	if err != nil {
 		return err
@@ -114,7 +119,11 @@ func runServer(ctx context.Context, arguments []string) error {
 		return err
 	}
 	//nolint:gosec // destination is a fixed filename beneath the explicit release-output directory.
-	return os.WriteFile(filepath.Join(arguments[4], "server-image.txt"), []byte(published.Server+"\n"), 0o600)
+	if err := os.WriteFile(filepath.Join(arguments[4], "server-image.txt"), []byte(published.Server+"\n"), 0o600); err != nil {
+		return err
+	}
+	//nolint:gosec // destination is a fixed release-reference filename.
+	return os.WriteFile(filepath.Join(arguments[4], "helper-image.txt"), []byte(published.Helper+"\n"), 0o600)
 }
 
 func readReference(path string) (string, error) {

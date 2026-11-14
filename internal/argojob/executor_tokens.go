@@ -85,6 +85,35 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 		if len(initializers) == 0 {
 			initializers = []any{map[string]any{"name": "init"}}
 		}
+		// Argo installs its runtime/template before authored initContainers,
+		// and adds their runtime mount before strategic merge. They never run
+		// emissary and must not alter the template wait will load with authority.
+		for _, authored := range t.InitContainers {
+			var initializer map[string]any
+			for _, item := range initializers {
+				if value, ok := item.(map[string]any); ok && value["name"] == authored.Name {
+					initializer = value
+					break
+				}
+			}
+			if initializer == nil {
+				initializer = map[string]any{"name": authored.Name}
+				initializers = append(initializers, initializer)
+			}
+			mounts, _ := initializer["volumeMounts"].([]any)
+			mount := map[string]any{"name": "var-run-argo", "mountPath": "/var/run/argo", "readOnly": true}
+			replaced := false
+			for i, item := range mounts {
+				if value, ok := item.(map[string]any); ok && value["mountPath"] == "/var/run/argo" {
+					mounts[i] = mount
+					replaced = true
+				}
+			}
+			if !replaced {
+				mounts = append(mounts, mount)
+			}
+			initializer["volumeMounts"] = mounts
+		}
 		merged := make([]any, 0, len(initializers)+1)
 		order := []map[string]string{}
 		inserted := false
@@ -247,17 +276,6 @@ func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context,
 		if nodeID := pod.Annotations["workflows.argoproj.io/node-id"]; nodeID != "" && mainMountsExecutorToken(pod) {
 			if _, ok := wf.Status.Nodes[nodeID]; !ok {
 				continue
-			}
-		}
-		if p := controller.config.ExecutionPlacement; p != nil {
-			if err := p.verifyWorkflowIdentity(ctx, controller.config, wf); err != nil {
-				return identityFailure("target_validation", err)
-			}
-			if err := p.verifyEnvironment(ctx, controller.kube, controller.config); err != nil {
-				return identityFailure("target_validation", err)
-			}
-			if err := p.verifyPodIdentity(pod); err != nil {
-				return identityFailure("target_validation", err)
 			}
 		}
 		resourceAccount := ""
@@ -444,7 +462,7 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 // gate is never removed: it represents credential lifetime and runs no code.
 // Deleting the workflow garbage-collects this Pod and invalidates its tokens.
 func (controller *Controller) executorIdentityPod(ctx context.Context, wf *wfv1.Workflow, serviceAccount string) (*corev1.Pod, error) {
-	name := controller.identityPodName(wf.UID, serviceAccount)
+	name := controller.identityPodName(wf, serviceAccount)
 	desired := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: wf.Namespace, Labels: map[string]string{"oberth.ci/role": "executor-identity"}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}},
 		Spec:       corev1.PodSpec{ServiceAccountName: serviceAccount, AutomountServiceAccountToken: ptr.To(false), RestartPolicy: corev1.RestartPolicyNever, SchedulingGates: []corev1.PodSchedulingGate{{Name: "oberth.ci/executor-identity"}}, Containers: []corev1.Container{{Name: "identity", Image: controller.config.SourceSeedImage, Command: []string{"/bin/false"}, SecurityContext: nonrootContainerSecurity(65534), Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1m"), corev1.ResourceMemory: resource.MustParse("1Mi")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("8Mi")}}}}},
@@ -466,17 +484,16 @@ func (controller *Controller) executorIdentityPod(ctx context.Context, wf *wfv1.
 	return pod, nil
 }
 
-func executorIdentityPodName(uid types.UID) string {
-	digest := sha256.Sum256([]byte(uid))
-	return fmt.Sprintf("oberth-executor-%x", digest[:12])
-}
-
-func (controller *Controller) identityPodName(uid types.UID, serviceAccount string) string {
-	if serviceAccount == controller.config.ExecutorServiceAccount {
-		return executorIdentityPodName(uid)
+// The authenticated bound-Pod name carries the Workflow UID AND name so the
+// native task-result admission policy can verify both without an API lookup.
+// Reserve this prefix against pipeline ServiceAccounts in the Pod policy.
+func (controller *Controller) identityPodName(workflow *wfv1.Workflow, serviceAccount string) string {
+	role := "executor"
+	if serviceAccount != controller.config.ExecutorServiceAccount {
+		digest := sha256.Sum256([]byte(serviceAccount))
+		role = fmt.Sprintf("%x", digest[:12])
 	}
-	digest := sha256.Sum256([]byte(string(uid) + "/" + serviceAccount))
-	return fmt.Sprintf("oberth-executor-%x", digest[:12])
+	return fmt.Sprintf("oberth-executor.%s.%s.%s", workflow.UID, role, workflow.Name)
 }
 
 func (controller *Controller) retireExecutorIdentity(ctx context.Context, wf *wfv1.Workflow) error {
@@ -506,7 +523,7 @@ func (controller *Controller) retireExecutorIdentity(ctx context.Context, wf *wf
 
 func (controller *Controller) retireIdentityPod(ctx context.Context, wf *wfv1.Workflow, serviceAccount string) error {
 	pods := controller.kube.CoreV1().Pods(wf.Namespace)
-	pod, err := pods.Get(ctx, controller.identityPodName(wf.UID, serviceAccount), metav1.GetOptions{})
+	pod, err := pods.Get(ctx, controller.identityPodName(wf, serviceAccount), metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
@@ -559,7 +576,8 @@ func validArgoScratchMount(c corev1.Container, mount corev1.VolumeMount, initial
 	executor := c.Image == argoworkflow.ExecutorImage && ((initializer && c.Name == "init") || (!initializer && c.Name == "wait") || (!initializer && resourcePod && c.Name == "main"))
 	switch mount.Name {
 	case "var-run-argo":
-		return (!resourcePod || executor) && apiequality.Semantic.DeepEqual(mount, corev1.VolumeMount{Name: "var-run-argo", MountPath: "/var/run/argo"})
+		expected := corev1.VolumeMount{Name: "var-run-argo", MountPath: "/var/run/argo", ReadOnly: initializer && !executor}
+		return (!resourcePod || executor) && apiequality.Semantic.DeepEqual(mount, expected)
 	case "argo-staging":
 		return executor || (!initializer && !resourcePod && c.Name == "main" && apiequality.Semantic.DeepEqual(mount, corev1.VolumeMount{Name: "argo-staging", MountPath: "/argo/staging"}))
 	default:

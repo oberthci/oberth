@@ -90,8 +90,13 @@ same approved change. Commits and pushes still need their explicit approval.
    ```sh
    helper configure '<path>' remote --installation '<public install JSON>' \
      --registered-repo '<git_path from repo_list>' --ssh-key '<local SSH private key path>' \
-     --ca-file '<selected server CA>' --client-cert '<local client certificate>' --client-key '<local TLS key>'
+     --client-cert '<local client certificate>' --client-key '<local TLS key>'
    ```
+
+   `--registered-repo` accepts a unique slug or the qualified `git_path`.
+   The CA defaults to `${CLAUDE_CONFIG_DIR:-~/.claude}/oberth/ca.crt`, stored
+   by the trust step; use `--ca-file` to select another public CA explicitly.
+   The CLI verifies either CA against the selected install pin.
 
    The CLI reads keys itself; never display, upload or paste them. Use the
    local SSH key already registered for this uplink. The public result names

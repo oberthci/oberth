@@ -37,7 +37,7 @@ func TestPreflightReportsFactsAndRemedies(t *testing.T) {
 	identity := ClusterIdentity{}
 	result := InstallResult{OK: true}
 	inspectCluster(context.Background(), &Config{}, deps, &identity, &result, false, true)
-	if !result.OK || len(identity.Nodes) != 1 || identity.Nodes[0].AvailableBytes == nil || identity.Distribution != "k3s" {
+	if !result.OK || len(identity.Nodes) != 1 || identity.Distribution != "k3s" {
 		t.Fatalf("preflight facts missing: %v", result.Checks)
 	}
 	node.Annotations["k3s.io/node-args"] = `["server","--disable-network-policy"]`
@@ -63,8 +63,31 @@ func TestPreflightReportsFactsAndRemedies(t *testing.T) {
 			}
 		}
 	}
-	if result.OK || !failed["network_policy"] || !failed["disk/node"] || !failed["architecture/node"] {
+	if result.OK || !failed["network_policy"] || !failed["architecture/node"] {
 		t.Fatal("preflight accepted unsupported node")
+	}
+}
+
+// Planning uses Kubernetes API facts without node proxy access or host tuning.
+func TestPreflightDoesNotReadNodeProxyOrAdviseHostTuning(t *testing.T) {
+	node := preflightNode()
+	node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{Type: corev1.NodeDiskPressure, Status: corev1.ConditionTrue})
+	deps := Deps{KubeClient: fake.NewClientset(node, preflightStorage()), ContextName: "chosen",
+		ProbeNetworkPolicy: enforcedPolicyFixture,
+		RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
+			t.Fatalf("planning invoked %s %v", name, args)
+			return nil, nil
+		},
+	}
+	result := InstallResult{OK: true}
+	inspectCluster(t.Context(), &Config{}, deps, &ClusterIdentity{}, &result, false, true)
+	if !result.OK {
+		t.Fatalf("host tuning blocked planning: %+v", result.Checks)
+	}
+	for _, check := range result.Checks {
+		if strings.HasPrefix(check.Code, "host_") || strings.HasPrefix(check.Code, "disk/") {
+			t.Fatalf("removed node advice remains: %+v", check)
+		}
 	}
 }
 

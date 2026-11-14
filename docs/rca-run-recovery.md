@@ -3,7 +3,7 @@
 Infrastructure failures remain failed runs with the observed cause and an
 appropriate retry hint. Oberth does not create automatic replacement runs.
 Use [native Argo template retries](infrastructure-retries.md), or manual
-`run_retry` / `run_rerun` after the failure. These manual actions retain their
+`run_rerun` after the failure. This manual action retains its
 existing ref, credential, publication and cleanup safety checks.
 
 An uncertain Workflow create/delete remains owned until its exact external

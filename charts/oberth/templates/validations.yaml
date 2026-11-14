@@ -1,9 +1,6 @@
 {{- if or (not (regexMatch "^[^[:space:]@]+@sha256:[0-9a-f]{64}$" .Values.image.ref)) (contains "@sha256:0000000000000000000000000000000000000000000000000000000000000000" .Values.image.ref) -}}
 {{- fail "image.ref must be replaced with the built server image's sha256 digest" -}}
 {{- end -}}
-{{- if not .Values.runnerImagePrefixes -}}
-{{- fail "runnerImagePrefixes must allow at least one runner image prefix (default golang:)" -}}
-{{- end -}}
 {{- range .Values.runnerImagePrefixes -}}
 {{- if or (eq (trim .) "") (ne (trim .) .) (regexMatch "[[:space:]\"'\\\\]" .) -}}
 {{- fail "runnerImagePrefixes entries must be clean nonempty strings" -}}

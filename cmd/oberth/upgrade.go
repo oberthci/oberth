@@ -20,6 +20,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.SetOutput(io.Discard)
 
 	var cfg installer.UpgradeConfig
+	flags.BoolVar(&cfg.ArgoSecurityDefaults, "argo-security-defaults", false, "consent to filling absent native security defaults on an existing Argo release; preserve operator values")
 	flags.BoolVar(&cfg.ReissueServerCA, "reissue-server-ca", false, "allow server CA replacement after reviewing its planned names; clients must refresh the CA pin")
 	var kubeContext string
 	var userValues, userSet stringList
@@ -135,6 +136,8 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 
 	result, err := installer.RunUpgrade(ctx, cfg, installer.Deps{
 		Output:           output,
+		Input:            input,
+		IsTerminal:       installer.StdinIsTerminal,
 		RunHelm:          runHelm,
 		RunCommand:       installer.DefaultRunCommand,
 		RunCommandStream: installer.DefaultRunCommandStream,

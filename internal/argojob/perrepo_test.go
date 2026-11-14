@@ -298,15 +298,13 @@ func TestPerRepoVaultRoleIsInjected(t *testing.T) {
 	}
 }
 
-// TestFragmentRunUsesHostRepoIdentity proves that when a fragment is resolved
-// into a host pipeline, the host repo's per-repo identity is used, not the
-// fragment source's.
-func TestFragmentRunUsesHostRepoIdentity(t *testing.T) {
+// TestPipelineUsesItsRepositoryIdentity checks the consuming repository account.
+func TestPipelineUsesItsRepositoryIdentity(t *testing.T) {
 	t.Parallel()
 	cfg := testConfigWithPerRepo()
 	path := "oberth/upstream/oberthci/oberth/test-secret"
 	req := testRequest(pipeline.TriggerRelease, perRepoCredentialedDocument(path))
-	req.Repo = "oberth" // HOST repo
+	req.Repo = "oberth" // consuming repository
 	req.UpstreamName = "codeberg"
 	req.UpstreamOrg = "oberthci"
 	req.ApprovedSecrets = map[string]bool{path: true}
@@ -322,7 +320,7 @@ func TestFragmentRunUsesHostRepoIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if wf.Spec.ServiceAccountName != testPerRepoSA {
-		t.Fatalf("fragment host ServiceAccount = %q, want %q", wf.Spec.ServiceAccountName, testPerRepoSA)
+		t.Fatalf("pipeline ServiceAccount = %q, want %q", wf.Spec.ServiceAccountName, testPerRepoSA)
 	}
 }
 

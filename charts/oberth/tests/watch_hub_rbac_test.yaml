@@ -1,0 +1,29 @@
+suite: namespace watch hub permissions
+release:
+  name: oberth
+  namespace: server-system
+templates:
+  - templates/rbac-argo.yaml
+set:
+  argo.namespace: pipeline-system
+tests:
+  - it: grants native watches only in the pipeline namespace
+    documentIndex: 0
+    asserts:
+      - isKind:
+          of: Role
+      - equal:
+          path: metadata.namespace
+          value: pipeline-system
+      - contains:
+          path: rules
+          content:
+            apiGroups: [argoproj.io]
+            resources: [workflows]
+            verbs: [create, get, list, watch, delete]
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: [pods]
+            verbs: [create, get, list, watch, delete, patch]

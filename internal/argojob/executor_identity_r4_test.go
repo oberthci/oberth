@@ -103,19 +103,19 @@ func TestExecutorIdentityStrictHelperFields(t *testing.T) {
 
 func TestExecutorIdentityRejectsResourceScratchAlias(t *testing.T) {
 	for _, shape := range []string{"container", "resource"} {
-		for _, attack := range []string{"manifest-fifo", "runtime-alias", "runtime-subPath", "runtime-duplicate", "scratch-device", "ephemeral", "staging-alias", "runtime-readOnly", "runtime-propagation", "native-resource-helper"} {
+		for _, attack := range []string{"manifest-fifo", "runtime-alias", "runtime-subPath", "runtime-duplicate", "scratch-device", "ephemeral", "staging-alias", "runtime-writable", "runtime-propagation", "native-resource-helper"} {
 			if shape == "container" && attack == "native-resource-helper" {
 				continue
 			}
 			t.Run(shape+"/"+attack, func(t *testing.T) {
 				controller, _, pod, _ := executorRetryFixture(t)
 				pod.Spec = executorEnvironmentPod(t, shape, "init", nil)
-				c := corev1.Container{Name: "plant", Image: "authored-image", Command: []string{"sh", "-c", "mkdir -p /x/0; mkfifo -m 666 /var/run/argo/f; ln -s /var/run/argo/f /x/0/manifest.yaml"}, VolumeMounts: []corev1.VolumeMount{{Name: "var-run-argo", MountPath: "/var/run/argo"}}}
+				c := corev1.Container{Name: "plant", Image: "authored-image", Command: []string{"sh", "-c", "mkdir -p /x/0; mkfifo -m 666 /var/run/argo/f; ln -s /var/run/argo/f /x/0/manifest.yaml"}, VolumeMounts: []corev1.VolumeMount{{Name: "var-run-argo", MountPath: "/var/run/argo", ReadOnly: true}}}
 				switch attack {
 				case "staging-alias":
 					c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "argo-staging", MountPath: "/x"})
-				case "runtime-readOnly":
-					c.VolumeMounts[0].ReadOnly = true
+				case "runtime-writable":
+					c.VolumeMounts[0].ReadOnly = false
 				case "runtime-propagation":
 					c.VolumeMounts[0].MountPropagation = ptr.To(corev1.MountPropagationHostToContainer)
 				case "native-resource-helper": // The native writable argoexec mount is unsafe on a resource helper too.

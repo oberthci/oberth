@@ -48,14 +48,14 @@ func TestScheduleEntriesAreIndependentAndSurviveRetryRecovery(t *testing.T) {
 	if _, err = s.FinishRun(ctx, nightly.ID, model.RunResult{Status: model.RunInterrupted}); err != nil {
 		t.Fatal(err)
 	}
-	retried, err := s.RetryRun(ctx, model.RunRetryRequest{RunID: nightly.ID, Actor: "admin"})
-	if err != nil || retried.ScheduleEntry != "nightly" {
+	retried, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: nightly.ID, Actor: "admin"})
+	if err != nil || retried.Enqueued.ScheduleEntry != "nightly" {
 		t.Fatalf("retry: %+v %v", retried, err)
 	}
-	if _, err = s.FinishRun(ctx, retried.ID, model.RunResult{Status: model.RunFailed, Phase: "test"}); err != nil {
+	if _, err = s.FinishRun(ctx, retried.Enqueued.ID, model.RunResult{Status: model.RunFailed, Phase: "test"}); err != nil {
 		t.Fatal(err)
 	}
-	rerun, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: retried.ID, Actor: "admin"})
+	rerun, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: retried.Enqueued.ID, Actor: "admin"})
 	if err != nil || rerun.Enqueued.ScheduleEntry != "nightly" {
 		t.Fatalf("rerun: %+v %v", rerun, err)
 	}

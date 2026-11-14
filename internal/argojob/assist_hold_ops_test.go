@@ -14,8 +14,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	kexec "k8s.io/client-go/util/exec"
+	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/pipeline"
@@ -46,7 +48,7 @@ func heldPodFixture(name, workflow, step string, startedAgo time.Duration, helpe
 	deadline := int64(2100)
 	started := metav1.NewTime(time.Now().Add(-startedAgo))
 	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace,
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace, UID: types.UID(name + "-uid"), OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: workflow, UID: types.UID(workflow + "-uid"), Controller: ptr.To(true)}},
 			Labels:      builtStepPodLabels(workflow),
 			Annotations: map[string]string{AssistHoldAnnotation: "2100", argoNodeNameAnnotation: workflow + "." + step + "(1)"}},
 		Spec: corev1.PodSpec{ActiveDeadlineSeconds: &deadline, Containers: []corev1.Container{main, {Name: "wait"}}},
@@ -71,7 +73,7 @@ func TestListAssistHoldsRecognisesParkedAttemptsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	holds, err := controller.ListAssistHolds(context.Background(), "wf-a")
+	holds, err := withTestObservationCache(t, controller).ListAssistHolds(context.Background(), "wf-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +152,7 @@ func assistSweepController(t *testing.T, client *fake.Clientset) *Controller {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return controller
+	return withTestObservationCache(t, controller)
 }
 
 func abandonedPods(abandoned []model.AssistAbandon) []string {
@@ -182,7 +184,7 @@ func TestEnforceAssistHoldsFindsPodsLabelledByBuild(t *testing.T) {
 	client := fake.NewClientset(held, failedAttemptFixture(held, 3))
 	controller := assistSweepController(t, client)
 	now := time.Now()
-	abandoned, err := controller.EnforceAssistHolds(context.Background(), nil, nil, now)
+	abandoned, err := withTestObservationCache(t, controller).EnforceAssistHolds(context.Background(), nil, nil, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +223,7 @@ func TestEnforceAssistHoldsCapRefusesNewestIdleHold(t *testing.T) {
 	client := fake.NewClientset(oldest, middle, newest, released, expired)
 	controller := assistSweepController(t, client)
 	activity := map[string]model.AssistPodActivity{"wf-d-test-1": {Released: true}}
-	abandoned, err := controller.EnforceAssistHolds(context.Background(), activity, nil, now)
+	abandoned, err := withTestObservationCache(t, controller).EnforceAssistHolds(context.Background(), activity, nil, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +379,7 @@ func TestEnforceAssistHoldsTTLExtendsOnActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	abandoned, err := controller.EnforceAssistHolds(context.Background(), activity, nil, now)
+	abandoned, err := withTestObservationCache(t, controller).EnforceAssistHolds(context.Background(), activity, nil, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,5 +412,19 @@ func TestEnforceAssistHoldsTTLExtendsOnActivity(t *testing.T) {
 	budget := int64(600)
 	if got := templateNamed(t, built, "test").Metadata.Annotations[AssistHoldAnnotation]; got != strconv.FormatInt(budget+AssistHoldMaxAgeFactor*ttlSeconds, 10) {
 		t.Fatalf("held Pod deadline = %s, want budget %d + %d TTLs of %ds", got, budget, AssistHoldMaxAgeFactor, ttlSeconds)
+	}
+}
+
+func TestAssistHoldStepIgnoresAuthoredEnvironment(t *testing.T) {
+	pod := heldPodFixture("wf-a-real-1", "wf-a", "real", time.Minute, false)
+	pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, corev1.EnvVar{Name: "OBERTH_STEP", Value: "forged"})
+	hold, ok := assistHoldOf(pod)
+	if !ok || hold.Step != "real" {
+		t.Fatalf("running hold = %+v, %v", hold, ok)
+	}
+	pod.Status.Phase, pod.Status.Reason = corev1.PodFailed, "Evicted"
+	hold, ok = assistEvictedOf(pod)
+	if !ok || hold.Step != "real" {
+		t.Fatalf("evicted hold = %+v, %v", hold, ok)
 	}
 }

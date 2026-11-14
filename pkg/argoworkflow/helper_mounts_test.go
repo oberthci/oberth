@@ -102,7 +102,7 @@ func TestAuthoredTmpfsAtRunIsAdmitted(t *testing.T) {
 	}
 }
 
-func TestAuthoredMountPathsMustBeAbsolute(t *testing.T) {
+func TestAuthoredRelativeMountPathsAreRefused(t *testing.T) {
 	for _, kind := range []string{"container", "script", "set-member", "set-common", "init", "sidecar", "defaults", "inline-dag", "inline-steps"} {
 		for _, target := range []string{"run/oberth/assist", "./run/oberth/assist", "../run/oberth", "work/data", "", "{{inputs.parameters.path}}"} {
 			t.Run(kind+"/"+target, func(t *testing.T) {
@@ -110,23 +110,44 @@ func TestAuthoredMountPathsMustBeAbsolute(t *testing.T) {
 					t.Fatal("invalid relative fixture")
 				}
 				err := Admit(helperMountWorkflow(t, kind, target), Policy{})
-				if err == nil || !strings.Contains(err.Error(), "mountPath") || !strings.Contains(err.Error(), "must be an absolute path") {
-					t.Fatalf("relative mount admitted: %v", err)
+				if strings.Contains(target, "{{") {
+					if err == nil || !strings.Contains(err.Error(), "server helper") {
+						t.Fatalf("templated helper alias admitted: %v", err)
+					}
+				} else if err == nil || !strings.Contains(err.Error(), "must be an absolute path") {
+					t.Fatalf("relative mount path admitted: %v", err)
 				}
 			})
 		}
 	}
 }
 
-func TestAuthoredDevicePathsMustBeAbsolute(t *testing.T) {
+func TestAuthoredRelativeDevicePathsAreRefused(t *testing.T) {
 	for _, target := range []string{"run/oberth/assist", "./run/oberth/assist", "../run/oberth", "dev/work", "", "{{inputs.parameters.path}}"} {
 		t.Run(target, func(t *testing.T) {
 			wf := helperMountWorkflow(t, "container", "/work/data")
 			wf.Spec.Templates[0].Container.VolumeDevices = []corev1.VolumeDevice{{Name: "shadow", DevicePath: target}}
 			err := Admit(wf, Policy{})
-			if err == nil || !strings.Contains(err.Error(), "devicePath") || !strings.Contains(err.Error(), "must be an absolute path") {
-				t.Fatalf("relative device admitted: %v", err)
+			if strings.Contains(target, "{{") {
+				if err == nil || !strings.Contains(err.Error(), "server helper") {
+					t.Fatalf("templated helper alias admitted: %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "must be an absolute path") {
+				t.Fatalf("relative device path admitted: %v", err)
 			}
 		})
+	}
+}
+
+func TestRefusalHelperPathNormalizationMatchesKubelet(t *testing.T) {
+	for _, value := range []string{"run/oberth/bin", "./var/run/oberth", "../run/oberth/vault-ca", "/x/../../var/run/oberth/bin"} {
+		if !helperPathMayBeShadowed(value) {
+			t.Fatalf("kubelet-absolute helper alias missed: %q", value)
+		}
+	}
+	for _, value := range []string{"work/data", "/run", "/run/oberth-other"} {
+		if helperPathMayBeShadowed(value) {
+			t.Fatalf("ordinary path treated as helper: %q", value)
+		}
 	}
 }

@@ -48,9 +48,8 @@ events_wait {"kinds": ["run.held", "run.finished"], "own": true, "after_id": <cu
 ## Failures
 
 `retry_hint.class` says what to do: `infrastructure` means retry unchanged
-(`run_retry` or `run_rerun`); `code` means read `run_logs` for the failed step
-(filter with `pattern`) and fix the code. A step named `frag-<hash>-<template>`
-comes from a pinned pipeline fragment of another repository.
+(`run_rerun`); `code` means read `run_logs` for the failed step
+(filter with `pattern`) and fix the code.
 
 ## Assisted continuation (holds)
 
@@ -112,7 +111,7 @@ without checking evidence that establishes that fact.
 ## Report the connected tool count
 
 <!-- BEGIN GENERATED MCP TOOL COUNT -->
-The full server registry contains **93 tools**, including administrator-only
+The full server registry contains **92 tools**, including administrator-only
 operations. The authenticated `tools/list` response is authoritative for the
 connected identity; non-admin clients do not receive administrator-only tools.
 <!-- END GENERATED MCP TOOL COUNT -->

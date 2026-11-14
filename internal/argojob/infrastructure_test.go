@@ -179,7 +179,7 @@ func TestDeclaredStorageEvictionIsStepFailure(t *testing.T) {
 			node.TemplateName = "test-template"
 			node.Message = tc.nodeMsg
 			wf.Status.Nodes[node.ID] = node
-			pod.Name = PodName(wf, node)
+			pod.Name = fixturePodName(wf, node)
 			kube := fake.NewClientset()
 			if tc.podMsg != "" {
 				pod.Status.Phase = corev1.PodFailed
