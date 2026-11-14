@@ -76,3 +76,38 @@ func argoWorkflowTTLArgs(cfg Config) []string {
 	value, _ := json.Marshal(review.TTLStrategy)
 	return []string{"--set-json", "controller.workflowDefaults.spec.ttlStrategy=" + string(value)}
 }
+
+// Ordinary upgrades review and fill the native cleanup default before the server
+// stops supplying per-Workflow cleanup. Explicit operator values always win.
+func planUpgradeWorkflowCleanup(ctx context.Context, deps Deps, namespace string, plan *upgradeArgoSecurity) (*upgradeArgoSecurity, error) {
+	if plan != nil {
+		plan.workflowCleanup = true
+	}
+	release, exists, err := findHelmRelease(ctx, deps, "argo-workflows", namespace)
+	if err != nil {
+		return nil, fmt.Errorf("inspect Argo workflow cleanup: %w", err)
+	}
+	if !exists {
+		return plan, nil
+	}
+	review, err := readArgoWorkflowTTL(ctx, deps, namespace, true)
+	if err != nil {
+		return nil, err
+	}
+	cfg := Config{argoWorkflowTTL: review}
+	printArgoWorkflowTTL(deps.Output, argoWorkflowTTLForReview(cfg))
+	args := argoWorkflowTTLArgs(cfg)
+	if len(args) == 0 {
+		return plan, nil
+	}
+	version := chartVersionFromRelease(release.Chart, "argo-workflows")
+	if canonicalChartVersion(version) == "" || release.Status != "deployed" {
+		return nil, fmt.Errorf("argo workflow cleanup requires a deployed release with a known chart version")
+	}
+	if plan == nil {
+		plan = &upgradeArgoSecurity{namespace: namespace, cleanupOnly: true, workflowCleanup: true}
+	}
+	plan.version = version
+	plan.args = append(plan.args, args...)
+	return plan, nil
+}

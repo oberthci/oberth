@@ -16,6 +16,8 @@ type upgradeArgoSecurity struct {
 	args               []string
 	review             []ArgoSecurityReview
 	consent            bool
+	cleanupOnly        bool
+	workflowCleanup    bool
 }
 
 func argoSecurityUpgradeRemedy(namespace string, cause error) error {
@@ -29,13 +31,21 @@ func argoSecurityUpgradeRemedy(namespace string, cause error) error {
 
 func planUpgradeArgoSecurity(ctx context.Context, deps Deps, values map[string]any, consent bool) (*upgradeArgoSecurity, error) {
 	if enabled, ok := valueAt(values, "argo", "podPolicy", "enabled").(bool); ok && !enabled {
-		return nil, nil
+		ns, _ := valueAt(values, "argo", "namespace").(string)
+		if ns == "" {
+			ns = DefaultArgoNamespace
+		}
+		return planUpgradeWorkflowCleanup(ctx, deps, ns, nil)
 	}
 	ns, _ := valueAt(values, "argo", "namespace").(string)
 	if ns == "" {
 		ns = DefaultArgoNamespace
 	}
-	return prepareArgoSecurity(ctx, deps, ns, consent, false, nil)
+	plan, err := prepareArgoSecurity(ctx, deps, ns, consent, false, nil)
+	if err != nil {
+		return nil, err
+	}
+	return planUpgradeWorkflowCleanup(ctx, deps, ns, plan)
 }
 
 func prepareArgoSecurity(ctx context.Context, deps Deps, ns string, consent, freshInstall bool, snapshot *helmRelease) (*upgradeArgoSecurity, error) {
@@ -167,7 +177,13 @@ func (plan *upgradeArgoSecurity) reconcile(ctx context.Context, deps Deps) error
 		return nil
 	}
 	// Read again at apply. A concurrent operator override remains authoritative.
-	fresh, err := planUpgradeArgoSecurity(ctx, deps, map[string]any{"argo": map[string]any{"namespace": plan.namespace}}, plan.consent)
+	var fresh *upgradeArgoSecurity
+	var err error
+	if plan.workflowCleanup {
+		fresh, err = planUpgradeArgoSecurity(ctx, deps, map[string]any{"argo": map[string]any{"namespace": plan.namespace, "podPolicy": map[string]any{"enabled": !plan.cleanupOnly}}}, plan.consent)
+	} else {
+		fresh, err = prepareArgoSecurity(ctx, deps, plan.namespace, plan.consent, false, nil)
+	}
 	if err != nil {
 		return err
 	}
@@ -182,7 +198,7 @@ func (plan *upgradeArgoSecurity) reconcile(ctx context.Context, deps Deps) error
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return argoSecurityUpgradeRemedy(fresh.namespace, errors.New("native Argo security reconcile failed; inspect the Argo release"))
 	}
-	if err := checkLiveArgoSecurity(ctx, deps, fresh.namespace); err != nil {
+	if err := checkLiveArgoSecurity(ctx, deps, fresh.namespace); err != nil && !fresh.cleanupOnly {
 		return argoSecurityUpgradeRemedy(fresh.namespace, err)
 	}
 	return nil

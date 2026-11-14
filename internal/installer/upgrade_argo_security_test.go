@@ -20,6 +20,9 @@ func TestUpgradeArgoSecurityBeforePolicy(t *testing.T) {
 			if strings.HasPrefix(mode, "old-profile") {
 				stored = `{"controller":{"configMap":{"create":false}}}`
 			}
+			if strings.Contains(mode, "compliant") {
+				stored = strings.Replace(stored, `"controller":{`, `"controller":{"workflowDefaults":{"spec":{"ttlStrategy":{"secondsAfterCompletion":3600}}},`, 1)
+			}
 			if mode == "unsafe-explicit" {
 				stored = `{"mainContainer":{"securityContext":{"allowPrivilegeEscalation":true}}}`
 			}
@@ -128,7 +131,7 @@ func TestUpgradeArgoSecurityUsesPlannedNamespaceAndRechecks(t *testing.T) {
 		return nil, errors.New("unexpected write")
 	}}
 	plan, err := planUpgradeArgoSecurityPreview(t.Context(), deps, []byte(`{"chart":{"values":{"argo":{"namespace":"old"}}},"config":{"argo":{"namespace":"operator-pipelines"}}}`), true)
-	if err != nil || plan == nil || !slices.Equal(readNamespaces, []string{"operator-pipelines"}) {
+	if err != nil || plan == nil || !slices.Equal(readNamespaces, []string{"operator-pipelines", "operator-pipelines"}) {
 		t.Fatal(plan, readNamespaces, err)
 	}
 	// A later operator override must stop the apply before either release changes.

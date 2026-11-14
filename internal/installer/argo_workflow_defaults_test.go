@@ -92,3 +92,70 @@ func TestArgoWorkflowTTLApplyRereadsOperatorValues(t *testing.T) {
 		t.Fatal("unreadable values allowed a write", applied, err)
 	}
 }
+
+func TestNativeUpgradeRetainsDefaultWorkflowCleanup(t *testing.T) {
+	for _, mode := range []string{"absent", "null", "empty", "zero", "custom", "ancestor-null", "concurrent-override", "unreadable", "dry-run"} {
+		t.Run(mode, func(t *testing.T) {
+			fixture := newUpgradeFixture(t, "0.16.20", "0.16.21", "73")
+			stored := `{}`
+			switch mode {
+			case "null":
+				stored = `{"controller":{"workflowDefaults":{"spec":{"ttlStrategy":null}}}}`
+			case "empty":
+				stored = `{"controller":{"workflowDefaults":{"spec":{"ttlStrategy":{}}}}}`
+			case "zero":
+				stored = `{"controller":{"workflowDefaults":{"spec":{"ttlStrategy":{"secondsAfterCompletion":0}}}}}`
+			case "custom":
+				stored = `{"controller":{"workflowDefaults":{"spec":{"ttlStrategy":{"secondsAfterSuccess":42}}}}}`
+			case "ancestor-null":
+				stored = `{"controller":{"workflowDefaults":null}}`
+			}
+			original := fixture.deps.RunHelm
+			reads, writes := 0, 0
+			fixture.deps.RunHelm = func(ctx context.Context, args []string) ([]byte, error) {
+				if args[0] == "repo" {
+					return nil, nil
+				}
+				if len(args) > 2 && args[0] == "get" && args[1] == "values" && args[2] == "argo-workflows" {
+					reads++
+					if mode == "unreadable" {
+						return nil, errors.New("values unavailable")
+					}
+					if mode == "concurrent-override" && reads >= 3 {
+						stored = `{"controller":{"workflowDefaults":{"spec":{"ttlStrategy":{"secondsAfterCompletion":0}}}}}`
+					}
+					return []byte(stored), nil
+				}
+				if len(args) > 1 && args[0] == "upgrade" && args[1] == "argo-workflows" {
+					writes++
+					if !slices.Contains(args, `controller.workflowDefaults.spec.ttlStrategy={"secondsAfterCompletion":3600}`) || !slices.Contains(args, "--reuse-values") {
+						t.Fatal(args)
+					}
+					stored = `{"controller":{"workflowDefaults":{"spec":{"ttlStrategy":{"secondsAfterCompletion":3600}}}}}`
+					return nil, nil
+				}
+				return original(ctx, args)
+			}
+			result, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.16.21", BinarySchemaVersion: 73, NoBackup: true, DryRun: mode == "dry-run"}, fixture.deps)
+			if mode == "unreadable" {
+				if err == nil || writes != 0 {
+					t.Fatal(result, writes, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(result, err)
+			}
+			expected := 0
+			if mode == "absent" {
+				expected = 1
+			}
+			if writes != expected {
+				t.Fatal(mode, writes, expected, reads)
+			}
+			if !strings.Contains(fixture.output.String(), "controller.workflowDefaults.spec.ttlStrategy") {
+				t.Fatal(fixture.output.String())
+			}
+		})
+	}
+}
