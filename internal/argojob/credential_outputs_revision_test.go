@@ -309,3 +309,29 @@ func TestCredentialOtherContainersInheritedResultRefused(t *testing.T) {
 		t.Fatalf("overridden inherited reference refused: %v", err)
 	}
 }
+
+func TestCredentialOtherContainersPodMetadataResultRefused(t *testing.T) {
+	for _, cloud := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cloud=%t", cloud), func(t *testing.T) {
+			config, request := credentialOutputRequest(t, cloud, false, "/root-result")
+			request = changeCredentialOutputRequest(t, request, func(wf *wfv1.Workflow) {
+				leaf := &wf.Spec.Templates[0]
+				leaf.Outputs = wfv1.Outputs{}
+				credentialOtherContainer(leaf, "sidecar")
+				wf.Spec.PodMetadata = &wfv1.Metadata{Labels: map[string]string{"example.com/result": "tasks.alias.outputs.result"}}
+				wf.Spec.Entrypoint = "parent"
+				wf.Spec.Templates = append(wf.Spec.Templates, wfv1.Template{Name: "parent", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "alias", Template: leaf.Name}}}})
+			})
+			_, err := Build(config, request)
+			if err == nil || !strings.Contains(err.Error(), "another container of the Pod can redirect what Argo reads") {
+				t.Fatalf("metadata-induced result read admitted: %v", err)
+			}
+			request = changeCredentialOutputRequest(t, request, func(wf *wfv1.Workflow) {
+				wf.Spec.Templates[1].Metadata.Labels = map[string]string{"example.com/result": "unrelated"}
+			})
+			if _, err := Build(config, request); err != nil {
+				t.Fatalf("overridden Pod metadata refused: %v", err)
+			}
+		})
+	}
+}

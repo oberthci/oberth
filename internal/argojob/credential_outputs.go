@@ -3,6 +3,7 @@ package argojob
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path"
 	"reflect"
 	"regexp"
@@ -130,7 +131,14 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 		if found || (parent.DAG == nil && len(parent.Steps) == 0) {
 			return
 		}
-		body, err := credentialResultScope(parent, wf.Spec.TemplateDefaults)
+		var metadata *wfv1.Metadata
+		for i := range wf.Spec.Templates {
+			if parent == &wf.Spec.Templates[i] {
+				metadata = wf.Spec.PodMetadata
+				break
+			}
+		}
+		body, err := credentialResultScope(parent, wf.Spec.TemplateDefaults, metadata)
 		if err != nil {
 			found = true
 			return
@@ -167,10 +175,19 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 	return found
 }
 
-// Argo's result-reference scan sees the parent after native defaults merging.
-// Exclude inapplicable template types exactly as mergedTemplateDefaultsInto does.
-func credentialResultScope(parent, defaults *wfv1.Template) ([]byte, error) {
-	body, err := json.Marshal(parent)
+// Resolve workflow Pod metadata as Argo does for named templates, and include
+// references inherited through native defaults without modifying the Workflow.
+func credentialResultScope(parent, defaults *wfv1.Template, metadata *wfv1.Metadata) ([]byte, error) {
+	resolved := parent.DeepCopy()
+	if metadata != nil {
+		resolved.Metadata.Annotations = map[string]string{}
+		maps.Copy(resolved.Metadata.Annotations, metadata.Annotations)
+		maps.Copy(resolved.Metadata.Annotations, parent.Metadata.Annotations)
+		resolved.Metadata.Labels = map[string]string{}
+		maps.Copy(resolved.Metadata.Labels, metadata.Labels)
+		maps.Copy(resolved.Metadata.Labels, parent.Metadata.Labels)
+	}
+	body, err := json.Marshal(resolved)
 	if err != nil || defaults == nil {
 		return body, err
 	}
