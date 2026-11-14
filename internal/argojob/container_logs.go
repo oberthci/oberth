@@ -69,8 +69,15 @@ func containerLogDone(workflow *wfv1.Workflow, entry runlog.ContainerLog, pods [
 // ObserveContainerLogs captures a verified snapshot outside status observation.
 // Each terminal container is read once; completion also captures running Pods.
 func (controller *Controller) ObserveContainerLogs(ctx context.Context, workflow *wfv1.Workflow, runID string, pods []*corev1.Pod) error {
+	return controller.observeContainerLogs(ctx, workflow, runID, pods, 30*time.Second)
+}
+
+func (controller *Controller) observeContainerLogs(ctx context.Context, workflow *wfv1.Workflow, runID string, pods []*corev1.Pod, budget time.Duration) error {
 	if controller.containerLogs == nil {
 		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if workflow == nil {
 		return errors.New("argojob: Workflow log identity is unavailable")
@@ -111,10 +118,13 @@ func (controller *Controller) ObserveContainerLogs(ctx context.Context, workflow
 	if err != nil {
 		return err
 	}
-	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	readCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	var result error
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(result, err)
+		}
 		if entry.Captured || entry.Pending || !containerLogDone(workflow, entry, pods) {
 			continue
 		}
@@ -141,6 +151,9 @@ func (controller *Controller) ObserveContainerLogs(ctx context.Context, workflow
 			}
 		}
 		result = errors.Join(result, controller.storeContainerCopy(readCtx, workflow, runID, entry))
+	}
+	if err := ctx.Err(); err != nil {
+		return errors.Join(result, err)
 	}
 	return errors.Join(result, controller.recordMissingPodLogs(runID, workflow, entries, names))
 }
@@ -304,7 +317,7 @@ func (controller *Controller) containerLogCapture(ctx context.Context, runID str
 				continue
 			}
 			if err := controller.ObserveContainerLogs(ctx, snapshot.workflow, runID, snapshot.pods); err != nil {
-				if !errors.Is(err, errContainerLogObservationIncomplete) {
+				if ctx.Err() == nil && !errors.Is(err, errContainerLogObservationIncomplete) {
 					log.Printf("WARN: run=%s container log copy unavailable (class=%s)", strconv.Quote(runID), executorIdentityErrorClass(err))
 				}
 			} else {
@@ -333,7 +346,11 @@ func (controller *Controller) containerLogCapture(ctx context.Context, runID str
 	return observe, func() {
 		close(snapshots)
 		<-joined
-		controller.finishContainerLogs(runID)
+		// Cancellation transfers unfinished observation to the next owner.
+		// Already attempted copies keep the receipts written by the joined task.
+		if ctx.Err() == nil {
+			controller.finishContainerLogs(runID)
+		}
 	}
 }
 

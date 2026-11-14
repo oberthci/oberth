@@ -232,9 +232,7 @@ func TestContainerLogDeadlineLeavesUnreadContainersForNextSnapshot(t *testing.T)
 				}
 				return io.NopCloser(strings.NewReader("remaining output\n")), nil
 			}, func(context.Context, string, string) (*corev1.Pod, error) { return pod.DeepCopy(), nil })
-			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-			defer cancel()
-			err := controller.ObserveContainerLogs(ctx, workflow, "run", []*corev1.Pod{pod})
+			err := controller.observeContainerLogs(t.Context(), workflow, "run", []*corev1.Pod{pod}, 20*time.Millisecond)
 			if complete && err != nil {
 				t.Fatal(err)
 			}
