@@ -585,6 +585,7 @@ func TestControllerWaitRemovesHubSubscription(t *testing.T) {
 	defer h.subMu.Unlock()
 	if len(h.subs) != 0 {
 		t.Fatal("run completion leaked subscriptions", len(h.subs))
+	}
 }
 
 func TestWorkflowsForRunUsesSharedLabelIndex(t *testing.T) {

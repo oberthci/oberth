@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -59,6 +60,11 @@ func TestUpgradePreviousReleaseStoredValuesAndDryRunSchema(t *testing.T) {
 						return out, nil
 					}
 					return raw, nil
+				case "upgrade":
+					if !slices.Contains(args, "--dry-run=server") || !slices.Contains(args, "--no-hooks") {
+						t.Fatalf("upgrade preview attempted a write: %v", args)
+					}
+					return json.Marshal(map[string]any{"config": stored, "chart": map[string]any{"values": map[string]any{}}})
 				case "version", "show", "template":
 					if args[0] == "template" {
 						renders++
