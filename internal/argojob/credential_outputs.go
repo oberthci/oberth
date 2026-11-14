@@ -85,7 +85,7 @@ func validateCredentialHookKeys(wf *wfv1.Workflow, credentialed map[*wfv1.Templa
 	var failure error
 	check := func(hooks wfv1.LifecycleHooks) {
 		for key, hook := range hooks {
-			if !names[hook.Template] && !(len(names) > 0 && strings.Contains(hook.Template, "{{")) {
+			if !names[hook.Template] && (len(names) == 0 || !strings.Contains(hook.Template, "{{")) {
 				continue
 			}
 			if strings.ContainsAny(string(key), ".()[]") {
