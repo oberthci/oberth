@@ -87,7 +87,10 @@ func testGrantRevocationIsImmediate(t *testing.T) {
 	refreshes := 0
 	s.secretAccessChanged = func(_ context.Context) error { refreshes++; return nil }
 	actor := api.Actor{Identity: "admin", Admin: true}
-	const repo = "codeberg/acme/oberth"
+	repo, err := f.store.QualifiedRepoName(t.Context(), f.repo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	const path = "oberth/upstream/acme/oberth/token"
 	for _, file := range []string{".oberth/a.yaml", ".oberth/b.yaml"} {
 		if _, err := s.accessAllow(t.Context(), actor, repo, file, "build", path); err != nil {

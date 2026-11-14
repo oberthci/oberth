@@ -113,7 +113,7 @@ func TestBuildCIRefusesMissingStepIdentityWithoutRepoIdentities(t *testing.T) {
 	cfg := testConfig()
 	path := "oberth/upstream/oberthci/oberth/test-secret"
 	req := testRequest(pipeline.TriggerCI, perRepoCredentialedDocument(path))
-	req.Repo, req.UpstreamName, req.UpstreamOrg = "oberth", "codeberg", "oberthci"
+	req.Repo, req.UpstreamName, req.UpstreamOrg = "oberth", "upstream", "oberthci"
 	req.ApprovedSecrets = map[string]bool{path: true}
 	if _, err := Build(cfg, req); err == nil || !strings.Contains(err.Error(), "per-step identity is not materialized") {
 		t.Fatalf("missing exact CI identity was not refused: %v", err)
