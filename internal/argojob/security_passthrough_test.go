@@ -213,7 +213,7 @@ func TestBuildAddsNoSecurityContextOrPrivateTmp(t *testing.T) {
 				t.Error("nonroot prepare container injected")
 			}
 			if c.Name == executorTokenWaiter {
-				if !reflect.DeepEqual(c.SecurityContext, nonrootContainerSecurity(0)) {
+				if !reflect.DeepEqual(c.SecurityContext, serverContainerSecurity(0)) {
 					t.Error("A7 waiter security context changed")
 				}
 			} else if c.SecurityContext != nil {

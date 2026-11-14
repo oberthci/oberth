@@ -286,7 +286,7 @@ Total time from step 3 to step 6 green: <min>   Total scenario time: <min>
 
 | Generated helper | Kind (init/regular) | CPU request | Memory request | Ephemeral-storage request | Limits | Matches documented budget? |
 |---|---|---|---|---|---|---|
-| <wait/init/oberth-executor-token; nonroot preparation if selected> | <kind> | <value> | <value> | <value/absent, per documented condition> | <values> | <yes/no, detail> |
+| <wait/init/oberth-executor-token> | <kind> | <value> | <value> | <value/absent, per documented condition> | <values> | <yes/no, detail> |
 
 - Helper scheduling cost: <contribution to effective Pod requests using Kubernetes init/steady-state aggregation; include CPU, memory and storage>
 - Cluster admission defaults: <fields, values and their source, attributed separately>

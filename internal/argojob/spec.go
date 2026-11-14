@@ -1043,9 +1043,9 @@ const (
 	// Standard mount paths from the workspace VCT. Each is a subPath of the
 	// "work" claim, shared across every step in the same Argo Workflow.
 	//
-	// The tools, trivy-cache, and release paths live under private scratch, which
-	// A repository can mount as a writable emptyDir. A subPath
-	// mount from the VCT takes precedence at its specific directory while the
+	// The tools, trivy-cache, and release paths live under private scratch.
+	// A repository can mount a writable emptyDir there. A subPath mount from
+	// the VCT takes precedence at its specific directory while the
 	// emptyDir backs everything else under private scratch.
 	WorkspaceToolsMountPath      = "/tmp/oberth-tools"
 	WorkspaceTrivyCacheMountPath = "/tmp/oberth-trivy"

@@ -6,7 +6,7 @@ import (
 )
 
 // Used only by Oberth-created helper containers, including the executor-token waiter.
-func nonrootContainerSecurity(uid int64) *corev1.SecurityContext {
+func serverContainerSecurity(uid int64) *corev1.SecurityContext {
 	return &corev1.SecurityContext{
 		RunAsUser: ptr.To(uid), RunAsGroup: ptr.To(uid), RunAsNonRoot: ptr.To(uid != 0),
 		AllowPrivilegeEscalation: ptr.To(false), ReadOnlyRootFilesystem: ptr.To(true),

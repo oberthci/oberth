@@ -541,12 +541,13 @@ unauthenticated.
 
 ## Security
 
-- Workflow Pods use server-enforced identities, dropped capabilities,
-  read-only root filesystems, seccomp `RuntimeDefault`, bounded resources and
-  deadlines. Granted main containers and the executor receive separate,
+- Workflow Pods use server-enforced identities and deadlines. Argo supplies
+  default security contexts, and Kubernetes enforces the Pod security floor.
+  Workflows declare their own users, groups, resources and writable scratch.
+  Granted main containers and the executor receive separate,
   scoped projected tokens; ordinary build containers receive no store token.
-  [Non-root test leaves](docs/nonroot-test-leaves.md) have a separately enforced
-  UID and controller contract.
+  [Non-root test leaves](docs/nonroot-test-leaves.md) declare their UID, group
+  and scratch volumes in workflow YAML.
 - **Secret access is granted per step.** The reviewed consumer command,
   declared paths and current step grants determine store delivery. Workflows
   without granted consumers use the tokenless pipeline identity on either

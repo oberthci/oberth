@@ -194,7 +194,7 @@ This is unbounded source retention. Its native replacement is tracked separately
 ## What Oberth writes into the user's Workflow and Pods
 
 This inventory describes current submission (`internal/argojob/spec.go`,
-`executor_tokens.go`, `nonroot.go`, `release_wif.go`, `assist_hold.go`,
+`executor_tokens.go`, `server_container_security.go`, `release_wif.go`, `assist_hold.go`,
 `sourcevolume.go` and `artifactcollect.go`). The metadata tables below list
 individual server labels and annotations. Conditional features apply only when
 configured/authorized. Oberth's injected environment and reserved mount paths
