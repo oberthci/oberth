@@ -431,8 +431,8 @@ one with a non-admin token is still answered with the server's refusal.
 | `workflow_capability_revoke` | Revoke the repository's operator capability; blocks new authorization |
 | `workflow_capability_get` | Read the repository's current operator capability |
 | `access_list` | List secret access grants for a repository |
-| `access_allow` | Grant a step in an exact workflow file access to a secret path (admin-only) |
-| `access_revoke` | Revoke a step's access in an exact workflow file to a secret path (admin-only) |
+| `access_allow` | Grant a step in an exact workflow file access to a secret path (unscoped admin only) |
+| `access_revoke` | Revoke a step's access in an exact workflow file to a secret path (unscoped admin only) |
 
 For `access_allow` and `access_revoke`, `secret` is the exact path recorded in
 `access_list` or the pipeline declaration, including the mount and KV API prefix

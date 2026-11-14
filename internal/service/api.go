@@ -3174,8 +3174,8 @@ func (service *API) accessListPending(ctx context.Context, repo string) (api.Acc
 }
 
 func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, workflow, step, secret string) (api.AccessGrantResponse, error) {
-	if !actor.Admin {
-		return api.AccessGrantResponse{}, refuse(ErrForbidden, "access_allow requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
+	if !actor.Admin || actor.Scoped() {
+		return api.AccessGrantResponse{}, refuse(ErrForbidden, "access_allow requires an unscoped admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
 	}
 	if service.secretAccess == nil {
 		return api.AccessGrantResponse{}, refuse(ErrUnavailable, "secret access")
@@ -3221,8 +3221,8 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, work
 }
 
 func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, workflow, step, secret string) (api.AccessGrantResponse, error) {
-	if !actor.Admin {
-		return api.AccessGrantResponse{}, refuse(ErrForbidden, "access_revoke requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
+	if !actor.Admin || actor.Scoped() {
+		return api.AccessGrantResponse{}, refuse(ErrForbidden, "access_revoke requires an unscoped admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
 	}
 	if service.secretAccess == nil {
 		return api.AccessGrantResponse{}, refuse(ErrUnavailable, "secret access")
