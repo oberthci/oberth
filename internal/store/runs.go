@@ -976,11 +976,11 @@ func isHexPrefix(value string) bool {
 	return true
 }
 
-// FailedWorkflowCreates supplies terminal create failures and interruptions.
+// FailedWorkflowCreates supplies only recent terminal create failures and interruptions.
 // Cancellation may replace a create error with its own reason before restart.
 // It never authorizes resubmission; immutable identity still guards shutdown.
-func (s *Store) FailedWorkflowCreates(ctx context.Context) ([]model.Run, error) {
-	rows, err := s.reader().QueryContext(ctx, `SELECT `+runColumns+` FROM runs WHERE job_name!='' AND ((status='failed' AND error LIKE 'create Workflow:%') OR status='interrupted')`)
+func (s *Store) FailedWorkflowCreates(ctx context.Context, since time.Time) ([]model.Run, error) {
+	rows, err := s.reader().QueryContext(ctx, `SELECT `+runColumns+` FROM runs WHERE job_name!='' AND ((status='failed' AND error LIKE 'create Workflow:%') OR status='interrupted') AND finished_at>=?`, unixNano(since))
 	if err != nil {
 		return nil, err
 	}

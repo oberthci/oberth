@@ -620,3 +620,15 @@ func TestWorkflowsForRunUsesSharedLabelIndex(t *testing.T) {
 		t.Fatal("index lookup used the API")
 	}
 }
+
+func TestActiveWorkflowsExcludeCompletedHistory(t *testing.T) {
+	live, completed := workflowObject("live"), workflowObject("completed")
+	completed.Status.Phase = wfv1.WorkflowSucceeded
+	hub := newTestHub(t, kubefake.NewClientset(), fakeArgo(live, completed))
+	runHub(t, hub)
+	syncHub(t, hub)
+	workflows := hub.ActiveWorkflows()
+	if len(workflows) != 1 || workflows[0].Name != "live" {
+		t.Fatal(workflows)
+	}
+}

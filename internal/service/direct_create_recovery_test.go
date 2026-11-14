@@ -191,3 +191,42 @@ func TestDirectCreateDisconnectImmediatelyAfterInsertKeepsAcceptance(t *testing.
 	f.engine.finish(t, accepted.ID)
 	f.awaitTerminal(t, accepted.ID)
 }
+
+type liveFailedCreateJobs struct {
+	*failedCreateWatchJobs
+	refs []WorkflowRunRef
+}
+
+func (j *liveFailedCreateJobs) ActiveWorkflowRuns() []WorkflowRunRef { return j.refs }
+
+func TestFailedCreateRearmIncludesOldLiveWorkflowWithoutHistoryScan(t *testing.T) {
+	f := newControlFixture(t)
+	accepted, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "old-live", Repository: f.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := f.store.SetRunWorkflowName(t.Context(), accepted.ID, "old-workflow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunInterrupted, Phase: model.PhaseCancelled}); err != nil {
+		t.Fatal(err)
+	}
+	jobs := &liveFailedCreateJobs{failedCreateWatchJobs: &failedCreateWatchJobs{fakeJobs: f.jobs, watched: make(chan WorkflowRequest, 2), deadlines: make(chan time.Time, 2)}, refs: []WorkflowRunRef{{RunID: run.ID, WorkflowName: run.WorkflowName}, {RunID: run.ID, WorkflowName: run.WorkflowName}}}
+	f.scheduler.jobs = jobs
+	if err := f.scheduler.rearmFailedCreates(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case req := <-jobs.watched:
+		if req.Run.ID != run.ID {
+			t.Fatal(req)
+		}
+	case <-time.After(testStartTimeout(5 * time.Second)):
+		t.Fatal("live failed create was not rearmed")
+	}
+	f.scheduler.closeObservations()
+	if len(jobs.watched) != 0 {
+		t.Fatal("duplicate live reference created a second observer")
+	}
+}

@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/oberthci/oberth/internal/store"
 	"log"
+	"strings"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -46,18 +49,47 @@ func (scheduler *Scheduler) failAccept(ctx context.Context, run model.Run, cause
 	}
 }
 
-// Restart is a natural event for checking historical create failures again.
-// The shared hub catches a late object during one bounded window; no polling
-// or background resubmission is introduced.
+// WorkflowRunRef identifies a cached Workflow without exposing its authored spec.
+type WorkflowRunRef struct{ RunID, WorkflowName string }
+
+// Rearm from live objects and only the recent failed-create observation window.
+// Historical cancellations whose Workflows are gone do no startup work.
 func (scheduler *Scheduler) rearmFailedCreates(ctx context.Context) error {
 	if _, ok := scheduler.jobs.(interface {
 		WatchFailedCreate(context.Context, WorkflowRequest) error
 	}); !ok {
 		return nil
 	}
-	runs, err := scheduler.database().FailedWorkflowCreates(ctx)
+	if adopter, ok := scheduler.jobs.(JobAdopter); ok {
+		if err := adopter.WaitForWatchSync(ctx); err != nil {
+			return err
+		}
+	}
+	since := time.Now().Add(-createObservationWindow)
+	recent, err := scheduler.database().FailedWorkflowCreates(ctx, since)
 	if err != nil {
 		return err
+	}
+	runs := make(map[string]model.Run, len(recent))
+	for _, run := range recent {
+		runs[run.ID] = run
+	}
+	if hub, ok := scheduler.jobs.(interface{ ActiveWorkflowRuns() []WorkflowRunRef }); ok {
+		for _, wf := range hub.ActiveWorkflowRuns() {
+			if _, exists := runs[wf.RunID]; exists {
+				continue
+			}
+			run, err := scheduler.database().Run(ctx, wf.RunID)
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if run.WorkflowName == wf.WorkflowName && (run.Status == model.RunInterrupted || (run.Status == model.RunFailed && strings.HasPrefix(run.Error, "create Workflow:"))) {
+				runs[run.ID] = run
+			}
+		}
 	}
 	for _, run := range runs {
 		repository, err := scheduler.database().Repository(ctx, run.RepoID)
@@ -69,6 +101,8 @@ func (scheduler *Scheduler) rearmFailedCreates(ctx context.Context) error {
 	return nil
 }
 
-func (database schedulerDatabase) FailedWorkflowCreates(ctx context.Context) ([]model.Run, error) {
-	return retryDatabase(ctx, "FailedWorkflowCreates", database.SchedulerStore.FailedWorkflowCreates)
+func (database schedulerDatabase) FailedWorkflowCreates(ctx context.Context, since time.Time) ([]model.Run, error) {
+	return retryDatabase(ctx, "FailedWorkflowCreates", func(ctx context.Context) ([]model.Run, error) {
+		return database.SchedulerStore.FailedWorkflowCreates(ctx, since)
+	})
 }

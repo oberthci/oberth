@@ -283,3 +283,15 @@ func (h *Hub) WorkflowsForRun(runID string) []*wfv1.Workflow {
 	}
 	return workflows
 }
+
+// ActiveWorkflows returns the non-completed namespace Workflows already cached.
+// Callers must wait for initial sync before using this startup snapshot.
+func (h *Hub) ActiveWorkflows() []*wfv1.Workflow {
+	var workflows []*wfv1.Workflow
+	for _, obj := range h.workflows.GetStore().List() {
+		if wf, ok := obj.(*wfv1.Workflow); ok && h.workflowName(wf) != "" && !wf.Status.Phase.Completed() {
+			workflows = append(workflows, wf)
+		}
+	}
+	return workflows
+}

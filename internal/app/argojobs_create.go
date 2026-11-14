@@ -33,3 +33,18 @@ func (jobs *ArgoJobs) WatchFailedCreate(ctx context.Context, request service.Wor
 		RunTrigger: argoworkflow.RunTrigger(request.Run.Trigger),
 	})
 }
+
+// ActiveWorkflowRuns uses the synced namespace hub without a Kubernetes list.
+func (jobs *ArgoJobs) ActiveWorkflowRuns() []service.WorkflowRunRef {
+	if jobs.watchHub == nil {
+		return nil
+	}
+	var runs []service.WorkflowRunRef
+	for _, wf := range jobs.watchHub.ActiveWorkflows() {
+		runID, _, ok := argojob.WorkflowMeta(wf)
+		if ok {
+			runs = append(runs, service.WorkflowRunRef{RunID: runID, WorkflowName: wf.Name})
+		}
+	}
+	return runs
+}
