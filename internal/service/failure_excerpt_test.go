@@ -63,7 +63,7 @@ func TestCIIssueExcerptIsTheFailedStepSliceNotSiblingTail(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-656", Repository: fixture.repo, Branch: "main",
 		SHA: "7c496a5d4043785ffe2593d25eff3d434e8fd041", Actor: "agent@host",
 	})

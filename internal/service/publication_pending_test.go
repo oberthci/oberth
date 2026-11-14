@@ -15,7 +15,7 @@ import (
 func TestPublishRetryReturnsPendingUntilDurableFinalization(t *testing.T) {
 	ctx := context.Background()
 	f := newControlFixture(t, JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}})
-	queued, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "pending-publication", Repository: f.repo, Branch: "feature/pending-publication", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
+	queued, err := f.scheduler.recordCIForTest(ctx, CIRequest{EventID: "pending-publication", Repository: f.repo, Branch: "feature/pending-publication", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func (observer lostPublicationAck) DeliverPublication(ctx context.Context, id st
 func TestPublishRetryTerminalReadBackWakesRunWaiters(t *testing.T) {
 	ctx := context.Background()
 	f := newControlFixture(t, JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}})
-	queued, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "lost-publication-ack", Repository: f.repo, Branch: "feature/lost-publication-ack", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
+	queued, err := f.scheduler.recordCIForTest(ctx, CIRequest{EventID: "lost-publication-ack", Repository: f.repo, Branch: "feature/lost-publication-ack", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -82,7 +82,7 @@ func newPruneFixture(t *testing.T) *pruneFixture {
 	f.mirror = ready.Path
 	service, err := NewAPI(APIConfig{
 		Runs: f.store, History: f.store, Repositories: f.store, Issues: f.store, Promotions: f.store, PromotionRuns: f.store,
-		Enqueues: f.scheduler, Git: f.controlFixture.git, Logs: f.logs, Auditor: f.store,
+		Enqueues: fixtureEnqueues{f.scheduler}, Git: f.controlFixture.git, Logs: f.logs, Auditor: f.store,
 		BranchPrune: cache, BranchDeletions: f.store, DeletionQueued: func() { f.queued++ },
 	})
 	if err != nil {

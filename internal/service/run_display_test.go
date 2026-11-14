@@ -71,12 +71,12 @@ func TestRunDisplayReasonsCoverTerminalCausesAndTrustedPreflight(t *testing.T) {
 func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
-	run, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "display", Repository: fixture.repo,
+	run, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "display", Repository: fixture.repo,
 		Branch: "feature/display", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := fixture.store.ClaimNextRun(ctx)
+	claimed, err := storetest.ClaimNextRun(fixture.store, ctx)
 	if err != nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %+v, %v", claimed, err)
 	}
@@ -115,7 +115,7 @@ func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 	if log.DisplayStatus != "queued" || log.DisplayReason == "" {
 		t.Fatalf("live log display pair = %+v", log)
 	}
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "successor", Repository: fixture.repo,
+	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "successor", Repository: fixture.repo,
 		Branch: "feature/display", SHA: strings.Repeat("b", 40), Actor: "agent@host"}); err != nil {
 		t.Fatal(err)
 	}
@@ -133,16 +133,16 @@ func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 func TestDefaultRunListNumbersClaimedAndUnclaimedTogether(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := t.Context()
-	first, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "first-position", Repository: fixture.repo,
+	first, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "first-position", Repository: fixture.repo,
 		Branch: "feature/first", SHA: strings.Repeat("d", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := fixture.store.ClaimNextRun(ctx)
+	claimed, err := storetest.ClaimNextRun(fixture.store, ctx)
 	if err != nil || claimed.ID != first.ID {
 		t.Fatalf("claim = %+v, %v", claimed, err)
 	}
-	second, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "second-position", Repository: fixture.repo,
+	second, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "second-position", Repository: fixture.repo,
 		Branch: "feature/second", SHA: strings.Repeat("e", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ type listPositionGuard struct {
 func TestRunListsUseStorePositionsWithoutPerRowQueries(t *testing.T) {
 	fixture := newControlFixture(t)
 	for _, branch := range []string{"one", "two"} {
-		if _, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: branch, Repository: fixture.repo, Branch: branch, SHA: strings.Repeat("a", 40), Actor: "agent"}); err != nil {
+		if _, err := fixture.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: branch, Repository: fixture.repo, Branch: branch, SHA: strings.Repeat("a", 40), Actor: "agent"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -212,7 +212,7 @@ func TestPromotionRestartDisplaysFailureWithoutCIIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.store.ClaimNextRun(ctx); err != nil {
+	if _, err = storetest.ClaimNextRun(f.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = f.store.MarkRunSubmissionStarted(ctx, enqueued.ID); err != nil {

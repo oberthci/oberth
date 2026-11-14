@@ -42,7 +42,7 @@ func TestRestartCutAdoptionPersistsRetryableWithoutTestIssue(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			done := make(chan error, 1)
-			go func() { done <- scheduler.Run(ctx); close(done) }()
+			go func() { done <- scheduler.runAcceptedFixtures(ctx); close(done) }()
 			deadline := time.NewTimer(testStartTimeout(15 * time.Second))
 			defer deadline.Stop()
 			var current model.Run

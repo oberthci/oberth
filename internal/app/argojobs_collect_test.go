@@ -78,8 +78,19 @@ func TestArgoCollectUnfinishedNodesPreservesWorkflowVerdict(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := scheduler.ProcessNext(ctx); err != nil {
-					t.Fatal(err)
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					current, err := db.Run(ctx, run.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if current.Status.Terminal() {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("observer did not finish")
+					}
+					time.Sleep(time.Millisecond)
 				}
 				finished, err := db.Run(ctx, run.ID)
 				if err != nil {

@@ -12,14 +12,11 @@ import (
 // documented started/submission order.
 const MaxActiveRuns = 500
 
-// ListActiveRuns returns every non-terminal run (queued, or claimed and
-// running) matching the repository/ref filter and the uplink repository
-// restriction, in the order the scheduler works through them:
+// ListActiveRuns returns non-terminal history matching the repository/ref
+// filter and the uplink repository restriction:
 //
 //  1. runs whose Workflow has started, oldest start first;
-//  2. every run that has not started, claimed or not, in submissionOrderSQL:
-//     admission_sequence, then queue_sequence. ClaimNextRun uses that same
-//     order, and the flat/latest-per-ref views number the same queue.
+//  2. runs without an execution start, in acceptance order.
 //
 // Argo controls execution parallelism after submission.
 // Before, Limit and Terminal are ignored: the view is one bounded list.
@@ -32,7 +29,7 @@ func (s *Store) ListActiveRuns(ctx context.Context, filter model.RunListFilter) 
 	restriction += statusSQL
 	restrictionArgs = append(restrictionArgs, statusArgs...)
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
-	orderSQL := submissionOrderSQL()
+	orderSQL := "queue_sequence"
 	rows, err := s.reader().QueryContext(ctx, `
 SELECT `+runReadColumns+` FROM runs
 WHERE status IN ('queued', 'running')

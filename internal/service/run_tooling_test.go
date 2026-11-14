@@ -15,13 +15,14 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // #1213: the 8-character ID printed by push feedback must be directly usable.
 func TestRunGetAcceptsPushFeedbackID(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
-	run, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	run, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "short-run-id", Repository: fixture.repo,
 		Branch: "feature/short-run-id", SHA: strings.Repeat("a", 40), Actor: "agent@host",
 	})
@@ -48,14 +49,14 @@ func TestActiveRunLogsWithoutRetainedOutputArePending(t *testing.T) {
 		t.Run(fmt.Sprintf("log-file-%t", createLog), func(t *testing.T) {
 			fixture := newControlFixture(t)
 			ctx := context.Background()
-			run, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+			run, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 				EventID: "pending-run-log", Repository: fixture.repo,
 				Branch: "feature/pending-run-log", SHA: strings.Repeat("b", 40), Actor: "agent@host",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+			if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 				t.Fatal(err)
 			}
 			started := time.Now().UTC()

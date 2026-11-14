@@ -31,7 +31,7 @@ func TestTransientPublicationRetriesBoundedAndProtected(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = f.store.ClaimNextRun(t.Context()); err != nil {
+			if _, err = storetest.ClaimNextRun(f.store, t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			pub, err := f.store.BeginPublication(t.Context(), model.PublicationSpec{RepoID: f.repo.ID, RunID: run.ID, RefKind: kind, Ref: ref, ResultSHA: run.SHA, Actor: run.Actor})
@@ -112,7 +112,7 @@ func TestPublicationLostReplyAndPermanentRejection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = f.store.ClaimNextRun(t.Context()); err != nil {
+			if _, err = storetest.ClaimNextRun(f.store, t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			pub, err := f.store.BeginPublication(t.Context(), model.PublicationSpec{RepoID: f.repo.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref, ResultSHA: run.SHA, Actor: run.Actor})
@@ -149,7 +149,7 @@ func TestPromoteRetryReusesExactTransientPushCandidate(t *testing.T) {
 			actor := api.Actor{Identity: "admin@host", Admin: true}
 			id := promoteForRetry(t, control, actor)
 			// Simulate an exhausted push-only failure after the recorded CI passed.
-			pending, err := s.store.ClaimNextRun(t.Context())
+			pending, err := storetest.ClaimNextRun(s.store, t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -242,7 +242,7 @@ func TestPublishRetryQueuedResponseAndRunRetryDoNotRepeatCI(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = f.store.ClaimNextRun(t.Context()); err != nil {
+			if _, err = storetest.ClaimNextRun(f.store, t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			pub, err := f.store.BeginPublication(t.Context(), model.PublicationSpec{RepoID: f.repo.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref, ResultSHA: run.SHA, Actor: run.Actor})
@@ -299,7 +299,7 @@ func TestSchedulerAutomaticallyResumesDuePublication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.store.ClaimNextRun(t.Context()); err != nil {
+	if _, err = storetest.ClaimNextRun(f.store, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	pub, err := f.store.BeginPublication(t.Context(), model.PublicationSpec{RepoID: f.repo.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref, ResultSHA: run.SHA, Actor: run.Actor})
@@ -310,7 +310,7 @@ func TestSchedulerAutomaticallyResumesDuePublication(t *testing.T) {
 	f.scheduler.git = g
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- f.scheduler.Run(ctx) }()
+	go func() { done <- f.scheduler.runAcceptedFixtures(ctx) }()
 	defer func() {
 		cancel()
 		if err := <-done; err != nil {
@@ -373,7 +373,7 @@ func TestGitSSHTransportFailureQueuesPublicationRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.store.ClaimNextRun(t.Context()); err != nil {
+	if _, err = storetest.ClaimNextRun(f.store, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	pub, err := f.store.BeginPublication(t.Context(), model.PublicationSpec{RepoID: f.repo.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref, ResultSHA: run.SHA, Actor: run.Actor})

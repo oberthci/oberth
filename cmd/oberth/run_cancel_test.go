@@ -163,7 +163,7 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 		return enqueued.Run
 	}
 	claimed := enqueue("feature-pod", model.RefBranch, "branch", "a", false)
-	if _, err := database.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(database, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.SetRunWorkflowName(ctx, claimed.ID, "oberth-oberth-"+claimed.ID[:8]); err != nil {

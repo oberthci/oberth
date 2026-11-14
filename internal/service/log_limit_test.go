@@ -92,7 +92,7 @@ func TestRunLogOverflowMakesRunFailClearly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enqueued, err := scheduler.EnqueueCI(context.Background(), CIRequest{
+	enqueued, err := scheduler.recordCIForTest(context.Background(), CIRequest{
 		EventID: "receive-log-overflow", Repository: fixture.repo, Branch: "feature/log-overflow",
 		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
 	})

@@ -45,7 +45,7 @@ func TestWorkflowCreateContractCleanupAfterDefiniteFailure(t *testing.T) {
 			if mode == "deletion-unconfirmed" {
 				jobs.deleteErr = errors.New("delete unavailable")
 			}
-			source, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "contract-failure", Repository: f.repo, Branch: "feature/contract-failure", SHA: strings.Repeat("a", 40), Actor: "pusher"})
+			source, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "contract-failure", Repository: f.repo, Branch: "feature/contract-failure", SHA: strings.Repeat("a", 40), Actor: "pusher"})
 			if err != nil {
 				t.Fatal(err)
 			}

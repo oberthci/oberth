@@ -30,7 +30,7 @@ func newPrunePromotionFixture(t *testing.T) (*pruneFixture, *upstreamGit) {
 	git := &upstreamGit{DeliveryGit: f.controlFixture.git}
 	service, err := NewAPI(APIConfig{
 		Runs: f.store, History: f.store, Repositories: f.store, Issues: f.store, Promotions: f.store, PromotionRuns: f.store,
-		Enqueues: f.scheduler, Git: git, Logs: f.logs, Auditor: f.store,
+		Enqueues: fixtureEnqueues{f.scheduler}, Git: git, Logs: f.logs, Auditor: f.store,
 		BranchPrune: f.cache, BranchDeletions: f.store, DeletionQueued: func() { f.queued++ },
 		AgentEvents: f.store,
 	})

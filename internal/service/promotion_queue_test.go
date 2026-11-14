@@ -39,7 +39,7 @@ func TestSecondPromotionWaitsAndIsPreparedOnTheNewTarget(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+		if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := fixture.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, TestedSHA: sha}); err != nil {
@@ -141,7 +141,7 @@ func TestRetriedPromotionQueuesBehindAPendingOne(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+		if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := fixture.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, TestedSHA: sha}); err != nil {
@@ -277,7 +277,7 @@ func TestShutdownCancelsAQueuedPromotionWait(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+		if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := fixture.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, TestedSHA: sha}); err != nil {
@@ -288,7 +288,7 @@ func TestShutdownCancelsAQueuedPromotionWait(t *testing.T) {
 	control, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: promotions, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),

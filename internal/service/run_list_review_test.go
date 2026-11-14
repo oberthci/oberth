@@ -13,6 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestScopedRunListUnknownPositionDoesNotInventQueueHead(t *testing.T) {
@@ -60,7 +61,7 @@ func TestRunListsObserveArgoWithoutDependingOnLocalStepHistory(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				run, err := f.store.ClaimNextRun(t.Context())
+				run, err := storetest.ClaimNextRun(f.store, t.Context())
 				if err != nil || run.ID != enqueued.ID {
 					t.Fatal("claim", err)
 				}

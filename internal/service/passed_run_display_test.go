@@ -59,7 +59,7 @@ func TestSchedulerRecordsCommitTrailersForRunList(t *testing.T) {
 				git.failure = errors.New("display unavailable")
 			}
 			f.scheduler.git = git
-			run, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "run-trailers", Repository: f.repo, Branch: "feature/trailers", SHA: strings.Repeat("a", 40), Actor: "owner"})
+			run, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "run-trailers", Repository: f.repo, Branch: "feature/trailers", SHA: strings.Repeat("a", 40), Actor: "owner"})
 			if err != nil {
 				t.Fatal(err)
 			}

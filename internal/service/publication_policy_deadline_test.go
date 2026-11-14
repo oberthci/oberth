@@ -45,7 +45,7 @@ func pendingPolicyRun(t *testing.T, f *controlFixture) model.Publication {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.store.ClaimNextRun(t.Context()); err != nil {
+	if _, err = storetest.ClaimNextRun(f.store, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	pub, err := f.store.BeginPublication(t.Context(), model.PublicationSpec{RepoID: f.repo.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref, ResultSHA: run.SHA, Actor: run.Actor})

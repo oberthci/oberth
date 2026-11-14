@@ -10,15 +10,16 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func submittedDisplayRun(t *testing.T, f *controlFixture, ref string) model.Run {
 	t.Helper()
-	enqueued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: ref, Repository: f.repo, Branch: ref, SHA: strings.Repeat("a", 40), Actor: "owner"})
+	enqueued, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: ref, Repository: f.repo, Branch: ref, SHA: strings.Repeat("a", 40), Actor: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := f.store.ClaimNextRun(t.Context())
+	run, err := storetest.ClaimNextRun(f.store, t.Context())
 	if err != nil || run.ID != enqueued.ID {
 		t.Fatal(run, err)
 	}

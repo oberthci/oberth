@@ -14,6 +14,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestTerminalDeclaredRowsKeepOrdinalsAndRealOutcomes(t *testing.T) {
@@ -67,7 +68,7 @@ func TestDeclaredRetryOutcomeInRunDetailAndStatus(t *testing.T) {
 			fixture := newControlFixture(t, result)
 			fixture.jobs.plan = []runprogress.PlannedStep{{Stage: "retry", Step: "check", Ordinal: 26}}
 			ctx := context.Background()
-			run, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+			run, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 				EventID: "retry", Repository: fixture.repo, Branch: "feature/retry",
 				SHA: strings.Repeat("a", 40), Actor: "agent@host",
 			})
@@ -159,14 +160,14 @@ func TestSeededPlanIsVisibleBeforeAnyStepStarts(t *testing.T) {
 	fixture := newControlFixture(t)
 	fixture.jobs.plan = oberthLikePlan()
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-seeded-plan", Repository: fixture.repo,
 		Branch: "feature/seeded-plan", SHA: "1111111111111111111111111111111111111111", Actor: "agent@host",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := fixture.store.ClaimNextRun(ctx)
+	run, err := storetest.ClaimNextRun(fixture.store, ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +214,7 @@ func TestPlannedStepsThatNeverRanReportSkipped(t *testing.T) {
 	fixture.jobs.plan = oberthLikePlan()
 	ctx := context.Background()
 	const sha = "2222222222222222222222222222222222222222"
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-partial-plan", Repository: fixture.repo,
 		Branch: "feature/partial-plan", SHA: sha, Actor: "agent@host",
 	})
@@ -254,14 +255,14 @@ func TestObservedStepsUpdateSeededRowsInPlace(t *testing.T) {
 	fixture := newControlFixture(t)
 	fixture.jobs.plan = oberthLikePlan()
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-inplace-plan", Repository: fixture.repo,
 		Branch: "feature/inplace-plan", SHA: "3333333333333333333333333333333333333333", Actor: "agent@host",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.logs.WriteStepPlan(enqueued.ID, oberthLikePlan()); err != nil {
@@ -296,14 +297,14 @@ func TestObservedStepsUpdateSeededRowsInPlace(t *testing.T) {
 func TestInterruptedRunRetainsItsPlanAndTheProgressItMade(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-interrupted-plan", Repository: fixture.repo,
 		Branch: "feature/interrupted-plan", SHA: "4444444444444444444444444444444444444444", Actor: "agent@host",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.logs.WriteStepPlan(enqueued.ID, oberthLikePlan()); err != nil {
@@ -346,7 +347,7 @@ func TestRunWithoutAPlanKeepsItsExistingBehaviour(t *testing.T) {
 	})
 	fixture.jobs.plan = nil
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-planless", Repository: fixture.repo,
 		Branch: "feature/planless", SHA: "5555555555555555555555555555555555555555", Actor: "agent@host",
 	})
@@ -375,7 +376,7 @@ func TestUnenumerablePipelineStillRuns(t *testing.T) {
 	})
 	fixture.jobs.planErr = errUnplannable
 	ctx := context.Background()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "receive-unplannable", Repository: fixture.repo,
 		Branch: "feature/unplannable", SHA: "6666666666666666666666666666666666666666", Actor: "agent@host",
 	})

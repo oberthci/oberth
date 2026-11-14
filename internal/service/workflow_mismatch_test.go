@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
-
 	"github.com/oberthci/oberth/internal/model"
 )
 
@@ -42,7 +41,7 @@ func TestWorkflowSpecMismatchStaysRunLocalUntilCleanup(t *testing.T) {
 	ticks := make(chan time.Time)
 	f.scheduler.createTicks = ticks
 	done, _ := startCreateScheduler(t, f.scheduler)
-	run, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "mismatch", Repository: f.repo, Branch: "feature/mismatch", SHA: strings.Repeat("a", 40), Actor: "pusher"})
+	run, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "mismatch", Repository: f.repo, Branch: "feature/mismatch", SHA: strings.Repeat("a", 40), Actor: "pusher"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +50,7 @@ func TestWorkflowSpecMismatchStaysRunLocalUntilCleanup(t *testing.T) {
 	if err != nil || current.Status != model.RunRunning || !strings.Contains(current.Error, "Workflow spec mismatch") {
 		t.Fatalf("mismatch diagnostic or pending ownership lost: %+v %v", current, err)
 	}
-	other, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "after-mismatch", Repository: f.repo, Branch: "feature/other", SHA: strings.Repeat("b", 40), Actor: "pusher"})
+	other, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "after-mismatch", Repository: f.repo, Branch: "feature/other", SHA: strings.Repeat("b", 40), Actor: "pusher"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +123,7 @@ func TestWorkflowMismatchCleanupReleasesOriginalBeforeManualRetry(t *testing.T) 
 	ticks := make(chan time.Time)
 	f.scheduler.createTicks = ticks
 	done, stop := startCreateScheduler(t, f.scheduler)
-	source, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "mismatch-retry", Repository: f.repo, Branch: "feature/mismatch-retry", SHA: strings.Repeat("a", 40), Actor: "pusher"})
+	source, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "mismatch-retry", Repository: f.repo, Branch: "feature/mismatch-retry", SHA: strings.Repeat("a", 40), Actor: "pusher"})
 	if err != nil {
 		t.Fatal(err)
 	}

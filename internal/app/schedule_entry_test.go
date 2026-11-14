@@ -19,7 +19,7 @@ func TestScheduleEntryCronAndManualKeepTheSameResolvedIdentity(t *testing.T) {
 		if cron.ScheduleEntry != name || cron.SHA != originalSHA {
 			t.Fatalf("cron lost entry: %+v", cron)
 		}
-		plan, err := schedules.PlanScheduleTrigger(context.Background(), oneRepo()[0], name, false)
+		plan, err := schedules.PlanScheduleTrigger(context.Background(), oneRepo()[0], name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -31,7 +31,7 @@ func TestScheduleEntryCronAndManualKeepTheSameResolvedIdentity(t *testing.T) {
 			t.Fatalf("manual/cron differ: %+v / %+v", manual, cron)
 		}
 	}
-	plan, err := schedules.PlanScheduleTrigger(context.Background(), oneRepo()[0], "nightly", false)
+	plan, err := schedules.PlanScheduleTrigger(context.Background(), oneRepo()[0], "nightly")
 	if err != nil {
 		t.Fatal(err)
 	}

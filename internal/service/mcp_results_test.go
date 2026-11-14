@@ -206,7 +206,7 @@ func TestMCPPromotionValidationRefusals(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.store.ClaimNextRun(t.Context()); err != nil {
+			if _, err := storetest.ClaimNextRun(f.store, t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: tc.status, TestedSHA: tc.tested}); err != nil {

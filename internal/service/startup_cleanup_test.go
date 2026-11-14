@@ -48,7 +48,7 @@ func TestStartupCancellationWaitsForObservedCleanup(t *testing.T) {
 	scheduler.onStartupRecovered = func() { close(recovered) }
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- scheduler.Run(ctx) }()
+	go func() { done <- scheduler.runAcceptedFixtures(ctx) }()
 	defer func() { cancel(); <-done }()
 	select {
 	case <-jobs.failed:
@@ -156,7 +156,7 @@ func TestSteadyCancellationDeleteFailureRetriesWithoutExit(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if _, err := f.store.ClaimNextRun(context.Background()); err != nil {
+			if _, err := storetest.ClaimNextRun(f.store, context.Background()); err != nil {
 				return err
 			}
 			if _, err := f.store.SetRunWorkflowName(context.Background(), enqueued.ID, "oberth-cancelled"); err != nil {
@@ -168,7 +168,7 @@ func TestSteadyCancellationDeleteFailureRetriesWithoutExit(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- scheduler.Run(ctx) }()
+	go func() { done <- scheduler.runAcceptedFixtures(ctx) }()
 	defer func() { cancel(); <-done }()
 	select {
 	case err := <-recovered:

@@ -60,7 +60,7 @@ func startDeadlineScheduler(t *testing.T, scheduler *Scheduler) (<-chan error, c
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- scheduler.Run(ctx); close(done) }()
+	go func() { done <- scheduler.runAcceptedFixtures(ctx); close(done) }()
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -101,7 +101,7 @@ func awaitDeadlineRun(t *testing.T, fixture *recoveryFixture, id string, done <-
 // Exercise actual Run startup, dispatch, submitted background task and finalization;
 // checking only adapter returns would miss a fatal completion-channel escape.
 func TestDatabaseDeadlineSchedulerConverges(t *testing.T) {
-	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunWorkflowName", "MarkRunSubmissionStarted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "RunWorkspaceCleanupEligible"}
+	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "StartRun", "Run", "Repository", "Upstream", "SetRunWorkflowName", "MarkRunSubmissionStarted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "RunWorkspaceCleanupEligible"}
 	for _, operation := range operations {
 		for _, fault := range []struct {
 			name string
@@ -226,6 +226,7 @@ func testDatabaseCancellationContinuesLiveDispatch(t *testing.T, failure error) 
 			database.mu.Lock()
 			before := database.calls[operation]
 			database.failures[operation] = 2
+			database.runFaultID = old.ID
 			database.mu.Unlock()
 			successor, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.exampleService.ID, RefKind: model.RefBranch, Ref: "supersede-db", SHA: strings.Repeat("b", 40), Actor: "test", Trigger: "branch"})
 			if err != nil {
@@ -234,7 +235,10 @@ func testDatabaseCancellationContinuesLiveDispatch(t *testing.T, failure error) 
 			if _, err := fixture.store.CancelRun(t.Context(), model.RunCancelRequest{RunID: old.ID, Actor: "operator"}); err != nil {
 				t.Fatal(err)
 			}
-			fixture.scheduler.NotifyQueue()
+			fixture.scheduler.NotifyCancellations()
+			if err := fixture.scheduler.AcceptEnqueue(t.Context(), successor); err != nil {
+				t.Fatal(err)
+			}
 			created := awaitDeadlineCreated(t, fixture.engine, done)
 			if created != successor.ID {
 				t.Fatalf("successor not dispatched: %v", created)
@@ -345,7 +349,7 @@ func (s *deadlineFaultStore) NextQueuedRun(ctx context.Context) (model.Run, erro
 	if err := s.fault("NextQueuedRun"); err != nil {
 		return model.Run{}, err
 	}
-	return s.Store.NextQueuedRun(ctx)
+	return storetest.NextQueuedRun(s.Store, ctx)
 }
 
 func TestDatabaseDeadlineWaitingDoesNotTripLiveness(t *testing.T) {
@@ -380,58 +384,6 @@ func TestDatabaseDeadlineWaitingDoesNotTripLiveness(t *testing.T) {
 	case <-done:
 	case <-time.After(testStartTimeout(time.Second)):
 		t.Fatal("DB backoff did not cancel")
-	}
-}
-
-type deadlineJoinStore struct {
-	*store.Store
-	admitted atomic.Bool
-	claims   atomic.Int64
-	blocked  chan struct{}
-	once     sync.Once
-}
-
-func (s *deadlineJoinStore) ClaimNextRun(ctx context.Context) (model.Run, error) {
-	if s.claims.Add(1) == 1 {
-		return s.Store.ClaimNextRun(ctx)
-	}
-	select {
-	case <-s.blocked:
-		return model.Run{}, store.ErrInvalidState
-	case <-ctx.Done():
-		return model.Run{}, ctx.Err()
-	}
-}
-
-// Run fails with a retryable deadline once the first run holds its grant:
-// without an Oberth run ceiling the dispatch loop claims the next run only
-// after every claimed run is granted, so the retry must start after that.
-func (s *deadlineJoinStore) Run(ctx context.Context, id string) (model.Run, error) {
-	if !s.admitted.Load() {
-		return s.Store.Run(ctx, id)
-	}
-	s.once.Do(func() { close(s.blocked) })
-	return model.Run{}, context.DeadlineExceeded
-}
-
-func (s *deadlineJoinStore) MarkRunSubmissionStarted(ctx context.Context, id string) (model.Run, error) {
-	run, err := s.Store.MarkRunSubmissionStarted(ctx, id)
-	s.admitted.Store(true)
-	return run, err
-}
-func TestDatabaseDeadlineFatalInvariantCancelsOtherRetryingWorkers(t *testing.T) {
-	fixture := newRecoveryFixture(t)
-	if _, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "pending", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"}); err != nil {
-		t.Fatal(err)
-	}
-	scheduler := fixture.scheduler(t, &deadlineJobs{})
-	scheduler.store = &deadlineJoinStore{Store: fixture.store, blocked: make(chan struct{})}
-	// This deadline is a watchdog, not the expected completion. A fatal invariant
-	// must cancel the other background task's retry scope before joining it.
-	ctx, cancel := context.WithTimeout(t.Context(), testStartTimeout(2*time.Second))
-	defer cancel()
-	if err := scheduler.Run(ctx); !errors.Is(err, store.ErrInvalidState) {
-		t.Fatalf("invariant blocked behind DB retry until shutdown: %v", err)
 	}
 }
 

@@ -36,7 +36,7 @@ func seedLegacyPublicationRetry(t *testing.T, path string) (model.Publication, m
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.ClaimNextRun(ctx); err != nil {
+	if _, err = storetest.ClaimNextRun(s, ctx); err != nil {
 		t.Fatal(err)
 	}
 	pub, err := s.BeginPublication(ctx, model.PublicationSpec{RepoID: repo.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref, ResultSHA: run.SHA, Actor: run.Actor})

@@ -18,7 +18,7 @@ func TestParkPromotionRefusesRedBranchSHAForSingleAndTrain(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/train=%v", status, train), func(t *testing.T) {
 				f := newControlFixture(t)
 				sha := strings.Repeat("a", 40)
-				queued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "red", Repository: f.repo, Branch: "feature/red", SHA: sha, Actor: "pusher"})
+				queued, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "red", Repository: f.repo, Branch: "feature/red", SHA: sha, Actor: "pusher"})
 				if err != nil {
 					t.Fatal(err)
 				}

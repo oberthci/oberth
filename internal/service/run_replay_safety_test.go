@@ -25,7 +25,7 @@ func (*retryEnqueueObserver) NotifyPublicationRecovery(string) {}
 
 func TestUnifiedRerunChecksMutationGateAndRemovedTool(t *testing.T) {
 	h := newRerunHarness(t, infraFailure)
-	source, err := h.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "manual-replay", Repository: h.fixture.repo, Branch: rerunBranch, SHA: rerunSHA, Actor: "pusher"})
+	source, err := h.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "manual-replay", Repository: h.fixture.repo, Branch: rerunBranch, SHA: rerunSHA, Actor: "pusher"})
 	if err != nil {
 		t.Fatal(err)
 	}

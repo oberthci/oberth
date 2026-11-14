@@ -212,7 +212,7 @@ func (noSummaryTiming) RunTiming(context.Context, string) (model.RunTiming, erro
 func TestRunGetSummary(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := t.Context()
-	run, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
+	run, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
 		EventID: "compact-run", Repository: fixture.repo, Branch: "feature/compact",
 		SHA: strings.Repeat("a", 40), Actor: "agent@host",
 	})

@@ -72,15 +72,15 @@ type ScheduleTriggerResponse struct {
 }
 
 // ScheduleControl is the scheduler's read and trigger surface (#1106). The
-// scheduler owns the schedule file, its parse limits and the manual trigger's
-// busy-repository guard, so the tools ask it instead of reading Git themselves.
+// scheduler owns schedule-file resolution and parse limits, so the tools ask it
+// instead of reading Git themselves.
 type ScheduleControl interface {
 	// InspectSchedule reports the repository's schedule; ok is false when it
 	// has none.
 	InspectSchedule(ctx context.Context, repository model.Repository) (view ScheduleRepoView, ok bool, err error)
 	// PlanScheduleTrigger resolves one entry to the branch head it would
-	// test. It refuses a repository with active runs unless force is set.
-	PlanScheduleTrigger(ctx context.Context, repository model.Repository, entry string, force bool) (SchedulePlan, error)
+	// test, without waiting for any other run.
+	PlanScheduleTrigger(ctx context.Context, repository model.Repository, entry string) (SchedulePlan, error)
 	// EnqueueSchedule queues the planned run through the same admission path
 	// as a cron fire, attributed to actor.
 	EnqueueSchedule(ctx context.Context, plan SchedulePlan, actor string) (model.EnqueueRunResult, error)
@@ -241,7 +241,7 @@ func (service *API) scheduleTrigger(ctx context.Context, actor api.Actor, raw js
 	if entry.Paused != nil && !arguments.Force {
 		return nil, fmt.Errorf("%w: entry %q is paused by %s; resume it, or pass force to run it once anyway", ErrInvalidInput, entry.Name, entry.Paused.By)
 	}
-	plan, err := service.schedules.PlanScheduleTrigger(ctx, repository, entry.Name, arguments.Force)
+	plan, err := service.schedules.PlanScheduleTrigger(ctx, repository, entry.Name)
 	if err != nil {
 		return nil, err
 	}

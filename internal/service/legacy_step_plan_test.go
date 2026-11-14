@@ -65,7 +65,7 @@ func TestLegacyPersistedAttemptsResolveDeclaredRows(t *testing.T) {
 					{Stage: "probe", Step: "check", Ordinal: 26},
 				}
 				ctx := context.Background()
-				run, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "legacy", Repository: fixture.repo,
+				run, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "persisted-attempts", Repository: fixture.repo,
 					Branch: "feature/legacy", SHA: strings.Repeat("b", 40), Actor: "agent@host"})
 				if err != nil {
 					t.Fatal(err)

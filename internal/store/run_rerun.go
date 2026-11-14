@@ -93,15 +93,10 @@ func (s *Store) RerunRun(ctx context.Context, request model.RunRerunRequest) (mo
 	if err := requireReplayAudit(source.Release || source.RefKind == model.RefTag, request.Force, request.ReplayAudit, evidence); err != nil {
 		return model.RunRerunResult{}, err
 	}
-	var activeID string
-	err = tx.QueryRowContext(ctx, `
-SELECT id FROM runs WHERE repo_id = ? AND ref_kind = ? AND ref = ? AND schedule_entry = ? AND status IN ('queued', 'running')
-ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry).Scan(&activeID)
-	if err == nil {
-		return model.RunRerunResult{}, fmt.Errorf("%w: %s %s already has active run %s", ErrInvalidState, source.RefKind, source.Ref, activeID)
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return model.RunRerunResult{}, fmt.Errorf("check active runs before rerun: %w", err)
+	if source.RefKind == model.RefTag {
+		if err := requireTagReplayIdle(ctx, tx, source); err != nil {
+			return model.RunRerunResult{}, err
+		}
 	}
 	if source.RefKind == model.RefTag {
 		if err := requireUnpublishedTagTx(ctx, tx, source); err != nil {
@@ -256,4 +251,18 @@ WHERE action = 'run.rerun' AND resource_type = 'run'`)
 		return nil, fmt.Errorf("read run rerun lineage: %w", err)
 	}
 	return sources, nil
+}
+
+func requireTagReplayIdle(ctx context.Context, tx *sql.Tx, source model.Run) error {
+	var activeID string
+	err := tx.QueryRowContext(ctx, `
+SELECT id FROM runs WHERE repo_id = ? AND ref_kind = ? AND ref = ? AND schedule_entry = ? AND status IN ('queued', 'running')
+ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry).Scan(&activeID)
+	if err == nil {
+		return fmt.Errorf("%w: %s %s already has active run %s", ErrInvalidState, source.RefKind, source.Ref, activeID)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("check active runs before rerun: %w", err)
+	}
+	return nil
 }

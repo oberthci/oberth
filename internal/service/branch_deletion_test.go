@@ -164,7 +164,7 @@ func TestPublicationSkipsBranchDeletedOnMirror(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = f.store.ClaimNextRun(t.Context()); err != nil {
+			if _, err = storetest.ClaimNextRun(f.store, t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			pub, err := f.store.BeginPublication(t.Context(), model.PublicationSpec{RepoID: f.repo.ID, RunID: run.ID, RefKind: model.RefBranch, Ref: "feature/gone", ResultSHA: run.SHA, Actor: run.Actor})

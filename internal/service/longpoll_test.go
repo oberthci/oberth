@@ -69,7 +69,7 @@ func TestPreparedLongPollCancellationPreservesDurableWork(t *testing.T) {
 	fixture := newControlFixture(t)
 	control := fixture.api(t)
 	ctx := context.Background()
-	run, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "stream-cancel", Repository: fixture.repo, Branch: "feature/stream", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
+	run, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "stream-cancel", Repository: fixture.repo, Branch: "feature/stream", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}

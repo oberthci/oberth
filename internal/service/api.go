@@ -2557,7 +2557,6 @@ func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, 
 			promotion.Error = errors.Join(err, lookupErr).Error()
 			return promotion, nil
 		}
-		service.enqueues.NotifyQueue()
 		service.signals.NotifyPromotion(promotion.ID)
 		return finalization.Promotion, nil
 	}
@@ -3458,7 +3457,6 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 		response.Error = current.Publication.Error
 	}
 	service.signals.NotifyRun(runID)
-	service.enqueues.NotifyQueue()
 	return response, nil
 }
 

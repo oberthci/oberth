@@ -33,7 +33,7 @@ func TestExecutorIdentityCleanupOutageKeepsServerAvailable(t *testing.T) {
 	absent := false
 	jobs := &expiredCleanupJobs{&pendingCreateJobs{fakeJobs: f.jobs, settle: func(context.Context, string, string, time.Time) (bool, error) { return absent, nil }}}
 	f.scheduler.jobs = jobs
-	queued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "identity-cleanup", Repository: f.repo, Branch: "identity-cleanup", SHA: strings.Repeat("a", 40), Actor: "agent"})
+	queued, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "identity-cleanup", Repository: f.repo, Branch: "identity-cleanup", SHA: strings.Repeat("a", 40), Actor: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}

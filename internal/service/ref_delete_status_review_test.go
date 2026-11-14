@@ -8,19 +8,20 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // Cancelled receipts remain replayable without hiding a recreated branch.
 func TestDeletedReceiveReplayMustNotHideRecreatedRun(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := t.Context()
-	occupant, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "occupant", Repository: f.repo, Branch: "feature/occupant", SHA: strings.Repeat("b", 40), Actor: "dev"})
+	occupant, err := f.scheduler.recordCIForTest(ctx, CIRequest{EventID: "occupant", Repository: f.repo, Branch: "feature/occupant", SHA: strings.Repeat("b", 40), Actor: "dev"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sha := strings.Repeat("a", 40)
 	g := &parkPushGit{stubPushGit: &stubPushGit{peeled: gitcache.PeeledObject{ObjectSHA: sha, CommitSHA: sha}}}
-	ingestor, err := NewPushIngestor(PushConfig{Repositories: f.store, Discoverer: stubRepositoryDiscoverer{}, Git: g, Receives: f.store, Branches: f.scheduler, Auditor: f.store})
+	ingestor, err := NewPushIngestor(PushConfig{Repositories: f.store, Discoverer: stubRepositoryDiscoverer{}, Git: g, Receives: f.store, Branches: fixtureEnqueues{f.scheduler}, Auditor: f.store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +65,7 @@ func TestDeletedReceiveReplayMustNotHideRecreatedRun(t *testing.T) {
 	}
 	checkStatus("new run queued", "queued")
 	for _, id := range []string{occupant.ID, fresh.Run.ID} {
-		claimed, err := f.store.ClaimNextRun(ctx)
+		claimed, err := storetest.ClaimNextRun(f.store, ctx)
 		if err != nil || claimed.ID != id {
 			t.Fatalf("claim: %+v %v", claimed, err)
 		}

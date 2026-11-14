@@ -25,7 +25,7 @@ func TestWorkflowCreateExhaustionIsInfrastructureAndRunRetryApplies(t *testing.T
 	// Manual run_rerun remains available when the administrator disables automatic recovery.
 
 	fixture.scheduler.jobs = &workflowCreateFailureJobs{fixture.jobs}
-	source, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "create-timeout", Repository: fixture.repo, Branch: "feature/create-timeout", SHA: strings.Repeat("a", 40), Actor: "pusher"})
+	source, err := fixture.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "create-timeout", Repository: fixture.repo, Branch: "feature/create-timeout", SHA: strings.Repeat("a", 40), Actor: "pusher"})
 	if err != nil {
 		t.Fatal(err)
 	}

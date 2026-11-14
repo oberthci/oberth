@@ -13,6 +13,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type pendingCreateJobs struct {
@@ -85,7 +86,7 @@ func startCreateScheduler(t *testing.T, s *Scheduler) (chan error, context.Cance
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- s.Run(ctx) }()
+	go func() { done <- s.runAcceptedFixtures(ctx) }()
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -131,7 +132,7 @@ func TestWorkflowCreateBrownoutTenMinutesDoesNotStopServerOrOtherRuns(t *testing
 				return f.scheduler.createTime().After(boundary), nil
 			}
 			done, _ := startCreateScheduler(t, f.scheduler)
-			pending, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "pending", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("a", 40), Actor: "pusher"})
+			pending, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "pending", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("a", 40), Actor: "pusher"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -165,7 +166,7 @@ func TestWorkflowCreateBrownoutTenMinutesDoesNotStopServerOrOtherRuns(t *testing
 				if _, err := f.store.RerunRun(t.Context(), model.RunRerunRequest{RunID: run.ID, Actor: "operator"}); err == nil {
 					t.Fatal("pending create allowed run_rerun")
 				}
-				other, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: fmt.Sprintf("other-%d", step), Repository: f.repo, Branch: fmt.Sprintf("feature/other-%d", step), SHA: strings.Repeat("b", 40), Actor: "pusher"})
+				other, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: fmt.Sprintf("other-%d", step), Repository: f.repo, Branch: fmt.Sprintf("feature/other-%d", step), SHA: strings.Repeat("b", 40), Actor: "pusher"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -218,11 +219,11 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 			f.scheduler.submissions = newSubmissionRegistry()
 			var runs []model.Run
 			for i := range 2 {
-				queued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: fmt.Sprintf("restart-%d", i), Repository: f.repo, Branch: fmt.Sprintf("feature/restart-%d", i), SHA: strings.Repeat("c", 40), Actor: "pusher"})
+				queued, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: fmt.Sprintf("restart-%d", i), Repository: f.repo, Branch: fmt.Sprintf("feature/restart-%d", i), SHA: strings.Repeat("c", 40), Actor: "pusher"})
 				if err != nil {
 					t.Fatal(err)
 				}
-				run, err := f.store.ClaimNextRun(t.Context())
+				run, err := storetest.ClaimNextRun(f.store, t.Context())
 				if err != nil || run.ID != queued.ID {
 					t.Fatal(err)
 				}
@@ -286,7 +287,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 			if state.Runs != 2 || f.scheduler.pendingCreateCount() != 2 {
 				t.Fatalf("restart did not restore exact pending contracts: %+v", state)
 			}
-			other, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "after-restart", Repository: f.repo, Branch: "feature/available", SHA: strings.Repeat("d", 40), Actor: "pusher"})
+			other, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "after-restart", Repository: f.repo, Branch: "feature/available", SHA: strings.Repeat("d", 40), Actor: "pusher"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -310,7 +311,7 @@ func TestWorkflowCreateProcessNextAndCancelNeverSettleInline(t *testing.T) {
 		calls++
 		return false, context.DeadlineExceeded
 	}
-	source, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "pending-cancel", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("e", 40), Actor: "pusher"})
+	source, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "pending-cancel", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("e", 40), Actor: "pusher"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +373,7 @@ func TestWorkflowCreatePendingPersistenceFailureIsRetriedWithoutFatal(t *testing
 	f.scheduler.store = db
 	jobs := &pendingCreateJobs{fakeJobs: f.jobs, settle: func(context.Context, string, string, time.Time) (bool, error) { return false, context.DeadlineExceeded }}
 	f.scheduler.jobs = jobs
-	source, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "persist-deferred", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("a", 40), Actor: "pusher"})
+	source, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "persist-deferred", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("a", 40), Actor: "pusher"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +399,7 @@ func TestWorkflowCreatePendingPushAndResolvedCancelStayLocal(t *testing.T) {
 			calls := 0
 			jobs := &pendingCreateJobs{fakeJobs: f.jobs, settle: func(context.Context, string, string, time.Time) (bool, error) { calls++; return true, nil }}
 			f.scheduler.jobs = jobs
-			source, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "pending-local", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("b", 40), Actor: "pusher"})
+			source, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "pending-local", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("b", 40), Actor: "pusher"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -406,7 +407,7 @@ func TestWorkflowCreatePendingPushAndResolvedCancelStayLocal(t *testing.T) {
 				t.Fatal(err)
 			}
 			if mode == "push" {
-				if _, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "newer-push", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("c", 40), Actor: "pusher"}); err != nil {
+				if _, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "newer-push", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("c", 40), Actor: "pusher"}); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -437,7 +438,7 @@ func TestWorkflowCreatePendingStatusDoesNotCallKubernetes(t *testing.T) {
 	f := newControlFixture(t)
 	jobs := &pendingCreateJobs{fakeJobs: f.jobs}
 	f.scheduler.jobs = jobs
-	source, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "pending-status", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("d", 40), Actor: "pusher"})
+	source, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "pending-status", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("d", 40), Actor: "pusher"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,11 +467,11 @@ func TestWorkflowCreatePendingStatusDoesNotCallKubernetes(t *testing.T) {
 
 func TestTerminalCancellationHandoffDoesNotRearmStop(t *testing.T) {
 	f := newControlFixture(t)
-	enqueued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "terminal-handoff", Repository: f.repo, Branch: "feature/terminal", SHA: strings.Repeat("a", 40), Actor: "owner"})
+	enqueued, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "terminal-handoff", Repository: f.repo, Branch: "feature/terminal", SHA: strings.Repeat("a", 40), Actor: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := f.store.ClaimNextRun(t.Context())
+	run, err := storetest.ClaimNextRun(f.store, t.Context())
 	if err != nil || run.ID != enqueued.ID {
 		t.Fatal(run, err)
 	}

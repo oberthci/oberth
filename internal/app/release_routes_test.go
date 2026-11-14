@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/gitcache"
@@ -232,13 +233,13 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	control := &routeController{}
+	control := &routeController{argoControl: &configuredController{waitResult: argojob.Completion{Terminal: true, Phase: "Failed", Reason: "route fixture complete"}}}
 	config := argojob.Config{Namespace: "pipelines", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release", CISecretsServiceAccount: "ci", ExecutorServiceAccount: "executor", ReleaseTagRoutes: argojob.ReleaseTagRoutes{"github/org/repo": {{Pattern: "deploy-*", File: ".oberth/deploy.yaml"}}}}
 	jobs, err := NewArgoJobs(control, config, &stubAuditor{}, emptySecretAccess{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler, err := service.NewScheduler(service.SchedulerConfig{Store: db, Git: unusedRouteGit{}, Logs: logs, Jobs: jobs, ReleaseJobs: jobs, Auditor: &stubAuditor{}, WorkspaceRoot: t.TempDir()})
+	scheduler, err := service.NewScheduler(service.SchedulerConfig{Store: db, Git: cache, Logs: logs, Jobs: jobs, ReleaseJobs: jobs, Auditor: &stubAuditor{}, WorkspaceRoot: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,17 +300,23 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 		if run.RefKind != model.RefTag || run.Ref != tc.tag {
 			t.Fatalf("unexpected durable tag: %+v", run)
 		}
-		request := service.WorkflowRequest{Run: run, Repository: repo, UpstreamName: "github", UpstreamOrg: "org", SourceDir: work, WorkflowName: "push-" + tc.tag}
-		if size, err := jobs.ResolvePipelineSource(ctx, request); err != nil || size == nil {
-			t.Fatalf("%v size=%v err=%v", tc.tag, size, err)
+		deadline := time.Now().Add(10 * time.Second)
+		for run.Status.Active() {
+			if time.Now().After(deadline) {
+				t.Fatalf("route observer did not finish: %+v", run)
+			}
+			time.Sleep(time.Millisecond)
+			run, err = db.Run(ctx, run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
-		if tc.release {
-			err = jobs.CreateRelease(ctx, request)
-		} else {
-			err = jobs.CreateWorkflow(ctx, request)
+		request := service.WorkflowRequest{Run: run, Repository: repo, UpstreamName: "github", UpstreamOrg: "org", SourceDir: work, WorkflowName: run.WorkflowName}
+		if run.WorkflowName == "" {
+			t.Fatalf("receive did not submit directly: %+v", run)
 		}
-		if err != nil {
-			t.Fatal(err)
+		if receipt, err := jobs.ResolvePipelineSource(ctx, request); err != nil || receipt == nil {
+			t.Fatalf("route receipt=%v err=%v", receipt, err)
 		}
 		if control.request.Ref != tc.tag || control.request.PipelineFile != tc.file {
 			t.Fatalf("wrong submission: %+v", control.request)
@@ -320,10 +327,6 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 		}
 	}
 }
-
-// Admission does not use Git; invoking one of these methods is a test failure.
-// The actual pushed objects above supply the release request's provenance.
-type unusedRouteGit struct{ service.WorkspaceGit }
 
 // This fixture repository is already registered; accidental rediscovery must
 // fail instead of silently replacing the identity used by route selection.

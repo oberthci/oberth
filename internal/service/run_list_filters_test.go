@@ -66,7 +66,7 @@ func TestRunListOwnAndHeldFilters(t *testing.T) {
 	if runs, err := f.runList(t, map[string]any{"held": true}); err != nil || len(runs) != 0 {
 		t.Fatalf("held before any hold = %v, %v", runIDs(runs), err)
 	}
-	claimed, err := f.store.ClaimNextRun(t.Context())
+	claimed, err := storetest.ClaimNextRun(f.store, t.Context())
 	if err != nil || claimed.ID != mine.ID {
 		t.Fatalf("claim = %+v, %v", claimed, err)
 	}

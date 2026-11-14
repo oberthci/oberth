@@ -98,7 +98,6 @@ func testSchedules(t *testing.T, git *fakeScheduleGit, repos []model.Repository)
 	schedules := NewSchedules(SchedulesConfig{
 		Repositories: func(context.Context) ([]model.Repository, error) { return repos, nil },
 		Git:          git,
-		Runs:         runs,
 		Enqueuer:     enqueuer,
 		State:        state,
 		MinInterval:  15 * time.Minute,

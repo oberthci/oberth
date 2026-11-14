@@ -14,6 +14,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type schedulingObserverFunc func(context.Context, model.Run) (*model.ExecutionObservation, error)
@@ -76,7 +77,7 @@ func TestSchedulingProjectionStartupUnavailableAndContext(t *testing.T) {
 
 func TestSchedulingAvailableInMCPStatusRunGetAndAPIRun(t *testing.T) {
 	fixture := newControlFixture(t)
-	run, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "scheduling", Repository: fixture.repo, Branch: "feature/scheduling", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
+	run, err := fixture.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "scheduling", Repository: fixture.repo, Branch: "feature/scheduling", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +89,7 @@ func TestSchedulingAvailableInMCPStatusRunGetAndAPIRun(t *testing.T) {
 	if queued.Scheduling.State != "queued" {
 		t.Fatalf("queued=%#v", queued.Scheduling)
 	}
-	running, err := fixture.store.ClaimNextRun(t.Context())
+	running, err := storetest.ClaimNextRun(fixture.store, t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +178,7 @@ func (c schedulingAgeClock) Since(observed time.Time) time.Duration {
 
 func TestWaitSchedulingAgeIncludesLongPoll(t *testing.T) {
 	fixture := newControlFixture(t)
-	run, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "scheduling-age", Repository: fixture.repo, Branch: "feature/scheduling-age", SHA: strings.Repeat("b", 40), Actor: "agent@host"})
+	run, err := fixture.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "scheduling-age", Repository: fixture.repo, Branch: "feature/scheduling-age", SHA: strings.Repeat("b", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,11 +227,11 @@ func TestWaitSchedulingAgeIncludesLongPoll(t *testing.T) {
 func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := t.Context()
-	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "deadline-observation", Repository: fixture.repo, Branch: "feature/deadline", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
+	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "deadline-observation", Repository: fixture.repo, Branch: "feature/deadline", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = fixture.store.ClaimNextRun(ctx); err != nil {
+	if _, err = storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = fixture.store.SetRunWorkflowName(ctx, enqueued.ID, "wf"); err != nil {

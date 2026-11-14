@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // TestMCPUnderQueueLoad runs the real scheduler, SQLite event recorder and HTTPS
@@ -159,7 +160,7 @@ func TestMCPUnderQueueLoad(t *testing.T) {
 func queueLoadFixture(t *testing.T) (*groupFixture, *API) {
 	t.Helper()
 	f := newGroupFixture(t, 10)
-	service, err := NewAPI(APIConfig{Runs: f.store, History: f.store, Repositories: f.store, Issues: f.store, Promotions: f.store, PromotionRuns: f.store, Enqueues: f.scheduler, Logs: f.control.logs, Auditor: f.store, Signals: f.scheduler.signals, AgentEvents: f.store, MaximumWait: 2 * time.Second})
+	service, err := NewAPI(APIConfig{Runs: f.store, History: f.store, Repositories: f.store, Issues: f.store, Promotions: f.store, PromotionRuns: f.store, Enqueues: fixtureEnqueues{f.scheduler}, Logs: f.control.logs, Auditor: f.store, Signals: f.scheduler.signals, AgentEvents: f.store, MaximumWait: 2 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +173,7 @@ func queueLoadFixture(t *testing.T) (*groupFixture, *API) {
 		f.branch(t, f.terraform, fmt.Sprintf("feature/running-%d", index), "a")
 	}
 	for range 10 {
-		run, err := f.store.ClaimNextRun(t.Context())
+		run, err := storetest.ClaimNextRun(f.store, t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}

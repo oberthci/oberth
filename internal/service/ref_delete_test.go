@@ -34,7 +34,7 @@ func TestRefDeletionStopsRunningAndAssistedWorkflows(t *testing.T) {
 			f := newGroupFixture(t, 0)
 			f.engine.declareCPU("feature/deleted", 2000)
 			f.engine.declareCPU("feature/other", 2000)
-			busy, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "busy", Repository: f.exampleService, Branch: "feature/deleted", SHA: strings.Repeat("a", 40), Actor: "agent@host", Assist: assist})
+			busy, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "busy", Repository: f.exampleService, Branch: "feature/deleted", SHA: strings.Repeat("a", 40), Actor: "agent@host", Assist: assist})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -174,7 +174,7 @@ func TestRefDeletionOverlappingRePushDoesNotCancelNewRun(t *testing.T) {
 	}
 	// Accept an identical SHA before the deletion callback returns. Cleanup must
 	// use the atomically captured old run, not re-select all current ref runs.
-	newer, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "re-push", Repository: f.exampleService, Branch: old.Ref, SHA: old.SHA, Actor: "agent@host"})
+	newer, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "re-push", Repository: f.exampleService, Branch: old.Ref, SHA: old.SHA, Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,7 +13,7 @@ import (
 func TestRunGetRetainsVersionedTimingWithoutCluster(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{Status: model.RunPassed})
 	ctx := context.Background()
-	run, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "run-timing", Repository: fixture.repo, Branch: "feature/timing", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
+	run, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "run-timing", Repository: fixture.repo, Branch: "feature/timing", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}

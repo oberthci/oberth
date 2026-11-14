@@ -75,7 +75,7 @@ func TestRepositoryArchiveToolsRequireUnscopedAdminAndKeepCatalog(t *testing.T) 
 		t.Fatalf("unknown archived filter = %v", err)
 	}
 	// A caller retaining a pre-archive repository snapshot cannot enqueue.
-	_, err = fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "late", Repository: fixture.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "agent"})
+	_, err = fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "late", Repository: fixture.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "agent"})
 	if !errors.Is(err, store.ErrRepositoryArchived) {
 		t.Fatalf("stale snapshot enqueue = %v", err)
 	}
@@ -127,7 +127,7 @@ func TestArchivedRepositoryStatusReadsHistoryWithoutGitCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, Phase: "passed"}); err != nil {

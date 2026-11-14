@@ -67,7 +67,7 @@ func TestRunLogPatternReserveDoesNotBlockCIIssueCreation(t *testing.T) {
 
 	fixture := newControlFixture(t, JobResult{Status: model.RunFailed, Phase: "security", FailedStage: "security", FailedStep: "security", Error: "step failed", Steps: []model.StepResult{{Stage: "security", Step: "security", Status: model.StepFailed, ExitCode: 2}}})
 	fixture.jobs.transcripts = []string{siblingInterleavedTranscript()}
-	queued, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "pattern-reserve-ci", Repository: fixture.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
+	queued, err := fixture.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "pattern-reserve-ci", Repository: fixture.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
 	}

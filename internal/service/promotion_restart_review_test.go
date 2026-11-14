@@ -9,6 +9,7 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestRestartNeverResubmitsPromotion(t *testing.T) {
@@ -24,7 +25,7 @@ func TestRestartNeverResubmitsPromotion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.store.ClaimNextRun(t.Context()); err != nil {
+	if _, err = storetest.ClaimNextRun(f.store, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.store.RecoverOwnerState(t.Context()); err != nil {

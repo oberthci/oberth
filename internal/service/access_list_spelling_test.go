@@ -25,7 +25,7 @@ func TestAccessListResolvesRepoSpelling(t *testing.T) {
 	service, err := NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, Repositories: fixture.store,
 		Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: fixture.scheduler, Git: fixture.git, Refs: fixture.refs,
+		Enqueues: fixtureEnqueues{fixture.scheduler}, Git: fixture.git, Refs: fixture.refs,
 		Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "promotion-work"),

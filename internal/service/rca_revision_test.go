@@ -202,7 +202,7 @@ func testRCACreateCleanupOutage(t *testing.T, knownCreate bool) {
 	scheduler.createTicks = ticks
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- scheduler.Run(ctx) }()
+	go func() { done <- scheduler.runAcceptedFixtures(ctx) }()
 	t.Cleanup(func() {
 		cancel()
 		select {

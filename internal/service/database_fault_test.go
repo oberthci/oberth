@@ -14,6 +14,7 @@ type deadlineFaultStore struct {
 	failures   map[string]int
 	calls      map[string]int
 	faultError error
+	runFaultID string
 }
 
 func (s *deadlineFaultStore) fault(operation string) error {
@@ -40,12 +41,12 @@ func (s *deadlineFaultStore) EnqueueReceiveEvent(a0 context.Context, a1 model.Re
 	return s.Store.EnqueueReceiveEvent(a0, a1, a2)
 }
 
-func (s *deadlineFaultStore) ClaimNextRun(a0 context.Context) (model.Run, error) {
-	if err := s.fault("ClaimNextRun"); err != nil {
+func (s *deadlineFaultStore) StartRun(a0 context.Context, id string) (model.Run, error) {
+	if err := s.fault("StartRun"); err != nil {
 		var zero model.Run
 		return zero, err
 	}
-	return s.Store.ClaimNextRun(a0)
+	return s.Store.StartRun(a0, id)
 }
 
 func (s *deadlineFaultStore) MarkRunCreatePending(a0 context.Context, a1 string, a2 string, reason ...string) error {
@@ -72,6 +73,13 @@ func (s *deadlineFaultStore) MarkRunSubmissionStarted(a0 context.Context, a1 str
 }
 
 func (s *deadlineFaultStore) Run(a0 context.Context, a1 string) (model.Run, error) {
+	s.mu.Lock()
+	target := s.runFaultID
+	s.mu.Unlock()
+	if target != "" && a1 != target {
+		return s.Store.Run(a0, a1)
+	}
+
 	if err := s.fault("Run"); err != nil {
 		var zero model.Run
 		return zero, err

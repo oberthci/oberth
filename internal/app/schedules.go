@@ -20,7 +20,6 @@ const ScheduleActor = "oberth:scheduler"
 const (
 	schedulePerRepoTimeout = 30 * time.Second
 	scheduleTickInterval   = time.Minute
-	scheduleRunLookback    = 5
 )
 
 type ScheduleGit interface {
@@ -31,10 +30,6 @@ type ScheduleGit interface {
 type ScheduleEnqueuer interface {
 	EnqueueCI(ctx context.Context, request service.CIRequest) (model.EnqueueRunResult, error)
 	EnqueueScheduledCI(context.Context, service.CIRequest, model.ScheduleFireSpec) (model.ScheduleEnqueueResult, error)
-}
-
-type ScheduleRuns interface {
-	ListRecentRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error)
 }
 
 type ScheduleState interface {
@@ -66,7 +61,6 @@ type ScheduleUpstreamResolver interface {
 type SchedulesConfig struct {
 	Repositories func(context.Context) ([]model.Repository, error)
 	Git          ScheduleGit
-	Runs         ScheduleRuns
 	Enqueuer     ScheduleEnqueuer
 	State        ScheduleState
 	Upstreams    ScheduleUpstreamResolver
@@ -281,22 +275,6 @@ func (schedules *Schedules) withoutPaused(ctx context.Context, qualifiedName str
 		running = append(running, entry)
 	}
 	return running
-}
-
-func (schedules *Schedules) busy(ctx context.Context, repoID int64) bool {
-	if schedules.config.Runs == nil {
-		return false
-	}
-	runs, err := schedules.config.Runs.ListRecentRuns(ctx, model.RunListFilter{RepoID: repoID, Limit: scheduleRunLookback})
-	if err != nil {
-		return true
-	}
-	for _, run := range runs {
-		if run.Status.Active() {
-			return true
-		}
-	}
-	return false
 }
 
 func (schedules *Schedules) record(ctx context.Context, repo, entry string, at time.Time, outcome string) {

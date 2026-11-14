@@ -18,7 +18,7 @@ func TestScheduleEntryEnqueuePersistsTheResolvedName(t *testing.T) {
 	f := newRecoveryFixture(t)
 	scheduler := f.scheduler(t, &recoveryJobs{})
 	for _, entry := range []string{"nightly", "weekly-sweep"} {
-		run, err := scheduler.EnqueueCI(context.Background(), CIRequest{EventID: "scheduled-" + entry, Repository: f.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "oberth:scheduler", Trigger: "schedule", ScheduleEntry: entry})
+		run, err := scheduler.recordCIForTest(context.Background(), CIRequest{EventID: "scheduled-" + entry, Repository: f.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "oberth:scheduler", Trigger: "schedule", ScheduleEntry: entry})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -37,7 +37,7 @@ func TestScheduleEntryIsVisibleThroughHTTPAndMCP(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := t.Context()
 	reader := f.api(t)
-	run, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "schedule-api", Repository: f.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "oberth:scheduler", Trigger: "schedule", ScheduleEntry: "nightly"})
+	run, err := f.scheduler.recordCIForTest(ctx, CIRequest{EventID: "schedule-api", Repository: f.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "oberth:scheduler", Trigger: "schedule", ScheduleEntry: "nightly"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,26 +76,31 @@ func TestScheduleEntryIsVisibleThroughHTTPAndMCP(t *testing.T) {
 	}
 }
 
-func TestScheduleCronUsesAtomicCursorAndCoalescesLiveEntry(t *testing.T) {
-	fixture := newRecoveryFixture(t)
-	scheduler := fixture.scheduler(t, &recoveryJobs{})
-	qualified, err := fixture.store.QualifiedRepoName(t.Context(), fixture.repo.ID)
+func TestScheduleCronSubmitsIndependentOverlappingOccurrences(t *testing.T) {
+	f := newGroupFixture(t, 0)
+	qualified, err := f.store.QualifiedRepoName(t.Context(), f.terraform.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	at := time.Date(2026, 10, 27, 1, 30, 0, 0, time.UTC)
-	request := CIRequest{EventID: "cron-first", Repository: fixture.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "oberth:scheduler", Trigger: "schedule", ScheduleEntry: "nightly"}
-	first, err := scheduler.EnqueueScheduledCI(t.Context(), request, model.ScheduleFireSpec{Repo: qualified, At: at})
+	request := CIRequest{EventID: "cron-first", Repository: f.terraform, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "oberth:scheduler", Trigger: "schedule", ScheduleEntry: "nightly"}
+	first, err := f.scheduler.EnqueueScheduledCI(t.Context(), request, model.ScheduleFireSpec{Repo: qualified, At: at})
 	if err != nil || first.Outcome != "fired" {
-		t.Fatalf("first cron = %+v, %v", first, err)
+		t.Fatalf("first cron=%+v %v", first, err)
 	}
 	request.EventID = "cron-next"
-	next, err := scheduler.EnqueueScheduledCI(t.Context(), request, model.ScheduleFireSpec{Repo: qualified, At: at.Add(15 * time.Minute), HasPrevious: true, Previous: at})
-	if err != nil || next.Outcome != "coalesced" || next.Enqueued.ID != first.Enqueued.ID {
-		t.Fatalf("next cron = %+v, %v", next, err)
+	next, err := f.scheduler.EnqueueScheduledCI(t.Context(), request, model.ScheduleFireSpec{Repo: qualified, At: at.Add(15 * time.Minute), HasPrevious: true, Previous: at})
+	if err != nil || next.Outcome != "fired" || next.Enqueued.ID == first.Enqueued.ID {
+		t.Fatalf("next cron=%+v %v", next, err)
 	}
-	retained, err := fixture.store.Run(t.Context(), first.Enqueued.ID)
-	if err != nil || retained.Status != model.RunQueued {
-		t.Fatalf("cron superseded its own live entry: %+v, %v", retained, err)
+	for _, id := range []string{first.Enqueued.ID, next.Enqueued.ID} {
+		run, err := f.store.Run(t.Context(), id)
+		if err != nil || run.Status != model.RunRunning || run.WorkflowName == "" {
+			t.Fatalf("occurrence not submitted=%+v %v", run, err)
+		}
+	}
+	for _, id := range []string{first.Enqueued.ID, next.Enqueued.ID} {
+		f.engine.finish(t, id)
+		f.awaitTerminal(t, id)
 	}
 }

@@ -55,7 +55,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.ClaimNextRun(ctx); err != nil {
+	if _, err := storetest.ClaimNextRun(database, ctx); err != nil {
 		t.Fatal(err)
 	}
 	logs, err := runlog.Open(filepath.Join(root, "logs"))

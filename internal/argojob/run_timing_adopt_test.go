@@ -91,7 +91,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.ClaimNextRun(ctx); err != nil {
+	if _, err = storetest.ClaimNextRun(db, ctx); err != nil {
 		t.Fatal(err)
 	}
 	// A submitted Workflow follows durable admission in the scheduler.

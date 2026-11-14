@@ -23,7 +23,7 @@ func scheduleTestRequest(t *testing.T, s *Store, repo model.Repository, at time.
 	return event, spec, model.ScheduleFireSpec{Repo: qualified, At: at}
 }
 
-func TestScheduleOccurrenceCoalescesOnlySameEntryAndBranch(t *testing.T) {
+func TestScheduleOccurrenceCreatesIndependentOverlappingRuns(t *testing.T) {
 	for _, claimed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("claimed-%v", claimed), func(t *testing.T) {
 			now := time.Date(2026, 10, 27, 1, 30, 0, 0, time.UTC)
@@ -56,7 +56,7 @@ func TestScheduleOccurrenceCoalescesOnlySameEntryAndBranch(t *testing.T) {
 			spec.SHA, spec.TestedSHA = event.ObjectSHA, event.CommitSHA
 			fire.HasPrevious, fire.Previous, fire.At = true, now, now.Add(15*time.Minute)
 			next, err := s.EnqueueScheduleOccurrence(t.Context(), event, spec, fire)
-			if err != nil || next.Outcome != "coalesced" || next.Enqueued.ID != first.Enqueued.ID {
+			if err != nil || next.Outcome != "fired" || next.Enqueued.ID == first.Enqueued.ID {
 				t.Fatalf("overlap = %+v, %v", next, err)
 			}
 			retained, err := s.Run(t.Context(), first.Enqueued.ID)
@@ -64,12 +64,12 @@ func TestScheduleOccurrenceCoalescesOnlySameEntryAndBranch(t *testing.T) {
 				t.Fatalf("live run changed: %+v, %v", retained, err)
 			}
 			outcomes, err := s.ScheduleOutcomes(t.Context(), fire.Repo)
-			if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != "coalesced" {
-				t.Fatalf("coalescing invisible: %+v, %v", outcomes, err)
+			if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != "fired" {
+				t.Fatalf("overlap invisible: %+v, %v", outcomes, err)
 			}
 			cursors, err := s.ScheduleFires(t.Context(), fire.Repo)
 			if err != nil || !cursors["nightly"].Equal(fire.At) {
-				t.Fatalf("coalescing did not consume occurrence: %+v, %v", cursors, err)
+				t.Fatalf("overlap did not consume occurrence: %+v, %v", cursors, err)
 			}
 			for _, differentBranch := range []bool{false, true} {
 				other := spec
@@ -237,7 +237,7 @@ func TestScheduleOccurrenceConcurrentTransactionsConsumeSnapshotOnce(t *testing.
 	}
 }
 
-func TestScheduleOccurrenceCoalescesRegardlessOfStoredTrigger(t *testing.T) {
+func TestScheduleOccurrenceDoesNotCoalesceAnyExistingTrigger(t *testing.T) {
 	now := time.Date(2026, 10, 27, 1, 30, 0, 0, time.UTC)
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -259,8 +259,8 @@ func TestScheduleOccurrenceCoalescesRegardlessOfStoredTrigger(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := s.EnqueueScheduleOccurrence(t.Context(), event, spec, fire)
-	if err != nil || result.Outcome != "coalesced" || result.Enqueued.ID != active.ID {
-		t.Fatalf("same-entry run with another trigger was not coalesced: %+v, %v", result, err)
+	if err != nil || result.Outcome != "fired" || result.Enqueued.ID == active.ID {
+		t.Fatalf("same-entry history suppressed a new occurrence: %+v, %v", result, err)
 	}
 	retained, err := s.Run(t.Context(), active.ID)
 	if err != nil || retained.Status != model.RunQueued {

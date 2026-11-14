@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
@@ -156,4 +157,8 @@ func (w *shutdownWorkflowFake) Delete(_ context.Context, _ string, options metav
 	w.deletes++
 	w.object = nil
 	return nil
+}
+
+func (w *shutdownWorkflowFake) Patch(context.Context, string, types.PatchType, []byte, metav1.PatchOptions, ...string) (*wfv1.Workflow, error) {
+	return nil, errors.New("unexpected patch during observation")
 }

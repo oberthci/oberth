@@ -30,7 +30,7 @@ func TestExecutorIdentityFailureStopsAsCancelledAndRunRetryApplies(t *testing.T)
 
 	fixture.jobs.waitErr = fmt.Errorf("observe: %w", &identityObservationFailure{cause: context.DeadlineExceeded})
 	fixture.jobs.stopResult = JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: fixture.jobs.waitErr.Error()}
-	source, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "identity-delivery", Repository: fixture.repo, Branch: "feature/identity", SHA: strings.Repeat("a", 40), Actor: "pusher"})
+	source, err := fixture.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "identity-delivery", Repository: fixture.repo, Branch: "feature/identity", SHA: strings.Repeat("a", 40), Actor: "pusher"})
 	if err != nil {
 		t.Fatal(err)
 	}

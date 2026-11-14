@@ -82,7 +82,7 @@ func newRerunHarnessWithOptions(t *testing.T, options store.Options, results ...
 	harness.service, err = NewAPI(APIConfig{
 		Runs: fixture.store, History: fixture.store, RunReruns: fixture.store,
 		Repositories: fixture.store, Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
-		Enqueues: harness.scheduler, Git: harness.git, Refs: harness.refs, Logs: fixture.logs, Auditor: fixture.store,
+		Enqueues: fixtureEnqueues{harness.scheduler}, Git: harness.git, Refs: harness.refs, Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(fixture.root, "rerun-promotion-work"),
 	})
@@ -143,7 +143,7 @@ var (
 func TestRunRerunAfterTestFailurePassesAndStatusReportsNewestRun(t *testing.T) {
 	harness := newRerunHarness(t, flakyResult, greenResult)
 	ctx := context.Background()
-	first, err := harness.scheduler.EnqueueCI(ctx, CIRequest{EventID: "flaky-push", Repository: harness.fixture.repo,
+	first, err := harness.scheduler.recordCIForTest(ctx, CIRequest{EventID: "flaky-push", Repository: harness.fixture.repo,
 		Branch: rerunBranch, SHA: rerunSHA, Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +204,7 @@ func TestRunRerunAfterTestFailurePassesAndStatusReportsNewestRun(t *testing.T) {
 func TestRunRerunRefusesBranchThatMoved(t *testing.T) {
 	harness := newRerunHarness(t, flakyResult)
 	ctx := context.Background()
-	first, err := harness.scheduler.EnqueueCI(ctx, CIRequest{EventID: "old-push", Repository: harness.fixture.repo,
+	first, err := harness.scheduler.recordCIForTest(ctx, CIRequest{EventID: "old-push", Repository: harness.fixture.repo,
 		Branch: rerunBranch, SHA: rerunSHA, Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
@@ -222,7 +222,7 @@ func TestRunRerunRefusesBranchThatMoved(t *testing.T) {
 
 func admitRerunTag(t *testing.T, harness *rerunHarness) model.Run {
 	t.Helper()
-	queued, err := harness.scheduler.AdmitRelease(context.Background(), ReleaseRequest{EventID: "tag-push", Repository: harness.fixture.repo,
+	queued, err := harness.scheduler.recordReleaseForTest(context.Background(), ReleaseRequest{EventID: "tag-push", Repository: harness.fixture.repo,
 		Tag: rerunTag, ObjectSHA: rerunTagObject, CommitSHA: rerunTagCommit, Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
@@ -365,7 +365,7 @@ func (s stubRefResolver) TagObjectSHA(ctx context.Context, repo, tag string) (st
 func TestRunRerunKeepsOperatorReasonWithoutAutomaticRetry(t *testing.T) {
 	now := time.Now()
 	harness := newRerunHarnessWithOptions(t, store.Options{Now: func() time.Time { return now }}, infraFailure, infraFailure)
-	first, err := harness.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "manual-reason", Repository: harness.fixture.repo, Branch: rerunBranch, SHA: rerunSHA, Actor: "operator"})
+	first, err := harness.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "manual-reason", Repository: harness.fixture.repo, Branch: rerunBranch, SHA: rerunSHA, Actor: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}

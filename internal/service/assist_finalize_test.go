@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // verdictUnreadableStore fails the run read that carries the assisted
@@ -29,11 +30,11 @@ func (store verdictUnreadableStore) Run(ctx context.Context, id string) (model.R
 func TestFinalizeReturnsUnreadableAssistedVerdict(t *testing.T) {
 	result := JobResult{Status: model.RunPassed, Phase: "test", Steps: []model.StepResult{{Stage: "ci", Step: "unit", Status: model.StepPassed}}}
 	f := newControlFixture(t, result)
-	source, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "verdict", Repository: f.repo, Branch: "feature/verdict", SHA: strings.Repeat("e", 40), Actor: "pusher"})
+	source, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "verdict", Repository: f.repo, Branch: "feature/verdict", SHA: strings.Repeat("e", 40), Actor: "pusher"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := f.store.ClaimNextRun(t.Context())
+	run, err := storetest.ClaimNextRun(f.store, t.Context())
 	if err != nil || run.ID != source.ID {
 		t.Fatalf("claim = %+v %v", run, err)
 	}
