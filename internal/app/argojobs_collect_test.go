@@ -62,7 +62,6 @@ func TestArgoCollectPreservesNativeVerdictAndUnfinishedNodes(t *testing.T) {
 				wf.Status.Phase = wfv1.WorkflowFailed
 				if succeeded {
 					wf.Status.Phase = wfv1.WorkflowSucceeded
-					delete(wf.Status.Nodes, "failed")
 				}
 				completion := argojob.Completion{Name: wf.Name, Terminal: true, Succeeded: succeeded, Phase: string(wf.Status.Phase), Reason: "original workflow failure", Steps: argojob.StepResults(wf), NodeSteps: argojob.NodeStepResults(wf, nil)}
 				if !succeeded {

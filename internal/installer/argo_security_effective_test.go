@@ -148,6 +148,17 @@ func assertInheritedSeccomp(t *testing.T, stored map[string]any, pod corev1.Pod)
 
 func checkWorkflowSeccompUpgrade(t *testing.T, stored []byte, live string, pass, podRefusal bool) {
 	t.Helper()
+	// Keep native cleanup configured so these cases isolate seccomp inheritance.
+	var values map[string]any
+	if err := json.Unmarshal(stored, &values); err != nil {
+		t.Fatal(err)
+	}
+	mergePlannedValues(values, map[string]any{"controller": map[string]any{"workflowDefaults": map[string]any{"spec": map[string]any{"ttlStrategy": map[string]any{"secondsAfterCompletion": 3600}}}}})
+	var err error
+	stored, err = json.Marshal(values)
+	if err != nil {
+		t.Fatal(err)
+	}
 	fixture := newUpgradeFixture(t, "0.16.20", "0.16.21", "73")
 	cm := argoSecurityLiveObjects(DefaultArgoNamespace, true)[1].(*corev1.ConfigMap)
 	cm.Data["config"] = live
@@ -169,7 +180,7 @@ func checkWorkflowSeccompUpgrade(t *testing.T, stored []byte, live string, pass,
 		}
 		return original(ctx, args)
 	}
-	_, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.16.21", BinarySchemaVersion: 73, NoBackup: true}, fixture.deps)
+	_, err = RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.16.21", BinarySchemaVersion: 73, NoBackup: true}, fixture.deps)
 	if pass {
 		if err != nil || policyWrites != 1 || nativeWrites != 0 {
 			t.Fatalf("native inheritance refused or rewritten: policy=%d native=%d err=%v", policyWrites, nativeWrites, err)

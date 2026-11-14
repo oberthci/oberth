@@ -305,7 +305,7 @@ func TestNoRetryStrategyIsUnchanged(t *testing.T) {
 	node.Phase = wfv1.NodeFailed
 	failed.Status.Nodes["unit-pod"] = node
 	completion := completionFor(failed)
-	if !completion.Succeeded || completion.FailedStage != "" || completion.FailedStep != "" {
+	if completion.Succeeded || completion.FailedStage != "test" || completion.FailedStep != "unit" {
 		t.Fatalf("failed step without retry = %v %q/%q, want failed test/unit", completion.Succeeded, completion.FailedStage, completion.FailedStep)
 	}
 }

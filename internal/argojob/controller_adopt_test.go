@@ -193,6 +193,7 @@ func TestStartupAdoptionCompletedWaitPublishesLogsAndRetiresIdentity(t *testing.
 	var pods []*corev1.Pod
 	for _, pod := range fixtureStepPods(wf) {
 		pod.Spec.Containers = []corev1.Container{{Name: "main"}}
+		pod.Status.Phase = corev1.PodSucceeded
 		pods = append(pods, pod)
 	}
 	controller.hub = containerLogCache{workflow: wf, pods: pods}

@@ -28,6 +28,7 @@ func TestStoppedCompletedWorkflowResumesLogsAndRetiresExecutorIdentity(t *testin
 	var pods []*corev1.Pod
 	for _, pod := range fixtureStepPods(workflow) {
 		pod.Spec.Containers = []corev1.Container{{Name: "main"}}
+		pod.Status.Phase = corev1.PodSucceeded
 		pods = append(pods, pod)
 	}
 	controller.hub = containerLogCache{workflow: workflow, pods: pods}
