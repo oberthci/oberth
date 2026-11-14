@@ -278,6 +278,9 @@ func TestAddRepoWorkflowsAreNativeAndNeverCommittedOrOverwritten(t *testing.T) {
 }
 
 func TestAddRepoClusterActionsKeepTheChosenContext(t *testing.T) {
+	// The API command stub uses public arguments and generates no credential.
+	// Still export its inventory identity for the mandatory bootstrap recorder.
+	bootstrapCredentialInventory(t)
 	f := newAddRepoFixture(t, "git@github.com:acme/project.git")
 	f.fake(t, "oberth", `printf '%s\n' "$@" >> "$CALL_TRACE"`)
 	f.fake(t, "kubectl", `echo unexpected-kubectl >&2;exit 1`)
