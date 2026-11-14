@@ -609,7 +609,7 @@ func sourceDatabase(t *testing.T) ([]byte, map[string][]byte, string) {
 		t.Fatal(err)
 	}
 	storetest.Track(database, path, opts)
-	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "upstream", Kind: "ssh", BaseURL: "ssh://git@upstream.example.test/org"})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "codeberg", Kind: "forgejo", BaseURL: "https://codeberg.org"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,7 +665,7 @@ func freshInstallDatabase(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	storetest.Track(database, path, opts)
-	if _, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "upstream", Kind: "ssh", BaseURL: "ssh://git@upstream.example.test/org"}); err != nil {
+	if _, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "github", Kind: "github", BaseURL: "https://github.com"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
