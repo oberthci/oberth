@@ -38,8 +38,8 @@ func TestUpgradeConfiguredAdminRepairsWithoutRunningPod(t *testing.T) {
 		t.Fatal(err)
 	}
 	kube.ClearActions()
-	if err := checkUpgradeVerificationConnection(t.Context(), UpgradeConfig{Namespace: DefaultNamespace}, f.deps); err != nil || len(kube.Actions()) != 0 {
-		t.Error("credential preflight contacted Kubernetes", err, kube.Actions())
+	if err := checkUpgradeVerificationConnection(t.Context(), UpgradeConfig{Namespace: DefaultNamespace}, f.deps); err != nil || len(kube.Actions()) != 1 || !kube.Actions()[0].Matches("list", "pods") {
+		t.Error("credential preflight did more than observe Pods", err, kube.Actions())
 	}
 	writes := 0
 	stop := errors.New("stop at Helm write")

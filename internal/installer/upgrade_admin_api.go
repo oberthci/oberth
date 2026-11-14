@@ -69,9 +69,30 @@ func checkUpgradeVerificationConnection(ctx context.Context, cfg UpgradeConfig, 
 			return err
 		}
 	}
-	if deps.Admin != nil {
-		return nil
+	if deps.Admin == nil {
+		if err := checkUpgradeClientConfiguration(ctx, cfg, deps); err != nil {
+			return err
+		}
 	}
+	if deps.KubeClient != nil {
+		pod, err := runningAdminPod(ctx, Config{Namespace: cfg.Namespace}, deps)
+		if err != nil {
+			return err
+		}
+		// A failed release with no Running Pod must remain repairable.
+		if pod == nil {
+			return nil
+		}
+	}
+	_, _, err := adminVersion(ctx, Config{Namespace: cfg.Namespace}, deps)
+	var status *client.AdminError
+	if errors.As(err, &status) && status.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("this client is not an unscoped admin of this server (nothing changed): %w", err)
+	}
+	return err
+}
+
+func checkUpgradeClientConfiguration(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
 	configured, err := resolveAdminClientConfig(Config{Namespace: cfg.Namespace}, deps)
 	if err == nil {
 		_, err = client.New(ctx, configured)

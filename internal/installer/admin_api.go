@@ -95,6 +95,29 @@ func resolveAdminClientConfig(cfg Config, deps Deps) (client.Config, error) {
 	return connection.Config(), nil
 }
 
+// runningAdminPod observes the same server selection for preflight and transport.
+func runningAdminPod(ctx context.Context, cfg Config, deps Deps) (*corev1.Pod, error) {
+	ns := cfg.Namespace
+	if ns == "" {
+		ns = DefaultNamespace
+	}
+	pods, err := deps.KubeClient.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=oberth"})
+	if err != nil {
+		return nil, err
+	}
+	var pod *corev1.Pod
+	for i := range pods.Items {
+		candidate := &pods.Items[i]
+		if candidate.DeletionTimestamp == nil && candidate.Status.Phase == corev1.PodRunning {
+			if pod != nil {
+				return nil, errors.New("admin API requires one running server Pod")
+			}
+			pod = candidate
+		}
+	}
+	return pod, nil
+}
+
 func adminAPI(ctx context.Context, cfg Config, deps Deps) (AdminAPI, func(), error) {
 	if deps.Admin != nil {
 		return deps.Admin, func() {}, nil
@@ -112,19 +135,9 @@ func adminAPI(ctx context.Context, cfg Config, deps Deps) (AdminAPI, func(), err
 		if ns == "" {
 			ns = DefaultNamespace
 		}
-		pods, err := deps.KubeClient.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=oberth"})
+		pod, err := runningAdminPod(ctx, cfg, deps)
 		if err != nil {
 			return nil, closeConnection, err
-		}
-		var pod *corev1.Pod
-		for i := range pods.Items {
-			candidate := &pods.Items[i]
-			if candidate.DeletionTimestamp == nil && candidate.Status.Phase == corev1.PodRunning {
-				if pod != nil {
-					return nil, closeConnection, errors.New("admin API requires one running server Pod")
-				}
-				pod = candidate
-			}
 		}
 		if pod == nil {
 			return nil, closeConnection, errors.New("no running server Pod for admin API")
