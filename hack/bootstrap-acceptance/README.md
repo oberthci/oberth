@@ -75,7 +75,7 @@ because its JSON result says `ok: true`.
 ## Captured output boundary
 
 Captured subprocess stdout/stderr and MCP responses stay in an owner-only
-scratch directory. The 17 installer contract fixtures export private inventories
+scratch directory. The 19 installer contract fixtures export private inventories
 through Go's standard test output directory before their keys/temp files vanish;
 the remaining public-pin fixture generates no credential. Inventories include
 private CA/leaf/signing keys recorded by their helpers, script-generated client
