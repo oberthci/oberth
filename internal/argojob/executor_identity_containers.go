@@ -12,7 +12,7 @@ func executorWaiterContainer(image string, resources corev1.ResourceRequirements
 	return corev1.Container{
 		Name: executorTokenWaiter, Image: image,
 		Command:         []string{"sh", "-c", executorTokenWaitCommand},
-		SecurityContext: serverContainerSecurity(0), Resources: resources,
+		SecurityContext: nonrootContainerSecurity(0), Resources: resources,
 		VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}},
 	}
 }
