@@ -16,7 +16,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	kubefake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -55,6 +54,10 @@ func TestStartupAdoptionWaitsThroughCapabilityAPIOutage(t *testing.T) {
 	if _, found, err := controller.Adopt(t.Context(), request); err != nil || !found || client.reads != 0 || reads != 2 {
 		t.Fatal("capability recovery changed Workflow observation", found, err, client.reads, reads)
 	}
+}
+
+func (adoptionCache) Subscribe(string) (<-chan struct{}, func()) {
+	return make(chan struct{}, 1), func() {}
 }
 
 func (h adoptionCache) Workflow(name string) (*wfv1.Workflow, bool) {
@@ -146,7 +149,7 @@ func TestStartupAdoptionRetainsUnknownAndRejectsUIDSubstitution(t *testing.T) {
 				cache.workflow = nil
 				client.readErr = apierrors.NewServiceUnavailable("API unavailable")
 			}
-			controller := &Controller{workflows: client, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, hub: cache, interval: time.Millisecond}
+			controller := &Controller{workflows: client, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, hub: cache, idleInterval: time.Millisecond}
 			binding, found, err := controller.Adopt(t.Context(), request)
 			if mode == "changed-uid" {
 				if err != nil || !found || client.reads != 0 {
@@ -172,9 +175,9 @@ func TestStartupAdoptionCompletedWaitPublishesLogsAndRetiresIdentity(t *testing.
 	config := testConfig()
 	config.Namespace = wf.Namespace
 	config.MaxRunLogBytes = 1 << 20
-	kube := kubefake.NewClientset()
+	kube := fixtureKube(wf)
 	client := &adoptionLiveClient{staticWorkflowClient: staticWorkflowClient{workflow: wf}}
-	controller := &Controller{workflows: client, kube: kube, config: config, hub: adoptionCache{workflow: wf, healthy: true}, interval: time.Millisecond}
+	controller := &Controller{workflows: client, kube: kube, config: config, hub: adoptionCache{workflow: wf, healthy: true}, idleInterval: time.Millisecond}
 	kube.PrependReactor("create", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		action.(clienttesting.CreateAction).GetObject().(*corev1.Pod).UID = "identity-lifetime-uid"
 		return false, nil, nil
