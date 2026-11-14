@@ -50,6 +50,8 @@ TESTS = (
 FLOW_TESTS = (
     (CLI_PACKAGE, 'TestRunCreateFirstAdminLiveGate'),
     (INSTALLER_PACKAGE, 'TestInstallJSONOnboardingAndResume'),
+    (INSTALLER_PACKAGE, 'TestFirstAdminInterruptedInstallResumes'),
+    (INSTALLER_PACKAGE, 'TestUpgradeReleasedServerWithoutAdminAPI'),
 )
 
 

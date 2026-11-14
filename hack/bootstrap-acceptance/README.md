@@ -41,7 +41,9 @@ time. The CLI build and one adverse fixture reuse the same race build flags/cach
 - First-admin command issuance through the real daemon gate and SQLite Store:
   first run, same-key redelivery, active-admin refusal and inactive-admin recovery.
   The recorded rest events must also include the complete non-interactive JSON
-  onboarding/resume flow. These tests cannot be silently skipped.
+  onboarding/resume flow, interrupted enrollment with and without a saved pending key,
+  and the released-server upgrade path with absent admin routes. These tests
+  cannot be silently skipped.
 - Connect pin refusal, CA verification, CA bundle/settings merge and idempotence;
   client certificate enrollment, invite redemption and add-repo context binding.
 
