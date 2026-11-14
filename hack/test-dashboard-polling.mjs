@@ -18,7 +18,7 @@ sandbox.fetch = async (url, init) => {
   sent.push({url, match: init.headers['If-None-Match'] || ''});
   const headers = new Headers({'ETag': 'W/"v1"', 'X-Oberth-Next-Before': '41'});
   if (init.headers['If-None-Match'] === 'W/"v1"') return {status: 304, ok: false, headers, json: async () => { throw new Error('a 304 has no body'); }};
-  return {status: 200, ok: true, headers, json: async () => [{id: 'run-1', status: 'passed'}]};
+  return {status: 200, ok: true, headers, json: async () => [{id: 'run-1', status: 'passed', display_status: 'passed'}]};
 };
 const first = await run(`api('/api/runs?limit=100', {withNext: true})`);
 const second = await run(`api('/api/runs?limit=100', {withNext: true})`);
@@ -64,7 +64,7 @@ console.log('Focus and selection survive polling');
 
 // Rows are keyboard links and read only snake_case fields.
 run(`state.repos = [{id: 1, name: 'app', upstream_id: 1}]; state.status = {upstream_info: [{id: 1, name: 'github', base_url: 'https://example.test/org'}]};`);
-const row = run(`runRow({id: 'abc12345', repo_id: 1, ref: 'feature/x', ref_kind: 'branch', status: 'passed', started_at: '2026-11-01T10:00:00Z', finished_at: '2026-11-01T10:01:00Z'})`);
+const row = run(`runRow({id: 'abc12345', repo_id: 1, ref: 'feature/x', ref_kind: 'branch', status: 'passed', display_status: 'passed', started_at: '2026-11-01T10:00:00Z', finished_at: '2026-11-01T10:01:00Z'})`);
 assert.match(row, /class="trow" data-run-id="abc12345" tabindex="0" role="link" aria-label="run app feature\/x passed"/);
 assert.match(row, /feature\/x/);
 assert.match(source, /event\.target\.matches\?\.\('\[role="link"\]\[tabindex\], \[role="button"\]\[tabindex\]'\)/, 'Enter opens row links');

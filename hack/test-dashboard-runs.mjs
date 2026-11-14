@@ -11,9 +11,8 @@ run(`
   let html='', requests=[], listNext='', flatPaging=false;
   replaceApp=value=>{html=value};
   const makeRun=(ID,extra={})=>{
-    const row={id:ID,repo_id:1,ref:'main',ref_kind:'branch',status:'passed',started_at:'2026-11-01T10:00:00Z',finished_at:'2026-11-01T10:01:00Z',...extra};
+    const row={id:ID,repo_id:1,ref:'main',ref_kind:'branch',status:'passed',display_status:extra.status ?? 'passed',started_at:'2026-11-01T10:00:00Z',finished_at:'2026-11-01T10:01:00Z',...extra};
     if(['running','queued'].includes(row.status)) {
-
       row.display_reason ??= '';
     }
     return row;
@@ -22,7 +21,7 @@ run(`
   const scheduled=makeRun('scheduled-running',{status:'running',trigger:'schedule',schedule_entry:'nightly',finished_at:null});
   const queued=makeRun('publication-queued',{status:'queued',ref:'other',started_at:null,finished_at:null});
   const failed=makeRun('nightly-failed',{status:'failed',trigger:'schedule',schedule_entry:'nightly'});
-  const cancelled=makeRun('cancelled-old',{status:'interrupted'});
+  const cancelled=makeRun('cancelled-old',{status:'interrupted',display_status:'cancelled'});
   const retried=makeRun('retried-old',{ref:'feature',status:'failed'});
   state.status={upstream_info:[{id:1,name:'github',base_url:'https://example.test/org'}]};state.statusLoadedAt=Date.now();
   api=async path=>{
@@ -278,8 +277,8 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'V1'
     {id:'admitted', status:'running', started_at:null, display_status:'queued', display_reason:'admitted, starting the workflow', scheduling:{state:'waiting', admission:{state:'admitted'}}},
     {id:'preflight', status:'running', started_at:null, display_status:'queued', display_reason:'KVM preflight running', scheduling:{state:'preflight'}},
     {id:'durable', status:'queued', started_at:null, display_status:'queued', display_reason:'awaiting submission', scheduling:{state:'queued'}},
-    {id:'raw-only', status:'waiting', started_at:null},
   ];
+  assert.equal(run(`displayRunStatus({status:'waiting'})`), undefined, 'V1: raw status cannot replace a missing canonical display status');
   sandbox.notStarted = notStarted;
   const table = run('runsTable(notStarted)');
   for (const [kind, label] of pills(table)) assert.deepEqual([kind, label], ['pending', 'queued'], 'V1: every not-started run is one grey queued pill');
