@@ -198,7 +198,10 @@ func assertValidateRuntimeParity(t *testing.T, document, secretPath string, trig
 		VaultAddress: "https://vault.example.com", VaultCredentialedRole: "release", VaultCISecretsRole: "ci-secrets",
 		PerRepoIdentities:   map[string]argojob.PerRepoIdentityConfig{"github/acme/project": {ServiceAccountName: "project-release"}},
 		PerRepoCIIdentities: map[string]argojob.PerRepoIdentityConfig{"github/acme/project": {ServiceAccountName: "project-ci"}},
-		PerStepIdentities:   map[string]argojob.PerRepoIdentityConfig{"github/acme/project/.oberth/release.yaml/*": {ServiceAccountName: "project-release-step"}},
+		PerStepIdentities: map[string]argojob.PerRepoIdentityConfig{
+			"github/acme/project/.oberth/release.yaml/*": {ServiceAccountName: "project-release-step"},
+			"github/acme/project/.oberth/build.yaml/*":   {CIServiceAccountName: "project-ci-step"},
+		},
 	}
 	request := argojob.Request{
 		RunID: "parity", RepositoryID: 1, Name: "parity", Repo: "project", UpstreamName: "github", UpstreamOrg: "acme",

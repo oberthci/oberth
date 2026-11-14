@@ -192,8 +192,8 @@ func (s *Store) ActiveSecretGrants(ctx context.Context, repoID int64, workflow s
 	// match every same-name repository across upstreams — the exact grant
 	// aliasing this ID-keyed lookup exists to prevent. There is no
 	// transition window that needs one: the v12 migration qualifies every
-	// persisted row that maps to a registered repository, and the access
-	// reconciler canonicalizes ConfigMap entries before writing. A stray
+	// persisted row that maps to a registered repository. API mutations
+	// canonicalize registered repository names before writing. A stray
 	// bare row (only possible for a repo that was unregistered at both of
 	// those boundaries) is deliberately inert until its grant is re-issued
 	// against the registered identity.

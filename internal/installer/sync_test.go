@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -186,7 +187,7 @@ func TestSyncGrantPoliciesSharedPoliciesZeroStanzaWithIdentities(t *testing.T) {
 		// Sync must overwrite them with the zero-stanza shape.
 		"policy read " + defaultCredentialedPolicy:         {out: OberthCredentialedPolicyWithGrants(defaultKVPrefix, []string{"release/cosign-secret"})},
 		"policy write " + defaultCredentialedPolicy + " -": {out: "Success!"},
-		"policy read " + defaultCISecretsPolicy:            {out: OberthCISecretsPolicy(defaultKVPrefix)},
+		"policy read " + defaultCISecretsPolicy:            {out: `path "oberth/data/upstream/acme/*" { capabilities = ["read"] }`},
 		"policy write " + defaultCISecretsPolicy + " -":    {out: "Success!"},
 		// Per-repo identities: matching, so no write needed.
 		"policy read " + name:                              {out: PerRepoPolicy(defaultKVPrefix, []string{"release/cosign-secret"})},
@@ -469,6 +470,13 @@ func TestSyncPrunesNamedStepPathFromPerRepoPolicy(t *testing.T) {
 	responses["policy write "+wildcardName+" -"] = fakeBaoResponse{out: "Success!"}
 	responses["read -format=json auth/kubernetes/role/"+wildcardName] = fakeBaoResponse{out: "No value found", err: errors.New("exit status 2")}
 	responses["write auth/kubernetes/role/"+wildcardName+" -"] = fakeBaoResponse{out: "Success!"}
+	for _, id := range stepIdentities {
+		ci := PerStepCIName(id.Upstream, id.Org, id.Repo, id.Workflow, id.Step)
+		responses["policy read "+ci] = fakeBaoResponse{out: "No policy named: " + ci, err: os.ErrNotExist}
+		responses["policy write "+ci+" -"] = fakeBaoResponse{}
+		responses["read -format=json auth/kubernetes/role/"+ci] = fakeBaoResponse{out: "No value found", err: os.ErrNotExist}
+		responses["write auth/kubernetes/role/"+ci+" -"] = fakeBaoResponse{}
+	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
 
