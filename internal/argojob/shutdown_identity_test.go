@@ -7,6 +7,7 @@ import (
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -20,7 +21,7 @@ func TestNativeShutdownIdentityDelivery(t *testing.T) {
 			}
 			progress := &executorIdentityProgress{identity: map[types.UID]identityWait{pod.UID: {since: time.Now().Add(-2 * executorReadinessTimeout), retried: true, persisted: true}}}
 			delivered := map[types.UID]bool{}
-			err := controller.observeWorkflowIdentities(t.Context(), wf, progress, delivered)
+			err := controller.observeWorkflowIdentities(t.Context(), wf, []corev1.Pod{*pod}, progress, delivered)
 			if strategy == "" {
 				if err == nil || *requests != 0 {
 					t.Fatal("expired ordinary startup escaped its deadline", err, *requests)

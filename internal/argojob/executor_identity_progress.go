@@ -229,9 +229,9 @@ func (controller *Controller) checkExecutorIdentityProgress(ctx context.Context,
 
 // observeWorkflowIdentities keeps Stop exit handlers supplied with executor
 // identities while Terminate releases no newly blocked containers.
-func (controller *Controller) observeWorkflowIdentities(ctx context.Context, workflow *wfv1.Workflow, admissionWatch *executorIdentityProgress, delivered map[types.UID]bool) error {
+func (controller *Controller) observeWorkflowIdentities(ctx context.Context, workflow *wfv1.Workflow, pods []corev1.Pod, admissionWatch *executorIdentityProgress, delivered map[types.UID]bool) error {
 	if workflow.Spec.Shutdown == "" {
-		if err := controller.checkExecutorIdentityProgress(ctx, workflow, admissionWatch, delivered); err != nil {
+		if err := controller.checkExecutorIdentityProgress(ctx, workflow, pods, admissionWatch, delivered); err != nil {
 			return err
 		}
 	}
@@ -242,7 +242,7 @@ func (controller *Controller) observeWorkflowIdentities(ctx context.Context, wor
 		// Bound reads and identity transport even when no waiter observation exists.
 		deliveryCtx, stopDelivery := context.WithTimeout(ctx, identityObservationTimeout)
 		identityReadUnavailable := false
-		deliveryErr := controller.deliverExecutorTokensObserved(deliveryCtx, workflow, delivered, func() { identityReadUnavailable = true })
+		deliveryErr := controller.deliverExecutorTokensObserved(deliveryCtx, workflow, pods, delivered, func() { identityReadUnavailable = true })
 		if deliveryCtx.Err() != nil && ctx.Err() == nil {
 			deliveryErr = &executorIdentityProgressError{reason: "Kubernetes executor identity observation unavailable for 2m"}
 		}
