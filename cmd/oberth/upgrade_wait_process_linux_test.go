@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -44,7 +45,11 @@ func TestUpgradeWaitProcessHelper(t *testing.T) {
 	switch os.Getenv("OBERTH_TEST_WAIT_ROLE") {
 	case "cli":
 		version = "0.17.52"
-		os.Args = []string{"oberth", "upgrade", "--wait-idle", "--chart=/fixture", "--timeout=1m", "--wait-for=" + os.Getenv("OBERTH_TEST_WAIT_LIMIT")}
+		durations := flag.Args()
+		if len(durations) != 1 {
+			t.Fatal("missing fixture wait duration")
+		}
+		os.Args = []string{"oberth", "upgrade", "--wait-idle", "--chart=/fixture", "--timeout=1m", "--wait-for=" + durations[0]}
 		home, err := os.UserHomeDir()
 		if err != nil {
 			os.Exit(93)
@@ -192,7 +197,8 @@ func (f *upgradeWaitProcessFixture) command(t *testing.T) *exec.Cmd {
 	if f.mode == "old-critical" {
 		critical = "yes"
 	}
-	command.Env = []string{"OBERTH_BASE_URL=https://fixture.example", "OBERTH_TOKEN=fixture-admin", "PATH=" + f.root + ":/usr/bin:/bin", "HOME=" + f.root, "KUBECONFIG=" + f.kubeconfig, "OBERTH_TEST_WAIT_ROLE=cli", "OBERTH_TEST_WAIT_LIMIT=" + limit, "OBERTH_TEST_UPGRADE_MARKER=" + filepath.Join(f.root, "upgrade.attempted"), "OBERTH_TEST_ALREADY=" + already, "OBERTH_TEST_OLD_CRITICAL=" + critical}
+	command.Args = append(command.Args, "--", limit)
+	command.Env = []string{"OBERTH_BASE_URL=https://fixture.example", "OBERTH_TOKEN=fixture-admin", "PATH=" + f.root + ":/usr/bin:/bin", "HOME=" + f.root, "KUBECONFIG=" + f.kubeconfig, "OBERTH_TEST_WAIT_ROLE=cli", "OBERTH_TEST_UPGRADE_MARKER=" + filepath.Join(f.root, "upgrade.attempted"), "OBERTH_TEST_ALREADY=" + already, "OBERTH_TEST_OLD_CRITICAL=" + critical}
 	if scale, set := os.LookupEnv("OBERTH_TEST_TIMEOUT_SCALE"); set {
 		command.Env = append(command.Env, "OBERTH_TEST_TIMEOUT_SCALE="+scale)
 	}

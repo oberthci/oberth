@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -21,8 +22,12 @@ import (
 
 // Run the actual CLI with a private kubeconfig and fixture host commands.
 func TestUpgradeDefaultWaitProcessHelper(t *testing.T) {
+	roles := flag.Args()
+	if len(roles) != 1 {
+		return
+	}
 	var extra []string
-	switch os.Getenv("OBERTH_TEST_WAIT_ROLE") {
+	switch roles[0] {
 	case "cli-default", "cli-already-current", "cli-unavailable":
 	case "cli-timeout":
 		extra = []string{"--wait-for=200ms"}
@@ -76,7 +81,7 @@ func TestUpgradeDefaultWaitProcessGraph(t *testing.T) {
 case "$*" in
  *"version --template "*) printf 'v4.2.3\n' ;;
  *"history oberth "*"-o json"*) printf '[{"revision":1,"status":"deployed"}]\n' ;;
- *"get values oberth "*"--all"*) printf '{"compatibility":{"schemaIdentity":"legacy-schema-v1","auditDomain":"legacy-audit-v1","witnessKeyInfo":"legacy-witness-v1"}}\n' ;;
+ *"get values oberth "*"--all"*) printf '{"compatibility":{"schemaIdentity":"fixture-schema-v1","auditDomain":"fixture-audit-v1","witnessKeyInfo":"fixture-witness-v1"}}\n' ;;
  *"get values oberth "*) printf '{"argo":{"podPolicy":{"enabled":false}}}\n' ;;
  *"template oberth "*) exit 0 ;;
  *"list "*)
@@ -102,9 +107,9 @@ exit 91
 			if mode == "already-current" {
 				already = "yes"
 			}
-			command := exec.CommandContext(t.Context(), executable, "-test.run=^TestUpgradeDefaultWaitProcessHelper$")
+			command := exec.CommandContext(t.Context(), executable, "-test.run=^TestUpgradeDefaultWaitProcessHelper$", "--", "cli-"+mode)
 			command.Dir = root
-			command.Env = []string{"OBERTH_BASE_URL=" + adminURL, "OBERTH_TOKEN=fixture-admin", "PATH=" + root + ":/usr/bin:/bin", "HOME=" + root, "KUBECONFIG=" + kubeconfig, "OBERTH_TEST_WAIT_ROLE=cli-" + mode, "OBERTH_TEST_UPGRADE_MARKER=" + marker, "OBERTH_TEST_ALREADY=" + already}
+			command.Env = []string{"OBERTH_BASE_URL=" + adminURL, "OBERTH_TOKEN=fixture-admin", "PATH=" + root + ":/usr/bin:/bin", "HOME=" + root, "KUBECONFIG=" + kubeconfig, "OBERTH_TEST_UPGRADE_MARKER=" + marker, "OBERTH_TEST_ALREADY=" + already}
 			raw, err := command.CombinedOutput()
 			output := string(raw)
 			if _, err := os.Stat(filepath.Join(root, "unexpected-kubectl")); !os.IsNotExist(err) {
