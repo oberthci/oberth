@@ -18,7 +18,7 @@ sandbox.fetch = async (url, init) => {
   sent.push({url, match: init.headers['If-None-Match'] || ''});
   const headers = new Headers({'ETag': 'W/"v1"', 'X-Oberth-Next-Before': '41'});
   if (init.headers['If-None-Match'] === 'W/"v1"') return {status: 304, ok: false, headers, json: async () => { throw new Error('a 304 has no body'); }};
-  return {status: 200, ok: true, headers, json: async () => [{id: 'run-1', status: 'passed'}]};
+  return {status: 200, ok: true, headers, json: async () => [{id: 'run-1', status: 'passed', display_status: 'passed'}]};
 };
 const first = await run(`api('/api/runs?limit=100', {withNext: true})`);
 const second = await run(`api('/api/runs?limit=100', {withNext: true})`);

@@ -74,7 +74,7 @@ func RunCancelPolicy(run model.Run, admin, force bool) (string, error) {
 // RunCancelWarning explains the consequence of another active cancellation.
 // MCP and in-pod CLI acknowledgements share the durable shutdown selection.
 func RunCancelWarning(warning string, cancellations []model.RunCancellation) string {
-	if len(cancellations) == 0 || cancellations[0].Terminate {
+	if len(cancellations) == 0 || cancellations[0].WorkflowName == "" || cancellations[0].Terminate {
 		return warning
 	}
 	notice := "repeat cancel while the run is active to use Argo Terminate; exit handlers will be skipped"

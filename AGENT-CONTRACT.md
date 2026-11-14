@@ -1207,11 +1207,13 @@ trust assumptions and complete invalidation rules.
   passed run, including releases; `display_status` is always `passed`.
   An interrupted result neither opens nor resolves a CI-red issue.
 
-  `/api/runs/counts` retains `Total` and `ByRepo`, and adds `Queued`, `Running`,
-  `QueuedByRepo` and `RunningByRepo`. Queued includes claimed/unadmitted runs;
-  running means admitted and non-terminal. Counts respect uplink scope. The
-  dashboard header uses these counts; its dated-page footer uses `Total - Queued`
-  (or the corresponding per-repository counts). Status chips and the independent
+  `/api/runs/counts` reports `Total`, `ByRepo`, `Preparing`, `Running`,
+  `PreparingByRepo` and `RunningByRepo`. Preparing counts accepted work whose
+  submission has not started; running counts non-terminal runs with a recorded
+  start. These counters describe submission progress, independently of native
+  Argo Pending and its `queued` display status. Counts respect uplink scope.
+  The dashboard sidebar uses the retained totals; its footer shows the page and
+  whether all active runs are included. Status chips and the independent
   release toggle compose, so failed releases can be selected. A pruned cursor
   returns 404 with an instruction to restart from the first page.
 - Execution scheduling observation has a two-second request budget, one exact
@@ -1271,14 +1273,17 @@ trust assumptions and complete invalidation rules.
   are untouched.
 - An explicit run cancel (`run_cancel`, `oberth run cancel`, `oberth runs
   cancel`) records durable intent and a `run.cancel` audit action atomically,
-  including actor, reason, previous state, force and policy warning. Queued work
-  finishes `interrupted` with phase `cancelled` and an actor reason. Claimed
-  work retains its existing active status and a cancelling reason until native
-  Argo completion. No status or label is added.
+  including actor, reason, previous state, force and policy warning. Accepted
+  runs begin submission immediately. Cancellation retains the active status,
+  phase `cancelled` and a cancelling reason until settlement. A cancel before
+  submission creates no Workflow and finishes cancelled after its creator joins;
+  a submitted Workflow stays observed through native Argo completion. No status
+  or label is added.
   Ordinary branch cancellation uses Argo Stop so exit handlers run. Repeating
   an active cancellation uses Terminate and skips exit handlers; release, tag,
   apply and promotion cancellations use Terminate immediately. The first Stop
-  response warns about repeat cancellation in both MCP and CLI output.
+  response warns about repeat cancellation in both MCP and CLI output when a
+  Workflow name exists. A cancel before submission omits that warning.
   `run_cancellations` records native stop obligations with reason `cancelled`
   or `owner_restart`; its terminate flag never decreases. No successor columns
   remain. Ownership and UID checks refuse foreign or replaced Workflows, and a
@@ -2673,10 +2678,11 @@ the live database size the backup ceiling is measured against.
 Owner resume retains the durable run ID and verified Workflow binding. Stranded
 runs fail after restart without resubmission; explicit retries have new IDs.
 Known milestones remain write-once. Restart timing epochs are removed while
-retaining current Workflow and step evidence. Queue time is `queued_at` to
-`claimed_at`, not queued to the historically overloaded StartedAt. Checkout
-completion, source seed start and readiness, Workflow creation, and durable
-terminalization have separate timestamps. Source seeding is once per Workflow,
+retaining current Workflow and step evidence. Accepted runs begin submission
+immediately: `queued_at` records acceptance, `claimed_at` records submission
+ownership, and `started_at` records the start of Workflow submission. These
+milestones do not measure an Oberth scheduling queue. Checkout completion, source
+seed start and readiness, Workflow creation, and durable terminalization have separate timestamps. Source seeding is once per Workflow,
 not once per step. Admission episodes, requested/granted/closed fields, and their
 table and triggers are removed by a forward migration; there is no alias.
 

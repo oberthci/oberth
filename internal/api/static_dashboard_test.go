@@ -313,9 +313,6 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 		`return statusOK && (!state.releaseOnly || run.release)`,
 		`data-kind-filter="release"`, `state.releaseOnly = !state.releaseOnly`,
 		`localStorage.setItem("oberth-kind", state.releaseOnly ? "release" : "all")`,
-		`if (saved === "waiting") return "queued"`,
-		`if (saved === "interrupted") return "cancelled"`,
-		`localStorage.getItem("oberth-filter") === "release"`,
 		`state.runNext = runPageFull(source)`,
 		`function shortSuccessor(s) { return String(s || "").slice(0, 12); }`,
 		`(status === "cancelled") ?`, `esc(runMessage(run))`, `server restart, retry needed`, `retry-warning`,
@@ -324,7 +321,12 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 			t.Fatalf("dashboard missing %q", want)
 		}
 	}
-	for _, unwanted := range []string{`SUPERSEDED`, `return "delivered"`, `[pending] running`, `[pending] queued`} {
+	for _, unwanted := range []string{
+		`SUPERSEDED`, `return "delivered"`, `[pending] running`, `[pending] queued`,
+		`if (saved === "waiting") return "queued"`,
+		`if (saved === "interrupted") return "cancelled"`,
+		`localStorage.getItem("oberth-filter") === "release"`,
+	} {
 		if strings.Contains(source, unwanted) {
 			t.Fatalf("dashboard retains %q", unwanted)
 		}

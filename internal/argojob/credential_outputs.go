@@ -25,6 +25,9 @@ func validateCredentialOutputPaths(wf *wfv1.Workflow, granted map[*wfv1.Template
 	for _, t := range cloud {
 		credentialed[t] = true
 	}
+	if err := validateCredentialHookKeys(wf, credentialed); err != nil {
+		return err
+	}
 	var failure error
 	walkTemplates(wf, func(t *wfv1.Template) {
 		if !credentialed[t] || failure != nil {
@@ -64,6 +67,41 @@ func validateCredentialOutputPaths(wf *wfv1.Workflow, granted map[*wfv1.Template
 			if credentialOutputOnMount(t, output) {
 				failure = fmt.Errorf("argojob: credentialed template %q output read path %q is on a volume mount or cannot be resolved before execution", t.Name, output)
 				return
+			}
+		}
+	})
+	return failure
+}
+
+// Hook delimiters can make Argo's result alias depend on expanded ancestor
+// names. Refuse them for credentialed leaves even without a local result read.
+func validateCredentialHookKeys(wf *wfv1.Workflow, credentialed map[*wfv1.Template]bool) error {
+	names := map[string]bool{}
+	for leaf, allowed := range credentialed {
+		if allowed && leaf.Name != "" {
+			names[leaf.Name] = true
+		}
+	}
+	var failure error
+	check := func(hooks wfv1.LifecycleHooks, kind, invocation, parent string) {
+		for key, hook := range hooks {
+			if !names[hook.Template] && (len(names) == 0 || !strings.Contains(hook.Template, "{{")) {
+				continue
+			}
+			if strings.ContainsAny(string(key), ".()[]") {
+				failure = fmt.Errorf("argojob: hook %q on %s %q in template %q invokes a credentialed template or a template chosen at run time; its key cannot contain '.', '(', ')', '[' or ']'", key, kind, invocation, parent)
+			}
+		}
+	}
+	walkTemplates(wf, func(parent *wfv1.Template) {
+		for _, group := range parent.Steps {
+			for _, step := range group.Steps {
+				check(step.Hooks, "step", step.Name, parent.Name)
+			}
+		}
+		if parent.DAG != nil {
+			for _, task := range parent.DAG.Tasks {
+				check(task.Hooks, "task", task.Name, parent.Name)
 			}
 		}
 	})
@@ -149,8 +187,13 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 		if parent.DAG != nil {
 			prefix = "tasks"
 		}
-		check := func(name, template string, inline *wfv1.Template) {
+		check := func(name string, unknownAlias bool, template string, inline *wfv1.Template) {
 			if inline != target && (target.Name == "" || (template != target.Name && !strings.Contains(template, "{{"))) {
+				return
+			}
+			// An unmatched hook closer can consume an unknown ancestor name.
+			if unknownAlias {
+				found = true
 				return
 			}
 			alias := regexp.QuoteMeta(name)
@@ -161,26 +204,68 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 			nativeIndexed, _ := regexp.Match(prefix+`\[['"]`+name+`['"]\]\.outputs.result`, body)
 			found = found || native || nativeIndexed || reference.MatchString(text)
 		}
+		checkHooks := func(hooks wfv1.LifecycleHooks, exit *wfv1.LifecycleHook) {
+			for name, hook := range hooks {
+				// Argo runs only the effective exit invocation separately.
+				if name != wfv1.ExitLifecycleEvent {
+					alias, unknown := credentialHookResultAlias(name)
+					check(alias, unknown, hook.Template, nil)
+				}
+			}
+			if exit != nil {
+				check("onExit", false, exit.Template, nil)
+			}
+		}
 		for _, group := range parent.Steps {
 			for _, step := range group.Steps {
-				check(step.Name, step.Template, step.Inline)
-				for name, hook := range step.Hooks {
-					check(string(name), hook.Template, nil)
-				}
-				check("onExit", step.OnExit, nil)
+				check(step.Name, false, step.Template, step.Inline)
+				checkHooks(step.Hooks, step.GetExitHook(wfv1.Arguments{}))
 			}
 		}
 		if parent.DAG != nil {
 			for _, task := range parent.DAG.Tasks {
-				check(task.Name, task.Template, task.Inline)
-				for name, hook := range task.Hooks {
-					check(string(name), hook.Template, nil)
-				}
-				check("onExit", task.OnExit, nil)
+				check(task.Name, false, task.Template, task.Inline)
+				checkHooks(task.Hooks, task.GetExitHook(wfv1.Arguments{}))
 			}
 		}
 	})
 	return found
+}
+
+// Match Argo v4.0.8: workflow/controller/hooks.go:114 names lifecycle nodes,
+// workflow/common/util.go:313 names exit nodes, and
+// workflow/controller/operator.go:3383-3418 extracts the result-capture alias.
+func credentialHookResultAlias(event wfv1.LifecycleEvent) (alias string, unknown bool) {
+	if event == wfv1.ExitLifecycleEvent {
+		return "onExit", false
+	}
+	nodeName := "hooks." + string(event)
+	opener := ""
+loop:
+	for i := len(nodeName) - 1; i >= 0; i-- {
+		char := string(nodeName[i])
+		switch {
+		case char == opener:
+			opener = ""
+		case opener != "":
+		case char == ")":
+			opener = "("
+		case char == "]":
+			opener = "["
+		default:
+			nodeName = nodeName[:i+1]
+			break loop
+		}
+	}
+	// Without a matching opener, Argo can derive an ancestor's alias from
+	// the full node name. Keep uncertainty separate from a valid empty alias.
+	if opener != "" {
+		return "", true
+	}
+	if lastDotIndex := strings.LastIndex(nodeName, "."); lastDotIndex >= 0 {
+		nodeName = nodeName[lastDotIndex+1:]
+	}
+	return nodeName, false
 }
 
 // Resolve workflow Pod metadata as Argo does for named templates, and include

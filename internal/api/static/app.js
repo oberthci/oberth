@@ -15,7 +15,7 @@ const state = {
   timer: null, routeSeq: 0,
   attempts: new Map(), detailRun: null,
   filter: readRunFilter(),
-  releaseOnly: localStorage.getItem("oberth-kind") === "release" || localStorage.getItem("oberth-filter") === "release",
+  releaseOnly: localStorage.getItem("oberth-kind") === "release",
   repo: localStorage.getItem("oberth-repo") || "all",
   showArchived: localStorage.getItem("oberth-archived") === "show",
   step: "", stepRunID: "",
@@ -33,8 +33,6 @@ const runFilters = ["all", "queued", "running", "passed", "failed", "cancelled"]
 
 function readRunFilter() {
   const saved = localStorage.getItem("oberth-filter");
-  if (saved === "waiting") return "queued";
-  if (saved === "interrupted") return "cancelled";
   return ["queued", "running", "passed", "failed", "cancelled"].includes(saved) ? saved : "all";
 }
 

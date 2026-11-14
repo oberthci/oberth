@@ -48,12 +48,12 @@ run(`
     return null;
   }};
   setAuto = () => {};
-  awaitResult = renderRunDetailView({run:{id:'scroll-run', repo_id:1, status:'running', ref:'fix/live'}, steps:[]}, 0);
+  awaitResult = renderRunDetailView({run:{id:'scroll-run', repo_id:1, status:'running', display_status:'running', ref:'fix/live'}, steps:[]}, 0);
 `);
 await run('awaitResult');
 assert.equal(run('newTerm.scrollTop'), 123);
 assert.equal(run('newSteps.scrollTop'), 45);
-run(`termReads=0; stepReads=0; oldTerm.scrollTop=900; awaitResult=renderRunDetailView({run:{id:'scroll-run',repo_id:1,status:'running',started_at:new Date().toISOString(),ref:'fix/live'},steps:[]},0);`);
+run(`termReads=0; stepReads=0; oldTerm.scrollTop=900; awaitResult=renderRunDetailView({run:{id:'scroll-run',repo_id:1,status:'running',display_status:'running',started_at:new Date().toISOString(),ref:'fix/live'},steps:[]},0);`);
 await run('awaitResult');
 assert.equal(run('newTerm.scrollTop'), 1200);
 
@@ -63,13 +63,13 @@ run(`
   state.step = 'build / compile';
   state.stepRunID = 'scroll-run';
   termReads=0; stepReads=0;
-  awaitResult=renderRunDetailView({run:{id:'scroll-run',repo_id:1,status:'running',started_at:new Date().toISOString(),ref:'fix/live'},steps:[{burn:'build',step:'compile',status:'queued',ordinal:0}]},0);
+  awaitResult=renderRunDetailView({run:{id:'scroll-run',repo_id:1,status:'running',display_status:'running',started_at:new Date().toISOString(),ref:'fix/live'},steps:[{burn:'build',step:'compile',status:'queued',ordinal:0}]},0);
 `);
 await run('awaitResult');
 assert.ok(run('renderedHTML').includes('fixture log'), 'a queued pod can emit before Argo publishes Running');
 
 // Empty row messages identify schedules, escaped; detail keeps its schedule badge.
-run(`const scheduleRun = {id:'scroll-run', repo_id:1, status:'passed', ref:'main', trigger:'schedule', schedule_entry:'nightly<unsafe>', display_reason:'schedule nightly<unsafe>'};`);
+run(`const scheduleRun = {id:'scroll-run', repo_id:1, status:'passed', display_status:'passed', ref:'main', trigger:'schedule', schedule_entry:'nightly<unsafe>', display_reason:'schedule nightly<unsafe>'};`);
 html = run(`runsTable([scheduleRun, {...scheduleRun, id:'weekly-run', schedule_entry:'weekly-sweep', display_reason:'schedule weekly-sweep'}])`);
 assert.ok(html.includes('schedule nightly&lt;unsafe&gt;') && html.includes('schedule weekly-sweep'));
 assert.ok(!html.includes('nightly<unsafe>'));
@@ -91,14 +91,14 @@ await run('awaitResult');
 assert.ok(run('renderedHTML').includes('fixture log') && run('renderedHTML').includes('live output'), 'an execution display label must not stop durable-running log refresh');
 console.log('live log dashboard checks passed');
 
-// Run-list vocabulary is additive: raw failure/cancellation states survive.
+// Run-list status comes from the canonical server display field.
 assert.equal(run(`displayRunStatus({status:'failed',display_status:'failed'})`), 'failed');
 assert.equal(run(`displayRunStatus({status:'interrupted',display_status:'cancelled'})`), 'cancelled');
-assert.equal(run(`displayRunStatus({status:'interrupted',display_status:'cancelled'})`), 'cancelled');
+assert.equal(run(`displayRunStatus({status:'interrupted'})`), undefined, 'raw status cannot replace a missing canonical display status');
 // The list always shows branch/tag heads, with history only on run detail.
-assert.equal(run(`state.filter='all';runMatches({status:'interrupted'})`), true);
-run(`state.attempts.clear();state.attempts.set('head',{rows:[{id:'old',repo_id:1,status:'interrupted'}],next:''});`);
-const headTable = run(`runsTable([{id:'head',repo_id:1,status:'passed',ref:'feature',earlier_attempts:1}])`);
+assert.equal(run(`state.filter='all';runMatches({status:'interrupted',display_status:'cancelled'})`), true);
+run(`state.attempts.clear();state.attempts.set('head',{rows:[{id:'old',repo_id:1,status:'interrupted',display_status:'cancelled'}],next:''});`);
+const headTable = run(`runsTable([{id:'head',repo_id:1,status:'passed',display_status:'passed',ref:'feature',earlier_attempts:1}])`);
 assert.ok(!headTable.includes('earlier attempts') && !headTable.includes('data-run-id="old"'));
 assert.ok(run(`runHistory({id:'head',ref_kind:'branch'})`).includes('data-run-id="old"'), 'cancelled runs remain available in detail history');
 assert.ok(run(`runHistory({id:'unloaded',ref_kind:'tag'})`).includes('Run history for this tag'));
@@ -113,8 +113,8 @@ run(`
  state.repos=[{id:1,name:'ours'},{id:2,name:'theirs'}];state.status={upstream_info:[]};
  // A directly loaded detail has no list-page head in memory.
  state.runs=[];state.repoRuns=[];state.attempts.clear();
- state.detailRun={id:'rca-head',repo_id:1,ref:'feature',ref_kind:'branch',status:'passed'};
- api=async path=>{rcaRequests.push(path);return {body:[state.detailRun,{id:'our-old',repo_id:1,ref:'feature',ref_kind:'branch',status:'interrupted'},{id:'tag-same-name',repo_id:1,ref:'feature',ref_kind:'tag'},{id:'other-repo',repo_id:2,ref:'feature',ref_kind:'branch'},{id:'other-ref',repo_id:1,ref:'elsewhere',ref_kind:'branch'}],next:'opaque-history-cursor'};};
+ state.detailRun={id:'rca-head',repo_id:1,ref:'feature',ref_kind:'branch',status:'passed',display_status:'passed'};
+ api=async path=>{rcaRequests.push(path);return {body:[state.detailRun,{id:'our-old',repo_id:1,ref:'feature',ref_kind:'branch',status:'interrupted',display_status:'cancelled'},{id:'tag-same-name',repo_id:1,ref:'feature',ref_kind:'tag'},{id:'other-repo',repo_id:2,ref:'feature',ref_kind:'branch'},{id:'other-ref',repo_id:1,ref:'elsewhere',ref_kind:'branch'}],next:'opaque-history-cursor'};};
  awaitResult=loadRunAttempts('rca-head',false);
 `);
 await run('awaitResult');
@@ -143,7 +143,7 @@ await run('awaitResult');
 assert.equal(run(`state.attempts.size`), 0);
 console.log('run-list grouping and detail-history checks passed');
 
-assert.equal(run(`summaryLines({run:{id:'original',status:'failed',display_reason:'infrastructure error'},steps:[]}).some(line => line.startsWith('[queued]'))`), false);
+assert.equal(run(`summaryLines({run:{id:'original',status:'failed',display_status:'failed',display_reason:'infrastructure error'},steps:[]}).some(line => line.startsWith('[queued]'))`), false);
 
 run(`
  const capacityStatusSavedAPI = api;

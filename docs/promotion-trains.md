@@ -2,7 +2,7 @@
 
 A train combines reviewed green branch commits and authorized parked commits into one promotion.
 Oberth fetches the target's current head immediately and merges the sources
-in order in one checkout.
+in request order in one working tree.
 It runs **one promotion CI run** on the final commit. A green result publishes
 that exact commit with the existing non-forced push checks. A red result leaves
 the target unchanged.
