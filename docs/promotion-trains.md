@@ -1,8 +1,8 @@
 # Promotion trains
 
 A train combines reviewed green branch commits and authorized parked commits into one promotion.
-Oberth waits for earlier promotions to the same repository and target, fetches
-the target's current head, and merges the sources in order in one temporary tree.
+Oberth fetches the target's current head immediately and merges the sources
+in order in one temporary tree.
 It runs **one promotion CI run** on the final commit. A green result publishes
 that exact commit with the existing non-forced push checks. A red result leaves
 the target unchanged.
@@ -65,3 +65,7 @@ is reconsidered. Every promotion is planned immediately, including promotions
 to a target with other active promotions. If that target moves before publication,
 the existing moved-target path prepares and tests a new result. Publication
 refuses the stale result; no promotion waits in an Oberth queue.
+
+At most two moved-target retries run automatically in a row. Four or more
+promotions racing for one target can leave later attempts failed; use
+`promote_retry` to request another attempt.

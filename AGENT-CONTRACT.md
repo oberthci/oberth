@@ -1175,22 +1175,17 @@ trust assumptions and complete invalidation rules.
   (`model.DisplayStatuses`; `model.DisplayRunStatus` is the only mapping,
   and `TestEveryRawPhaseMapsToExactlyOneDisplayStatus` holds every raw
   status, phase and projection to it). A status says what to do with the
-  run; anything finer is the reason line, never a second status. Every run
-  that has not started is `queued`: durable queued, or claimed before
-  admission (`Status` `waiting` on the wire, phase `waiting` or
-  `preparing`). Admission records `started_at`, so an admitted run,
-  is `running`.
-  The dashboard reverses only the queued block: last-to-start at the top,
-  next-in-line directly above running rows, also in the queued filter. API/MCP
-  retain claim order. A queued run's display reason reports native Argo parallelism, lock or
-  suspension state, or a curated Kubernetes Pending reason. Source-seed waits
-  are observable before Workflow creation. No aggregate request figure,
-  priority class, pressure blocker or resource reservation is projected.
+  run; anything finer is the reason line, never a second status. Accepted
+  preparation displays `running`, including checkout and source seeding.
+  Only an observed Argo Pending Workflow displays `queued`; its reason names
+  native parallelism, locks, suspension or Kubernetes Pending evidence.
+  Runs are submitted immediately on the server lifetime. A client disconnect
+  does not cancel acceptance. No aggregate resource reservation is projected.
 
   | Durable cause | `display_status` | `display_reason` |
   | --- | --- | --- |
-  | queued, claimed before admission | `queued` | what the run waits for (above) |
-  | admitted and started | `running` | empty |
+  | observed Argo Pending | `queued` | native Argo or Kubernetes wait reason |
+  | accepted preparation or active execution | `running` | preparation or execution reason when available |
   | uncertain Workflow create (phase `infrastructure-pending`) | `running` | `Workflow create outcome uncertain; cleanup pending` |
   | running past its execution deadline | `running` | `Execution deadline exceeded.` |
   | failed by its execution deadline | `failed` | `Execution deadline exceeded.` or the retained resource guidance |
@@ -1526,20 +1521,13 @@ trust assumptions and complete invalidation rules.
   (`retry_of`, `mode` `manual`|`auto`, `auto_attempt`) recorded on the new
   promotion in its admission transaction, and `promote_status` on the failed
   promotion reports the successor as `retried_as`.
-  Promotions to one target of one repository are prepared one at a time
-  (#1021): a promotion admitted while an earlier one to the same target is
-  pending stays pending with no plan or run, and once no earlier one is
-  pending it is merged onto the target as that left it, so two promotions
-  never race to "upstream moved". The wait is bounded (12 h, then the
-  promotion fails). Server shutdown cancels the wait (it does not wait it
-  out) and leaves the promotion pending with no plan, which owner-startup
-  recovery interrupts like any promotion that never recorded its plan;
-  nothing touches the store after the API's shutdown returns. The API shuts
-  down after the scheduler's background tasks stop, and refuses background work
-  (queued waits, automatic moved-promotion retries) from then on. A plan
-  already under way when the bounded shutdown wait times out keeps running
-  to its own bounded end and is logged. promote,
-  promote_retry and the automatic moved-target retry (#1097) all queue.
+  Promotions are planned immediately, including concurrent promotions to the
+  same target. If the target moves before publication, the stale result is
+  refused and its successor is prepared against the new head and tested again.
+  There are at most two automatic moved-target retries in a row. Four or more
+  promotions racing for one target can leave later attempts failed; use
+  `promote_retry` to request another attempt. Server shutdown joins tracked
+  background work; owner recovery interrupts promotions without a recorded plan.
   An unborn target (brand-new repository whose upstream lacks the branch —
   confirmed by a successful, empty ls-remote, never inferred from a failed
   fetch) is a fast-forward creation of the tested source; the promotion row
@@ -1551,15 +1539,12 @@ trust assumptions and complete invalidation rules.
   credential policy, as described in [ordinary tag runs](docs/tag-runs.md).
   After every burn is terminal green, Oberth publishes the exact admitted tag
   object—not merely another tag that peels to the same commit—and fails closed
-  if the upstream tag appeared first. Run success requires BOTH a Succeeded
-  Workflow AND zero terminally failed configured step results. A step with
-  retry attempts where the final attempt succeeded is a pass
-  (deduplicateRetries keeps only the final attempt). A terminally failed
-  configured step—regardless of whether the DAG's depends expressions handle
-  it—makes the run red. Enhanced-depends cleanup or verification tasks may
-  still execute after a failure but cannot convert the terminal run to green.
-  An Argo-Failed Workflow always fails the run regardless of which step rows
-  failed, because unreached tasks have no rows to inspect.
+  if the upstream tag appeared first. Argo's Workflow phase supplies the run verdict. A Succeeded
+  Workflow stays passed even when the author tolerated a failed node; the node
+  remains failed in step history. Publication independently checks the current
+  branch head and cancellation. A user cancel after native success keeps the
+  run passed but prevents publication; that passed run cannot be rerun.
+
 - Pipelines execute as Argo Workflows in a namespace that is never the server's.
   Oberth owns the envelope and the repository owns the work: the document
   supplies steps, DAG, images and commands, and Oberth forces namespace,
