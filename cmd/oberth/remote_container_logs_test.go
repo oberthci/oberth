@@ -6,14 +6,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
 func TestContainerLogCLIUsesNativeSelectors(t *testing.T) {
 	body := "[command/output] plain\ntime=2026-01-01 level=info msg=done argo=true\n"
-	requests := 0
+	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		requests++
+		requests.Add(1)
 		if request.Header.Get("Authorization") != "Bearer test-token" {
 			t.Error("missing auth")
 		}
@@ -45,7 +46,7 @@ func TestContainerLogCLIUsesNativeSelectors(t *testing.T) {
 			Container string `json:"container"`
 		}
 	}
-	if err := json.Unmarshal(output.Bytes(), &listing); err != nil || len(listing.Containers) != 1 || listing.Containers[0].NodeID != "node" || requests != 2 {
-		t.Fatal(output.String(), err, requests)
+	if err := json.Unmarshal(output.Bytes(), &listing); err != nil || len(listing.Containers) != 1 || listing.Containers[0].NodeID != "node" || requests.Load() != 2 {
+		t.Fatal(output.String(), err, requests.Load())
 	}
 }
