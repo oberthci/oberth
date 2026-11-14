@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -101,21 +100,6 @@ func TestValidateUplinkIdentityRejectsInvalid(t *testing.T) {
 }
 
 // --- sanitizeExecOutput tests ---
-
-func TestSanitizeExecOutputStripsTokenLines(t *testing.T) {
-	t.Parallel()
-	input := "Uplink token for tester@box (shown once):\noberth_secret_token_value\nDone.\n"
-	got := sanitizeExecOutput(input)
-	if strings.Contains(got, "oberth_") {
-		t.Fatalf("token line should be stripped, got: %q", got)
-	}
-	if !strings.Contains(got, "Uplink token for tester@box") {
-		t.Fatalf("non-token lines should be preserved, got: %q", got)
-	}
-	if !strings.Contains(got, "Done.") {
-		t.Fatalf("trailing non-token lines should be preserved, got: %q", got)
-	}
-}
 
 // --- selectOption tests ---
 
@@ -761,34 +745,20 @@ func TestWorkKeyImportWaitsForAuditGate(t *testing.T) {
 	}
 	key := pem.EncodeToMemory(block)
 	calls := 0
-	deps := Deps{Output: io.Discard, PollInterval: time.Millisecond, RunCommand: func(_ context.Context, input []byte, _ string, _ ...string) ([]byte, error) {
+	refusal := errors.New("audit integrity unavailable")
+	deps := testAdminDeps(Deps{Output: io.Discard, RunCommand: func(_ context.Context, input []byte, _ string, _ ...string) ([]byte, error) {
 		calls++
 		if !bytes.Equal(input, key) {
-			t.Fatal("import payload changed")
+			t.Fatal("payload changed")
 		}
-		if calls == 1 {
-			return []byte("oberth: daemon audit mutation gate rejected upstream.identity.import: audit integrity unavailable"), errors.New("exit status 1")
-		}
-		return nil, nil
-	}}
-	if err := applyProvidedDeployKey(context.Background(), Config{ForgeURL: "github.com/company", Timeout: time.Second}, deps, key); err != nil {
-		t.Fatal(err)
+		return nil, refusal
+	}})
+	if err := applyProvidedDeployKey(t.Context(), Config{ForgeURL: "ssh://git@forge.example.test/acme"}, deps, key); !errors.Is(err, refusal) || calls != 1 {
+		t.Fatalf("mutation refusal must not retry: %v attempts=%d", err, calls)
 	}
-	if calls != 2 {
-		t.Fatalf("got %d attempts", calls)
-	}
-	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
-		return []byte("oberth: daemon audit mutation gate rejected upstream.identity.import: rejected"), errors.New("exit status 1")
-	}
-	if err := applyProvidedDeployKey(context.Background(), Config{Timeout: 5 * time.Millisecond}, deps, key); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("gate rejection did not stay closed until timeout: %v", err)
-	}
-	calls = 0
-	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
-		calls++
-		return []byte("refusing to replace identity"), errors.New("exit status 1")
-	}
-	if err := applyProvidedDeployKey(context.Background(), Config{}, deps, key); err == nil || calls != 1 {
-		t.Fatal("permanent failure must not be retried")
+	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) { calls++; return nil, nil }
+	refreshFixtureAdmin(&deps)
+	if err := applyProvidedDeployKey(t.Context(), Config{ForgeURL: "ssh://git@forge.example.test/acme"}, deps, key); err != nil || calls != 2 {
+		t.Fatal("explicit retry failed", err, calls)
 	}
 }

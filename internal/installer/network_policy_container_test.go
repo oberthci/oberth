@@ -21,7 +21,7 @@ func TestPolicyProbeExecIgnoresInjectedDefaultContainer(t *testing.T) {
 	})
 	model := &policyTrafficModel{kube: kube, mode: "egress-only", denial: "refused"}
 	calls := map[string]int{}
-	deps := Deps{KubeClient: kube, RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+	deps := testAdminDeps(Deps{KubeClient: kube, RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 		selected := "injected"
 		for i, arg := range args {
 			if arg == "--" {
@@ -40,7 +40,7 @@ func TestPolicyProbeExecIgnoresInjectedDefaultContainer(t *testing.T) {
 		calls[script]++
 		model.mu.Unlock()
 		return model.run(ctx, input, name, args...)
-	}}
+	}})
 	result := probeNetworkPolicy(t.Context(), Config{}, deps, policyModelTiming())
 	if result.Status != "enforced" {
 		t.Fatal(result)

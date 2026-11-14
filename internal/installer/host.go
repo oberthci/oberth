@@ -18,13 +18,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oberthci/oberth/internal/kubeconfig"
-
 	"golang.org/x/term"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
 	"github.com/oberthci/oberth/internal/clientcert"
+	"github.com/oberthci/oberth/internal/kubeconfig"
 	"github.com/oberthci/oberth/internal/mdnsdial"
 	"github.com/oberthci/oberth/internal/releaseverify"
 )
@@ -42,6 +41,10 @@ type InteractiveRunner func(ctx context.Context, name string, args ...string) er
 // InstallDeps holds injectable host and cluster dependencies for the CLI-level
 // install orchestration.
 type InstallDeps struct {
+	ClientConfigRoot func() (string, error)
+
+	Admin AdminAPI
+
 	// VerifyProbe opts verification into the mutating live policy measurement.
 	VerifyProbe        bool
 	installResolved    func(Config)
@@ -53,6 +56,7 @@ type InstallDeps struct {
 	RunCommand         CommandRunner
 	RunInteractive     InteractiveRunner
 	IsTerminal         func() bool
+
 	// OutputIsTerminal reports whether Output reaches a terminal (default:
 	// standard output is one). Credentials are shown only on a terminal;
 	// anywhere else they go to --secrets-file or the install refuses.
@@ -224,6 +228,16 @@ func executeWithCredentials(ctx context.Context, cfg Config, deps InstallDeps) (
 }
 
 func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFileSink bool) error {
+	if cfg.ContextName == "" {
+		target, err := RecordedKubernetesTarget()
+		if err != nil {
+			return err
+		}
+		cfg.ContextName = target.Context
+		if cfg.KubeconfigPath == "" {
+			cfg.KubeconfigPath = target.Kubeconfig
+		}
+	}
 	preflightRun := deps.RunCommand
 	contextName := cfg.ContextName
 
@@ -347,6 +361,8 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 	runHelm := HelmWithKubeArgs(deps.RunHelm, helmKubeArgs)
 
 	return Run(ctx, cfg, Deps{
+		Admin:                   deps.Admin,
+		ClientConfigRoot:        deps.ClientConfigRoot,
 		checkClientReachability: true,
 		installResolved:         deps.installResolved,
 		Output:                  deps.Output,
@@ -467,6 +483,13 @@ func prepareInstallInputs(ctx context.Context, cfg *Config, deps InstallDeps) er
 // kubeconfig that cannot be listed is left to the load that follows.
 func RequireContextChoice(action, contextName, kubeconfigPath string, list func(string) ([]string, error)) error {
 	if contextName != "" {
+		return nil
+	}
+	target, err := RecordedKubernetesTarget()
+	if err != nil {
+		return err
+	}
+	if target.Context != "" {
 		return nil
 	}
 	names, err := list(kubeconfigPath)
@@ -623,7 +646,7 @@ func commandOutputSuffix(output []byte) string {
 // combined output for prerequisite and registry diagnostics. Failed child
 // commands retain stderr separately in exec.ExitError.
 func DefaultRunCommand(ctx context.Context, input []byte, name string, args ...string) (result []byte, resultErr error) {
-	args, environment, lease, cleanup, prepareErr := kubeconfig.Command(name, args, installerChildEnvironment())
+	args, environment, lease, cleanup, prepareErr := pinnedKubernetesCommand(name, args, installerChildEnvironment())
 	if prepareErr != nil {
 		return nil, prepareErr
 	}
@@ -676,10 +699,9 @@ func (w commandCaptureWriter) Write(p []byte) (int, error) {
 }
 
 // DefaultRunInteractive runs a host command wired to the operator's own
-// terminal, so pod-side interactive flows (kubectl exec -i ... oberth
-// upstream add) can prompt, stream progress, and read answers directly.
+// terminal for interactive operator actions.
 func DefaultRunInteractive(ctx context.Context, name string, args ...string) (resultErr error) {
-	args, environment, lease, cleanup, prepareErr := kubeconfig.Command(name, args, installerChildEnvironment())
+	args, environment, lease, cleanup, prepareErr := pinnedKubernetesCommand(name, args, installerChildEnvironment())
 	if prepareErr != nil {
 		return prepareErr
 	}
@@ -709,7 +731,7 @@ func StdinIsTerminal() bool {
 // output. The explicit caller context owns termination; WaitDelay bounds joins
 // if an inherited pipe remains open after the local child exits.
 func DefaultRunCommandStream(ctx context.Context, output io.Writer, name string, args ...string) (resultErr error) {
-	args, environment, lease, cleanup, prepareErr := kubeconfig.Command(name, args, installerChildEnvironment())
+	args, environment, lease, cleanup, prepareErr := pinnedKubernetesCommand(name, args, installerChildEnvironment())
 	if prepareErr != nil {
 		return prepareErr
 	}

@@ -1,14 +1,9 @@
 package app
 
 import (
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base64"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"unicode"
 
@@ -17,43 +12,8 @@ import (
 
 const maximumAdminKeyBytes = 64 << 10
 
-func TLSCertificateFingerprint(path string) (string, error) {
-	// #nosec G304 -- the operator explicitly supplies the in-pod certificate path.
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("app: read TLS certificate: %w", err)
-	}
-	block, _ := pem.Decode(body)
-	if block == nil || block.Type != "CERTIFICATE" {
-		return "", errors.New("app: TLS certificate file does not begin with a certificate")
-	}
-	certificate, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return "", fmt.Errorf("app: parse TLS certificate: %w", err)
-	}
-	digest := sha256.Sum256(certificate.Raw)
-	return "SHA256:" + base64.RawStdEncoding.EncodeToString(digest[:]), nil
-}
-
-func AuthorizedKeyFingerprint(path string) (string, error) {
-	// #nosec G304 -- the operator explicitly selects a local public-key file.
-	file, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("app: open uplink public key: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-	info, err := file.Stat()
-	if err != nil {
-		return "", fmt.Errorf("app: inspect uplink public key: %w", err)
-	}
-	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maximumAdminKeyBytes {
-		return "", errors.New("app: uplink public key must be a non-empty regular file no larger than 64 KiB")
-	}
-	return AuthorizedKeyFingerprintReader(file)
-}
-
 // AuthorizedKeyFingerprintReader reads exactly one bounded, bare authorized
-// key. It is used by the in-pod bootstrap command when '-' selects stdin.
+// key for first-admin enrollment.
 func AuthorizedKeyFingerprintReader(reader io.Reader) (string, error) {
 	if reader == nil {
 		return "", errors.New("app: uplink public key input is required")

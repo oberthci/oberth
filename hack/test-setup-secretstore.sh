@@ -126,9 +126,7 @@ cat >"$bin/kubectl" <<'MOCK'
 set -eu
 printf 'kubectl %s\n' "$*" >>"$MOCK_STATE/calls.log"
 case "$*" in
-  "config current-context") printf 'test-context\n' ;;
-  *".clusters[0].cluster.server"*) printf 'https://kube.example:6443\n' ;;
-  *kube-root-ca.crt*) printf -- '-----BEGIN CERTIFICATE-----\nMIIFAKETESTCA\n-----END CERTIFICATE-----\n' ;;
+  *"config view"*) printf '%s\n' '{"clusters":[{"cluster":{"server":"https://kube.example:6443","certificate-authority-data":"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUZBS0VURVNUQ0EKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo="}}]}' ;;
   *) exit 1 ;;
 esac
 MOCK
@@ -137,6 +135,14 @@ chmod +x "$bin/bao" "$bin/kubectl"
 export PATH="$bin:$PATH"
 unset VAULT_ADDR VAULT_SKIP_VERIFY BAO_SKIP_VERIFY KUBERNETES_SERVICE_HOST IN_CLUSTER_CA 2>/dev/null || true
 export BAO_ADDR="https://store.example:8200"
+export XDG_CONFIG_HOME="$work/config"
+mkdir -p "$XDG_CONFIG_HOME/oberth"
+python3 - "$XDG_CONFIG_HOME/oberth/kubernetes.json" <<'PYTHON'
+import hashlib,json,pathlib,sys
+ca=b"-----BEGIN CERTIFICATE-----\nMIIFAKETESTCA\n-----END CERTIFICATE-----\n"
+p=pathlib.Path(sys.argv[1]);p.write_text(json.dumps({"context":"recorded-context","namespace":"oberth","api_server":"https://kube.example:6443","ca_sha256":hashlib.sha256(ca).hexdigest()}));p.chmod(0o600)
+PYTHON
+
 
 failures=0
 scenario=""
@@ -181,7 +187,17 @@ check 'contains "writing policy oberth-ci"' "must write the policy"
 check 'contains "writing role oberth-ci bound to ServiceAccount oberth/oberth"' "must write the role"
 check 'contains "secretstore.enabled=true"' "helm handoff must enable the secret store"
 check 'contains "secretstore.address=https://store.example:8200"' "helm handoff must carry the address"
-check 'contains "oberth secretstore verify"' "next steps must include the in-pod verification"
+check 'contains "oberth mcp call secretstore_verify"' "next steps must include authenticated API verification"
+if ! python3 -c 'import json,shlex,sys
+lines=sys.stdin.read().splitlines()
+command=next(line.strip() for line in lines if line.strip().startswith("oberth mcp call secretstore_verify"))
+args=shlex.split(command)
+assert len(args)==5 and json.loads(args[4])=={"paths":["oberth/upstream/<org>/<repo>/github-token"]}
+' <<< "$output"; then
+  check false 'printed verification command must pass paths inside its sole JSON argument'
+fi
+
+
 check 'calls_contain "bao auth enable -path=kubernetes kubernetes"' "auth enable must reach the CLI"
 check 'calls_contain "token_no_default_policy=true"' "role must drop the default policy"
 check 'grep -Fq "auth/token/revoke-self" "$MOCK_STATE/policy-oberth-ci"' "policy must allow the client to revoke its own login token"
@@ -394,7 +410,7 @@ run_script
 check '[ "$status" = 0 ]' 'fresh store must configure successfully'
 check 'calls_contain "bao auth list -format=json"' 'auth discovery must use JSON'
 check 'calls_contain "bao secrets list -format=json"' 'secrets discovery must use JSON'
-check '[ -f "$MOCK_STATE/auth-type" ] && [ -f "$MOCK_STATE/kv-type" ]' 'fresh setup must enable auth, KV and Transit'
+check '[ -f "$MOCK_STATE/auth-type" ] && [ -f "$MOCK_STATE/kv-type" ]' 'fresh setup must enable auth and KV'
 check '! calls_contain "bao read -field=type sys/"' 'mount discovery must not probe absent mount paths'
 for kind in auth secrets; do
   for failure in denied silent partial invalid null array missing-type empty-type wrong-type; do
@@ -477,6 +493,33 @@ for target in config policy role; do
   done
 done
 script=$saved_script
+
+begin "recorded and explicit context"
+fresh_state
+run_script
+check '[ "$status" = 0 ]' 'recorded context must work'
+check 'calls_contain "kubectl --context recorded-context config view"' 'must read recorded context, not ambient current-context'
+fresh_state
+run_script --context explicit-context
+check '[ "$status" = 0 ]' 'explicit other context must work'
+check 'calls_contain "kubectl --context explicit-context config view"' 'explicit context must win'
+
+for identity_field in api_server ca_sha256; do
+  begin "changed recorded $identity_field"
+  fresh_state
+  cp "$XDG_CONFIG_HOME/oberth/kubernetes.json" "$work/saved-target.json"
+  python3 - "$XDG_CONFIG_HOME/oberth/kubernetes.json" "$identity_field" <<'PYTHON'
+import json,pathlib,sys
+p=pathlib.Path(sys.argv[1]);record=json.loads(p.read_text());record[sys.argv[2]]="changed";p.write_text(json.dumps(record))
+PYTHON
+  run_script
+  check '[ "$status" != 0 ]' 'changed recorded cluster must be refused'
+  check 'contains "could not verify Kubernetes cluster identity"' 'refusal must explain cluster verification'
+  if calls_contain 'bao write ' || calls_contain 'bao auth enable '; then
+    check false 'changed cluster must authorize no store mutation'
+  fi
+  cp "$work/saved-target.json" "$XDG_CONFIG_HOME/oberth/kubernetes.json"
+done
 
 if [ "$failures" != 0 ]; then
   printf '%d setup-secretstore contract check(s) failed\n' "$failures" >&2

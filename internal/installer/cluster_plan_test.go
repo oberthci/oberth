@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -32,7 +33,7 @@ func preflightStats(context.Context, []byte, string, ...string) ([]byte, error) 
 func TestPreflightReportsFactsAndRemedies(t *testing.T) {
 	node := preflightNode()
 	kube := fake.NewClientset(node, preflightStorage())
-	deps := Deps{KubeClient: kube, ContextName: "chosen", RunCommand: preflightStats, ProbeNetworkPolicy: enforcedPolicyFixture}
+	deps := testAdminDeps(Deps{KubeClient: kube, ContextName: "chosen", RunCommand: preflightStats, ProbeNetworkPolicy: enforcedPolicyFixture})
 	identity := ClusterIdentity{}
 	result := InstallResult{OK: true}
 	inspectCluster(context.Background(), &Config{}, deps, &identity, &result, false, true)
@@ -50,6 +51,7 @@ func TestPreflightReportsFactsAndRemedies(t *testing.T) {
 	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
 		return nil, errors.New("private diagnostic")
 	}
+	refreshFixtureAdmin(&deps)
 	result = InstallResult{OK: true}
 	inspectCluster(context.Background(), &Config{}, deps, &ClusterIdentity{}, &result, false, true)
 	failed := map[string]bool{}
@@ -124,7 +126,7 @@ func TestMultifileKubeconfigKeepsExplicitContext(t *testing.T) {
 
 func TestDarwinUsesSelectedKubeconfigWithoutCreatingKind(t *testing.T) {
 	called := false
-	deps := InstallDeps{GOOS: "darwin", LookPath: func(name string) (string, error) { return name, nil }, RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
+	deps := testAdminInstallDeps(InstallDeps{GOOS: "darwin", LookPath: func(name string) (string, error) { return name, nil }, RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
 		t.Fatal("implicit host mutation")
 		return nil, nil
 	}, LoadKubeConfig: func(name string) (kubernetes.Interface, *rest.Config, string, error) {
@@ -133,7 +135,7 @@ func TestDarwinUsesSelectedKubeconfigWithoutCreatingKind(t *testing.T) {
 			t.Fatal("context changed")
 		}
 		return nil, nil, "", errors.New("selected context reached")
-	}}
+	}})
 	err := Execute(context.Background(), Config{ContextName: "chosen"}, deps)
 	if !called || err == nil || !strings.Contains(err.Error(), "selected context reached") {
 		t.Fatal("user context not selected")
@@ -156,12 +158,12 @@ func TestPlanReportsSelectedRemoteClusterWithoutAnotherGate(t *testing.T) {
 	bootstrapCredentialInventory(t)
 	ca := newTestServerCA(t, []string{"api.example.test"})
 	kube := fake.NewClientset(preflightNode(), preflightStorage())
-	deps := InstallDeps{RunHelm: func(context.Context, []string) ([]byte, error) { return []byte("[]"), nil }, LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(name string) (kubernetes.Interface, *rest.Config, string, error) {
+	deps := testAdminInstallDeps(InstallDeps{RunHelm: func(context.Context, []string) ([]byte, error) { return []byte("[]"), nil }, LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(name string) (kubernetes.Interface, *rest.Config, string, error) {
 		if name != "chosen" {
 			t.Fatal("context changed")
 		}
 		return kube, &rest.Config{Host: "https://api.example.test:6443", TLSClientConfig: rest.TLSClientConfig{CAData: ca}}, name, nil
-	}, RunCommand: preflightStats, ProbeNetworkPolicy: enforcedPolicyFixture}
+	}, RunCommand: preflightStats, ProbeNetworkPolicy: enforcedPolicyFixture})
 	plan := PlanInstall(context.Background(), Config{ContextName: "chosen"}, deps)
 	if !plan.OK || plan.Identity.Context != "chosen" || plan.Identity.CAPin == "" || plan.Identity.Server != "https://api.example.test:6443" || len(plan.Identity.Nodes) != 1 {
 		t.Fatalf("plan failed: %v", plan.Checks)
@@ -191,7 +193,7 @@ func TestExecuteRefusesUnknownNetworkPolicyBeforeHelm(t *testing.T) {
 	node := preflightNode()
 	node.Annotations = nil
 	kube := fake.NewClientset(node, preflightStorage())
-	deps := InstallDeps{Output: io.Discard, LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
+	deps := testAdminInstallDeps(InstallDeps{Output: io.Discard, LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 		return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA(t, []string{"api.example.test"})}}, "chosen", nil
 	}, ProbeNetworkPolicy: func(context.Context, Config, Deps) NetworkPolicyProbeResult {
 		return NetworkPolicyProbeResult{Status: "unverified", Remedy: "Allow the probe and retry install."}
@@ -201,7 +203,7 @@ func TestExecuteRefusesUnknownNetworkPolicyBeforeHelm(t *testing.T) {
 		}
 		t.Fatal("Helm ran without network-policy enforcement")
 		return nil, nil
-	}}
+	}})
 	err := Execute(context.Background(), Config{ContextName: "chosen"}, deps)
 	if !errors.Is(err, errInstallPreflight) || !strings.Contains(err.Error(), "network_policy:") {
 		t.Fatal("unknown enforcement was accepted")
@@ -212,14 +214,13 @@ func TestVerifyRequiresUpstreamAuthentication(t *testing.T) {
 	for _, test := range []struct {
 		raw string
 		ok  bool
-	}{
-		{"NAME  KIND URL                           AUTH\nforge ssh  ssh://git@forge.example/acme   ok\n", true},
-		{"NAME  KIND URL                           AUTH\nforge ssh  ssh://git@forge.example/acme   REJECTED\n", false},
-		{"NAME KIND URL\nforge ssh ssh://git@forge.example/acme\n", false},
-		{"NAME KIND URL AUTH\n", false},
-	} {
-		if verifiedUpstreams([]byte(test.raw)) != test.ok {
-			t.Fatal("upstream authentication result was misclassified")
+	}{{`{"upstreams":[{"upstream":{"name":"forge"},"auth":"ok"}]}`, true}, {`{"upstreams":[{"upstream":{"name":"forge"},"auth":"REJECTED"}]}`, false}, {`{"upstreams":[{"upstream":{"name":"forge"}}]}`, false}, {`{"upstreams":[]}`, false}} {
+		var result upstreamCheckResult
+		if json.Unmarshal([]byte(test.raw), &result) != nil {
+			t.Fatal("bad fixture")
+		}
+		if verifiedUpstreamAPI(result, false) != test.ok {
+			t.Fatal("upstream authentication was misclassified")
 		}
 	}
 }
@@ -235,10 +236,11 @@ func TestPolicyPreflightUsesLiveEvidenceForEveryDistribution(t *testing.T) {
 			node.Spec.ProviderID = providerID
 			node.Status.NodeInfo.KubeletVersion = "v1.37.0"
 			result := InstallResult{OK: true}
-			deps := Deps{KubeClient: fake.NewClientset(node, preflightStorage()), RunCommand: preflightStats, ProbeNetworkPolicy: func(context.Context, Config, Deps) NetworkPolicyProbeResult {
+			deps := testAdminDeps(Deps{KubeClient: fake.NewClientset(node, preflightStorage()), RunCommand: preflightStats, ProbeNetworkPolicy: func(context.Context, Config, Deps) NetworkPolicyProbeResult {
 				return NetworkPolicyProbeResult{Status: status, Remedy: "Repeat the live probe."}
-			}}
+			}})
 			inspectCluster(t.Context(), &Config{}, deps, &ClusterIdentity{}, &result, false, true)
+
 			if result.OK != (status == "enforced") || result.Checks[len(result.Checks)-1].Reason != status {
 				t.Fatalf("%s: %+v", providerID, result)
 			}
@@ -254,7 +256,7 @@ func TestAllInstallModesRefuseUntrustedClusterBeforeAccess(t *testing.T) {
 		{Host: "http://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: ca}},
 	} {
 		kube := fake.NewClientset()
-		deps := InstallDeps{Output: io.Discard, LookPath: func(name string) (string, error) { return name, nil },
+		deps := testAdminInstallDeps(InstallDeps{Output: io.Discard, LookPath: func(name string) (string, error) { return name, nil },
 			LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) { return kube, config, "chosen", nil },
 			RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
 				t.Fatal("subprocess contacted an untrusted cluster")
@@ -263,7 +265,7 @@ func TestAllInstallModesRefuseUntrustedClusterBeforeAccess(t *testing.T) {
 			RunHelm: func(context.Context, []string) ([]byte, error) {
 				t.Fatal("Helm contacted an untrusted cluster")
 				return nil, nil
-			}}
+			}})
 		cfg := Config{ContextName: "chosen"}
 		if PlanInstall(context.Background(), cfg, deps).OK || VerifyInstall(context.Background(), cfg, deps).OK {
 			t.Fatal("read-only mode accepted an untrusted cluster")

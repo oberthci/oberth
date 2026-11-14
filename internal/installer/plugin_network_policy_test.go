@@ -75,7 +75,7 @@ func TestPluginNetworkPolicyLiveProbeAndCleanup(t *testing.T) {
 			if mode == "absent" {
 				model.mode = "absent"
 			}
-			deps := Deps{KubeClient: kube, ContextName: "chosen", RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+			deps := testAdminDeps(Deps{KubeClient: kube, ContextName: "chosen", RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 				if name != "kubectl" || !strings.Contains(strings.Join(args, " "), "--context chosen --namespace "+namespace+" exec ") {
 					t.Fatal(args)
 				}
@@ -83,7 +83,7 @@ func TestPluginNetworkPolicyLiveProbeAndCleanup(t *testing.T) {
 					return nil, errors.New("private diagnostic")
 				}
 				return model.run(ctx, input, name, args...)
-			}}
+			}})
 			result := probeNetworkPolicy(ctx, Config{}, deps, policyProbeTiming{time.Second, 8 * time.Millisecond, 100 * time.Millisecond, 50 * time.Millisecond, time.Millisecond})
 			want := "unverified"
 			if mode == "enforced" {

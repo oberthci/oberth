@@ -83,12 +83,12 @@ func TestAddRepoKubectlUsesPrivateConfiguration(t *testing.T) {
 	}
 	t.Setenv("KUBECONFIG", strings.Join(paths, string(os.PathListSeparator)))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	script := filepath.Join("..", "..", "claude-plugin", "scripts", "add-repo")
-	for _, args := range [][]string{{"contexts"}, {"pods", "chosen", "pipelines"}, {"prepare-upstream", "chosen", "pipelines", "pod", "forge", "ssh://code.example.test/org", "repo", "shared", "--consent"}, {"verify", "chosen", "pipelines", "pod", "forge/org/repo"}} {
-		cmd := exec.CommandContext(t.Context(), "sh", append([]string{script}, args...)...)
+	for _, args := range [][]string{{"--context", "chosen", "get", "pods"}, {"--context=chosen", "get", "services"}} {
+		cmd := exec.CommandContext(t.Context(), "oberth", append([]string{"client", "kubectl"}, args...)...)
 		if data, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("plugin proxy: %v %s", err, data)
+			t.Fatalf("private CLI proxy: %v %s", err, data)
 		}
+
 		for path, before := range original {
 			after, err := os.ReadFile(path)
 			if err != nil || !bytes.Equal(before, after) {

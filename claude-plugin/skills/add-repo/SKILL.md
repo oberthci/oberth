@@ -25,8 +25,7 @@ same approved change. Commits and pushes still need their explicit approval.
 
 1. **Inspect.** Run `helper prerequisites`, then `helper inspect '<path>'`.
    The helper reuses Oberth from PATH or `~/.local/bin/oberth`; if absent,
-   use the verified bootstrap from `/oberth:install`. Missing Helm/kubectl get
-   install links; the user installs them. OpenSSH is also checked. This detects
+   use the verified bootstrap from `/oberth:install`. OpenSSH and Git are also checked. This detects
    GitHub, GitLab or Codeberg and the full organization path from origin, strips
    credentials from its output, and detects Go, Node or Python. For another
    host, `forge=other` supports ordinary SSH Git servers, including
@@ -37,17 +36,14 @@ same approved change. Commits and pushes still need their explicit approval.
    the exact settings page or authorized_keys location, not an invented link. Never display the raw origin URL.
    Preserve any existing `.oberth/` workflow and uncommitted work.
 2. **Check Oberth and its upstream.** Call MCP `system_status`. If sealed,
-   run `/oberth:unseal` first. Reuse the install's user-selected cluster context,
-   namespace and pod only when they are known; otherwise use `helper contexts`
-   and have the user choose, then `helper pods '<context>' '<namespace>'`.
-   Every cluster action takes that context explicitly; never pick a cluster.
-   Run `helper upstreams '<context>' '<namespace>' '<pod>'`. Match the full
+   run `/oberth:unseal` first. Reuse the authenticated API connection from the
+   client configuration. Run `helper upstreams` to inspect that server. Match the full
    upstream base URL, not just the forge name. Keep the existing key mode.
    If the organization is absent, show a proposed unique upstream name and
    `ssh://git@<forge-host>/<full-organization>` and get consent to add it.
    Use the existing configuration path:
 
-   `helper prepare-upstream '<context>' '<namespace>' '<pod>' '<name>' '<base-url>' '<repo>' shared --consent`
+   `helper prepare-upstream '<name>' '<base-url>' '<repo>' shared --consent`
 
    This registers the upstream as pending and prints a public key/remedy;
    pending registration is not proof that the forge accepted its key. Use `dedicated` for an
@@ -56,8 +52,8 @@ same approved change. Commits and pushes still need their explicit approval.
    upstream configuration flow. For an unknown forge, append its authoritative
    `SHA256:...` fingerprint after `--consent` in the prepare command; never
    learn that pin from a scan. Never read private key files or Kubernetes
-   Secrets. For an existing shared key, `helper public-key '<context>'
-   '<namespace>' '<pod>'` reads only the public identity allowlisted by Oberth.
+   Secrets. For an existing shared key, `helper public-key` returns the named public identity as JSON. Read its
+   `content` field; it contains public SSH material only.
    For a dedicated key, the prepare command prints its matching public key.
 3. **Deploy key with consent.** Show the public key fingerprint, target
    repository, exact settings URL from inspect, and that write access lets
@@ -75,14 +71,14 @@ same approved change. Commits and pushes still need their explicit approval.
    with the same organization base URL, using `dedicated`; preserve the old
    upstream and never rotate its key silently.
 4. **Register and verify the path.** With consent to this repository mapping,
-   run `helper register '<context>' '<namespace>' '<pod>' '<repo>' '<upstream>'
+   run `helper register '<repo>' '<upstream>'
    '<default-branch>' --consent`. Use the final repository slug or its qualified
    `<upstream>/<route-org>/<repo>` git path; qualified paths are checked against the
    selected upstream and organization. Call MCP `repo_list` and take this registration's exact
-   `git_path`, then run `helper verify '<context>' '<namespace>' '<pod>'
-   '<git_path>'` (a unique registered slug also works). This verifies forge access after the public key is accepted;
-   `--no-wait` preparation alone does not. Run `helper upstreams ...` and check
-   its AUTH column; exit zero alone does not prove acceptance for every
+   `git_path`, then run `helper verify
+   '<git_path>'`. This verifies forge access after the public key is accepted;
+   `--no-wait` preparation alone does not. Run `helper upstreams` and check
+   each structured `auth` result; exit zero alone does not prove acceptance for every
    upstream. Do not continue after a failed repository check.
 5. **Bind and review local Git configuration.** Use the saved public install
    JSON for the selected server and its matching CA/certificate files. Do not

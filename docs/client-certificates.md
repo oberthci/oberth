@@ -28,14 +28,13 @@ and `oberth://uplink/<identity>` URI come from the registered uplink, with only
 clientAuth EKU. The default lifetime is 2160h (90 days); `--ttl` / MCP `ttl` can
 select 1h through 8760h. A request exceeding the CA's own lifetime is refused.
 
-An in-pod administrator runs:
+An authenticated admin runs:
 
 ```sh
 oberth uplink cert agent@host --csr client.csr > client.crt
 ```
 
-Use `--fingerprint` when the identity has several SSH keys and `--database` when
-administering a non-default database. The admin MCP tool is `uplink_cert` with
+Use `--fingerprint` when the identity has several SSH keys. The admin MCP tool is `uplink_cert` with
 `identity`, `csr`, and optional `fingerprint` and `ttl`. Both return only the
 public certificate. The shared service function `IssueClientCert` commits its
 pin before returning; invite redemption can call it after authorizing the

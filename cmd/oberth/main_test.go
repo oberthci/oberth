@@ -1,30 +1,17 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"crypto/ecdsa"
-	"crypto/ed25519"
 	"crypto/elliptic"
 	cryptorand "crypto/rand"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/pem"
 	"io"
-	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
-	"k8s.io/client-go/kubernetes"
-
-	"github.com/oberthci/oberth/internal/auth"
-	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestParseServeOptionsRequiresSafeComposition(t *testing.T) {
@@ -159,104 +146,5 @@ func TestParseServeOptionsAllowsRekorHTTPOnlyWhenOptedIn(t *testing.T) {
 				t.Fatalf("options = %+v", options)
 			}
 		})
-	}
-}
-
-func TestAdministrativeBootstrapRegistersUpstreamAndBoundToken(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	directory := t.TempDir()
-	databasePath := filepath.Join(directory, "oberth.sqlite")
-	// Admin commands act on a database the server created; they never create one.
-	if err := storetest.EnsureDatabase(t.Context(), databasePath, store.Options{}); err != nil {
-		t.Fatal(err)
-	}
-	upstreamKeyPath := filepath.Join(directory, "upstream-key")
-	knownHostsPath := filepath.Join(directory, "known_hosts")
-	publicKey, privateKey, err := ed25519.GenerateKey(cryptorand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	privateBlock, err := ssh.MarshalPrivateKey(privateKey, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(upstreamKeyPath, pem.EncodeToMemory(privateBlock), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	sshKey, err := ssh.NewPublicKey(publicKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(knownHostsPath, []byte(knownhosts.Line([]string{"codeberg.org:22"}, sshKey)+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var upstreamOutput bytes.Buffer
-	if err := runUpstreamWithDependencies(ctx, []string{
-		"add", "--database", databasePath, "--upstream-key", upstreamKeyPath, "--known-hosts", knownHostsPath,
-		"codeberg", "ssh://git@codeberg.org/acme",
-	}, &upstreamOutput, upstreamDependencies{
-		input:        strings.NewReader(""),
-		mutationGate: allowTestMutation,
-		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) {
-			t.Fatal("Kubernetes must not be contacted for projected credentials")
-			return nil, nil
-		}),
-		scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) {
-			t.Fatal("host-key scanner must not run for projected credentials")
-			return nil, nil
-		},
-		probe: func(context.Context, string, []byte, []byte) error { return nil },
-	}); err != nil {
-		t.Fatal(err)
-	}
-	// Upstream was registered; the command no longer prints a confirmation
-	// message, so verify through the store instead.
-	_ = upstreamOutput.String()
-
-	publicKeyPath := filepath.Join(directory, "agent.pub")
-	if err := os.WriteFile(publicKeyPath, ssh.MarshalAuthorizedKey(sshKey), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	certificatePath := filepath.Join(directory, "tls.crt")
-	writeTestCertificate(t, certificatePath, publicKey, privateKey)
-	var uplinkOutput bytes.Buffer
-	if err := runUplinkWithDependencies(ctx, []string{
-		"add", "--database", databasePath, "--tls-cert", certificatePath,
-		publicKeyPath, "operator@example-node",
-	}, strings.NewReader(""), &uplinkOutput, uplinkDependencies{mutationGate: allowTestMutation}); err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(uplinkOutput.String()), "\n")
-	if len(lines) != 2 || !strings.HasPrefix(lines[0], "Uplink token for ") || !strings.HasPrefix(lines[1], "oberth_") {
-		t.Fatalf("uplink output shape = %q", uplinkOutput.String())
-	}
-	database, err := storetest.OpenAdminClient(ctx, databasePath, store.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-	authenticated, err := (auth.Authenticator{Tokens: database}).Authenticate(ctx, lines[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if authenticated.Identity != "operator@example-node" || authenticated.Fingerprint != ssh.FingerprintSHA256(sshKey) {
-		t.Fatalf("authenticated = %+v", authenticated)
-	}
-}
-
-func writeTestCertificate(t *testing.T, path string, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey) {
-	t.Helper()
-	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "oberth"},
-		NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
-	}
-	der, err := x509.CreateCertificate(cryptorand.Reader, template, template, publicKey, privateKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
-		t.Fatal(err)
 	}
 }

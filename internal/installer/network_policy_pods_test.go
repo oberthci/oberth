@@ -53,7 +53,7 @@ func TestPolicyProbeRejectsSameNamePodReplacement(t *testing.T) {
 					})
 				}
 				model := &policyTrafficModel{kube: kube, mode: "egress-only", denial: "refused"}
-				deps := Deps{KubeClient: kube, RunCommand: func(ctx context.Context, input []byte, command string, args ...string) ([]byte, error) {
+				deps := testAdminDeps(Deps{KubeClient: kube, RunCommand: func(ctx context.Context, input []byte, command string, args ...string) ([]byte, error) {
 					calls.Add(1)
 					namespace, _, script, _ := policyModelArgs(args)
 					if phase != "readiness" && script == policyTrafficScript {
@@ -66,7 +66,7 @@ func TestPolicyProbeRejectsSameNamePodReplacement(t *testing.T) {
 						}
 					}
 					return model.run(ctx, input, command, args...)
-				}}
+				}})
 				result := probeNetworkPolicy(t.Context(), Config{}, deps, policyModelTiming())
 				if !changed.Load() || result.Status != "unverified" || !strings.Contains(result.Remedy, "identity changed") {
 					t.Fatal("replacement supplied measurement evidence", result)
@@ -87,7 +87,7 @@ func TestPolicyProbeRejectsServerReplacementAtFinalRecovery(t *testing.T) {
 	kube.PrependReactor("delete", "networkpolicies", func(kt.Action) (bool, runtime.Object, error) { removals.Add(1); return false, nil, nil })
 	model := &policyTrafficModel{kube: kube, mode: "egress-only", denial: "refused"}
 	changed := false
-	deps := Deps{KubeClient: kube, RunCommand: func(ctx context.Context, input []byte, command string, args ...string) ([]byte, error) {
+	deps := testAdminDeps(Deps{KubeClient: kube, RunCommand: func(ctx context.Context, input []byte, command string, args ...string) ([]byte, error) {
 		namespace, pod, script, _ := policyModelArgs(args)
 		raw, err := model.run(ctx, input, command, args...)
 		if script == policyTrafficScript && pod == "control-0" && removals.Load() == policyProbeRounds && recovery.Add(1) == policyProbeSamples {
@@ -95,7 +95,7 @@ func TestPolicyProbeRejectsServerReplacementAtFinalRecovery(t *testing.T) {
 			changed = true
 		}
 		return raw, err
-	}}
+	}})
 	result := probeNetworkPolicy(t.Context(), Config{}, deps, policyModelTiming())
 	if !changed || result.Status != "unverified" || !strings.Contains(result.Remedy, "identity changed for server") {
 		t.Fatal("last recovery accepted a replaced server", result)
@@ -110,10 +110,10 @@ func TestPolicyProbeRequiresCreatedPodUID(t *testing.T) {
 		a.(kt.CreateAction).GetObject().(*corev1.Pod).UID = ""
 		return false, nil, nil
 	})
-	result := probeNetworkPolicy(t.Context(), Config{}, Deps{KubeClient: kube, RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
+	result := probeNetworkPolicy(t.Context(), Config{}, testAdminDeps(Deps{KubeClient: kube, RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
 		t.Error("exec without a created UID")
 		return nil, nil
-	}}, policyModelTiming())
+	}}), policyModelTiming())
 	if result.Status != "unverified" || !strings.Contains(result.Remedy, "no verified UID") {
 		t.Fatal(result)
 	}

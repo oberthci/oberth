@@ -42,6 +42,21 @@ TESTS = (
     (INSTALLER_PACKAGE, 'TestFirstAdminCSRDoesNotMintBearer'),
     (INSTALLER_PACKAGE, 'TestPluginInviteConfiguresMutualTLSAfterRedemption'),
     (INSTALLER_PACKAGE, 'TestAddRepoClusterActionsKeepTheChosenContext'),
+    (INSTALLER_PACKAGE, 'TestFirstAdminRerunRefusalPreservesPartialResult'),
+    (INSTALLER_PACKAGE, 'TestFirstAdminCachedKeyWithoutCSRCanResume'),
+)
+
+
+# These complete flows must also pass in the recorded rest run. The existing
+# credential inventory contract remains scoped to TESTS' installer fixtures.
+FLOW_TESTS = (
+    (CLI_PACKAGE, 'TestRunCreateFirstAdminLiveGate'),
+    (CLI_PACKAGE, 'TestUpgradeWaitProcessGraph'),
+    (INSTALLER_PACKAGE, 'TestUpgradeUnconfiguredAdminRefusesBeforeMutation'),
+    (INSTALLER_PACKAGE, 'TestUpgradeMissingCurrentAdminAPIGivesRetryCommand'),
+    (INSTALLER_PACKAGE, 'TestInstallJSONOnboardingAndResume'),
+    (INSTALLER_PACKAGE, 'TestFirstAdminInterruptedInstallResumes'),
+    (INSTALLER_PACKAGE, 'TestUpgradeReleasedServerWithoutAdminAPI'),
 )
 
 
@@ -244,7 +259,7 @@ def require_pass_events(raw, returncode):
             terminal[(package, test)] = action
     if returncode:
         raise Refused('race command failed', stage='rest-race', check='command-exit')
-    for package, test in TESTS:
+    for package, test in TESTS + FLOW_TESTS:
         if terminal.get((package, test)) != 'pass':
             raise Refused('required fixture did not pass', stage='fixture-events', check='required-fixture-pass',
                           package=package, test=test)
@@ -370,7 +385,7 @@ def main():
         probe = Probe(root, Path(directory), 'selected', Path(directory) / 'unused-kubeconfig')
         probe.secrets.write_bytes(b'FIXTURE_CANARY=' + secrets.token_hex(32).encode() + b'\n')
         race_seconds, cell_seconds = checked_cell(probe, race_command)
-    print('Bootstrap contract cell passed: 18 race fixture events; '
+    print(f'Bootstrap contract cell passed: {len(TESTS) + len(FLOW_TESTS)} race fixture events; '
           f'race_seconds={race_seconds:.3f} added_cell_seconds={cell_seconds:.3f}.')
 
 

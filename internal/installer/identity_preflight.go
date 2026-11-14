@@ -14,17 +14,15 @@ import (
 	"io"
 	"math/big"
 	"net"
-	"os/exec"
 	"slices"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
-
-	"github.com/oberthci/oberth/internal/secretstore"
-
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/oberthci/oberth/internal/secretstore"
 )
 
 // liveHelmValuesSubset is the subset of a Helm release's values the identity
@@ -466,69 +464,19 @@ func readPodServerCert(ctx context.Context, cfg Config, deps Deps) ([]byte, erro
 }
 
 func readServerPublicCertificate(ctx context.Context, cfg Config, deps Deps, ca bool) ([]byte, error) {
-	ns := cfg.Namespace
-	if ns == "" {
-		ns = DefaultNamespace
-	}
-	if deps.KubeClient != nil {
-		// Ignore retained legacy Secrets once the deployment uses runtime
-		// identities: they are no longer the certificate being served.
-		useSecret := true
-		deployment, err := deps.KubeClient.AppsV1().Deployments(ns).Get(ctx, "oberth", metav1.GetOptions{})
-		if err == nil {
-			useSecret = false
-			for _, volume := range deployment.Spec.Template.Spec.Volumes {
-				if volume.Secret != nil && volume.Secret.SecretName == "oberth-tls" {
-					useSecret = true
-				}
-			}
-		} else if !apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("locate server certificate source: %w", err)
+	if cfg.enrollment != nil {
+		if ca && cfg.enrollment.result.ServerCA != "" {
+			return []byte(cfg.enrollment.result.ServerCA), nil
 		}
-		if useSecret {
-			secret, err := deps.KubeClient.CoreV1().Secrets(ns).Get(ctx, "oberth-tls", metav1.GetOptions{})
-			if err == nil {
-				if ca && len(secret.Data["ca.crt"]) > 0 {
-					return secret.Data["ca.crt"], nil
-				}
-				if len(secret.Data["tls.crt"]) == 0 {
-					return nil, errors.New("oberth-tls has no public certificate")
-				}
-				return secret.Data["tls.crt"], nil
-			}
-			if !apierrors.IsNotFound(err) {
-				return nil, fmt.Errorf("read server certificate Secret: %w", err)
-			}
+		if !ca && cfg.enrollment.result.ServerCertificate != "" {
+			return []byte(cfg.enrollment.result.ServerCertificate), nil
 		}
 	}
-	if deps.RunCommand == nil {
-		return nil, errors.New("no cluster command runner for runtime identity")
-	}
-	paths := []string{"/etc/oberth/tls/tls.crt", "/run/oberth-identities/server/tls.crt"}
+	name := "server-certificate"
 	if ca {
-		paths = []string{"/run/oberth-identities/server/ca.crt", "/run/oberth-identities/server/tls.crt", "/etc/oberth/tls/tls.crt"}
+		name = "server-ca"
 	}
-	var last error
-	for _, path := range paths {
-		args := []string{}
-		if deps.ContextName != "" {
-			args = append(args, "--context", deps.ContextName)
-		}
-		args = append(args, "exec", "-n", ns, "deploy/oberth", "-c", "oberth", "--")
-		command := append(append([]string{}, args...), "/usr/local/bin/oberth", "admin", "read-file", path)
-		cert, err := deps.RunCommand(ctx, nil, "kubectl", command...)
-		// Only pre-scratch releases lack admin. Never fall back on permission,
-		// I/O, or allowlist errors from a scratch-capable binary.
-		var exitError *exec.ExitError
-		if errors.As(err, &exitError) && strings.Contains(string(exitError.Stderr), `unknown command "admin"`) {
-			cert, err = deps.RunCommand(ctx, nil, "kubectl", append(args, "cat", path)...)
-		}
-		if err == nil && len(cert) > 0 {
-			return cert, nil
-		}
-		last = errors.Join(last, err)
-	}
-	return nil, fmt.Errorf("could not retrieve server public certificate: %w", errors.Join(last, errors.New("no certificate returned")))
+	return readPublicIdentity(ctx, cfg, deps, name)
 }
 
 // certSHA256Fingerprint returns the colon-separated SHA-256 fingerprint of

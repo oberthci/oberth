@@ -128,6 +128,7 @@ func TestUpgradeDryRunValidatesCleanedStoredValues(t *testing.T) {
 			}
 			var output bytes.Buffer
 			deps, chart := hotfixHelm(t, values, &output)
+			withUpgradeAdminFixture(&deps, "0.22.5")
 			_, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.22.5", ChartOverride: chart, DryRun: true, NoBackup: true}, deps)
 			if unknown {
 				var schemaErr *ErrSchemaValidation
@@ -152,6 +153,7 @@ func TestRetiredProfileCleanupKeepsOpaqueTransit(t *testing.T) {
 // now that dry run performs the same read-only validation as apply.
 func withValidatedDryRunRelease(t testing.TB, deps *Deps, version string) {
 	t.Helper()
+	withUpgradeAdminFixture(deps, version)
 	withSignedRelease(t, deps, version, fakeChartImageRef)
 	run := deps.RunHelm
 	deps.RunHelm = func(ctx context.Context, args []string) ([]byte, error) {

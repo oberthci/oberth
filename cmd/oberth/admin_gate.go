@@ -253,7 +253,7 @@ func validAdminOperation(operation string) bool {
 	switch operation {
 	case "upstream.database.open", "upstream.register", "upstream.remove", "upstream.identity.import",
 		"repository.database.open", "repository.register", "repository.remove",
-		"uplink.database.open", "uplink.register", "uplink.remove", "uplink.scope", "uplink.token.create", "uplink.token.activate",
+		"uplink.database.open", "uplink.register", "uplink.remove", "uplink.scope", "uplink.token.create", "uplink.token.activate", "uplink.cert.issue",
 		"access.database.open", "access.allow", "access.revoke", "audit.database.open", "audit.record",
 		"run.cancel":
 		return true

@@ -16,6 +16,9 @@ import (
 // home and config directory so setup.json and reports never land in the
 // developer's own ~/.config.
 func TestMain(m *testing.M) {
+	runWizardAdmin = func(context.Context, WizardState, string, any, any) error {
+		return errors.New("test ran an unstubbed admin API")
+	}
 	checkHostTools = func(string, func(string) (string, error)) error { return nil }
 	runKubectl = func(context.Context, ...string) ([]byte, error) {
 		return nil, errors.New("test ran an unstubbed kubectl")

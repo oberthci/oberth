@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/oberthci/oberth/internal/store"
@@ -50,31 +49,18 @@ func TestHistoryBackupLargeStreamAndRestoreRoundTrip(t *testing.T) {
 	source := newFakeBackupCluster(t, sourceCompat)
 	var output bytes.Buffer
 	deps := source.deps(&output)
-	stream := deps.runIO
 	streamed := false
-	deps.runStdout = func(context.Context, []byte, string, ...string) ([]byte, error) {
-		t.Fatal("backup used buffered stdout")
-		return nil, nil
-	}
-	deps.runIO = func(ctx context.Context, in io.Reader, out io.Writer, name string, args ...string) error {
-		if strings.Contains(strings.Join(args, " "), "backup database") {
-			if in != nil {
-				t.Fatal("snapshot unexpectedly had stdin")
-			}
-			if strings.Contains(strings.Join(args, " "), "--max-database-bytes") {
-				t.Fatal("default limit flag breaks older in-pod servers", args)
-			}
-			file, err := os.Open(databasePath)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = file.Close() }()
-			n, err := io.Copy(out, file)
-			streamed = n == info.Size()
+	deps.Admin = streamingFixtureAdmin{AdminAPI: deps.Admin, download: func(_ context.Context, _ int64, out io.Writer) error {
+		file, err := os.Open(databasePath)
+		if err != nil {
 			return err
 		}
-		return stream(ctx, in, out, name, args...)
-	}
+		defer func() { _ = file.Close() }()
+		n, err := io.Copy(out, file)
+		streamed = n == info.Size()
+		return err
+	}}
+
 	outer := filepath.Join(t.TempDir(), "history.cms")
 	cfg := BackupConfig{Scope: BackupScopeHistory, Output: outer, Recipient: "fixture.pem"}
 	cfg.applyDefaults()

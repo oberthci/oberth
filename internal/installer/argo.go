@@ -198,6 +198,18 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	}
 
 	args := ArgoHelmArgs(cfg)
+	if exists {
+		unchanged, err := resumedReleaseUnchanged(ctx, cfg, deps, release, "argo-workflows", ns, result.TargetVersion, args)
+		if err != nil {
+			return result, err
+		}
+		if unchanged {
+			result.AlreadyInstalled = true
+			result.Upgraded = false
+			return result, nil
+		}
+	}
+
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return result, fmt.Errorf("helm install Argo Workflows: %w", err)
 	}

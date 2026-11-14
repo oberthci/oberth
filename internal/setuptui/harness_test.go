@@ -213,6 +213,8 @@ type fakeKubectl struct {
 func stubKubectl(t *testing.T, k *fakeKubectl) *fakeKubectl {
 	t.Helper()
 	previous := runKubectl
+	previousAdmin := runWizardAdmin
+	runWizardAdmin = fixtureWizardAdmin
 	runKubectl = func(_ context.Context, args ...string) ([]byte, error) {
 		k.mu.Lock()
 		defer k.mu.Unlock()
@@ -240,7 +242,7 @@ func stubKubectl(t *testing.T, k *fakeKubectl) *fakeKubectl {
 		}
 		return nil, exec.ErrNotFound
 	}
-	t.Cleanup(func() { runKubectl = previous })
+	t.Cleanup(func() { runKubectl = previous; runWizardAdmin = previousAdmin })
 	return k
 }
 

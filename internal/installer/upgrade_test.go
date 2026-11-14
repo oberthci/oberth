@@ -21,6 +21,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
+
+	"github.com/oberthci/oberth/internal/client"
 )
 
 func TestValidateUpgradeRejectsDevBuild(t *testing.T) {
@@ -79,7 +81,7 @@ func TestRunUpgradeAlreadyUpToDate(t *testing.T) {
 			t.Parallel()
 			var output bytes.Buffer
 			helmCalls := 0
-			deps := Deps{
+			deps := testAdminDeps(Deps{
 				Output: &output,
 				RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
 					t.Fatal("no-op/dry-run must not write audit records")
@@ -97,7 +99,7 @@ func TestRunUpgradeAlreadyUpToDate(t *testing.T) {
 				},
 				KubeClient: argoSecurityTestClient(),
 				RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-			}
+			})
 
 			result, err := RunUpgrade(context.Background(), UpgradeConfig{
 				BinaryVersion: "0.12.35", Namespace: "oberth", DryRun: dryRun,
@@ -129,20 +131,20 @@ func TestRunUpgradeSameVersionValuesDryRunPlansReapply(t *testing.T) {
 				return out, nil
 			}
 			if len(args) >= 2 && args[0] == "list" {
-				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.12.35"}]`), nil
+				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.22.7"}]`), nil
 			}
 			return nil, fmt.Errorf("unexpected Helm call in dry-run: %v", args)
 		},
 		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
-	withValidatedDryRunRelease(t, &deps, "0.12.35")
+	withValidatedDryRunRelease(t, &deps, "0.22.7")
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion: "0.12.35", Namespace: "oberth", DryRun: true, UserValues: []string{valuesFile},
+		BinaryVersion: "0.22.7", Namespace: "oberth", DryRun: true, UserValues: []string{valuesFile},
 	}, deps)
 	text := output.String()
-	if err != nil || result.AlreadyUpToDate || !strings.Contains(text, "Re-apply --values/--set at v0.12.35") ||
-		strings.Contains(text, "from v0.12.35 to v0.12.35") || !strings.Contains(text, "--values "+valuesFile) {
+	if err != nil || result.AlreadyUpToDate || !strings.Contains(text, "Re-apply --values/--set at v0.22.7") ||
+		strings.Contains(text, "from v0.22.7 to v0.22.7") || !strings.Contains(text, "--values "+valuesFile) {
 		t.Fatalf("same-version values dry run: result=%+v err=%v output=%q", result, err, text)
 	}
 }
@@ -159,22 +161,22 @@ func TestRunUpgradeFailedSameVersionDryRunPlansRepair(t *testing.T) {
 			}
 			helmCalls++
 			if len(args) >= 2 && args[0] == "list" {
-				return []byte(`[{"name":"oberth","namespace":"oberth","revision":"57","status":"failed","chart":"oberth-0.16.6"}]`), nil
+				return []byte(`[{"name":"oberth","namespace":"oberth","revision":"57","status":"failed","chart":"oberth-0.22.7"}]`), nil
 			}
 			return nil, fmt.Errorf("unexpected Helm mutation in dry-run: %v", args)
 		},
 		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
-	withValidatedDryRunRelease(t, &deps, "0.16.6")
+	withValidatedDryRunRelease(t, &deps, "0.22.7")
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion: "0.16.6", Namespace: "oberth", DryRun: true,
+		BinaryVersion: "0.22.7", Namespace: "oberth", DryRun: true,
 	}, deps)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := output.String()
-	for _, want := range []string{"revision 57 is FAILED", "same-version forward repair", "helm upgrade oberth", "Verify the signed release v0.16.6", "<verified oberth-0.16.6.tgz>", "No cluster changes were made"} {
+	for _, want := range []string{"revision 57 is FAILED", "same-version forward repair", "helm upgrade oberth", "Verify the signed release v0.22.7", "<verified oberth-0.22.7.tgz>", "No cluster changes were made"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("dry-run output missing %q: %q", want, text)
 		}
@@ -244,7 +246,7 @@ func TestRunUpgradeRetriesFailedSameVersionWithPinnedImage(t *testing.T) {
 	}
 	var output bytes.Buffer
 	var calls [][]string
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
@@ -269,7 +271,7 @@ func TestRunUpgradeRetriesFailedSameVersionWithPinnedImage(t *testing.T) {
 		},
 		KubeClient: argoSecurityTestClient(deployment),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 	withSignedRelease(t, &deps, targetVersion, targetImage)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
 		BinaryVersion: targetVersion, Namespace: "oberth", Timeout: 10 * time.Second, NoBackup: true,
@@ -317,7 +319,7 @@ func TestRunUpgradeReappliesValuesAtSameVersion(t *testing.T) {
 	}
 	var output bytes.Buffer
 	var calls [][]string
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
@@ -342,7 +344,7 @@ func TestRunUpgradeReappliesValuesAtSameVersion(t *testing.T) {
 		},
 		KubeClient: argoSecurityTestClient(deployment),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 	valuesFile := filepath.Join(t.TempDir(), "watch.yaml")
 	if err := os.WriteFile(valuesFile, []byte("pushBannerURL: https://ci.example.invalid\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -397,6 +399,7 @@ func TestRunUpgradeFailedSameVersionRejectsTagOnlyImage(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 	withSignedRelease(t, &deps, "0.16.6", fakeChartImageRef)
+	withUpgradeAdminFixture(&deps, "0.22.7")
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
 		BinaryVersion: "0.16.6", Namespace: "oberth", NoBackup: true,
 	}, deps)
@@ -505,7 +508,7 @@ func TestRunUpgradeRejectsUnparseableInstalledVersion(t *testing.T) {
 func TestRunUpgradeDryRun(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: &output,
 		RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
 			t.Fatal("no-op/dry-run must not write audit records")
@@ -529,7 +532,7 @@ func TestRunUpgradeDryRun(t *testing.T) {
 		},
 		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 
 	withValidatedDryRunRelease(t, &deps, "0.12.35")
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -727,12 +730,12 @@ func TestDeploymentRolledOut(t *testing.T) {
 
 func TestVerifyRunningVersionParsesOutput(t *testing.T) {
 	t.Parallel()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: io.Discard,
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("oberth v0.12.35 commit=abc123 date=2026-08-18T00:00:00Z\n"), nil
 		},
-	}
+	})
 	version, err := verifyRunningVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"}, "0.12.35")
 	if err != nil {
 		t.Fatal(err)
@@ -744,12 +747,12 @@ func TestVerifyRunningVersionParsesOutput(t *testing.T) {
 
 func TestVerifyRunningVersionHandlesKubectlNoise(t *testing.T) {
 	t.Parallel()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: io.Discard,
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("Defaulted container \"oberth\" out of: oberth, init\noberth v0.12.35 commit=abc123 date=2026-08-18T00:00:00Z\n"), nil
 		},
-	}
+	})
 	version, err := verifyRunningVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"}, "0.12.35")
 	if err != nil {
 		t.Fatal(err)
@@ -761,26 +764,26 @@ func TestVerifyRunningVersionHandlesKubectlNoise(t *testing.T) {
 
 func TestVerifyRunningVersionRejectsMismatch(t *testing.T) {
 	t.Parallel()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: io.Discard,
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("oberth v0.12.20 commit=abc123 date=2026-08-18T00:00:00Z\n"), nil
 		},
-	}
+	})
 	_, err := verifyRunningVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"}, "0.12.35")
-	if err == nil || !strings.Contains(err.Error(), "expected v0.12.35 but pod reports v0.12.20") {
+	if err == nil || !strings.Contains(err.Error(), "expected v0.12.35 but server API reports v0.12.20") {
 		t.Fatalf("mismatch error = %v", err)
 	}
 }
 
 func TestVerifyRunningVersionRejectsUnparseable(t *testing.T) {
 	t.Parallel()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: io.Discard,
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("oberth dev commit=unknown date=unknown\n"), nil
 		},
-	}
+	})
 	_, err := verifyRunningVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"}, "0.12.35")
 	if err == nil || !strings.Contains(err.Error(), "could not parse") {
 		t.Fatalf("unparseable error = %v", err)
@@ -881,7 +884,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, installed, target str
 
 	verified, recorded := false, false
 	helmCallLog := make([]string, 0)
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
@@ -921,7 +924,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, installed, target str
 				if !verified || name != "kubectl" {
 					t.Fatalf("audit before verification: %s %v", name, args)
 				}
-				want := []string{"exec", "-c", "oberth", "--context", "remote-fixture", "-n", "oberth", "deploy/oberth", "--", "/usr/local/bin/oberth", "audit", "record", "upgrade.completed", "--details", string(auditDetails)}
+				want := []string{"exec", "-i", "-c", "oberth", "--context", "remote-fixture", "-n", "oberth", "deploy/oberth", "--", "/usr/local/bin/oberth", "audit", "record", "upgrade.completed", "--details", string(auditDetails)}
 				if !reflect.DeepEqual(args, want) {
 					t.Fatalf("audit args=%v want=%v", args, want)
 				}
@@ -937,7 +940,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, installed, target str
 		KubeClient:  kubeClient,
 		RestConfig:  &rest.Config{Host: server.URL},
 		ContextName: "remote-fixture",
-	}
+	})
 
 	withSignedRelease(t, &deps, target, targetImage)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -1226,7 +1229,7 @@ func TestRunUpgradeRetriesTransientVerifyExecFailure(t *testing.T) {
 	kubeClient := argoSecurityTestClient(deployment)
 
 	execAttempts := 0
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:       &output,
 		PollInterval: time.Millisecond,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
@@ -1254,13 +1257,13 @@ func TestRunUpgradeRetriesTransientVerifyExecFailure(t *testing.T) {
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			execAttempts++
 			if execAttempts < 2 {
-				return nil, fmt.Errorf("error: unable to upgrade connection: container not found")
+				return nil, &client.AdminError{StatusCode: 503, Cause: errors.New("server temporarily unavailable")}
 			}
 			return []byte("oberth v0.12.35 commit=abc123 date=2026-08-18T00:00:00Z\n"), nil
 		},
 		KubeClient: kubeClient,
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 
 	withSignedRelease(t, &deps, "0.12.35", targetImage)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -1312,7 +1315,7 @@ func TestRunUpgradeFailsWhenVersionUnverifiable(t *testing.T) {
 	kubeClient := argoSecurityTestClient(deployment)
 
 	execAttempts := 0
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:       &output,
 		PollInterval: time.Millisecond,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
@@ -1342,11 +1345,11 @@ func TestRunUpgradeFailsWhenVersionUnverifiable(t *testing.T) {
 				t.Fatal("failed upgrade must not record completion")
 			}
 			execAttempts++
-			return nil, fmt.Errorf("error: unable to upgrade connection: container not found")
+			return nil, &client.AdminError{StatusCode: 503, Cause: errors.New("server temporarily unavailable")}
 		},
 		KubeClient: kubeClient,
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 
 	withSignedRelease(t, &deps, "0.12.35", targetImage)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -1403,7 +1406,7 @@ func TestRunUpgradeFailsOnVersionMismatchFullFlow(t *testing.T) {
 	kubeClient := argoSecurityTestClient(deployment)
 
 	execAttempts := 0
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:       &output,
 		PollInterval: time.Millisecond,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
@@ -1437,7 +1440,7 @@ func TestRunUpgradeFailsOnVersionMismatchFullFlow(t *testing.T) {
 		},
 		KubeClient: kubeClient,
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 
 	withSignedRelease(t, &deps, "0.12.35", targetImage)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -1453,8 +1456,8 @@ func TestRunUpgradeFailsOnVersionMismatchFullFlow(t *testing.T) {
 		t.Fatalf("error should name both versions: %v", err)
 	}
 	// Version mismatch is definitive — must NOT retry.
-	if execAttempts != 1 {
-		t.Fatalf("expected exactly 1 exec attempt (no retry on mismatch), got %d", execAttempts)
+	if execAttempts != 2 {
+		t.Fatalf("expected one API observation (two fixture reads) (no retry on mismatch), got %d", execAttempts)
 	}
 }
 
@@ -1494,6 +1497,7 @@ func TestRunUpgradeRecoveryGuidanceOnHelmFailure(t *testing.T) {
 	}
 
 	withSignedRelease(t, &deps, "0.12.35", targetImage)
+	withUpgradeAdminFixture(&deps, "0.22.7")
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
 		NoBackup:      true,
 		BinaryVersion: "0.12.35",
@@ -1584,6 +1588,7 @@ func TestRunUpgradeRecoveryGuidanceOnRolloutFailure(t *testing.T) {
 	defer cancel()
 
 	withSignedRelease(t, &deps, "0.12.35", targetImage)
+	withUpgradeAdminFixture(&deps, "0.22.7")
 	_, err := RunUpgrade(ctx, UpgradeConfig{
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
@@ -1779,7 +1784,7 @@ func TestDryRunIncludesUserValues(t *testing.T) {
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
 					Name: "oberth", Namespace: "oberth",
-					Status: "deployed", Chart: "oberth-0.16.18",
+					Status: "deployed", Chart: "oberth-0.22.7",
 				}}
 				data, _ := json.Marshal(releases)
 				return data, nil
@@ -1790,9 +1795,9 @@ func TestDryRunIncludesUserValues(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
-	withValidatedDryRunRelease(t, &deps, "0.16.19")
+	withValidatedDryRunRelease(t, &deps, "0.22.8")
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion: "0.16.19",
+		BinaryVersion: "0.22.8",
 		Namespace:     "oberth",
 		DryRun:        true,
 		UserSet:       []string{"replicaCount=5"},
@@ -1835,7 +1840,7 @@ func TestDryRunAndRealArgsAgree(t *testing.T) {
 
 func TestQueryRunningSchemaVersionParsesOutput(t *testing.T) {
 	t.Parallel()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: io.Discard,
 		RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 			// Verify the command calls version --schema, not just version.
@@ -1844,9 +1849,9 @@ func TestQueryRunningSchemaVersionParsesOutput(t *testing.T) {
 					return []byte("17\n"), nil
 				}
 			}
-			return nil, fmt.Errorf("unexpected args: %v", args)
+			return []byte("oberth v0.22.6"), nil
 		},
-	}
+	})
 	v, err := queryRunningSchemaVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"})
 	if err != nil {
 		t.Fatal(err)
@@ -1856,18 +1861,18 @@ func TestQueryRunningSchemaVersionParsesOutput(t *testing.T) {
 	}
 }
 
-func TestQueryRunningSchemaVersionReturnsZeroForOldBinary(t *testing.T) {
+func TestQueryRunningSchemaVersionRefusesUnavailableAPI(t *testing.T) {
 	t.Parallel()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: io.Discard,
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			// Old binary does not understand --schema, returns usage error.
 			return []byte("oberth: usage error: version accepts no arguments\n"), fmt.Errorf("exit status 2")
 		},
-	}
+	})
 	v, err := queryRunningSchemaVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("API refusal hidden")
 	}
 	if v != 0 {
 		t.Fatalf("schema version = %d, want 0 for old binary", v)
@@ -1877,7 +1882,7 @@ func TestQueryRunningSchemaVersionReturnsZeroForOldBinary(t *testing.T) {
 func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
@@ -1886,7 +1891,7 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
 					Name: "oberth", Namespace: "oberth",
-					Status: "deployed", Chart: "oberth-0.16.18",
+					Status: "deployed", Chart: "oberth-0.22.7",
 				}}
 				data, _ := json.Marshal(releases)
 				return data, nil
@@ -1898,11 +1903,11 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 		},
 		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 
-	withValidatedDryRunRelease(t, &deps, "0.16.19")
+	withValidatedDryRunRelease(t, &deps, "0.22.8")
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion:       "0.16.19",
+		BinaryVersion:       "0.22.8",
 		Namespace:           "oberth",
 		DryRun:              true,
 		BinarySchemaVersion: 17,
@@ -1925,7 +1930,7 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
@@ -1934,7 +1939,7 @@ func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
 					Name: "oberth", Namespace: "oberth",
-					Status: "deployed", Chart: "oberth-0.16.18",
+					Status: "deployed", Chart: "oberth-0.22.7",
 				}}
 				data, _ := json.Marshal(releases)
 				return data, nil
@@ -1946,11 +1951,11 @@ func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 		},
 		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 
-	withValidatedDryRunRelease(t, &deps, "0.16.19")
+	withValidatedDryRunRelease(t, &deps, "0.22.8")
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion:       "0.16.19",
+		BinaryVersion:       "0.22.8",
 		Namespace:           "oberth",
 		DryRun:              true,
 		BinarySchemaVersion: 17,

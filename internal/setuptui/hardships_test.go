@@ -201,7 +201,7 @@ func TestVerifyChecksAndSummary(t *testing.T) {
 		t.Errorf("summary %q", s)
 	}
 
-	rows := parseUpstreamCheck([]byte(upstreamCheckTable("codeberg", "ssh://git@codeberg.org/x", "ssh: unable to authenticate")))
+	rows := fixtureUpstreamCheck([]byte(upstreamCheckTable("codeberg", "ssh://git@codeberg.org/x", "ssh: unable to authenticate")))
 	if len(rows) != 1 || rows[0].ok() || rows[0].auth != "ssh: unable to authenticate" || rows[0].url != "ssh://git@codeberg.org/x" {
 		t.Errorf("parsed %+v", rows)
 	}
@@ -244,7 +244,7 @@ func TestParseUpstreamCheckServerOutput(t *testing.T) {
 	out := "NAME       KIND   URL                                 KEY NAME   KEY FINGERPRINT                                      AUTH\n" +
 		"codeberg   ssh    ssh://git@codeberg.org/exampleorg   -          SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA   ok\n" +
 		"github     ssh    ssh://git@github.com/oberthci       -          SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA   ok\n"
-	rows := parseUpstreamCheck([]byte(out))
+	rows := fixtureUpstreamCheck([]byte(out))
 	if len(rows) != 2 || rows[0].name != "codeberg" || rows[0].url != "ssh://git@codeberg.org/exampleorg" || !rows[0].ok() || !rows[1].ok() {
 		t.Fatalf("parsed %+v", rows)
 	}

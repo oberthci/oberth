@@ -6,13 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -21,115 +19,279 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/httpstream"
+	streamspdy "k8s.io/apimachinery/pkg/util/httpstream/spdy"
 
-	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
-func upgradeWaitKubeconfig(t *testing.T, root string) string {
-	t.Helper()
-	objects := upgradeWaitArgoObjects()
-	deployment := objects[0].(*appsv1.Deployment)
-	config := objects[1].(*corev1.ConfigMap)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Errorf("upgrade wait attempted a Kubernetes mutation: %s %s", r.Method, r.URL.Path)
-			http.Error(w, "mutations refused", http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/apis/apps/v1/namespaces/" + deployment.Namespace + "/deployments":
-			_ = json.NewEncoder(w).Encode(&appsv1.DeploymentList{Items: []appsv1.Deployment{*deployment}})
-		case "/api/v1/namespaces/" + config.Namespace + "/configmaps/" + config.Name:
-			_ = json.NewEncoder(w).Encode(config)
-		case "/api/v1/namespaces/kube-system":
-			http.NotFound(w, r)
-		default:
-			t.Errorf("unexpected Kubernetes request: %s", r.URL.Path)
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(server.Close)
-	kubeconfig := filepath.Join(root, "kubeconfig")
-	if err := os.WriteFile(kubeconfig, []byte("apiVersion: v1\nkind: Config\ncurrent-context: fixture\ncontexts:\n- name: fixture\n  context:\n    cluster: fixture\n    user: fixture\nclusters:\n- name: fixture\n  cluster:\n    server: "+server.URL+"\nusers:\n- name: fixture\n  user: {}\n"), 0600); err != nil {
-		t.Fatal(err)
+func upgradeWaitArgoObjects() []runtime.Object {
+	return []runtime.Object{
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "workflow-controller", Namespace: installer.DefaultArgoNamespace}, Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "workflow-controller", Command: []string{"workflow-controller"}, Args: []string{"--configmap", "idle-test-config"}}}}}}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "idle-test-config", Namespace: installer.DefaultArgoNamespace}, Data: map[string]string{"config": `{
+			"mainContainer":{"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"seccompProfile":{"type":"RuntimeDefault"}}},
+			"executor":{"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"seccompProfile":{"type":"RuntimeDefault"}}}
+		}`}},
 	}
-	return kubeconfig
 }
 
-// The helper runs the actual CLI main, or the production in-pod wait loop in
-// place of kubectl exec. Every host command is a fixture; no cluster is used.
+// The helper runs the actual CLI; all cluster traffic is loopback and every
+// kubectl invocation refuses. Idle observation creates no child observer.
 func TestUpgradeWaitProcessHelper(t *testing.T) {
 	switch os.Getenv("OBERTH_TEST_WAIT_ROLE") {
 	case "cli":
 		version = "0.17.52"
 		os.Args = []string{"oberth", "upgrade", "--wait-idle", "--chart=/fixture", "--timeout=1m", "--wait-timeout=" + os.Getenv("OBERTH_TEST_WAIT_LIMIT")}
-		// The fixture has no server database to back up; the record (none
-		// without a backup) would go to the helper's private home.
 		home, err := os.UserHomeDir()
 		if err != nil {
 			os.Exit(93)
 		}
-		os.Args = append(os.Args, "--no-backup", "--backup-dir="+home)
+		os.Args = append(os.Args, "--context=fixture", "--no-backup", "--backup-dir="+home)
 		if os.Getenv("OBERTH_TEST_OLD_CRITICAL") == "yes" {
 			os.Args = append(os.Args, "--wait-for=critical")
 		}
 		main()
 		os.Exit(0)
-	case "waiter":
-		if err := os.WriteFile(os.Getenv("OBERTH_TEST_WAIT_PID"), []byte(strconv.Itoa(os.Getpid())), 0600); err != nil {
-			os.Exit(92)
-		}
-		pgid, _ := syscall.Getpgid(0)
-		fmt.Printf("fixture observer pid=%d ppid=%d pgid=%d\n", os.Getpid(), os.Getppid(), pgid)
-		ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(3*time.Minute))
-		defer cancel()
-		err := waitIdle(ctx, &http.Client{Timeout: 5 * time.Second}, os.Getenv("OBERTH_TEST_WAIT_URL"), time.Second, idleWaitOptions{mode: "all", output: os.Stdout})
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		os.Exit(0)
 	}
 }
 
-func TestUpgradeWaitProcessGraph(t *testing.T) {
-	// Default coverage exercises the same process graph with a short busy wait.
-	// Opt in to the original >2 minute reproduction when investigating callers:
-	// OBERTH_TEST_LONG_IDLE_WAIT=1 go test -run '^TestUpgradeWaitProcessGraph$' ./cmd/oberth
-	busyFor := 100 * time.Millisecond
+type upgradeWaitProcessFixture struct {
+	root, kubeconfig, mode string
+	firstProbe             atomic.Int64
+	liveReads              atomic.Int32
+	observed               chan struct{}
+	busyFor                time.Duration
+}
+
+func newUpgradeWaitProcessFixture(t *testing.T, mode string) *upgradeWaitProcessFixture {
+	t.Helper()
+	f := &upgradeWaitProcessFixture{root: t.TempDir(), mode: mode, observed: make(chan struct{}), busyFor: 100 * time.Millisecond}
 	if os.Getenv("OBERTH_TEST_LONG_IDLE_WAIT") == "1" {
-		busyFor = 121 * time.Second
+		f.busyFor = 121 * time.Second
 	}
-	for _, mode := range []string{"shell", "setsid", "kill-child", "kill-group", "cancel", "deadline", "unavailable", "already-current", "old-critical"} {
-		t.Run(mode, func(t *testing.T) {
-			t.Parallel()
-			root := t.TempDir()
-			executable, err := os.Executable()
-			if err != nil {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { f.serve(t, w, r) }))
+	t.Cleanup(server.Close)
+	f.kubeconfig = filepath.Join(f.root, "kubeconfig")
+	config := "apiVersion: v1\nkind: Config\ncurrent-context: fixture\ncontexts:\n- name: fixture\n  context:\n    cluster: fixture\n    user: fixture\nclusters:\n- name: fixture\n  cluster:\n    server: " + server.URL + "\nusers:\n- name: fixture\n  user: {}\n"
+	if err := os.WriteFile(f.kubeconfig, []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"helm": upgradeWaitHelmFixture, "kubectl": "#!/bin/sh\nprintf refused > \"$(dirname \"$0\")/unexpected-kubectl\"\nexit 91\n"} {
+		if err := os.WriteFile(filepath.Join(f.root, name), []byte(body), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return f
+}
+
+func (f *upgradeWaitProcessFixture) serve(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if strings.HasSuffix(r.URL.Path, "/portforward") {
+		if _, err := httpstream.Handshake(r, w, []string{"portforward.k8s.io"}); err != nil {
+			t.Error(err)
+			return
+		}
+		conn := streamspdy.NewResponseUpgrader().UpgradeResponse(w, r, func(stream httpstream.Stream, replySent <-chan struct{}) error {
+			go func() { <-replySent; _ = stream.Close() }()
+			return nil
+		})
+		if conn != nil {
+			defer func() { _ = conn.Close() }()
+			<-conn.CloseChan()
+		}
+		return
+	}
+	if r.Method != http.MethodGet {
+		t.Errorf("upgrade mutated Kubernetes: %s %s", r.Method, r.URL.Path)
+		http.Error(w, "refused", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	objects := upgradeWaitArgoObjects()
+	deployment := objects[0].(*appsv1.Deployment)
+	config := objects[1].(*corev1.ConfigMap)
+	switch r.URL.Path {
+	case "/apis/apps/v1/namespaces/" + deployment.Namespace + "/deployments":
+		f.liveReads.Add(1)
+		_ = json.NewEncoder(w).Encode(&appsv1.DeploymentList{Items: []appsv1.Deployment{*deployment}})
+	case "/api/v1/namespaces/" + config.Namespace + "/configmaps/" + config.Name:
+		f.liveReads.Add(1)
+		_ = json.NewEncoder(w).Encode(config)
+	case "/api/v1/namespaces/oberth/pods":
+		_ = json.NewEncoder(w).Encode(&corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "server"}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}}})
+	case "/api/v1/namespaces/kube-system":
+		http.NotFound(w, r)
+	case "/apis/argoproj.io/v1alpha1/namespaces/oberth-argo/workflows":
+		f.workflows(t, w, r)
+	default:
+		t.Errorf("unexpected Kubernetes request: %s", r.URL.Path)
+		http.NotFound(w, r)
+	}
+}
+
+func (f *upgradeWaitProcessFixture) workflows(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	if r.URL.Query().Get("labelSelector") != "oberth.ci/run" {
+		t.Error("idle observation lost run selector")
+	}
+	if f.liveReads.Load() < 2 {
+		t.Error("idle observation preceded live Argo configuration check")
+	}
+	if f.firstProbe.CompareAndSwap(0, time.Now().UnixNano()) {
+		close(f.observed)
+	}
+	if f.mode == "unavailable" {
+		http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if f.mode == "observer-disconnected" {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("missing HTTP hijacker")
+			return
+		}
+		conn, _, err := hijacker.Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.Close()
+		return
+	}
+	phase := "Running"
+	if (f.mode == "shell" || f.mode == "setsid" || f.mode == "old-critical") && time.Since(time.Unix(0, f.firstProbe.Load())) >= f.busyFor {
+		phase = "Succeeded"
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"apiVersion": "argoproj.io/v1alpha1", "kind": "WorkflowList", "items": []any{map[string]any{"metadata": map[string]any{"name": "fixture", "labels": map[string]string{"oberth.ci/run": "run"}}, "status": map[string]any{"phase": phase}}}})
+}
+
+func (f *upgradeWaitProcessFixture) command(t *testing.T) *exec.Cmd {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(170*time.Second))
+	t.Cleanup(cancel)
+	command := exec.CommandContext(ctx, "/bin/sh", "-c", `exec "$@"`, "fixture", executable, "-test.run", "^TestUpgradeWaitProcessHelper$")
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if f.mode == "setsid" {
+		setsid, err := exec.LookPath("setsid")
+		if err != nil {
+			t.Fatal(err)
+		}
+		command = exec.CommandContext(ctx, setsid, "/bin/sh", "-c", `exec "$@"`, "fixture", executable, "-test.run", "^TestUpgradeWaitProcessHelper$")
+	}
+	limit, already, critical := "3m", "no", "no"
+	if f.mode == "deadline" {
+		limit = "250ms"
+	}
+	if f.mode == "already-current" {
+		already = "yes"
+	}
+	if f.mode == "old-critical" {
+		critical = "yes"
+	}
+	command.Env = []string{"OBERTH_BASE_URL=https://fixture.example", "OBERTH_TOKEN=fixture-admin", "PATH=" + f.root + ":/usr/bin:/bin", "HOME=" + f.root, "KUBECONFIG=" + f.kubeconfig, "OBERTH_TEST_WAIT_ROLE=cli", "OBERTH_TEST_WAIT_LIMIT=" + limit, "OBERTH_TEST_UPGRADE_MARKER=" + filepath.Join(f.root, "upgrade.attempted"), "OBERTH_TEST_ALREADY=" + already, "OBERTH_TEST_OLD_CRITICAL=" + critical}
+	if scale, set := os.LookupEnv("OBERTH_TEST_TIMEOUT_SCALE"); set {
+		command.Env = append(command.Env, "OBERTH_TEST_TIMEOUT_SCALE="+scale)
+	}
+	command.WaitDelay = 5 * time.Second
+	return command
+}
+
+func TestUpgradeWaitProcessGraph(t *testing.T) {
+	for _, mode := range []string{"shell", "setsid", "observer-disconnected", "kill-group", "cancel", "deadline", "unavailable", "already-current", "old-critical"} {
+		t.Run(mode, func(t *testing.T) { t.Parallel(); f := newUpgradeWaitProcessFixture(t, mode); f.run(t) })
+	}
+}
+
+func (f *upgradeWaitProcessFixture) run(t *testing.T) {
+	t.Helper()
+	command := f.command(t)
+	var output strings.Builder
+	command.Stdout, command.Stderr = &output, &output
+	start := time.Now()
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL) })
+	finished := make(chan error, 1)
+	go func() { finished <- command.Wait() }()
+	if f.mode == "cancel" || f.mode == "kill-group" {
+		timer := time.NewTimer(testtimeout.Start(15 * time.Second))
+		defer timer.Stop()
+		select {
+		case err := <-finished:
+			t.Fatalf("CLI exited before native observation: %v: %s", err, &output)
+		case <-timer.C:
+			t.Fatal("native observer did not start")
+		case <-f.observed:
+		}
+		if f.mode == "kill-group" {
+			if err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL); err != nil {
 				t.Fatal(err)
 			}
-			pidPath, upgradePath := filepath.Join(root, "wait.pid"), filepath.Join(root, "upgrade.attempted")
-			var firstProbe atomic.Int64
-			var unavailableProbes atomic.Int64
-			unavailableRetried := make(chan struct{})
-			admin := newAdminGateServer(nil, "fixture", nil, func(context.Context) (model.IdleQueueStatus, error) {
-				if mode == "unavailable" {
-					if unavailableProbes.Add(1) == 2 {
-						close(unavailableRetried)
-					}
-					return model.IdleQueueStatus{}, errors.New("fixture unavailable")
-				}
-				firstProbe.CompareAndSwap(0, time.Now().UnixNano())
-				if (mode == "shell" || mode == "setsid") && time.Since(time.Unix(0, firstProbe.Load())) >= busyFor {
-					return model.IdleQueueStatus{Version: 1}, nil
-				}
-				return model.IdleQueueStatus{Version: 1, Preparing: 1, Branch: 1}, nil
-			})
-			server := httptest.NewServer(admin.Handler)
-			t.Cleanup(server.Close)
-			helm := `#!/bin/sh
+		} else if err := command.Process.Signal(syscall.SIGTERM); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := <-finished
+	f.check(t, err, output.String(), time.Since(start))
+}
+
+func (f *upgradeWaitProcessFixture) check(t *testing.T, err error, text string, elapsed time.Duration) {
+	t.Helper()
+	if _, e := os.Stat(filepath.Join(f.root, "unexpected-kubectl")); !errors.Is(e, os.ErrNotExist) {
+		t.Fatal("upgrade invoked kubectl instead of the native observer")
+	}
+	_, markerErr := os.Stat(filepath.Join(f.root, "upgrade.attempted"))
+	attempted := markerErr == nil
+	if f.mode == "already-current" {
+		if err != nil || attempted || f.firstProbe.Load() != 0 || !strings.Contains(text, "Already running v0.17.52; no upgrade performed") {
+			t.Fatalf("same-version no-op: %v: %s", err, text)
+		}
+		return
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		t.Fatalf("expected nonzero CLI exit: %v: %s", err, text)
+	}
+	switch f.mode {
+	case "shell", "setsid", "old-critical":
+		if !attempted || elapsed < f.busyFor || exit.ExitCode() != 1 || !strings.Contains(text, "fixture Helm upgrade refusal") {
+			t.Fatalf("elapsed=%s attempted=%v err=%v: %s", elapsed, attempted, err, text)
+		}
+	default:
+		if attempted {
+			t.Fatal("Helm mutation followed refused native observation")
+		}
+		switch f.mode {
+		case "kill-group":
+			if !exit.Sys().(syscall.WaitStatus).Signaled() || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL || strings.Contains(text, "oberth: wait for") {
+				t.Fatalf("group kill: %v: %s", err, text)
+			}
+		case "cancel":
+			if exit.ExitCode() != 130 || strings.Contains(text, "context canceled") || strings.Contains(text, "oberth:") {
+				t.Fatalf("cancel: %v: %s", err, text)
+			}
+		case "deadline":
+			if exit.ExitCode() != 1 || !strings.Contains(text, "context deadline exceeded") {
+				t.Fatalf("deadline: %v: %s", err, text)
+			}
+		case "unavailable", "observer-disconnected":
+			if exit.ExitCode() != 1 || !strings.Contains(text, "cannot observe active Kubernetes Workflows") {
+				t.Fatalf("failed observer: %v: %s", err, text)
+			}
+		}
+	}
+	t.Logf("mode=%s elapsed=%s upgrade_attempted=%v", f.mode, elapsed, attempted)
+}
+
+const upgradeWaitHelmFixture = `#!/bin/sh
 case "$*" in
  *"version --template "*) printf 'v4.2.3\n' ;;
  *"history oberth "*"-o json"*) printf '[{"revision":1,"status":"deployed"}]\n' ;;
@@ -145,171 +307,3 @@ case "$*" in
  *) echo 'unexpected fixture Helm command' >&2; exit 91 ;;
 esac
 `
-			kubectl := `#!/bin/sh
-case "$*" in
- *"wait-idle"*)
-   if [ "$OBERTH_TEST_OLD_CRITICAL" = yes ]; then echo 'flag provided but not defined: -wait-for' >&2; exit 2; fi
-   OBERTH_TEST_WAIT_ROLE=waiter; export OBERTH_TEST_WAIT_ROLE; exec "$OBERTH_TEST_EXECUTABLE" -test.run '^TestUpgradeWaitProcessHelper$' ;;
- *"version --schema"*) echo 31 ;;
- *) echo 'unexpected fixture kubectl command' >&2; exit 91 ;;
-esac
-`
-			for name, body := range map[string]string{"helm": helm, "kubectl": kubectl} {
-				if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			kubeconfig := upgradeWaitKubeconfig(t, root)
-			ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(170*time.Second))
-			defer cancel()
-			command := exec.CommandContext(ctx, "/bin/sh", "-c", `exec "$@"`, "fixture", executable, "-test.run", "^TestUpgradeWaitProcessHelper$")
-			command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-			if mode == "setsid" {
-				setsid, err := exec.LookPath("setsid")
-				if err != nil {
-					t.Fatal("CI process test requires setsid:", err)
-				}
-				command = exec.CommandContext(ctx, setsid, "/bin/sh", "-c", `exec "$@"`, "fixture", executable, "-test.run", "^TestUpgradeWaitProcessHelper$")
-			}
-			limit := "3m"
-			if mode == "deadline" {
-				limit = "250ms"
-			}
-			already := "no"
-			if mode == "already-current" {
-				already = "yes"
-			}
-			oldCritical := "no"
-			if mode == "old-critical" {
-				oldCritical = "yes"
-			}
-			command.Env = []string{"PATH=" + root + ":/usr/bin:/bin", "HOME=" + root, "KUBECONFIG=" + kubeconfig, "OBERTH_TEST_WAIT_ROLE=cli", "OBERTH_TEST_EXECUTABLE=" + executable, "OBERTH_TEST_WAIT_URL=" + server.URL + "/v1/idle", "OBERTH_TEST_WAIT_PID=" + pidPath, "OBERTH_TEST_WAIT_LIMIT=" + limit, "OBERTH_TEST_UPGRADE_MARKER=" + upgradePath, "OBERTH_TEST_ALREADY=" + already, "OBERTH_TEST_OLD_CRITICAL=" + oldCritical}
-			// Keep the test-only scale through this private subprocess environment.
-			if scale, set := os.LookupEnv("OBERTH_TEST_TIMEOUT_SCALE"); set {
-				command.Env = append(command.Env, "OBERTH_TEST_TIMEOUT_SCALE="+scale)
-			}
-			command.WaitDelay = 5 * time.Second
-			var output strings.Builder
-			command.Stdout, command.Stderr = &output, &output
-			start := time.Now()
-			if err := command.Start(); err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL) })
-			finished := make(chan error, 1)
-			go func() { finished <- command.Wait() }()
-			if mode == "unavailable" {
-				// A second request proves the first 503 was reported and
-				// retried. Start-up scheduling must not consume a tiny local
-				// deadline before the observer has even reached the API.
-				until := time.NewTimer(testtimeout.Start(15 * time.Second))
-				defer until.Stop()
-				select {
-				case err := <-finished:
-					t.Fatalf("CLI exited before retrying unavailable queue: %v: %s", err, &output)
-				case <-until.C:
-					t.Fatal("unavailable queue was not retried")
-				case <-unavailableRetried:
-				}
-				if err := command.Process.Signal(syscall.SIGTERM); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if mode == "kill-child" || mode == "kill-group" || mode == "cancel" {
-				var pid int
-				until := time.NewTimer(testtimeout.Start(15 * time.Second))
-				defer until.Stop()
-				for pid == 0 {
-					select {
-					case err := <-finished:
-						t.Fatalf("CLI exited before observer: %v: %s", err, &output)
-					case <-until.C:
-						t.Fatal("observer did not start")
-					case <-time.After(10 * time.Millisecond):
-						if body, err := os.ReadFile(pidPath); err == nil {
-							pid, _ = strconv.Atoi(string(body))
-						}
-					}
-				}
-				if mode == "kill-child" || mode == "kill-group" {
-					// The opt-in long variant also rules out a hidden 60-second kill.
-					timer := time.NewTimer(busyFor)
-					select {
-					case err := <-finished:
-						timer.Stop()
-						t.Fatalf("wait exited before external kill: %v: %s", err, &output)
-					case <-timer.C:
-					}
-				}
-				switch mode {
-				case "kill-child":
-					if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-						t.Fatal(err)
-					}
-				case "kill-group":
-					if err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL); err != nil {
-						t.Fatal(err)
-					}
-				case "cancel":
-					if err := command.Process.Signal(syscall.SIGTERM); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
-			err = <-finished
-			text := output.String()
-			var exit *exec.ExitError
-			if mode == "already-current" {
-				if err != nil || !strings.Contains(text, "Already running v0.17.52; no upgrade performed") {
-					t.Fatalf("same-version no-op: %v: %s", err, text)
-				}
-				if _, statErr := os.Stat(upgradePath); !errors.Is(statErr, os.ErrNotExist) || firstProbe.Load() != 0 {
-					t.Fatalf("same-version no-op attempted wait/upgrade: marker=%v probe=%d", statErr, firstProbe.Load())
-				}
-				return
-			}
-			if !errors.As(err, &exit) {
-				t.Fatalf("expected nonzero CLI exit, got %v: %s", err, text)
-			}
-			_, markerErr := os.Stat(upgradePath)
-			attempted := markerErr == nil
-			if mode == "shell" || mode == "setsid" {
-				if !attempted || time.Since(start) < busyFor || exit.ExitCode() != 1 || !strings.Contains(text, "fixture Helm upgrade refusal") {
-					t.Fatalf("elapsed=%s attempted=%v exit=%v: %s", time.Since(start), attempted, err, text)
-				}
-			} else {
-				if attempted {
-					t.Fatal("upgrade attempted after refused wait")
-				}
-				switch mode {
-				case "kill-group":
-					if !exit.Sys().(syscall.WaitStatus).Signaled() || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL || strings.Contains(text, "oberth: wait for") {
-						t.Fatalf("group kill: %v: %s", err, text)
-					}
-				case "kill-child":
-					if exit.ExitCode() != 1 || !strings.Contains(text, "signal: killed") || !strings.Contains(text, "local kubectl exec") {
-						t.Fatalf("child kill: %v: %s", err, text)
-					}
-				case "cancel":
-					if exit.ExitCode() != 130 || strings.Contains(text, "context canceled") || strings.Contains(text, "oberth:") {
-						t.Fatalf("cancel: %v: %s", err, text)
-					}
-				case "deadline":
-					if exit.ExitCode() != 1 || !strings.Contains(text, "context deadline exceeded") {
-						t.Fatalf("deadline: %v: %s", err, text)
-					}
-				case "unavailable":
-					// This case ends with SIGTERM after proving that 503 is retried.
-					if exit.ExitCode() != 130 || unavailableProbes.Load() < 2 || !strings.Contains(text, "HTTP 503") || strings.Contains(text, "context canceled") || strings.Contains(text, "oberth:") {
-						t.Fatalf("unavailable: %v: %s", err, text)
-					}
-				case "old-critical":
-					if exit.ExitCode() != 1 || !strings.Contains(text, "server too old for --wait-for=critical; use --wait-for=all") {
-						t.Fatalf("old critical waiter: %v: %s", err, text)
-					}
-				}
-			}
-			t.Logf("mode=%s elapsed=%s CLI=%v upgrade_attempted=%v\n%s", mode, time.Since(start), err, attempted, text)
-		})
-	}
-}

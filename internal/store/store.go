@@ -1919,6 +1919,19 @@ func (s *Store) CreateTokenCredential(ctx context.Context, spec model.TokenCrede
 // CreateTokenCredentialWithPolicy applies the live daemon's issuance policy.
 // Only new credentials change; legacy rows are never assigned an expiry here.
 func (s *Store) CreateTokenCredentialWithPolicy(ctx context.Context, spec model.TokenCredentialSpec, policy model.UplinkTokenPolicy) (model.TokenCredential, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return model.TokenCredential{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	v, err := s.createTokenCredential(ctx, tx, spec, policy)
+	if err != nil {
+		return v, err
+	}
+	return v, tx.Commit()
+}
+
+func (s *Store) createTokenCredential(ctx context.Context, tx *sql.Tx, spec model.TokenCredentialSpec, policy model.UplinkTokenPolicy) (model.TokenCredential, error) {
 	if err := policy.Validate(); err != nil {
 		return model.TokenCredential{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
@@ -1942,11 +1955,6 @@ func (s *Store) CreateTokenCredentialWithPolicy(ctx context.Context, spec model.
 		return model.TokenCredential{}, fmt.Errorf("generate token credential id: %w", err)
 	}
 	now := unixNano(nowTime)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.TokenCredential{}, fmt.Errorf("begin create token credential: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO token_credentials(id, name, digest, created_at, revoked_at, expires_at) VALUES(?, ?, ?, ?, ?, ?)`,
 		id, spec.Name, append([]byte(nil), spec.Digest...), now, now, expires); err != nil {
@@ -1956,20 +1964,25 @@ INSERT INTO token_credentials(id, name, digest, created_at, revoked_at, expires_
 INSERT INTO pending_token_credentials(token_credential_id, created_at) VALUES(?, ?)`, id, now); err != nil {
 		return model.TokenCredential{}, fmt.Errorf("mark token credential pending: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return model.TokenCredential{}, fmt.Errorf("commit token credential: %w", err)
-	}
 	pendingAt := fromUnixNano(now)
 	return model.TokenCredential{ID: id, Name: spec.Name, Digest: append([]byte(nil), spec.Digest...), CreatedAt: pendingAt, ExpiresAt: expiresAt, RevokedAt: &pendingAt}, nil
 }
 
 func (s *Store) ActivateTokenCredential(ctx context.Context, id string) (model.TokenCredential, error) {
-	now := unixNano(s.now())
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return model.TokenCredential{}, fmt.Errorf("begin activate token credential: %w", err)
+		return model.TokenCredential{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	v, err := s.activateTokenCredential(ctx, tx, id)
+	if err != nil {
+		return v, err
+	}
+	return v, tx.Commit()
+}
+
+func (s *Store) activateTokenCredential(ctx context.Context, tx *sql.Tx, id string) (model.TokenCredential, error) {
+	now := unixNano(s.now())
 	var pendingID string
 	if err := tx.QueryRowContext(ctx, `
 DELETE FROM pending_token_credentials WHERE token_credential_id = ? RETURNING token_credential_id`, id).Scan(&pendingID); err != nil {
@@ -1982,9 +1995,6 @@ WHERE id = ? AND activated_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
 RETURNING id, name, digest, created_at, activated_at, last_used_at, revoked_at, expires_at`, now, id, now))
 	if err != nil {
 		return model.TokenCredential{}, translateNotFound("pending token credential", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return model.TokenCredential{}, fmt.Errorf("commit activate token credential: %w", err)
 	}
 	return value, nil
 }

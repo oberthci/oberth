@@ -274,6 +274,7 @@ func (server *Server) Handler() http.Handler {
 }
 
 func (server *Server) routes() {
+	server.administrationRoutes()
 	server.mux.HandleFunc("GET /healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
 	})

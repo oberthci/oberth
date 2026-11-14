@@ -51,7 +51,8 @@ Native SSH uses context-bound connections, closes streams on cancellation,
 and preserves the remote exit status. On Linux its helper also dies with its
 Git parent. The runtime stays non-root without additional capabilities/RBAC.
 Cache preparation and restore file operations use the separately pinned
-utility image; server execs use native Oberth subcommands.
+utility image. Host administration uses authenticated APIs; installation keeps
+one server exec to create the first admin.
 
 `hack/test-gitcache.sh` gates the complete race-enabled CLI suite. The public
 multi-pack history gate retains full-commit archive coverage and the checkout

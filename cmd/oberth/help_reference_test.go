@@ -21,7 +21,7 @@ access allow
 access list
 access revoke
 admin
-admin read-file
+admin public-identity
 admin readiness
 artifacts
 audit
@@ -152,11 +152,7 @@ func TestCommandHelpReference(t *testing.T) {
 			fmt.Fprintf(&reference, "## oberth %s\n\n```text\n%s\n```\n\n", command, referenceHelp(help))
 		})
 	}
-	var pod strings.Builder
-	if err := runUpstreamWithDependencies(t.Context(), []string{"add", "--help"}, &pod, upstreamDependencies{}); err != nil {
-		t.Fatal(err)
-	}
-	fmt.Fprintf(&reference, "## oberth upstream add (in-pod)\n\n```text\n%s\n```\n\n", referenceHelp(pod.String()))
+
 	if t.Failed() {
 		return
 	}
@@ -257,6 +253,11 @@ func TestHelpIncludesRegisteredFlags(t *testing.T) {
 			if !ok || function.Body == nil {
 				continue
 			}
+			// This parser is a server callback implementation, reached through the typed
+			// secretstore_verify request; its connection/path overrides are not CLI flags.
+			if function.Name.Name == "runSecretStoreVerifyWithSources" {
+				continue
+			}
 			var commands, names []string
 			ast.Inspect(function.Body, func(node ast.Node) bool {
 				call, ok := node.(*ast.CallExpr)
@@ -310,11 +311,7 @@ func TestHelpIncludesRegisteredFlags(t *testing.T) {
 			}
 			for _, command := range commands {
 				var out strings.Builder
-				if function.Name.Name == "runUpstreamWithDependencies" {
-					err = runUpstreamWithDependencies(t.Context(), []string{"add", "--help"}, &out, upstreamDependencies{})
-				} else {
-					err = runCLI(t.Context(), append(strings.Fields(command), "--help"), strings.NewReader(""), &out)
-				}
+				err = runCLI(t.Context(), append(strings.Fields(command), "--help"), strings.NewReader(""), &out)
 				if err != nil {
 					t.Errorf("%s --help: %v", command, err)
 					continue

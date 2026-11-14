@@ -566,7 +566,7 @@
     },
     "flag:no-wait": {
       "doc_anchor": "docs/install-answers.md#pending-forge-authorization",
-      "test_ref": "cmd/oberth/upstream_pending_test.go TestNoWaitPendingGitHubIsReadyWithCertificateMCP"
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
     },
     "value:upstream_key_pending": {
       "doc_anchor": "docs/install-answers.md#pending-forge-authorization",
@@ -920,6 +920,134 @@
       "doc_anchor": "docs/argo-secret-delivery.md",
       "test_ref": "internal/argojob/spec_test.go TestBuildInjectsRunIdentityAndVaultCoordinates"
     },
+    "value:uplink_scope": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/RequiresAdmin"
+    },
+    "value:upstream-public-key": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/RejectsPaths"
+    },
+    "value:repo_add": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_database_backup": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_idle": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_public_identity": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:server-certificate": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/RejectsPaths"
+    },
+    "value:upstream_add": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_readiness": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_version": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_access_list": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:upstream_provide_key": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:upstream_remove": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_audit_record": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:upstream_list": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:repo_verify": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:server-ca": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/RejectsPaths"
+    },
+    "value:manual_steps": {
+      "doc_anchor": "docs/install-answers.md#non-interactive-onboarding",
+      "test_ref": "internal/installer/install_resume_test.go TestInstallJSONOnboardingAndResume"
+    },
+    "value:uplink_add": {
+      "doc_anchor": "docs/mcp-setup.md#1-create-an-uplink",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "flag:clear": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:details": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:release-tier": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:keys": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:tier": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:revoked": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:key-file": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:default-branch": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:admin": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:replacement-fingerprint": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:repo": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:dedicated-key": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:wait-for": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
     "value:runnerImagePrefixes": {
       "doc_anchor": "docs/cli-reference.md#oberth-serve",
       "test_ref": "cmd/oberth/init_test.go TestDefaultRunnerImagePrefixesMatchChart"
@@ -955,6 +1083,10 @@
     "flag:containers": {
       "doc_anchor": "docs/container-logs.md",
       "test_ref": "cmd/oberth/remote_container_logs_test.go TestContainerLogCLIUsesNativeSelectors"
+    },
+    "flag:wait-idle": {
+      "doc_anchor": "docs/cli-reference.md#oberth-upgrade",
+      "test_ref": "internal/installer/upgrade_released_server_test.go TestUpgradeReleasedServerWithoutAdminAPI"
     }
   }
 }

@@ -153,12 +153,12 @@ func TestPreflightLegacyBundleAbsentRefusesBeforeHelm(t *testing.T) {
 	pr := &preflightRunner{t: t, baoRunner: runner}
 
 	var buf bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:      &buf,
 		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand:  pr.run,
 		ContextName: "test-ctx",
-	}
+	})
 
 	cfg := Config{InstallSecretStore: true}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
@@ -192,7 +192,7 @@ func TestPreflightLegacyAllBundlesPresentCertCoversNames(t *testing.T) {
 
 	helmCalls := 0
 	var buf bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:     &buf,
 		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: pr.run,
@@ -201,7 +201,7 @@ func TestPreflightLegacyAllBundlesPresentCertCoversNames(t *testing.T) {
 			return nil, nil
 		},
 		ContextName: "test-ctx",
-	}
+	})
 
 	cfg := Config{InstallSecretStore: true}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
@@ -275,7 +275,7 @@ func TestPreflightCertLacksClientSANRotates(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:     &buf,
 		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: runner,
@@ -286,7 +286,7 @@ func TestPreflightCertLacksClientSANRotates(t *testing.T) {
 			return nil, nil
 		},
 		ContextName: "test-ctx",
-	}
+	})
 
 	cfg := Config{InstallSecretStore: true, ReissueServerCA: true, TLSExtraDNSNames: []string{"server.example.test"}}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
@@ -374,17 +374,17 @@ func TestPreflightOpenBaoCertMismatchRefuses(t *testing.T) {
 	pr := &preflightRunner{t: t, baoRunner: runner, podCertPEM: podCertPEM}
 
 	var buf bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:     &buf,
 		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet(), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "oberth-tls", Namespace: "oberth"}, Data: map[string][]byte{"tls.crt": podCertPEM}}),
 		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 			if slices.Contains(args, "deploy/oberth") {
-				return nil, fmt.Errorf(`unknown command "admin"`)
+				return podCertPEM, nil
 			}
 			return pr.run(ctx, input, name, args...)
 		},
 		ContextName: "test-ctx",
-	}
+	})
 
 	cfg := Config{InstallSecretStore: true}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
@@ -448,7 +448,7 @@ func TestPreflightNeverIssuesNonGetKubeAction(t *testing.T) {
 
 	kube := fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet())
 	var buf bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:     &buf,
 		KubeClient: kube,
 		RunCommand: pr.run,
@@ -456,7 +456,7 @@ func TestPreflightNeverIssuesNonGetKubeAction(t *testing.T) {
 			return nil, nil
 		},
 		ContextName: "test-ctx",
-	}
+	})
 
 	cfg := Config{InstallSecretStore: true}
 	_ = preflightServerIdentities(context.Background(), &cfg, deps, false)
@@ -485,12 +485,12 @@ func TestPreflightDryRunLegacyAbsentBundleRefuses(t *testing.T) {
 	pr := &preflightRunner{t: t, baoRunner: runner}
 
 	var buf bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:      &buf,
 		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand:  pr.run,
 		ContextName: "test-ctx",
-	}
+	})
 
 	cfg := Config{InstallSecretStore: true}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, true)
@@ -524,7 +524,7 @@ func TestPreflightDryRunMissingSANsPrintsPlanNoWrite(t *testing.T) {
 	liveValuesJSON, _ := json.Marshal(liveValues)
 
 	var buf bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:     &buf,
 		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: pr.run,
@@ -535,7 +535,7 @@ func TestPreflightDryRunMissingSANsPrintsPlanNoWrite(t *testing.T) {
 			return nil, nil
 		},
 		ContextName: "test-ctx",
-	}
+	})
 
 	cfg := Config{InstallSecretStore: true, ReissueServerCA: true, TLSExtraDNSNames: []string{"server.example.test"}}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, true)
@@ -666,12 +666,12 @@ func TestPreflightSameKeyDifferentCertPassesCrossCheck(t *testing.T) {
 	pr := &preflightRunner{t: t, baoRunner: runner, podCertPEM: certPEM}
 
 	var buf bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:      &buf,
 		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand:  pr.run,
 		ContextName: "test-ctx",
-	}
+	})
 
 	cfg := Config{InstallSecretStore: true}
 	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
@@ -701,12 +701,12 @@ func TestPreflightUnparseableBaoCertRefuses(t *testing.T) {
 	pr := &preflightRunner{t: t, baoRunner: runner, podCertPEM: podCertPEM}
 
 	var buf bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:      &buf,
 		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand:  pr.run,
 		ContextName: "test-ctx",
-	}
+	})
 
 	cfg := Config{InstallSecretStore: true}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
@@ -793,7 +793,7 @@ func TestReadLiveHelmValuesErrorPropagates(t *testing.T) {
 		},
 	}}
 
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:     &bytes.Buffer{},
 		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
@@ -808,7 +808,7 @@ func TestReadLiveHelmValuesErrorPropagates(t *testing.T) {
 			return nil, fmt.Errorf("helm: HELM_DRIVER=configmap: release not found")
 		},
 		ContextName: "test-ctx",
-	}
+	})
 
 	cfg := Config{InstallSecretStore: true}
 	_, err := readLiveHelmValuesSubset(context.Background(), deps, cfg.Namespace)
@@ -908,7 +908,7 @@ func TestPreflightClearsIdentityReadBuffers(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:     &buf,
 		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: runner,
@@ -919,7 +919,7 @@ func TestPreflightClearsIdentityReadBuffers(t *testing.T) {
 			return nil, nil
 		},
 		ContextName: "test-ctx",
-	}
+	})
 	cfg := Config{InstallSecretStore: true, ReissueServerCA: true, TLSExtraDNSNames: []string{"server.example.test"}}
 	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
 		t.Fatalf("preflight failed: %v", err)

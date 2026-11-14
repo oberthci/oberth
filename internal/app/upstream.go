@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -245,20 +244,6 @@ func ValidateUpstreamBase(baseURL string) error {
 		return fmt.Errorf("app: invalid upstream base: %w", err)
 	}
 	return nil
-}
-
-func UpstreamKind(baseURL string) (string, error) {
-	if err := ValidateUpstreamBase(baseURL); err != nil {
-		return "", err
-	}
-	if filepath.IsAbs(strings.TrimSpace(baseURL)) {
-		return "local", nil
-	}
-	parsed, err := url.Parse(baseURL)
-	if err != nil {
-		return "", fmt.Errorf("app: parse upstream base: %w", err)
-	}
-	return parsed.Scheme, nil
 }
 
 // QualifyInput resolves any accepted repository input (bare, org-qualified,

@@ -315,21 +315,15 @@ Old preflight execution is terminalized rather than reattached. Native
 execution keeps exact source, UID, target and operator identity custody;
 historical execution journals do not authorize new work.
 
-Upgrade idle-probe retries: `TestUpgradeWaitRetriesTimeoutBeforeUpgrade` uses a
-fake HTTP transport and clock through the real installer wait path: a five-second
-probe timeout followed by idle reaches Helm upgrade, while persistent timeouts
-consume exactly the two-minute wait budget, refuse upgrade and preserve the last
-probe cause with throttled diagnostics. `TestWaitIdleTransientFailuresBackOffAndRecover`
-checks transport/503/truncated-body recovery and backoff reset on a valid busy
-sample; protocol-error and cancellation tests pin immediate refusal and prompt
-cancellation. `TestIdleSnapshotAdminProbeDoesNotWaitForStorage` blocks a background
-read while 100 admin probes answer from memory, then proves expiry, refresh and
-failure invalidation. Missing/invalid/late samples cannot establish idle.
-
-`TestUpgradeWaitDeadlineRetainsChildProbeDiagnostic` splits child output at every
-byte and proves the local deadline retains its last reported probe cause even
-when kubectl is killed; a subsequent busy snapshot clears that stale cause.
-
+`TestAdminIdleObservation` drives the authenticated API wait path through transient failures, busy/idle
+samples, critical selection, authorization refusal, deadline and cancellation.
+`TestWaitIdleTransientFailuresBackOffAndRecover` checks transport, 503 and
+truncated-body recovery and backoff reset on a valid busy sample; protocol-error
+and cancellation tests pin immediate refusal and prompt cancellation.
+`TestIdleSnapshotAdminProbeDoesNotWaitForStorage` blocks a background read while
+100 probes answer from memory, then proves expiry, refresh and failure
+invalidation. Missing, invalid or late samples cannot establish idle. Upgrade
+observation uses the API directly and preserves the last failure at its deadline.
 
 Idle sampler freshness follow-up: `TestIdleSnapshotSlowReadsRemainAvailableToWaiter`
 uses 4.5-second reads at six waiter start phases; the waiter gets idle within
@@ -598,3 +592,11 @@ creates no objects and reports `not-retested`; explicit verification with
 `--probe` invokes the live measurement. CLI tests refuse `--probe` outside
 verification and alongside `--plan` or `--dry-run`. Existing install refusal
 and real probe cleanup tests remain in place.
+
+
+Upgrade from a released server without admin routes is covered by
+`TestUpgradeReleasedServerWithoutAdminAPI`: the default backup refuses before
+changes with exact matching-version commands, while the explicit no-backup path
+completes using the stored-values fixture and native Workflow observation.
+`TestUpgradeNativeWorkflowObservation` checks active and terminal phases, the
+selected pipeline namespace, and refusal when observation is unavailable.

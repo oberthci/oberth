@@ -85,7 +85,7 @@ func newCertificateResumeHost(t *testing.T, onboard func(context.Context, []byte
 	kube := argoSecurityTestClient(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet(), preflightNode(), preflightStorage(), readyOberthPod(), readyArgoControllerPod())
 	pki, runner := pkiLifecycleDeps(t, []string{"ci.example.com", "localhost", "node", "node.local"}, []string{"192.0.2.1", "127.0.0.1", "::1"})
 	h.runner = runner
-	h.deps = InstallDeps{Output: &h.output, LookPath: func(s string) (string, error) { return s, nil }, ProbeNetworkPolicy: enforcedPolicyFixture,
+	h.deps = testAdminInstallDeps(InstallDeps{Output: &h.output, LookPath: func(s string) (string, error) { return s, nil }, ProbeNetworkPolicy: enforcedPolicyFixture,
 		LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 			return kube, &rest.Config{Host: "https://192.0.2.10:6443", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA(t, []string{"api.example.test"})}}, "chosen", nil
 		},
@@ -112,17 +112,20 @@ func newCertificateResumeHost(t *testing.T, onboard func(context.Context, []byte
 			if strings.Contains(joined, " get values ") {
 				return []byte(`{"tls":{"pki":{"enabled":true},"extraDNSNames":["ci.example.com"]},"secretstore":{"address":"https://openbao.openbao.svc:8200"},"networkPolicy":{"enabled":true}}`), nil
 			}
+			if strings.Contains(joined, " get manifest ") {
+				return []byte("kind: Deployment"), nil
+			}
 			if strings.Contains(joined, " show ") {
 				return []byte(fakeChartValuesYAML), nil
 			}
 			if strings.Contains(joined, "--dry-run=server") {
-				return []byte(`{"config":{}}`), nil
+				return []byte(`{"config":{},"manifest":"kind: Deployment","chart":{"values":{"tls":{"pki":{"enabled":true},"extraDNSNames":["ci.example.com"]},"secretstore":{"address":"https://openbao.openbao.svc:8200"},"networkPolicy":{"enabled":true}}}}`), nil
 			}
 			if strings.Contains(joined, " upgrade ") && strings.Contains(joined, " oberth ") {
 				h.applied = true
 			}
 			return nil, nil
-		}}
+		}})
 	return h
 }
 
@@ -198,7 +201,7 @@ func TestIssuedAdminCertificateSurvivesRegistrationFailureAndResume(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pod.addCalls != firstAdds+1 || !host.applied || !os.SameFile(before, after) || !before.ModTime().Equal(after.ModTime()) || !bytes.Equal(mustRead(t, cfg.AdminCSRPath+".crt"), cert) {
+	if pod.addCalls != firstAdds+1 || host.applied || !os.SameFile(before, after) || !before.ModTime().Equal(after.ModTime()) || !bytes.Equal(mustRead(t, cfg.AdminCSRPath+".crt"), cert) {
 		t.Fatal("resume did not finish registration while preserving the certificate")
 	}
 	if !bytes.Equal(mustRead(t, cfg.ResumeSecretsFile), recovery) || strings.Contains(host.output.String(), token) {

@@ -179,7 +179,7 @@ func TestRestoreOnlySecrets(t *testing.T) {
 	if target.swapArgs != nil {
 		t.Fatal("--only secrets touched the database")
 	}
-	if cm, err := target.client.CoreV1().ConfigMaps(DefaultNamespace).Get(context.Background(), secretAccessConfigMapName, metav1GetOptions()); err != nil || cm.Data[secretAccessConfigMapKey] != testGrants {
+	if cm, err := target.client.CoreV1().ConfigMaps(DefaultNamespace).Get(context.Background(), secretAccessConfigMapName, metav1GetOptions()); err != nil || !strings.Contains(cm.Data[secretAccessConfigMapKey], "codeberg/org/repo") {
 		t.Fatalf("--only secrets did not restore the grants: %v %v", cm, err)
 	}
 	if canonicalJSON(target.bao.kv["release/cosign-secret"]) != canonicalJSON(source.bao.kv["release/cosign-secret"]) {

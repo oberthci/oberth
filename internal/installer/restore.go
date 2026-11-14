@@ -28,13 +28,12 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/yaml"
-
-	"golang.org/x/mod/semver"
 
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/containerimage"
@@ -365,7 +364,7 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 		// release does on a migrated database during oberth upgrade
 		// --rollback) is a server that is not running: the restore pod then
 		// checks the target schema before the swap, as for a stopped server.
-		if target.Schema, err = podSchemaVersion(ctx, deps.RunCommand, deps.ContextName, cfg.Namespace, target.Pod, serverContainerName); err != nil {
+		if target.Schema, err = podSchemaVersion(ctx, deps.Deps, cfg.Namespace); err != nil {
 			target.Notes = append(target.Notes, fmt.Sprintf("server pod %s does not answer (%v); treated as not running", target.Pod, err))
 			target.Pod, target.Schema = "", 0
 		}
@@ -436,7 +435,7 @@ func readTargetContents(ctx context.Context, cfg RestoreConfig, deps backupDeps,
 		return
 	}
 	snapshot := filepath.Join(dir, "oberth-database.tar")
-	if _, err := snapshotServerDatabase(ctx, deps, cfg.Namespace, target.Pod, target.Schema, protocol, dir, snapshot); err != nil {
+	if _, err := snapshotServerDatabase(ctx, deps, cfg.Namespace, snapshot); err != nil {
 		target.ContentsNote = err.Error()
 		return
 	}
@@ -635,8 +634,8 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	} else {
 		_, _ = fmt.Fprintln(w, "  ✓ server ready")
 		if pod, err := runningServerPod(ctx, deps.Deps, cfg.Namespace, target.Server.Selector); err == nil && pod != "" {
-			target.DeployPublicKey = readRestoreDeployPublicKey(ctx, deps.Deps, cfg.Namespace, pod, restoreDeployPublicPath(target.Server))
-			recordServerAudit(ctx, deps.Deps, cfg.Namespace, pod, "restore.completed", map[string]any{
+			target.DeployPublicKey = readRestoreDeployPublicKey(ctx, deps.Deps, cfg.Namespace)
+			recordServerAudit(ctx, deps.Deps, cfg.Namespace, "restore.completed", map[string]any{
 				"archive_sha256": archive.CipherSHA, "history": parts.History, "secrets": parts.Secrets,
 				"from_audit_head_id": archive.restoredHeadID(), "from_audit_head_sha256": archive.restoredHeadSHA256(),
 			})
@@ -834,7 +833,7 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 		if err != nil {
 			return fmt.Errorf("read restore schema init log: %w", err)
 		}
-		schema, err := parsePodSchema(out)
+		schema, err := parseUtilitySchema(out)
 		if err != nil {
 			return err
 		}

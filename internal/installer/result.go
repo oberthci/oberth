@@ -13,16 +13,14 @@ import (
 	"net"
 	"os"
 	"slices"
-	"strings"
 	"time"
-
-	"github.com/oberthci/oberth/internal/kubeconfig"
-
-	"github.com/oberthci/oberth/internal/model"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	"github.com/oberthci/oberth/internal/kubeconfig"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // CheckResult is a stable public check. Diagnostics never include subprocess output.
@@ -86,6 +84,7 @@ func certificateClientAccess() *InstallClientAccess {
 }
 
 type InstallResult struct {
+	ManualSteps   []string             `json:"manual_steps,omitempty"`
 	ClientAccess  *InstallClientAccess `json:"client_access,omitempty"`
 	Upstream      *InstallUpstream     `json:"upstream,omitempty"`
 	Cluster       *ClusterIdentity     `json:"cluster,omitempty"`
@@ -177,7 +176,7 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 			return host.RunCommand(ctx, input, name, args...)
 		}
 	}
-	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, ClientHost: cfg.ClientHost, Output: io.Discard, RunCommand: run, ProbeNetworkPolicy: host.ProbeNetworkPolicy}
+	deps := Deps{Admin: host.Admin, KubeClient: kube, RestConfig: config, ContextName: selected, ClientHost: cfg.ClientHost, Output: io.Discard, RunCommand: run, ProbeNetworkPolicy: host.ProbeNetworkPolicy}
 	identity := publicClusterIdentity(cfg, config, selected)
 	if !checkClusterTrust(config, identity, &r) {
 		r.Cluster = &identity
@@ -257,12 +256,12 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 		r.checkUpstreamPending(*r.Upstream)
 		r.check("upstream_public_key", r.Upstream.DeployPublicKey != "", "Read the public deploy key through the selected cluster administration connection.")
 	} else {
-		upstreamOutput, upstreamErr := deps.RunCommand(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "upstream", "list", "--check")...)
-		healthy := upstreamErr == nil && verifiedUpstreams(upstreamOutput)
+		upstreamOutput, upstreamErr := upstreamCheckJSON(ctx, cfg, deps)
+		healthy := upstreamErr == nil && verifiedUpstreamAPI(upstreamOutput, false)
 		if r.Upstream != nil && !healthy {
 			r.Upstream.State = "pending"
 		}
-		if !healthy && r.Upstream != nil && upstreamErr == nil && upstreamsVerifiedOrPending(upstreamOutput, true) {
+		if !healthy && r.Upstream != nil && upstreamErr == nil && verifiedUpstreamAPI(upstreamOutput, true) {
 			r.checkUpstreamPending(*r.Upstream)
 			r.check("upstream_public_key", r.Upstream.DeployPublicKey != "", "Read the public deploy key through the selected cluster administration connection.")
 		} else {
@@ -318,9 +317,8 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 func deploymentReadinessReason(ctx context.Context, cfg Config, deps Deps) string {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	raw, err := deps.RunCommand(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "admin", "readiness")...)
 	var response model.ReadinessResponse
-	if err != nil || len(raw) > 4096 || json.Unmarshal(raw, &response) != nil || !response.Valid() || response.Status == "ready" {
+	if CallAdmin(ctx, cfg, deps, "readiness", nil, &response) != nil || !response.Valid() || response.Status == "ready" {
 		return "unavailable"
 	}
 	return response.Code
@@ -438,7 +436,9 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 	var failure *installStepError
 	if errors.As(installErr, &failure) {
 		result.Checks[len(result.Checks)-1] = failure.check
-		result.ServerURL = failure.endpoint
+		if failure.endpoint != "" {
+			result.ServerURL = failure.endpoint
+		}
 	}
 	if cfg.SecretsFile != "" {
 		if raw, err := os.ReadFile(cfg.SecretsFile); err == nil { //nolint:gosec // G304: operator-selected credential sink; only its digest is public
@@ -447,43 +447,12 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 			result.SecretsFile, result.SecretsSHA256 = cfg.SecretsFile, hex.EncodeToString(sum[:])
 		}
 	}
+	result.ManualSteps = installManualSteps(cfg, result, installErr)
 	if err := json.NewEncoder(output).Encode(result); err != nil {
 		return err
 	}
 	return installResultError(result)
 }
-
-// The CLI's tabwriter aligns AUTH with its header. Require a recognized
-// successful probe; registration alone does not prove the forge still works.
-func verifiedUpstreams(raw []byte) bool { return upstreamsVerifiedOrPending(raw, false) }
-
-func upstreamsVerifiedOrPending(raw []byte, allowPending bool) bool {
-	authAt, rows := -1, 0
-	for _, line := range strings.Split(string(raw), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		if authAt < 0 {
-			if fields[0] == "NAME" {
-				authAt = strings.Index(line, "AUTH")
-			}
-			continue
-		}
-		if len(fields) < 2 || len(line) <= authAt {
-			return false
-		}
-		status := strings.TrimSpace(line[authAt:])
-		healthy := status == "ok" || (strings.HasPrefix(status, "ok (read ") && strings.HasSuffix(status, ")")) || (fields[1] != "ssh" && status == "-")
-		pending := allowPending && status == "pending: the forge has not accepted this deploy key"
-		if !healthy && !pending {
-			return false
-		}
-		rows++
-	}
-	return rows > 0
-}
-
 func printArgoSecurityReview(w io.Writer, contexts []ArgoSecurityReview) {
 	if w == nil {
 		return

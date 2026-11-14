@@ -4,14 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
-
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -29,8 +23,8 @@ const (
 // without importing the service package (which would pull in transitive
 // dependencies the installer does not need).
 type grantEntry struct {
-	Repo     string `json:"repo"   yaml:"repo"`
 	Workflow string `json:"workflow" yaml:"workflow"`
+	Repo     string `json:"repo"   yaml:"repo"`
 	Step     string `json:"step"   yaml:"step"`
 	Secret   string `json:"secret" yaml:"secret"`
 }
@@ -40,84 +34,20 @@ type grantEntry struct {
 // cmd/oberth/admin.go's accessListJSONGrant without importing the main
 // package. Only Repo and Secret are consumed for identity production.
 type accessListJSONEntry struct {
+	Workflow string `json:"workflow" yaml:"workflow"`
 	Repo     string `json:"repo"`
-	Workflow string `json:"workflow"`
 	Step     string `json:"step"`
 	Secret   string `json:"secret"`
 }
 
-// ProducePerRepoIdentities reads per-repo identity data needed for Vault
-// policy provisioning. It first tries to query the running Oberth server's
-// database by exec'ing `oberth access list --json` in the Oberth deployment
-// pod. If that flag is rejected (older deployed binary), it retries with the
-// tabwriter format. If both exec attempts fail (fresh install, pod not yet
-// running), it falls back to reading the secret-access ConfigMap directly —
-// that path only accepts qualified entries because the ConfigMap may carry
-// bare-spelled names the installer cannot resolve without database access.
-//
-// The returned warnings slice carries degradation notices (e.g. exec failed,
-// fell back to ConfigMap) that the caller should surface in its output.
-func ProducePerRepoIdentities(ctx context.Context, kube kubernetes.Interface, run CommandRunner, contextName, namespace string) ([]PerRepoIdentity, []string, error) {
-	var warnings []string
-
-	if run != nil {
-		identities, execWarnings, err := produceFromAccessList(ctx, run, contextName, namespace)
-		warnings = append(warnings, execWarnings...)
-		if err == nil {
-			return identities, warnings, nil
-		}
-		// exec failed — fall through to the ConfigMap path. Record the
-		// degradation so the caller can surface it.
-		cmIdentities, cmErr := produceFromConfigMap(ctx, kube, namespace)
-		if cmErr != nil {
-			return nil, warnings, cmErr
-		}
-		warnings = append(warnings, fmt.Sprintf("access list exec failed (%v); fell back to ConfigMap (%d qualified entries)", err, len(cmIdentities)))
-		return cmIdentities, warnings, nil
-	}
-
-	identities, err := produceFromConfigMap(ctx, kube, namespace)
-	return identities, warnings, err
-}
-
-// produceFromAccessList execs into the running Oberth deployment pod and
-// runs `oberth access list` to read per-repo grant data from the server's
-// database. It first attempts --json for structured parsing; if the deployed
-// binary rejects the flag (older version), it retries with the tabwriter
-// format. The database rows carry qualified "upstream/org/repo" names
-// thanks to the v12 schema migration and the access reconciler.
-func produceFromAccessList(ctx context.Context, run CommandRunner, contextName, namespace string) ([]PerRepoIdentity, []string, error) {
-	baseArgs := []string{"exec", "-i", "-c", "oberth"}
-	if contextName != "" {
-		baseArgs = append(baseArgs, "--context", contextName)
-	}
-	baseArgs = append(baseArgs, "-n", namespace, "deploy/oberth", "--", "/usr/local/bin/oberth", "access", "list")
-
-	// Try --json first (available since the version shipping this code).
-	jsonArgs := append(append([]string(nil), baseArgs...), "--json")
-	out, err := run(ctx, nil, "kubectl", jsonArgs...)
-	if err == nil {
-		identities, parseErr := ParseAccessListJSON(out)
-		if parseErr != nil {
-			return nil, nil, fmt.Errorf("parse access list --json output: %w", parseErr)
-		}
-		return identities, nil, nil
-	}
-
-	// --json rejected (older deployed binary) — retry with tabwriter format.
-	var warnings []string
-	warnings = append(warnings, fmt.Sprintf("access list --json exec failed (%v); retrying with tabwriter format", err))
-
-	out, err = run(ctx, nil, "kubectl", baseArgs...)
+// ProducePerRepoIdentities derives identities from the authenticated active grant catalog.
+func ProducePerRepoIdentities(ctx context.Context, cfg Config, deps Deps) ([]PerRepoIdentity, []string, error) {
+	data, err := activeGrantJSON(ctx, cfg, deps)
 	if err != nil {
-		return nil, warnings, fmt.Errorf("exec access list in Oberth pod: %w", err)
+		return nil, nil, err
 	}
-
-	identities, parseErr := ParseAccessListOutput(out)
-	if parseErr != nil {
-		return nil, warnings, parseErr
-	}
-	return identities, warnings, nil
+	identities, err := ParseAccessListJSON(data)
+	return identities, nil, err
 }
 
 // parseAccessListJSON parses the JSON-formatted output of `oberth access list
@@ -166,82 +96,13 @@ func ParseAccessListJSON(data []byte) ([]PerRepoIdentity, error) {
 	return result, nil
 }
 
-// accessListSeparator matches the 3+ space padding tabwriter inserts between
-// columns. Column values (repo, workflow file, step, secret) never contain runs of 3+
-// spaces, so this is a reliable field boundary.
-var accessListSeparator = regexp.MustCompile(`\s{3,}`)
-
-// parseAccessListOutput parses the tabwriter-formatted output of
-// `oberth access list` into per-repo identities. Each line has:
-//
-//	REPO   WORKFLOW   STEP   SECRET   APPROVED_BY   APPROVED_AT   STATUS
-//
-// separated by 3+ spaces (tabwriter padding). Only qualified 3-segment
-// repo names produce identities; unresolved bare rows in the database
-// (possible for repos unregistered at both the v12 migration and the last
-// reconcile) are skipped.
-//
-// Returns an error if there are data lines but zero identities survive the
-// 3-segment filter (format drift detection).
-func ParseAccessListOutput(data []byte) ([]PerRepoIdentity, error) {
-	if strings.TrimSpace(string(data)) == "" {
-		return nil, nil
-	}
-	if !strings.Contains(string(data), "WORKFLOW") {
-		return nil, fmt.Errorf("access list output lacks workflow scope")
-	}
-	type repoKey struct {
-		upstream, org, repo string
-	}
-	byRepo := make(map[repoKey][]string)
-
-	var dataLines int
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "REPO") {
-			continue // skip header and blank lines
-		}
-		dataLines++
-
-		fields := accessListSeparator.Split(line, -1)
-		if len(fields) < 4 {
-			continue
-		}
-
-		repo := strings.TrimSpace(fields[0])
-		if err := model.ValidateWorkflowFile(strings.TrimSpace(fields[1])); err != nil {
-			return nil, err
-		}
-
-		parts := strings.Split(repo, "/")
-		if len(parts) != 3 {
-			continue // skip bare names that the DB hasn't qualified yet
-		}
-
-		key := repoKey{upstream: parts[0], org: parts[1], repo: parts[2]}
-		byRepo[key] = nil
-	}
-
-	if dataLines > 0 && len(byRepo) == 0 {
-		return nil, fmt.Errorf("access list output yielded no identities from %d data lines — format drift?", dataLines)
-	}
-
-	result := make([]PerRepoIdentity, 0, len(byRepo))
-	for key, grants := range byRepo {
-		sort.Strings(grants)
-		result = append(result, PerRepoIdentity{
-			Upstream: key.upstream,
-			Org:      key.org,
-			Repo:     key.repo,
-			Grants:   grants,
-		})
-	}
-	return result, nil
-}
-
-// ParseAccessListJSONWithSteps parses workflow-scoped grants. Repository
-// identities carry no explicit approvals; raw scoped rows produce named and
-// wildcard workflow-file identities in DerivePerStepIdentities.
+// ParseAccessListJSONWithSteps parses the JSON output and returns both per-repo
+// identities and the raw grant entries with step information needed to derive
+// per-step identities. This is the structured entry point for the sync command
+// to produce both per-repo and per-step identities in one pass. The two path
+// sets are disjoint by construction: a per-repo identity carries only the
+// wildcard-step grants, a per-step identity carries its named grants plus the
+// inherited wildcards (issue #814).
 func ParseAccessListJSONWithSteps(data []byte) ([]PerRepoIdentity, []grantWithStep, error) {
 	var entries []accessListJSONEntry
 	if err := json.Unmarshal(data, &entries); err != nil {
@@ -291,117 +152,36 @@ func ParseAccessListJSONWithSteps(data []byte) ([]PerRepoIdentity, []grantWithSt
 	return repoIdentities, grants, nil
 }
 
-// ProducePerStepIdentities reads exact workflow-scoped grants from the server.
-// Named and wildcard identities inherit only within the same file.
-func ProducePerStepIdentities(ctx context.Context, run CommandRunner, contextName, namespace string) ([]PerStepIdentity, error) {
-	if run == nil {
-		return nil, nil
-	}
-	baseArgs := []string{"exec", "-i", "-c", "oberth"}
-	if contextName != "" {
-		baseArgs = append(baseArgs, "--context", contextName)
-	}
-	baseArgs = append(baseArgs, "-n", namespace, "deploy/oberth", "--", "/usr/local/bin/oberth", "access", "list")
-	jsonArgs := append(append([]string(nil), baseArgs...), "--json")
-	out, err := run(ctx, nil, "kubectl", jsonArgs...)
+// ProducePerStepIdentities reads the access list from the running server and
+// derives per-step identities. For each named-step grant (step != "*"), a
+// per-step identity is produced with paths = the step's named grants PLUS any
+// wildcard-granted paths for the same repo (inherited). Issue #623, finding 1.
+func ProducePerStepIdentities(ctx context.Context, cfg Config, deps Deps) ([]PerStepIdentity, error) {
+	data, err := activeGrantJSON(ctx, cfg, deps)
 	if err != nil {
-		return nil, fmt.Errorf("exec access list --json in Oberth pod: %w", err)
+		return nil, err
 	}
-	_, grants, parseErr := ParseAccessListJSONWithSteps(out)
-	if parseErr != nil {
-		return nil, fmt.Errorf("parse access list for per-step identities: %w", parseErr)
+	_, grants, err := ParseAccessListJSONWithSteps(data)
+	if err != nil {
+		return nil, err
 	}
-	// Derive per-step identities from the grants. DerivePerStepIdentities
-	// does the wildcard-inheritance merge and produces the sorted list.
 	return DerivePerStepIdentities(nil, grants), nil
 }
 
-// produceFromConfigMap reads the secret-access ConfigMap and builds per-repo
-// identities from entries whose repo field is already in qualified
-// "upstream/org/repo" format. Bare-name entries are skipped because the
-// ConfigMap may not have been canonicalized yet and the installer has no
-// database access to resolve them.
-//
-// Only a genuine not-found error (fresh install, no ConfigMap yet) returns
-// nil, nil. Other errors (RBAC, transport) are surfaced so the caller's
-// warning path is reachable.
-func produceFromConfigMap(ctx context.Context, kube kubernetes.Interface, namespace string) ([]PerRepoIdentity, error) {
-	if kube == nil {
-		return nil, fmt.Errorf("secret-access ConfigMap client is unavailable")
-	}
-	cm, err := kube.CoreV1().ConfigMaps(namespace).Get(ctx, secretAccessConfigMapName, metav1.GetOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// ConfigMap not found: no per-repo identities. Normal for
-			// fresh installs where no grants exist yet.
-			return nil, nil
-		}
-		// RBAC, transport, or other non-retriable error — surface it
-		// instead of silently returning zero identities.
-		return nil, fmt.Errorf("read secret access ConfigMap: %w", err)
-	}
-
-	data := cm.Data[secretAccessConfigMapKey]
-	if strings.TrimSpace(data) == "" {
-		return nil, nil
-	}
-
-	var entries []grantEntry
-	if err := yaml.Unmarshal([]byte(data), &entries); err != nil {
-		return nil, fmt.Errorf("parse secret access ConfigMap: %w", err)
-	}
-
-	// Group grant secrets by qualified repo key.
-	type repoKey struct {
-		upstream, org, repo string
-	}
-	type repoGrants struct {
-		key    repoKey
-		grants []string
-	}
-	byRepo := make(map[string]*repoGrants)
-
-	for _, entry := range entries {
-		if err := model.ValidateWorkflowFile(entry.Workflow); err != nil {
-			return nil, fmt.Errorf("reject secret access ConfigMap grant: %w; remove unscoped entries before re-approving", err)
-		}
-		parts := strings.Split(entry.Repo, "/")
-		if len(parts) != 3 {
-			// Skip bare or org/repo entries — they can't be unambiguously
-			// resolved without database access.
-			continue
-		}
-		upstream, org, repo := parts[0], parts[1], parts[2]
-		mapKey := entry.Repo
-
-		rg, exists := byRepo[mapKey]
-		if !exists {
-			rg = &repoGrants{key: repoKey{upstream: upstream, org: org, repo: repo}}
-			byRepo[mapKey] = rg
-		}
-		rg.grants = nil
-	}
-
-	var result []PerRepoIdentity
-	for _, rg := range byRepo {
-		result = append(result, PerRepoIdentity{
-			Upstream: rg.key.upstream,
-			Org:      rg.key.org,
-			Repo:     rg.key.repo,
-			Grants:   rg.grants,
-		})
-	}
-	return result, nil
+// ProducePerRepoIdentitiesForSync reads the desired set for destructive reconciliation.
+func ProducePerRepoIdentitiesForSync(ctx context.Context, cfg Config, deps Deps) ([]PerRepoIdentity, []string, error) {
+	return ProducePerRepoIdentities(ctx, cfg, deps)
 }
 
-// ProducePerRepoIdentitiesForSync reads the desired set for destructive reconciliation.
-func ProducePerRepoIdentitiesForSync(ctx context.Context, kube kubernetes.Interface, run CommandRunner, contextName, namespace string) ([]PerRepoIdentity, []string, error) {
-	identities, warnings, err := ProducePerRepoIdentities(ctx, kube, run, contextName, namespace)
-	if err != nil {
-		return nil, warnings, err
+func activeGrantJSON(ctx context.Context, cfg Config, deps Deps) ([]byte, error) {
+	var result struct {
+		Grants []accessListJSONEntry `json:"grants"`
 	}
-	if run == nil || len(warnings) != 0 {
-		return nil, warnings, fmt.Errorf("refusing sync: the desired repository set was not read from the live database without warnings; orphan deletion requires an authoritative set")
+	if err := CallAdmin(ctx, cfg, deps, "access-list", nil, &result); err != nil {
+		return nil, err
 	}
-	return identities, warnings, nil
+	if result.Grants == nil {
+		return nil, fmt.Errorf("admin access list omitted the grants array")
+	}
+	return json.Marshal(result.Grants) //nolint:gosec // G117: Grant entries contain secret path identifiers, never secret values.
 }

@@ -19,7 +19,7 @@ func TestRepoArchiveCLIForwardsToAdminMCP(t *testing.T) {
 	t.Setenv("OBERTH_MCP_URL", server.URL)
 	for _, action := range []string{"archive", "unarchive"} {
 		var output strings.Builder
-		if err := runRepoWithDependencies(context.Background(), []string{action, "github/org/repo"}, &output, repoDependencies{}); err != nil {
+		if err := runRepo(context.Background(), []string{action, "github/org/repo"}, &output); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(output.String(), `tool=repo_`+action+` args={"repo":"github/org/repo"}`) {

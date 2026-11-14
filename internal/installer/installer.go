@@ -24,9 +24,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oberthci/oberth/internal/gitcache"
-	"github.com/oberthci/oberth/internal/kubeconfig"
-
 	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,6 +31,9 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/kubeconfig"
 
 	"github.com/oberthci/oberth/internal/releaseverify"
 )
@@ -103,6 +103,8 @@ const (
 
 // Config holds options for the install command.
 type Config struct {
+	enrollment *installerEnrollment
+
 	// ArgoSecurityDefaults explicitly permits absent-only changes to an existing Argo release.
 	ArgoSecurityDefaults   bool `json:"-"`
 	ReissueServerCA        bool
@@ -475,6 +477,8 @@ func isValidDNS1123Label(s string) bool {
 
 // Deps holds injectable dependencies for testing.
 type Deps struct {
+	Admin AdminAPI
+
 	installResolved func(Config)
 	// Host installs verify the advertised endpoint after server readiness.
 	checkClientReachability bool
@@ -934,7 +938,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	// no repos are registered on a fresh install either. On an
 	// upgrade, the database carries qualified "upstream/org/repo"
 	// names that match the serve path's identity map exactly.
-	if cfg.wantsSecretStore() && len(cfg.PerRepoIdentities) == 0 {
+	if cfg.wantsSecretStore() && cfg.existingRelease && len(cfg.PerRepoIdentities) == 0 {
 		ns := cfg.Namespace
 		if ns == "" {
 			ns = DefaultNamespace
@@ -946,7 +950,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 				identityRunner = nil
 			}
 		}
-		produced, produceWarnings, produceErr := ProducePerRepoIdentities(ctx, deps.KubeClient, identityRunner, deps.ContextName, ns)
+		produced, produceWarnings, produceErr := ProducePerRepoIdentities(ctx, cfg, deps)
 		for _, warn := range produceWarnings {
 			_, _ = fmt.Fprintf(deps.Output, "WARNING: %s\n", warn)
 		}
@@ -967,7 +971,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		// per-repo producer succeeded (prune-safety: an empty per-step list
 		// from a producer failure must never reach the chart or the sync).
 		if len(cfg.PerStepIdentities) == 0 && identityRunner != nil && produceErr == nil {
-			stepIds, stepErr := ProducePerStepIdentities(ctx, identityRunner, deps.ContextName, ns)
+			stepIds, stepErr := ProducePerStepIdentities(ctx, cfg, deps)
 			if err := checkProducedIdentities(cfg.liveInstallValues, "perStepIdentities", len(stepIds), stepErr); err != nil {
 				return err
 			}
@@ -1284,7 +1288,20 @@ func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, 
 		_, _ = fmt.Fprintln(deps.Output, "Installing OpenBao...")
 	}
 
-	if _, err := deps.RunHelm(ctx, OpenBaoHelmArgs(cfg)); err != nil {
+	args := OpenBaoHelmArgs(cfg)
+	if exists {
+		unchanged, err := resumedReleaseUnchanged(ctx, cfg, deps, release, "openbao", ns, result.TargetVersion, args)
+		if err != nil {
+			return result, err
+		}
+		if unchanged {
+			result.AlreadyInstalled = true
+			result.Upgraded = false
+			return result, nil
+		}
+	}
+	if _, err := deps.RunHelm(ctx, args); err != nil {
+
 		return result, fmt.Errorf("helm install OpenBao: %w", err)
 	}
 	if requiresTLSMigration {
@@ -1438,6 +1455,17 @@ func InstallRekorStack(ctx context.Context, cfg Config, deps Deps) (RekorResult,
 	args := RekorHelmArgs(cfg, valuesFile.Name())
 	args[3] = filepath.Join(dir, "rekorchart")
 	args = append(args, "-f", connectionPath, "--timeout", cfg.Timeout.String())
+	if exists {
+		unchanged, err := resumedReleaseUnchanged(ctx, cfg, deps, release, "rekor", ns, result.TargetVersion, args)
+		if err != nil {
+			return result, err
+		}
+		if unchanged {
+			result.AlreadyInstalled = true
+			result.Upgraded = false
+			return result, nil
+		}
+	}
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return result, fmt.Errorf("helm install Rekor: %w", err)
 	}
@@ -1622,6 +1650,17 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		cfg.ImageRef = cfg.verifiedImage
 	}
 
+	if exists && action == actionUpgrade {
+		unchanged, err := resumedOberthUnchanged(ctx, cfg, deps, release, openbao, rekor)
+		if err != nil {
+			return result, err
+		}
+		if unchanged {
+			result.AlreadyInstalled = true
+			result.Upgraded = false
+			return result, nil
+		}
+	}
 	switch action {
 	case actionUpgrade:
 		result.Upgraded = true
@@ -2141,7 +2180,7 @@ func PrintNextSteps(cfg Config, w io.Writer) error {
 		installed = "Oberth is installed and connected to OpenBao."
 	}
 	if cfg.ServiceType == "ClusterIP" {
-		installed += "\nClusterIP is internal only. For workstation access, keep a port-forward running:\n  kubectl -n " + ns + " port-forward service/oberth 30022:2222 30443:443"
+		installed += "\nClusterIP is internal only. For workstation access, keep a port-forward running:\n  kubectl" + target + " -n " + ns + " port-forward service/oberth 30022:2222 30443:443"
 	}
 	_, err := fmt.Fprintf(w, `
 %[2]s
@@ -2150,14 +2189,12 @@ Next steps:
 
   1. Register the upstream (interactive — generates and persists the deploy key):
 
-       kubectl%[5]s exec -it -n %[1]s deploy/oberth -- \
-         /usr/local/bin/oberth upstream add <name> ssh://git@<forge>/<org>
+       oberth upstream add --yes <name> ssh://git@<forge>/<org>
 
   2. Add your first uplink (prints its bearer token once; store it, and pin
      the CA that oberth client pin prints):
 
-       kubectl%[5]s exec -i -n %[1]s deploy/oberth -- \
-         /usr/local/bin/oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
+       oberth uplink add ~/.ssh/id_ed25519.pub operator@host
 
   3. Clone an existing repository through Oberth:
 
@@ -2171,11 +2208,10 @@ Next steps:
        git push origin my-branch
 
   5. Promote green code to a target branch: a promotion needs a single-use
-     grant from an admin uplink, which the first uplink is not. Register one
+     grant from an admin uplink, which the installer already created. Register one
      for a person, with a key no agent holds, and issue the grant with it:
 
-       kubectl%[5]s exec -it -n %[1]s deploy/oberth -- \
-         /usr/local/bin/oberth uplink add --admin - admin@host < admin.pub
+       oberth uplink add --admin admin.pub admin@host
        oberth mcp call --token-file <admin token file> promote_grant \
          '{"repo":"<upstream>/<org>/<repo>","sha":"<green sha>","branch":"main"}'
 
@@ -2319,7 +2355,7 @@ func printDryRunPlan(cfg Config, w io.Writer, cluster ClusterInfo) error {
 	_, _ = fmt.Fprintf(w, "  %d. Wait for the Oberth pod to start (timeout: %s), then complete first-run onboarding\n", step, cfg.Timeout)
 	_, _ = fmt.Fprintln(w, "     A fresh deployment stays NotReady until its first upstream is registered;")
 	_, _ = fmt.Fprintln(w, "     an interactive terminal is walked through upstream + uplink setup, otherwise")
-	_, _ = fmt.Fprintln(w, "     the manual kubectl exec steps are printed.")
+	_, _ = fmt.Fprintln(w, "     the one create-first-admin exec are printed.")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "No cluster changes were made (--dry-run).")
 	return nil
@@ -2352,7 +2388,7 @@ func HelmWithKubeArgs(runHelm func(ctx context.Context, args []string) ([]byte, 
 // permission notices on macOS) from corrupting parseable output.
 func DefaultRunHelm(ctx context.Context, args []string) (result []byte, resultErr error) {
 
-	args, environment, lease, cleanup, prepareErr := kubeconfig.Command("helm", args, installerChildEnvironment())
+	args, environment, lease, cleanup, prepareErr := pinnedKubernetesCommand("helm", args, installerChildEnvironment())
 	if prepareErr != nil {
 		return nil, prepareErr
 	}
@@ -2398,10 +2434,26 @@ func LoadKubeConfigForContext(contextName string, output io.Writer) (kubernetes.
 // variable initialized at program start from the original $HOME, which
 // t.Setenv cannot override).
 func loadKubeConfigForContext(contextName, k3sFallbackPath string, output io.Writer) (kubernetes.Interface, *rest.Config, string, error) {
+	if contextName == "" {
+		target, err := RecordedKubernetesTarget()
+		if err != nil {
+			return nil, nil, "", err
+		}
+		if target.Context != "" {
+			return loadKubeConfigWithRules(kubeconfig.Rules(target.Kubeconfig), target.Context, k3sFallbackPath, output)
+		}
+	}
 	return loadKubeConfigWithRules(kubeconfig.Rules(""), contextName, k3sFallbackPath, output)
 }
 
 func loadKubeConfigWithRules(rules *clientcmd.ClientConfigLoadingRules, contextName, k3sFallbackPath string, output io.Writer) (kubernetes.Interface, *rest.Config, string, error) {
+	if contextName == "" {
+		target, err := RecordedKubernetesTarget()
+		if err != nil {
+			return nil, nil, "", err
+		}
+		contextName = target.Context
+	}
 	client, restConfig, selectedContext, err := loadFromRules(rules, contextName)
 	if err == nil {
 		return client, restConfig, selectedContext, nil
@@ -2413,9 +2465,24 @@ func loadKubeConfigWithRules(rules *clientcmd.ClientConfigLoadingRules, contextN
 }
 
 func loadFromRules(rules *clientcmd.ClientConfigLoadingRules, contextName string) (kubernetes.Interface, *rest.Config, string, error) {
+	if contextName == "" {
+		raw, err := kubeconfig.Read(rules)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		if len(raw.Contexts) != 1 {
+			return nil, nil, "", errors.New("select --context or install a recorded Kubernetes target")
+		}
+		for name := range raw.Contexts {
+			contextName = name
+		}
+	}
 	rawConfig, restConfig, err := kubeconfig.Client(rules, contextName)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("load kubeconfig: %w", err)
+	}
+	if err := verifyRecordedCluster(contextName, restConfig); err != nil {
+		return nil, nil, "", err
 	}
 	client, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
@@ -2435,7 +2502,18 @@ func loadFromRules(rules *clientcmd.ClientConfigLoadingRules, contextName string
 // The selected context is pinned in Helm's arguments. KUBECONFIG keeps its
 // full file list; a root-owned k3s file is never selected implicitly.
 func ResolveHelmKubeArgs(contextName string) (helmArgs []string, target string, err error) {
-	return resolveHelmKubeArgs(kubeconfig.Rules(""), contextName, k3sKubeconfigPath)
+	rules := kubeconfig.Rules("")
+	if contextName == "" {
+		target, e := RecordedKubernetesTarget()
+		if e != nil {
+			return nil, "", e
+		}
+		contextName = target.Context
+		if target.Kubeconfig != "" {
+			rules = kubeconfig.Rules(target.Kubeconfig)
+		}
+	}
+	return resolveHelmKubeArgs(rules, contextName, k3sKubeconfigPath)
 }
 
 // resolveHelmKubeArgs is the testable core of ResolveHelmKubeArgs.

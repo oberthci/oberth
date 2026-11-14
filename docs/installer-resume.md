@@ -57,9 +57,9 @@ command afterward; HTTPS alone cannot satisfy the SSH verification check.
 The database retains its upstream registrations, but deploy keys belong to the
 installation. Restore prints the current public deploy key: add it with write
 access in each restored repository's forge **Settings → Deploy keys**, then run
-the printed context-specific `oberth upstream list --check` command.
+the printed authenticated `oberth upstream list --check` command.
 
-If the key has not been created, run `oberth upstream add NAME BASE_URL` using the
+If the key has not been created, run `oberth upstream add --yes NAME BASE_URL` using the
 restored registration's exact name and URL. It creates or recovers the installation's
 key and keeps an identical database registration. Preserve `--dedicated-key` for
 upstreams configured with dedicated keys. Re-enroll certificate clients against the
@@ -80,6 +80,40 @@ the newest matching attempt in the caller's upstream scope. After adopting a
 workflow, a new retry attempt replays its own output from the start when an earlier
 attempt has a durable cursor, preserving the script's FAIL line for per-step logs.
 
+## Unchanged releases
+
+A resume with `--resume-secrets-file` compares Helm's rendered manifest and
+merged effective values with the deployed Oberth release. When both match, it
+continues onboarding without creating a Helm revision. A values change, local
+chart change or chart version change still applies. A resume keeps this
+no-op check even when `--upgrade` is present; a separate install with
+`--upgrade` and no recovery input explicitly requests reconciliation. An existing authenticated admin is reused during
+resume; later enrollment uses the admin API and never repeats first-admin exec.
+
+The local `kubernetes.json` install record stores the context name, source
+kubeconfig path when supplied, API server URL and SHA-256 of the CA bundle. Cluster
+commands verify that identity before connecting, including explicit reuse of the
+recorded context name. Changing `KUBECONFIG` cannot redirect that recorded name.
+TLS server-name and verification settings are also checked. Equivalent embedded
+CA bundles and CA files, including symlinks, identify the same cluster. A context using the
+system trust store records the digest of an empty explicit CA bundle; TLS still
+uses system trust. An explicit different context selects another target.
+`scripts/setup-secretstore.sh --context NAME --kubeconfig PATH` uses the same
+selection and checks; without those flags it uses the install record, never the
+ambient current-context. Its external TokenReview setup requires an explicit CA
+bundle in the selected kubeconfig.
+
+Keep `installer-pending-*.json` in the owner-only Oberth configuration directory
+for each Kubernetes target. Each contains the locally generated private installer
+key and CSR saved before the first-admin exec. An interrupted installation reuses
+that key to retrieve fresh credentials rather than creating another administrator.
+No bootstrap token is stored in a Kubernetes Secret.
+
+Losing a still-valid admin credential does not enable first-admin recovery with
+a new key. Until that credential expires or is revoked it remains active; an
+unexpiring bearer remains active indefinitely. Keep the original local installer
+key so an interrupted response can be retried with the same enrollment.
+
 An owner-only empty `--secrets-file` left by an interrupted install can be reused
 at the same path. Group- or world-readable empty files are refused; changing
 their permissions cannot revoke another process's already-open descriptor.
@@ -87,3 +121,18 @@ A non-empty conflicting file is refused. Existing recovery input is never
 overwritten; use `--resume-secrets-file` for input and a separate output path.
 While the live NetworkPolicy probe runs, install prints its start and a progress
 heartbeat every ten seconds, including owned cleanup.
+
+
+A Helm release left by an interrupted install does not establish an administrator.
+The installer probes the authenticated admin API first. If it cannot authenticate,
+it resumes the guarded first-admin enrollment with the saved pending key and CSR,
+or saves a new enrollment if the earlier attempt never reached that step. A lost
+exec response does not require uninstalling the release. A starting daemon socket
+gets a short bounded retry; a credential refusal or interrupted response does not
+trigger automatic repeated issuance. The server's active-admin guard still applies.
+
+If first-admin enrollment is refused, the partial installation remains available
+and the result includes the server's refusal and manual steps. Use the original
+installer key for redelivery or an already authenticated administrative client.
+An interrupted stdout response is never printed as a diagnostic, because it may
+contain a newly issued credential.
