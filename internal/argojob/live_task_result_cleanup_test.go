@@ -27,17 +27,21 @@ func TestLiveArgoTaskResultCleanupUnderPolicy(t *testing.T) {
 	installLiveTaskResultPolicy(t, cluster)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
+	argo, err := wfclientset.NewForConfig(cluster.restConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
 	since := metav1.Now()
 	controller, err := NewController(cluster.workflows, cluster.kube, cluster.config())
 	if err != nil {
 		t.Fatal(err)
 	}
-	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
+	controller = controller.WithWatchHub(cluster.hub).WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
 	name := fmt.Sprintf("r7-cleanup-%d", time.Now().Unix())
 	request := liveRequest(name, pipeline.TriggerCI, liveTwoStageDocument)
 	request.SourceDir = writeCheckout(t)
 	t.Cleanup(func() {
-		_ = cluster.workflows.Delete(context.Background(), name, metav1.DeleteOptions{})
+		_ = argo.ArgoprojV1alpha1().Workflows(cluster.namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
 	})
 	if _, err := controller.Create(ctx, request); err != nil {
 		t.Fatal(err)
@@ -58,10 +62,6 @@ func TestLiveArgoTaskResultCleanupUnderPolicy(t *testing.T) {
 		if len(holder.OwnerReferences) == 1 && holder.OwnerReferences[0].Name == name && holder.DeletionTimestamp == nil {
 			t.Fatalf("settled Workflow kept executor identity holder %s", holder.Name)
 		}
-	}
-	argo, err := wfclientset.NewForConfig(cluster.restConfig)
-	if err != nil {
-		t.Fatal(err)
 	}
 	results := argo.ArgoprojV1alpha1().WorkflowTaskResults(cluster.namespace)
 	remaining := -1
