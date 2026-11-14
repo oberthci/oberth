@@ -628,3 +628,18 @@ running and unclassified Workflows count as active; terminal Workflows do not.
 This advisory read neither freezes admission nor observes the server's queue.
 If Workflow reads are unavailable, the wait refuses: confirm no runs are active
 before deliberately retrying without the wait flags.
+
+Run this upgrade from a machine whose Oberth client is connected to this server
+as an unscoped administrator. The installer checks that it can build that admin
+connection before any write, including with `--no-backup`. A kubeconfig alone is
+insufficient. Use the refusal's `export OBERTH_BASE_URL=... OBERTH_CLIENT_CERT=...
+OBERTH_CLIENT_KEY=... OBERTH_CA_CERT=...` command with this server's endpoint,
+admin certificate/key and pinned server CA, then retry.
+
+A failed v0.22.7 Helm release can still have older Pods serving traffic. If its
+admin route returns not-found, take the backup using the CLI matching those
+running Pods, then retry `oberth upgrade --no-backup --context selected
+--namespace oberth` with the actual target. Reapply your other upgrade options:
+OpenBao namespace, values/set overrides, backup directory, timeout, TLS,
+chart/release source and downgrade consent are omitted from the printed retry.
+Dry runs perform the same backup and connection prerequisite checks.

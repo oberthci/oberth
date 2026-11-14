@@ -355,6 +355,9 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	if err := checkUpgradeBackupAPI(ctx, cfg, deps, currentVersion); err != nil {
 		return result, err
 	}
+	if err := checkUpgradeVerificationConnection(ctx, cfg, deps); err != nil {
+		return result, err
+	}
 
 	liveSchema, err := announceUpgradeSchema(ctx, w, cfg, deps, cmp > 0)
 	if err != nil {
@@ -850,7 +853,7 @@ func verifyRunningVersion(ctx context.Context, deps Deps, cfg UpgradeConfig, tar
 func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, retryFailed bool) (UpgradeResult, error) {
 	_, _ = fmt.Fprintf(w, "\nDry-run plan (no cluster changes will be made):\n\n")
 	if cfg.WaitIdle {
-		_, _ = fmt.Fprintf(w, "  Wait for %s runs in the selected live daemon queue (--wait-idle; --wait-timeout=%s).\n", upgradeWaitSelection(cfg), cfg.WaitTimeout)
+		_, _ = fmt.Fprintf(w, "  Wait for %s active Kubernetes Workflows (critical includes all active Workflows) (--wait-idle; --wait-timeout=%s).\n", upgradeWaitSelection(cfg), cfg.WaitTimeout)
 	}
 	_, _ = fmt.Fprintln(w, "  Verify Helm >= 3.14, read installed values (including defaults), pin compatibility identities, and validate stored values against the target chart schema before applying changes.")
 	if cfg.serverPKI {
