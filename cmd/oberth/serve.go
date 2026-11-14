@@ -877,18 +877,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		chain.AnchoredAt = anchor.AnchoredAt.UTC().Format(time.RFC3339)
 		return chain, nil
 	}
-	refreshGrantIdentities := func(ctx context.Context) error {
-		refreshed, err := buildPerRepoIdentities(ctx, database)
-		if err != nil {
-			return err
-		}
-		steps, err := buildPerStepIdentities(ctx, database)
-		if err != nil {
-			return err
-		}
-		identityStore.ReplaceWithSteps(refreshed, buildPerRepoCIIdentities(refreshed), steps)
-		return nil
-	}
+	refreshGrantIdentities := newGrantIdentityRefresher(database, identityStore)
 	// Wire the declaration recorder so Workflow admission records (repo, step,
 	// path) declarations for `access_list --pending`. Issue #623, finding 4.
 	argoJobs.SetDeclarationRecorder(database)
@@ -2039,4 +2028,24 @@ func writeHealthMetrics(w io.Writer, health app.Health) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	health.WriteStatusMetrics(ctx, w)
+}
+
+// newGrantIdentityRefresher serializes reading and publishing grant identities,
+// so a slower refresh cannot replace a newer committed grant snapshot.
+func newGrantIdentityRefresher(database perRepoStore, identityStore *argojob.IdentityStore) func(context.Context) error {
+	var refreshMu sync.Mutex
+	return func(ctx context.Context) error {
+		refreshMu.Lock()
+		defer refreshMu.Unlock()
+		refreshed, err := buildPerRepoIdentities(ctx, database)
+		if err != nil {
+			return err
+		}
+		steps, err := buildPerStepIdentities(ctx, database)
+		if err != nil {
+			return err
+		}
+		identityStore.ReplaceWithSteps(refreshed, buildPerRepoCIIdentities(refreshed), steps)
+		return nil
+	}
 }
