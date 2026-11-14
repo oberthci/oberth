@@ -285,11 +285,12 @@ func (scheduler *Scheduler) AcceptEnqueue(_ context.Context, enqueued model.Enqu
 		return nil
 	}
 	scheduler.observationMu.Lock()
-	defer scheduler.observationMu.Unlock()
 	if scheduler.observationsClosed {
+		scheduler.observationMu.Unlock()
 		return nil
 	} // Startup recovery owns an interrupted acceptance.
 	ctx := scheduler.observationCtx
+	scheduler.observationMu.Unlock()
 	run, err := scheduler.database().StartRun(ctx, enqueued.ID)
 	if err != nil {
 		current, readErr := scheduler.database().Run(ctx, enqueued.ID)
@@ -303,6 +304,11 @@ func (scheduler *Scheduler) AcceptEnqueue(_ context.Context, enqueued model.Enqu
 			scheduler.failAccept(ctx, enqueued.Run, err)
 		}
 		return err
+	}
+	scheduler.observationMu.Lock()
+	defer scheduler.observationMu.Unlock()
+	if scheduler.observationsClosed {
+		return nil
 	}
 	owner := scheduler.submissions.trackRun(run)
 	finishEvidence := scheduler.beginEvidenceExecution(run.ID)
