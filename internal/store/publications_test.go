@@ -188,9 +188,7 @@ func TestNewBranchRunWaitsForPendingPublicationOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(replacement.Cancellations) != 0 {
-		t.Fatalf("publication owner cancellations = %#v, want none", replacement.Cancellations)
-	}
+
 	unrelated, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, otherBranch, unrelatedSHA))
 	if err != nil {
 		t.Fatal(err)
@@ -199,7 +197,7 @@ func TestNewBranchRunWaitsForPendingPublicationOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if owner.Status != model.RunRunning || owner.Phase != "publishing" || owner.SupersededBy != "" {
+	if owner.Status != model.RunRunning || owner.Phase != "publishing" {
 		t.Fatalf("publication owner after newer enqueue = %#v", owner)
 	}
 	queued, err := s.Run(ctx, replacement.ID)

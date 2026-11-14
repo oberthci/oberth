@@ -11,29 +11,42 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 type cleanupWorkflowClient struct {
 	createRetryWorkflowClient
-	deletes    []metav1.DeleteOptions
-	deleteHook func(context.Context, metav1.DeleteOptions) error
+	patches   int
+	patchHook func(context.Context, types.PatchType, []byte) (*wfv1.Workflow, error)
 }
 
-func (c *cleanupWorkflowClient) Delete(ctx context.Context, _ string, opts metav1.DeleteOptions) error {
-	c.deletes = append(c.deletes, opts)
-	if c.deleteHook != nil {
-		return c.deleteHook(ctx, opts)
+func (c *cleanupWorkflowClient) Patch(ctx context.Context, _ string, kind types.PatchType, data []byte, _ metav1.PatchOptions, _ ...string) (*wfv1.Workflow, error) {
+	c.patches++
+	if c.patchHook != nil {
+		return c.patchHook(ctx, kind, data)
 	}
-	return nil
+	return nil, errors.New("unexpected Stop patch")
 }
 
 func TestWorkflowCreateCleanupOneBoundedObservation(t *testing.T) {
-	for _, mode := range []string{"early-absence", "final-absence", "found", "deleting", "foreign", "uid-conflict", "blocked-read", "blocked-delete", "cancel"} {
+	for _, mode := range []string{"early-absence", "final-absence", "found", "stopped", "completed", "deleting", "foreign", "uid-conflict", "blocked-read", "blocked-patch", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				start := time.Now()
-				boundary := start.Add(60 * time.Second)
-				wf := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "wf", UID: "owned-uid", Annotations: map[string]string{runIDAnnotation: "run"}}}
+				boundary := time.Now().Add(time.Minute)
+				workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "wf", UID: "owned-uid", ResourceVersion: "1", Annotations: map[string]string{runIDAnnotation: "run"}}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowRunning}}
+				if mode == "stopped" {
+					workflow.Spec.Shutdown = wfv1.ShutdownStrategyStop
+				}
+				if mode == "completed" {
+					workflow.Status.Phase = wfv1.WorkflowFailed
+				}
+				if mode == "foreign" {
+					workflow.Annotations[runIDAnnotation] = "foreign"
+				}
+				if mode == "deleting" {
+					stamp := metav1.Now()
+					workflow.DeletionTimestamp = &stamp
+				}
 				client := &cleanupWorkflowClient{}
 				reads := 0
 				client.getHook = func(ctx context.Context, name string) (*wfv1.Workflow, error) {
@@ -45,99 +58,90 @@ func TestWorkflowCreateCleanupOneBoundedObservation(t *testing.T) {
 					if mode == "early-absence" || mode == "final-absence" {
 						return nil, apierrors.NewNotFound(workflowTestResource, name)
 					}
-					copy := wf.DeepCopy()
-					if mode == "foreign" {
-						copy.Annotations[runIDAnnotation] = "other"
-					}
-					if mode == "deleting" {
-						stamp := metav1.Now()
-						copy.DeletionTimestamp = &stamp
-					}
-					return copy, nil
+					return workflow.DeepCopy(), nil
 				}
-				client.deleteHook = func(ctx context.Context, opts metav1.DeleteOptions) error {
-					if opts.Preconditions == nil || opts.Preconditions.UID == nil || *opts.Preconditions.UID != "owned-uid" || opts.PropagationPolicy == nil || *opts.PropagationPolicy != metav1.DeletePropagationForeground || opts.GracePeriodSeconds == nil || *opts.GracePeriodSeconds != 10 {
-						t.Fatal("delete lost UID/foreground/10s grace fence")
+				client.patchHook = func(ctx context.Context, kind types.PatchType, data []byte) (*wfv1.Workflow, error) {
+					if mode == "blocked-patch" || mode == "cancel" {
+						<-ctx.Done()
+						return nil, ctx.Err()
 					}
 					if mode == "uid-conflict" {
-						return apierrors.NewConflict(workflowTestResource, "wf", errors.New("UID changed"))
+						return nil, apierrors.NewConflict(workflowTestResource, "wf", errors.New("UID changed"))
 					}
-					if mode == "blocked-delete" || mode == "cancel" {
-						<-ctx.Done()
-						return ctx.Err()
-					}
-					return nil
+					return applyWorkflowStopTestPatch(workflow, kind, data)
+				}
+				if mode == "final-absence" {
+					time.Sleep(time.Minute)
 				}
 				ctx := t.Context()
-				if mode == "final-absence" {
-					time.Sleep(60 * time.Second)
-				}
 				if mode == "cancel" {
 					var cancel context.CancelFunc
 					ctx, cancel = context.WithTimeout(ctx, 3*time.Second)
 					defer cancel()
 				}
-				callStart := time.Now()
+				started := time.Now()
 				done, err := (&Controller{workflows: client}).SettleCreate(ctx, "wf", "run", boundary)
-				if reads != 1 || len(client.posts) != 0 || time.Since(callStart) > 10*time.Second {
-					t.Fatalf("attempt retried or escaped 10s: reads=%d elapsed=%s err=%v", reads, time.Since(callStart), err)
+				if reads != 1 || len(client.posts) != 0 || time.Since(started) > 10*time.Second {
+					t.Fatalf("observation retried/escaped budget: %d %v", reads, err)
 				}
 				switch mode {
-				case "final-absence":
+				case "final-absence", "completed":
 					if !done || err != nil {
-						t.Fatalf("final absence unconfirmed: %t %v", done, err)
+						t.Fatal("terminal/definite absence not settled", done, err)
 					}
-				case "early-absence", "found", "deleting":
-					if done || err != nil || time.Since(callStart) != 0 {
-						t.Fatalf("pending attempt slept/completed: done=%t elapsed=%s err=%v", done, time.Since(callStart), err)
+				case "early-absence", "found", "stopped", "deleting":
+					if done || err != nil {
+						t.Fatal("Stop acceptance became terminal evidence", done, err)
 					}
 				case "foreign":
-					if done || err == nil || !strings.Contains(err.Error(), "belongs to run") || len(client.deletes) != 0 {
-						t.Fatalf("foreign object deleted: %v", err)
+					if done || err == nil || !strings.Contains(err.Error(), "belongs to run") || client.patches != 0 {
+						t.Fatal("foreign Workflow mutated", err)
 					}
 				case "uid-conflict":
 					if done || !apierrors.IsConflict(err) {
-						t.Fatalf("UID conflict completed: %v", err)
+						t.Fatal("conflict released custody", err)
 					}
 				default:
 					if done || !errors.Is(err, context.DeadlineExceeded) {
-						t.Fatalf("request budget/cancellation lost: %t %v", done, err)
+						t.Fatal("observation/Stop lost deadline", done, err)
 					}
 				}
-				if mode == "deleting" && len(client.deletes) != 0 {
-					t.Fatal("already-deleting UID deleted again")
+				if (mode == "completed" || mode == "stopped" || mode == "deleting") && client.patches != 0 {
+					t.Fatal("terminal/already-stopped Workflow patched again")
 				}
 			})
 		})
 	}
 }
 
-func TestWorkflowCreateCleanupSlowForegroundDeletionDefersPastWindow(t *testing.T) {
+func TestWorkflowCreateCleanupWaitsThroughExitHandlers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		boundary := time.Now().Add(60 * time.Second)
-		wf := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "wf", UID: "owned-uid", Annotations: map[string]string{runIDAnnotation: "run"}}}
+		boundary := time.Now().Add(time.Minute)
+		workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "wf", UID: "owned-uid", ResourceVersion: "1", Annotations: map[string]string{runIDAnnotation: "run"}}, Spec: wfv1.WorkflowSpec{OnExit: "cleanup"}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowRunning}}
 		client := &cleanupWorkflowClient{}
-		client.stored = wf
-		client.deleteHook = func(context.Context, metav1.DeleteOptions) error {
-			stamp := metav1.Now()
-			client.stored.DeletionTimestamp = &stamp
-			return nil
+		client.getHook = func(context.Context, string) (*wfv1.Workflow, error) { return workflow.DeepCopy(), nil }
+		client.patchHook = func(_ context.Context, kind types.PatchType, data []byte) (*wfv1.Workflow, error) {
+			var err error
+			workflow, err = applyWorkflowStopTestPatch(workflow, kind, data)
+			return workflow, err
 		}
 		controller := &Controller{workflows: client}
-		for _, advance := range []time.Duration{0, 60 * time.Second, 60 * time.Second} {
-			time.Sleep(advance)
+		for range 3 {
 			done, err := controller.SettleCreate(t.Context(), "wf", "run", boundary)
 			if done || err != nil {
-				t.Fatalf("slow foreground deletion became fatal/done: %t %v", done, err)
+				t.Fatal("running exit handler released custody", done, err)
 			}
+			time.Sleep(time.Minute)
 		}
-		if len(client.deletes) != 1 {
-			t.Fatal("deletion was reissued while terminating")
+		if client.patches != 1 || workflow.Spec.OnExit != "cleanup" {
+			t.Fatal("Stop repeated or exit handler changed")
 		}
-		client.stored = nil
-		done, err := controller.SettleCreate(t.Context(), "wf", "run", boundary)
-		if !done || err != nil {
-			t.Fatalf("recovered absence not settled: %t %v", done, err)
+		workflow.Status.Phase = wfv1.WorkflowFailed
+		if done, err := controller.SettleCreate(t.Context(), "wf", "run", boundary); !done || err != nil {
+			t.Fatal("Argo completion did not settle", done, err)
+		}
+		if workflow.DeletionTimestamp != nil {
+			t.Fatal("completed Workflow deleted instead of retained for TTL")
 		}
 	})
 }

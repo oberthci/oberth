@@ -69,7 +69,7 @@ func TestRestartCutArgoJobsMapsInterruptionAndKeepsFallbackBinding(t *testing.T)
 			}
 			result, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard, nil, 0)
 			if mode == "normal" {
-				if err != nil || result.Status != model.RunInterrupted || result.Phase != "interrupted" || result.FailedStep != "" || len(jobs.intents) != 0 {
+				if err != nil || result.Status != model.RunFailed || result.Phase != "infrastructure" || result.FailedStep != "" || len(jobs.intents) != 0 {
 					t.Fatal("interruption mapping failed", result, err)
 				}
 				return
@@ -87,19 +87,17 @@ func TestRestartCutArgoJobsMapsInterruptionAndKeepsFallbackBinding(t *testing.T)
 				}
 				return
 			}
-			want := model.RunInterrupted
-			if mode == "late-real-failure" || mode == "real-failure" || mode == "earlier-real-failure" {
-				want = model.RunFailed
+			if err != nil || result.Status != model.RunFailed {
+				t.Fatal("native phase lost", result, err)
 			}
-			if err != nil || result.Status != want {
-				t.Fatal("fresh terminal verdict replaced incorrectly", result, err)
+			realFailure := mode == "late-real-failure" || mode == "real-failure" || mode == "earlier-real-failure"
+			if realFailure && (result.FailedStep != "test" || result.Phase != "build") {
+				t.Fatal("real failure lost attribution", result)
 			}
-			if want == model.RunInterrupted && (result.FailedStep != "" || result.Phase != "interrupted") {
-				t.Fatal("interruption kept test attribution", result)
+			if !realFailure && (result.FailedStep != "" || result.Phase != "infrastructure") {
+				t.Fatal("interruption invented test failure", result)
 			}
-			if want == model.RunFailed && (result.FailedStep != "test" || result.Phase != "build") {
-				t.Fatal("real failure lost test attribution", result)
-			}
+
 		})
 	}
 }
@@ -152,7 +150,7 @@ func TestRestartCutR2PartialRunningObservationAllowsTerminalCut(t *testing.T) {
 		t.Fatal("partial read lost bound fallback or collected live artifacts", result, err, collector.calls)
 	}
 	final, err := result.Reobserve(t.Context())
-	if err != nil || final.Status != model.RunInterrupted || final.Phase != "interrupted" || final.FailedStep != "" || c.resumedReads != 1 {
+	if err != nil || final.Status != model.RunFailed || final.Phase != "infrastructure" || final.FailedStep != "" || c.resumedReads != 1 {
 		t.Fatal("partial running snapshot fabricated terminal red", final, err)
 	}
 }

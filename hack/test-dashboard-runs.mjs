@@ -22,7 +22,7 @@ run(`
   const scheduled=makeRun('scheduled-running',{status:'running',trigger:'schedule',schedule_entry:'nightly',finished_at:null});
   const queued=makeRun('publication-queued',{status:'queued',ref:'other',started_at:null,finished_at:null});
   const failed=makeRun('nightly-failed',{status:'failed',trigger:'schedule',schedule_entry:'nightly'});
-  const superseded=makeRun('superseded-old',{status:'interrupted',superseded_by:head.id});
+  const cancelled=makeRun('cancelled-old',{status:'interrupted'});
   const retried=makeRun('retried-old',{ref:'feature',status:'failed'});
   state.status={upstream_info:[{id:1,name:'github',base_url:'https://example.test/org'}]};state.statusLoadedAt=Date.now();
   api=async path=>{
@@ -34,7 +34,7 @@ run(`
     let rows;
     if(query.has('latest_per_ref'))rows=query.has('before')?[makeRun('page-two-head',{ref:'old-ref'})]:[head,makeRun('retry-head',{ref:'feature'})];
     else if(flatPaging)rows=[head,...Array.from({length:100},(_,i)=>makeRun('flat-'+i,{ref:'ref-'+i}))];
-    else rows=[head,scheduled,queued,failed,superseded,retried,makeRun('retry-head',{ref:'feature'})];
+    else rows=[head,scheduled,queued,failed,cancelled,retried,makeRun('retry-head',{ref:'feature'})];
     return {body:rows,next:listNext};
   };
   const apiFixture=api;
@@ -59,7 +59,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F1'
 }
 if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F2') {
   run(`changeRunRepo('all');`);
-  for(const [status,id] of [['failed','nightly-failed'],['superseded','superseded-old'],['failed','retried-old']]) {
+  for(const [status,id] of [['failed','nightly-failed'],['cancelled','cancelled-old'],['failed','retried-old']]) {
     run(`state.filter=${JSON.stringify(status)};requests=[];`);
     await run('renderRuns(0)');
     assert.ok(ids().includes(id),`F2: ${status} must find a non-head run, including another schedule lane`);
@@ -68,7 +68,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F2'
   run(`state.filter='passed';flatPaging=true;listNext='opaque-flat-cursor';`);
   await run('renderRuns(0)');
   assert.equal(run('state.runNext'),'opaque-flat-cursor','flat paging counts dated rows, not its extra queued rows');
-  console.log('F2 passed: failed nightly, superseded and failed attempt filters; flat-list queue pagination');
+  console.log('F2 passed: failed nightly, cancelled and failed attempt filters; flat-list queue pagination');
 }
 if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3') {
   // Queued runs accepted before several runs started and finished must never
@@ -286,8 +286,8 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'V1'
   assert.ok(!/waiting<\/span>/.test(table) && !table.includes('>admitted<') && !table.includes('>preflight<'), 'V1: no second not-started status');
   for (const row of notStarted) if (row.display_reason) assert.ok(table.includes(row.display_reason), 'V1: the reason line shows ' + row.display_reason);
   for (const row of notStarted) assert.equal(run(`runListGroup(notStarted.find(r => r.id === '${row.id}'))`), 0, 'V1: ' + row.id + ' sorts in the queue group');
-  // The vocabulary is six statuses; each has a known kind and label.
-  for (const status of ['queued', 'running', 'passed', 'failed', 'superseded', 'cancelled']) {
+  // The vocabulary is five statuses; each has a known kind and label.
+  for (const status of ['queued', 'running', 'passed', 'failed', 'cancelled']) {
     assert.notEqual(run(`statusKind('${status}')`), 'unknown', 'V1: ' + status + ' has a kind');
   }
   for (const gone of ['waiting', 'infra-pending', 'deadline-exceeded', 'interrupted']) {
@@ -330,7 +330,7 @@ for (const latest of [false, true]) {
 console.log('Queued groups reverse submission order in flat, latest-per-ref and scoped views');
 
 // Server messages are the entire row message, including empty messages.
-for (const status of ['queued','running','passed','failed','cancelled','superseded']) {
+for (const status of ['queued','running','passed','failed','cancelled']) {
  sandbox.contractRun={id:'contract',repo_id:1,ref:'main',status:status,display_status:status,display_reason:`message ${status}`,resource_message:'hidden advice',priority_reason:'hidden priority',scheduling:{message:'hidden observation'}};
  assert.equal(run('rowMessage(contractRun)'),`message ${status}`);
  sandbox.contractRun.display_reason='';
@@ -380,15 +380,15 @@ try {
  const queuedDate=new Date(sandbox.queuedTimeRun.queued_at);
  assert.ok(queuedCell.includes(queuedDate.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',hourCycle:'h23'})), 'the displayed time comes from QueuedAt');
 } finally { Date.now = savedNow }
-for (const status of ['running','passed','failed','cancelled','superseded']) {
+for (const status of ['running','passed','failed','cancelled']) {
  sandbox.timeRun={display_status:status,started_at:clockNow.toISOString(),finished_at:status==='running'?null:new Date(clockNow.getTime()+62000).toISOString()};
  assert.match(run('whenCell(timeRun)'),/started at \d\d:\d\d/);
  sandbox.timeRun.started_at=yesterday.toISOString();
  assert.match(run('whenCell(timeRun)'),/started at [A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}/);
- if (['cancelled','superseded'].includes(status)) assert.match(run('whenCell(timeRun)'),/^<span><\/span>/);
+ if (['cancelled'].includes(status)) assert.match(run('whenCell(timeRun)'),/^<span><\/span>/);
 }
 assert.match(run(`runRow({id:'escaped',repo_id:1,ref:'<script>',sha:'sha"<unsafe>',actor:'actor"<unsafe>',display_status:'failed',display_reason:'reason"<unsafe>'})`),/reason&quot;&lt;unsafe&gt;/);
-console.log('Run-list contract passed: six states, today/older start lines, live timer and escaping');
+console.log('Run-list contract passed: five states, today/older start lines, live timer and escaping');
 
 assert.equal(run(`runMessageCell({display_status:'passed',display_reason:'closes #1415, #1416 · schedule nightly'})`),'closes #1415, #1416 · schedule nightly');
 assert.equal(run(`runMessageCell({display_status:'passed',issue_trailers:[{issue:1,close:true}]})`),'','the client never fabricates a trailer message');

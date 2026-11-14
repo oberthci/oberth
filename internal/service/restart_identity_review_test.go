@@ -28,7 +28,7 @@ func TestStartupAdoptsNonReleaseTagWorkflow(t *testing.T) {
 		t.Fatalf("tag was not adopted: id=%s deletes=%v err=%v", adopted, jobs.deleted, err)
 	}
 	current, err := fixture.store.Run(t.Context(), run.ID)
-	if err != nil || current.Status != model.RunRunning || current.SupersededBy != "" {
+	if err != nil || current.Status != model.RunRunning {
 		t.Fatalf("adoption changed durable identity: %+v %v", current, err)
 	}
 }

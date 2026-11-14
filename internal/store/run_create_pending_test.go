@@ -9,8 +9,8 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestPendingCreateCleanupSurvivesRecoveryAndPreemption(t *testing.T) {
-	for _, mode := range []string{"restart", "cancel", "supersede", "already-completed"} {
+func TestPendingCreateCleanupSurvivesRecoveryAndCancellation(t *testing.T) {
+	for _, mode := range []string{"restart", "cancel", "independent-push", "already-completed"} {
 		t.Run(mode, func(t *testing.T) {
 			now := time.Now().UTC()
 			s := testStore(t, &now)
@@ -53,7 +53,7 @@ func TestPendingCreateCleanupSurvivesRecoveryAndPreemption(t *testing.T) {
 				if _, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: run.ID, Actor: "operator"}); err != nil {
 					t.Fatal(err)
 				}
-			case "supersede":
+			case "independent-push":
 				spec.SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 				if _, err := s.EnqueueRun(ctx, spec); err != nil {
 					t.Fatal(err)
@@ -65,7 +65,7 @@ func TestPendingCreateCleanupSurvivesRecoveryAndPreemption(t *testing.T) {
 			current, _ := s.Run(ctx, run.ID)
 			pending, _ := s.PendingRunCancellations(ctx)
 			if len(pending) != 1 || pending[0].Reason != "owner_restart" || pending[0].WorkflowName != "wf" {
-				t.Fatalf("restart/preemption lost cleanup: %+v", pending)
+				t.Fatalf("restart/cancel lost cleanup: %+v", pending)
 			}
 			if mode == "restart" && (current.Status != model.RunRunning || current.Phase != "infrastructure-pending") {
 				t.Fatalf("restart freed pending run: %+v", current)

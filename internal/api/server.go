@@ -61,7 +61,6 @@ type ToolService interface {
 
 type RunFilter struct {
 	Status       model.RunStatusFilter
-	Superseded   bool
 	LatestPerRef bool
 	Repository   string
 	Ref          string
@@ -395,13 +394,7 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if raw := query.Get("superseded"); raw != "" {
-		if raw != "true" && raw != "false" {
-			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "superseded must be true or false"})
-			return
-		}
-		filter.Superseded = raw == "true"
-	}
+
 	if raw := query.Get("latest_per_ref"); raw != "" && raw != "0" && raw != "1" {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "latest_per_ref must be 0 or 1"})
 		return

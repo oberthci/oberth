@@ -14,5 +14,5 @@ spec:
 
 Use a shared native mutex around the release finalization that must be serial.
 Oberth's own `.oberth/release.yaml` declares its release priority and mutexes in
-Git. Publication custody and branch-delete/supersede cancellation remain Oberth
+Git. Publication custody and branch deletion and explicit cancellation remain Oberth
 lifecycle controls. See [native scheduling](native-scheduling.md).

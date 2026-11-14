@@ -73,9 +73,9 @@ func TestStepProgressLogWriterJournalsControlRecordsWithoutRetainingThem(t *test
 type overflowingJobs struct{}
 
 func (overflowingJobs) CreateWorkflow(context.Context, WorkflowRequest) error { return nil }
-func (overflowingJobs) Delete(context.Context, string, string) error          { return nil }
+func (overflowingJobs) Stop(context.Context, string, string) error            { return nil }
 func (overflowingJobs) TerminalResult(context.Context, string) (JobResult, error) {
-	return JobResult{}, ErrJobNotTerminal
+	return JobResult{Status: model.RunFailed, Phase: "job", Error: errRunLogLimit.Error()}, nil
 }
 func (overflowingJobs) Wait(_ context.Context, _ string, destination io.Writer) (JobResult, error) {
 	_, err := io.WriteString(destination, "[test/unit] "+strings.Repeat("x", 128)+"\n")
@@ -109,4 +109,8 @@ func TestRunLogOverflowMakesRunFailClearly(t *testing.T) {
 	if finished.Status != model.RunFailed || finished.Phase != "job" || !strings.Contains(finished.Error, errRunLogLimit.Error()) {
 		t.Fatalf("overflow run = %#v", finished)
 	}
+}
+
+func (j overflowingJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
 }

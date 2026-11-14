@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 const createObservationWindow = time.Minute
@@ -29,6 +31,7 @@ type createAdmission struct {
 type pendingCreate struct {
 	runID       string
 	reason      string
+	observer    chan error
 	persisted   bool
 	confirmed   bool
 	restarting  bool
@@ -146,6 +149,7 @@ func createSettlementBackoff(attempt int) time.Duration {
 // One shared background task, one due run per tick. Per-attempt API/DB work is bounded;
 // retries have no total deadline. An outage leaves cleanup pending.
 func (scheduler *Scheduler) runCreateCleanup(ctx context.Context) {
+	defer scheduler.createObservers.Wait()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	ticks := ticker.C
@@ -185,7 +189,7 @@ func (scheduler *Scheduler) settleOneCreate(ctx context.Context) {
 	pending := due[0]
 	scheduler.createMu.Unlock()
 	attemptCtx, cancel := context.WithTimeout(ctx, createSettlementAttemptBudget)
-	done, err := scheduler.settleCreateAttempt(attemptCtx, pending)
+	done, err := scheduler.settleCreateAttempt(attemptCtx, ctx, pending)
 	cancel()
 	if ctx.Err() != nil {
 		return
@@ -211,7 +215,7 @@ func (scheduler *Scheduler) settleOneCreate(ctx context.Context) {
 	}
 	log.Printf("WARN: create_cleanup run=%q pending_for=%s attempt=%d reason=%s retry_in=%s", pending.runID, age, pending.attempts, reason, delay)
 }
-func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pendingCreate) (bool, error) {
+func (scheduler *Scheduler) settleCreateAttempt(ctx, observerCtx context.Context, pending *pendingCreate) (bool, error) {
 	// This reconciler owns its own bounded attempts and backoff. Nested DB
 	// adapters must not acquire the scheduler's unbounded retry continuation.
 	ctx = context.WithValue(ctx, databaseRetryKey{}, (*databaseRetryScope)(nil))
@@ -221,6 +225,38 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 	run, err := scheduler.store.Run(ctx, pending.runID)
 	if err != nil {
 		return false, err
+	}
+	if pending.observer != nil {
+		select {
+		case err := <-pending.observer:
+			pending.observer = nil
+			if err != nil {
+				return false, err
+			}
+		default:
+			return false, nil
+		}
+	}
+	if run.Status.Terminal() || run.Phase == "publishing" {
+		// A terminal observer may have closed this obligation before an API
+		// cancellation snapshot handed off its local bookkeeping.
+		cancellations, err := scheduler.store.PendingRunCancellations(ctx)
+		if err != nil {
+			return false, err
+		}
+		stillPending := false
+		for _, c := range cancellations {
+			if c.RunID == run.ID {
+				stillPending = true
+			}
+		}
+		if !stillPending {
+			scheduler.pruneDeferredPodJournal(ctx, run.ID)
+			if err := scheduler.workspaces.cleanupRun(ctx, run.ID); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
 	}
 	if !pending.persisted {
 		if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.WorkflowName, pending.reason); err != nil {
@@ -240,7 +276,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 			break
 		}
 	}
-	if pending.restarting && run.Status == model.RunRunning {
+	if pending.restarting && run.Status == model.RunRunning && !run.Cancelled() {
 		return scheduler.observeRestartCreate(ctx, pending, run, observed)
 	}
 	if observed != nil {
@@ -250,9 +286,51 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		if !ok {
 			return false, errors.New("service: engine cannot settle uncertain create")
 		}
+		if observed.Terminate {
+			if err := scheduler.jobs.Terminate(ctx, observed.WorkflowName, run.ID); err != nil {
+				return false, err
+			}
+		}
 		done, err := settler.SettleCreate(ctx, observed.WorkflowName, run.ID, observed.CreatedAt.Add(createObservationWindow))
-		if err != nil || !done {
+		if err != nil {
 			return false, err
+		}
+		// Completion still needs final logs, step evidence and identity retirement.
+		if run.Status.Active() && run.Error != argoworkflow.ErrWorkflowCapabilityRequired.Error() {
+			if adopter, ok := scheduler.jobs.(JobAdopter); ok {
+				found, err := adopter.Adopt(ctx, run)
+				if errors.Is(err, argoworkflow.ErrWorkflowCapabilityRequired) {
+					if persistErr := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.WorkflowName, argoworkflow.ErrWorkflowCapabilityRequired.Error()); persistErr != nil {
+						return false, persistErr
+					}
+					pending.reason = argoworkflow.ErrWorkflowCapabilityRequired.Error()
+					return false, scheduler.jobs.Terminate(ctx, run.WorkflowName, run.ID)
+				}
+				if err != nil {
+					return false, err
+				}
+				if found {
+					reservation, acquired, err := scheduler.submissions.adoptOwner(run)
+					if err != nil {
+						return false, err
+					}
+					if !acquired {
+						return false, nil
+					}
+					pending.observer = make(chan error, 1)
+					done := pending.observer
+					scheduler.createObservers.Add(1)
+					go func() {
+						defer scheduler.createObservers.Done()
+						done <- scheduler.resumeObservedRun(observerCtx, run, scheduler.requireMutation, reservation, true)
+						scheduler.signalCreateCleanup()
+					}()
+					return false, nil
+				}
+			}
+		}
+		if !done {
+			return false, nil
 		}
 		if err := scheduler.store.CompleteObservedRunCancellation(ctx, *observed); err != nil {
 			return false, err
@@ -279,9 +357,31 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		case store.ExecutorIdentityPendingMessage:
 			message = "executor identity readiness deadline exceeded after one issuance retry; cleanup confirmed absence"
 		}
-		if err := scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, errors.New(message)); err != nil {
+		if terminal, err := scheduler.jobs.TerminalResult(ctx, run.WorkflowName); err == nil {
+			repository, err := scheduler.store.Repository(ctx, run.RepoID)
+			if err != nil {
+				return false, err
+			}
+			index, indexErr := scheduler.logs.BuildIndex(run.ID)
+			if indexErr != nil {
+				index = runlog.Index{}
+			}
+			if err := scheduler.finishObservedRun(ctx, run, repository, scheduler.requireMutation, terminal, index, true); err != nil {
+				return false, err
+			}
+		} else if !errors.Is(err, ErrJobNotTerminal) {
+			return false, err
+		} else if err := scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, errors.New(message)); err != nil {
 			return false, err
 		}
+	}
+	scheduler.signals.NotifyRun(run.ID)
+	if run.Trigger == "promotion" {
+		promotion, err := scheduler.store.PromotionByRun(ctx, run.ID)
+		if err != nil {
+			return false, err
+		}
+		scheduler.signals.NotifyPromotion(promotion.ID)
 	}
 	// Do not release against a concurrent cancellation re-arm.
 	cancellations, err = scheduler.store.PendingRunCancellations(ctx)
@@ -294,6 +394,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 			return false, nil
 		}
 	}
+	scheduler.pruneDeferredPodJournal(ctx, run.ID)
 	// Exact external absence and the durable verdict are established. Scratch
 	// cleanup can retry independently.
 	cleanupCtx, cancel := context.WithTimeout(ctx, workspaceCleanupTimeout)
@@ -311,6 +412,10 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Run, name string, failures ...error) {
 	reason := ""
 	for _, failure := range failures {
+		if errors.Is(failure, argoworkflow.ErrWorkflowCapabilityRequired) {
+			reason = argoworkflow.ErrWorkflowCapabilityRequired.Error()
+			run.Error = reason
+		}
 		var expired interface{ ExecutorIdentityExpired() bool }
 		if errors.As(failure, &expired) {
 			reason = store.ExecutorIdentityPendingMessage

@@ -14,9 +14,9 @@ func TestAdminRunStatusUsesDisplayValuesBeforeBounds(t *testing.T) {
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	fixtures := []struct {
-		status                                   model.RunStatus
-		phase, reason, failure, superseded, want string
-		started                                  bool
+		status                       model.RunStatus
+		phase, reason, failure, want string
+		started                      bool
 	}{
 		{status: model.RunQueued, want: "queued"},
 		{status: model.RunRunning, want: "queued"},
@@ -31,8 +31,8 @@ func TestAdminRunStatusUsesDisplayValuesBeforeBounds(t *testing.T) {
 		{status: model.RunFailed, failure: "DeadlineExceeded", want: "failed"},
 		{status: model.RunFailed, failure: "observe adopted Workflow job: " + model.ExecutionDeadlineMessage + " Server watchdog expired: context deadline exceeded\ncleanup failure", want: "failed"},
 		{status: model.RunFailed, failure: "DeadlineExceeded", reason: "historical automatic retry " + strings.Repeat("f", 32), want: "failed"},
-		{status: model.RunInterrupted, phase: model.PhaseCancelled, superseded: strings.Repeat("f", 32), want: "cancelled"},
-		{status: model.RunInterrupted, superseded: strings.Repeat("f", 32), want: "superseded"},
+		{status: model.RunInterrupted, phase: model.PhaseCancelled, want: "cancelled"},
+		{status: model.RunInterrupted, want: "cancelled"},
 		{status: model.RunInterrupted, want: "cancelled"},
 	}
 	want := map[string]map[string]bool{}
@@ -45,7 +45,7 @@ func TestAdminRunStatusUsesDisplayValuesBeforeBounds(t *testing.T) {
 		if fixture.started {
 			started = unixNano(now)
 		}
-		if _, err = s.db.Exec(`UPDATE runs SET status=?,phase=?,reason=?,error=?,superseded_by=?,started_at=?,finished_at=? WHERE id=?`, fixture.status, fixture.phase, fixture.reason, fixture.failure, fixture.superseded, started, unixNano(now), run.ID); err != nil {
+		if _, err = s.db.Exec(`UPDATE runs SET status=?,phase=?,reason=?,error=?,started_at=?,finished_at=? WHERE id=?`, fixture.status, fixture.phase, fixture.reason, fixture.failure, started, unixNano(now), run.ID); err != nil {
 			t.Fatal(err)
 		}
 		if want[fixture.want] == nil {

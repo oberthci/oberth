@@ -150,7 +150,7 @@ controller, release, reconciliation, or workflow implementation.
 
 Run before the first real release. It covers rendered manifests, immutable image
 digests, restored Secret names, cache ownership, namespace RBAC, TLS/SSH identity,
-and the complete feature-red, issue-update, supersede, green-sync, divergent,
+and the complete feature-red, issue-update, independent branch-push, Argo Stop, green-sync, divergent,
 fast-forward, and already-contained promotion paths, reachable-tag release,
 unreachable-tag rejection, and post-release tag immutability trace.
 

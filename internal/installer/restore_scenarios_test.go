@@ -156,10 +156,10 @@ func TestRollbackRestoreHandsQueuedRunsToTheServer(t *testing.T) {
 	archive, runID, _, target := reinstallFixture(t)
 	// The backup's own Workflow of its running run is kept; one submitted
 	// for that run under another name (after the backup) is not.
-	target.workflows = append(target.workflows, runWorkflow{Name: "oberth-backup-fixture", RunID: runID, Phase: "Running"})
+	target.workflows = append(target.workflows, runWorkflow{Name: "oberth-backup-fixture", RunID: runID, UID: "backup-uid", ResourceVersion: "7", Phase: "Running"})
 	out := runFixtureRestore(t, archive, target, RestoreConfig{Only: []string{RestorePartHistory}, InterruptQueued: true})
-	if deleted := slices.Sorted(slices.Values(target.deleted)); !slices.Equal(deleted, []string{"oberth-oberth-known", "oberth-oberth-orphan"}) {
-		t.Fatalf("rollback restore deleted %v, want the after-backup and the unknown Workflow", target.deleted)
+	if stopped := slices.Sorted(slices.Values(target.stopped)); len(target.deleted) != 0 || !slices.Equal(stopped, []string{"oberth-oberth-known", "oberth-oberth-orphan"}) {
+		t.Fatalf("rollback restore deleted=%v stopped=%v, want Stop on the after-backup and unknown Workflows", target.deleted, target.stopped)
 	}
 	var marker struct {
 		Runs []string `json:"runs"`

@@ -128,7 +128,6 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
 .v4b.dim{color:var(--dim);border-color:var(--line)}
 .v4b.run{color:var(--orange);border-color:color-mix(in srgb,var(--orange) 27%,transparent);background:color-mix(in srgb,var(--orange) 7%,transparent)}
 .v4b.release{color:var(--purple);border-color:color-mix(in srgb,var(--purple) 33%,transparent);background:color-mix(in srgb,var(--purple) 9%,transparent)}
-.v4b.superseded{color:var(--pink);border-color:color-mix(in srgb,var(--pink) 30%,transparent);background:color-mix(in srgb,var(--pink) 8%,transparent)}
 /* run detail header */
 .rh{padding:14px 18px 11px;border-bottom:1px solid var(--line);background:var(--panel)}
 .rh1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}

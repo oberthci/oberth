@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
@@ -40,7 +41,7 @@ func TestNativeOperatorShutdownTerminalMapping(t *testing.T) {
 					}
 					stopped := phase != wfv1.WorkflowSucceeded && (strategy == wfv1.ShutdownStrategyStop || strategy == wfv1.ShutdownStrategyTerminate)
 					if stopped {
-						if result.Status != model.RunInterrupted || result.Phase != model.PhaseCancelled || result.Error != "Workflow stopped: "+message || result.FailedStage != "" || result.FailedStep != "" {
+						if result.Status != model.RunInterrupted || result.Phase != model.PhaseCancelled || result.Error != "Workflow stopped by its Workflow spec: "+message || result.FailedStage != "" || result.FailedStep != "" {
 							t.Fatalf("native shutdown misclassified: %+v", result)
 						}
 					} else if result.Status == model.RunInterrupted || strings.HasPrefix(result.Error, "Workflow stopped:") {
@@ -109,7 +110,7 @@ spec:
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Status != model.RunInterrupted || result.Phase != model.PhaseCancelled || result.Error != "Workflow stopped: "+message {
+			if result.Status != model.RunInterrupted || result.Phase != model.PhaseCancelled || result.Error != "Workflow stopped by its Workflow spec: "+message {
 				t.Fatalf("authored shutdown attributed to an actor: %+v", result)
 			}
 			if client.posts != 1 || client.deletes != 0 || client.object.Spec.Shutdown != strategy {
@@ -156,4 +157,8 @@ func (w *shutdownWorkflowFake) Delete(_ context.Context, _ string, options metav
 	w.deletes++
 	w.object = nil
 	return nil
+}
+
+func (*shutdownWorkflowFake) Patch(context.Context, string, types.PatchType, []byte, metav1.PatchOptions, ...string) (*wfv1.Workflow, error) {
+	panic("terminal observation must not patch the Workflow")
 }

@@ -1183,8 +1183,8 @@ trust assumptions and complete invalidation rules.
   Durable `Status` values are unchanged and `RunStatus.Valid` still refuses
   the read-only `waiting` projection.
 
-  `display_status` is exactly one of seven values: `queued`, `running`,
-  `passed`, `failed`, `superseded`, `cancelled`
+  `display_status` is exactly one of five values: `queued`, `running`,
+  `passed`, `failed`, `cancelled`
   (`model.DisplayStatuses`; `model.DisplayRunStatus` is the only mapping,
   and `TestEveryRawPhaseMapsToExactlyOneDisplayStatus` holds every raw
   status, phase and projection to it). A status says what to do with the
@@ -1208,17 +1208,17 @@ trust assumptions and complete invalidation rules.
   | running past its execution deadline | `running` | `Execution deadline exceeded.` |
   | failed by its execution deadline | `failed` | `Execution deadline exceeded.` or the retained resource guidance |
   | passed CI / published release | `passed` | empty |
-  | failed step or infrastructure | `failed` | failed phase and bounded cause; never empty |
+  | Argo Failed/Error or infrastructure failure | `failed` | failed phase and bounded cause; never empty |
   | upstream publication failure | `failed` | upstream rejection class, or upstream publication failure with transient cause |
   | queued publication retry | `running` | publication attempt/backoff message; from publication state |
-  | superseded (`reason='superseded by newer run'`) | `superseded` | `superseded by <short SHA>`; successor run remains linked |
   | Workflow confirmed absent after a server restart, including work never submitted | `failed` | `interrupted by server restart` |
-  | explicit cancel | `cancelled` | `cancelled by <actor>: <reason>` |
+  | active submitted cancellation | `running` | `cancelling by <actor>: <reason>` until Argo finishes |
+  | unsuccessful Oberth stop or cancellation before submission | `cancelled` | cancelling actor or retained stop reason |
   | observed Workflow interrupted by server restart, requiring an operator retry | `cancelled` | `server restart, retry needed` |
 
-  Raw status fields retain their values, but existing `display_status` values
-  can change from `cancelled` to `superseded` when a successor is known.
-  Clients must accept these display enum values. The former `waiting`
+  Raw status fields retain their values. A newer push leaves older runs active;
+  publication checks the current mirror branch head before pushing. Clients
+  accept the five display enum values above. The former `waiting`
   dashboard label and the `infra-pending` and `deadline-exceeded`
   `display_status` values are gone: they are `queued`, `running` and
   `failed`/`running` with the reason above. The display pair is additive
@@ -1295,52 +1295,52 @@ trust assumptions and complete invalidation rules.
 ## Behavioral guarantees
 
 - Branch pushes, including pushes to the discovered default branch, enqueue one
-  FIFO CI run for the exact accepted commit. A newer push to the same repository
-  and branch marks the older run `interrupted`, records which newer run
-  superseded it, and creates a durable cancellation obligation for any in-flight
-  Workflow. The scheduler cancels an in-flight create and retries deletion
-  until the Workflow is absent. Submission tracking reserves no capacity.
-- A branch deletion atomically cancels that ref's unfinished non-promotion runs
-  with phase `cancelled` and reason `ref deleted`, recording the same durable
-  cleanup obligations. Deferred receives retain a cancelled reason and cannot
-  drain into new runs. Receive replay cannot cancel later recreations, including
-  at the same SHA. Tags, promotion CI and pending publication owners are untouched.
+  FIFO CI run for the exact accepted commit. A newer push leaves older runs
+  running under Argo's parallelism. Before branch publication, Oberth verifies
+  the current mirror head under the Git lock through the push. An older green
+  result abandons publication if the branch has moved, even if the newer run
+  fails. Submission tracking reserves no capacity.
+- A branch deletion records cancellation of that ref's unfinished non-promotion
+  runs, with phase `cancelled` and reason `ref deleted`. Work not submitted
+  finishes cancelled; submitted Workflows receive native Stop and keep their
+  observer until Argo finishes. Deferred receives retain a cancelled reason and
+  cannot drain into new runs. Receive replay cannot cancel later recreations,
+  including at the same SHA. Tags, promotion CI and pending publication owners
+  are untouched.
 - An explicit run cancel (`run_cancel`, `oberth run cancel`, `oberth runs
-  cancel`) terminalizes one queued, waiting or running run through an audited
-  `CancelRun(actor, run, reason)`: the run becomes `interrupted` with phase
-  `cancelled` and reason `cancelled by <actor>[: <reason>]` (projected
-  unchanged by `run_get`, `run_list` and `/api/runs`), and a `run.cancel`
-  audit action carrying actor, reason, previous state, force and any warning is
-  appended in the same transaction. No run status is added: every consumer
-  already treats `interrupted` as terminal and non-green, and a new status
-  would need a `runs` CHECK-constraint table rebuild. A queued run simply
-  never gets claimed. A claimed run receives the existing supersede obligation
-  with no successor (`run_cancellations.reason = 'superseded'`, empty
-  `superseded_by`): its in-memory submission ownership is withdrawn if work
-  has not been submitted, and its owned Workflow is deleted through the normal
-  Delete path. The owner settles without recording another result and releases
-  submitted ownership only after deletion is accepted. The record is terminal before the deletion
-  finishes, exactly as for a supersede; a failed deletion stays a pending
-  obligation for the cancellation pass, including after a restart. The MCP
-  request performs the Workflow deletion synchronously on its own context
-  (`AcceptCancellations`): a client disconnect or timeout leaves the
-  committed cancel with a pending obligation (`workflow: pending`) that the
-  next cancellation pass completes. Cancelling
-  a terminal run is refused (HTTP 409 / `ErrInvalidState`) without any change.
-  A run owning a pending publication is refused: the publication owns it.
-  Cancelling promotion CI fails the promotion in the same transaction, so no
-  publication can begin and nothing is merged or pushed. A cancel projects no
-  CI issue. Authorization: an admin uplink may cancel any run it can see, but
-  tag/release and apply runs require an explicit `force` and record the
-  warning that their publication may be partial (anything the Workflow
-  already pushed stays published). A non-admin uplink may cancel only
-  `branch`-trigger runs in repositories its scope can see; release, tag,
-  plan, apply, promotion and scheduled runs are refused with `ErrForbidden`.
-  The decision is re-made on the run as it is inside the cancel transaction.
-  Because a cancellation pass can settle an obligation before the owner
-  creates the Workflow, the owner re-reads the run right before creation and,
-  if it must delete a Workflow it created for a preempted run and fails,
-  re-arms the obligation so the next pass or restart deletes it.
+  cancel`) records durable intent and a `run.cancel` audit action atomically,
+  including actor, reason, previous state, force and policy warning. Queued work
+  finishes `interrupted` with phase `cancelled` and an actor reason. Claimed
+  work retains its existing active status and a cancelling reason until native
+  Argo completion. No status or label is added.
+  Ordinary branch cancellation uses Argo Stop so exit handlers run. Repeating
+  an active cancellation uses Terminate and skips exit handlers; release, tag,
+  apply and promotion cancellations use Terminate immediately. The first Stop
+  response warns about repeat cancellation in both MCP and CLI output.
+  `run_cancellations` records native stop obligations with reason `cancelled`
+  or `owner_restart`; its terminate flag never decreases. No successor columns
+  remain. Ownership and UID checks refuse foreign or replaced Workflows, and a
+  stale Stop cannot overwrite Terminate. Failed shutdown requests remain pending
+  for recovery. Oberth never deletes Workflows; Argo TTL owns their deletion.
+  Accepted Stop keeps token delivery, logs and step observation until Argo's
+  final phase. An existing completed Workflow also passes through resumed final
+  collection and executor identity retirement. Settlement starts an observer
+  only when it acquires its own reservation. An unsuccessful Oberth stop ends
+  with the existing interrupted/cancelled verdict and opens no CI issue; native
+  Succeeded remains passed even when an author-tolerated step failed; the step
+  evidence remains failed. Authored shutdown retains a Workflow-spec reason.
+  The MCP request attempts the native shutdown on its request context; a client
+  disconnect or timeout leaves the durable obligation for the next pass. A
+  terminal run or a run owning pending publication refuses cancellation. A
+  promotion cancellation prevents a new publication. Work already published
+  stays published.
+  Authorization is rechecked inside the cancel transaction. An admin uplink may
+  cancel any run it can see, with explicit force for tag/release and apply runs
+  and a partial-publication warning. A non-admin uplink may cancel only branch
+  pushes within its repository scope; release, tag, plan, apply, promotion and
+  scheduled runs are refused. Cancellation racing Workflow creation preserves
+  the accepted native shutdown strategy and keeps observation/settlement of
+  that exact Workflow until native completion or confirmed absence.
 - An explicit rerun (`run_rerun`, `oberth run rerun <id> [--reason]
   [--force]`, #1098) queues a new run with the same repository, ref, SHA,
   trigger, tested and base SHA as one failed or interrupted run, including
@@ -1482,9 +1482,10 @@ trust assumptions and complete invalidation rules.
   policy; it observes the exact admitted Workflow spec. Credential-bearing
   service accounts, projected WIF audiences and environment remain pinned by
   that spec hash. Promotion workspaces are cleaned only after their durable
-  run/publication/promotion owners permit terminal cleanup. Explicit cancellation and newer-push
-  supersession still delete the exact owned Workflow, and terminal runs are
-  never adopted or automatically re-fired.
+  run/publication/promotion owners permit terminal cleanup. Explicit cancellation
+  uses native Stop or Terminate; a newer push leaves older Workflows running.
+  A completed Workflow with an active run is adopted for final collection.
+  Terminal run rows are never automatically re-fired.
 - Green branch runs force-sync that same branch to the upstream forge. Red
   default-branch and scheduled branch runs create or update one open CI issue
   per repository and branch with the new SHA, a bounded (16 KiB) failure excerpt,
@@ -2553,8 +2554,9 @@ continue follows nothing: it is never a promotion source, never published upstre
 never resolves a CI issue. No status,
 label or layout is added; the existing status carries the reason line
 `assisted: step <name> continued after patch sha256:<12 hex> by <actor>; not
-evidence`. Held runs keep their run slot, template locks and groups;
-supersession and cancellation delete their Workflow. No RBAC is added: the
+evidence`. Held runs retain Argo's native parallelism and template locks.
+Cancellation uses native Stop or Terminate; Argo TTL owns Workflow deletion.
+No RBAC is added for assisted continuation: the
 Argo Role's existing `pods/exec` and `pods` delete verbs are used in the
 pipeline namespace only. See
 [assisted continuation](docs/assisted-continuation.md).
@@ -2834,7 +2836,7 @@ Authors use native Argo `retryStrategy`; manual `run_rerun` retain
 existing safety checks. Source preparation precedes Workflow creation and needs
 manual retry after a failure. Historical audit receipts remain immutable.
 Raw failed/interrupted statuses remain; public display states are queued,
-running, passed, failed, superseded and cancelled. No retry-link status is emitted.
+running, passed, failed and cancelled. No retry-link status is emitted.
 
 Readiness uses a 30s background reader budget, retaining green on deadline or
 typed SQLite reader contention without renewing the 90s last-success age.

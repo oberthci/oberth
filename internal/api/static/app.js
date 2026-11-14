@@ -30,13 +30,13 @@ const state = {
   pendingController: null, // AbortController for in-flight API requests
   statusPending: null, statusFailedAt: 0, statusLoadedAt: 0, // the background /api/status fetch (ensureStatus)
 };
-const runFilters = ["all", "queued", "running", "passed", "failed", "superseded", "cancelled"];
+const runFilters = ["all", "queued", "running", "passed", "failed", "cancelled"];
 
 function readRunFilter() {
   const saved = localStorage.getItem("oberth-filter");
   if (saved === "waiting") return "queued";
   if (saved === "interrupted") return "cancelled";
-  return ["queued", "running", "passed", "failed", "superseded", "cancelled"].includes(saved) ? saved : "all";
+  return ["queued", "running", "passed", "failed", "cancelled"].includes(saved) ? saved : "all";
 }
 
 /* ---------- tiny utilities (unchanged from the old dashboard) ---------- */
@@ -174,7 +174,7 @@ function statusKind(status) {
        read as not-yet-started to the eye, so they share a kind and a glyph —
        the label keeps them apart wherever the difference matters. */
     case "queued": case "pending": return "pending";
-    case "superseded": case "cancelled": case "skipped": return "cancel";
+    case "cancelled": case "skipped": return "cancel";
     default: return "unknown";
   }
 }
@@ -200,12 +200,12 @@ function bigIcon(status) {
   return `<span class="ic ${cls}">${glyph}</span>`;
 }
 /* display_status is the server's one raw-to-display mapping (six values:
-   queued, running, passed, failed, superseded, cancelled).
+   queued, running, passed, failed, cancelled).
    The fallback mirrors it for rows that carry only raw fields; the raw wire
    status "waiting" (claimed, not started) is one of the queued rows. */
 function displayRunStatus(run) {
   if (run.display_status) return run.display_status;
-  if (run.status === "interrupted") return run.superseded_by && run.phase !== "cancelled" ? "superseded" : "cancelled";
+  if (run.status === "interrupted") return "cancelled";
   if (run.status === "waiting" || run.status === "queued" || (run.status === "running" && !run.started_at)) return "queued";
   return run.status;
 }
@@ -594,7 +594,7 @@ function whenCell(run) {
   const date = new Date(stamp || "");
   if (status === "queued" && !Number.isFinite(+date)) return "";
   const label = Number.isFinite(+date) ? `${started ? "started" : "queued"} at ${shortStamp(stamp)}` : "";
-  const duration = ["cancelled", "superseded"].includes(status) || !started ? "" : runListDuration(spanSeconds(started, run.finished_at, status === "running"));
+  const duration = ["cancelled"].includes(status) || !started ? "" : runListDuration(spanSeconds(started, run.finished_at, status === "running"));
   return `<span${status === "running" && started ? ` data-started="${esc(started)}"` : ""}>${esc(duration)}</span><span class="meta" title="${esc(stampTitle(stamp))}">${esc(label)}</span>`;
 }
 function runListDuration(seconds) {
@@ -611,9 +611,7 @@ setInterval(tickRunTimers, 1000);
 document.addEventListener?.("visibilitychange", () => { if (!document.hidden) tickRunTimers(); });
 function runMessageCell(run) {
   const message = rowMessage(run);
- if (run.superseded_by) {
-    return `<button type="button" class="run-successor" data-run-id="${esc(run.superseded_by)}">${esc(message)}</button>`;
-  }
+
   return run.display_reason === "server restart, retry needed" ? `<span class="retry-warning">${esc(message)}</span>` : esc(message);
 }
 function runRow(run) {
@@ -623,7 +621,7 @@ function runRow(run) {
 function runsTable(runs) {
   return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>when</div><div>message</div></div>${runs.map(runRow).join("")}</div>`;
 }
-/* History belongs to the individual run, including superseded runs. The
+/* History belongs to the individual run, including stopped runs. The
    API cursor is opaque (scoped uplinks get IDs rather than sequences). */
 function runHistory(run) {
   const history = state.attempts.get(run.id);
@@ -1033,7 +1031,6 @@ function summaryLines(detail) {
     if (execution.reconciliation_lag_seconds != null) lines.push(`[execution] observed ${execution.phase} · finalization lag ${execution.reconciliation_lag_seconds}s`);
   }
   if (unreached) lines.push(`${unreached} declared step${unreached === 1 ? "" : "s"} not reached`);
-  if (run.superseded_by) lines.push({successor: run.superseded_by, text: run.display_reason || `view successor ${shortSuccessor(run.superseded_by)}`});
   if (run.reason && run.reason !== run.display_reason && run.reason !== run.error) lines.push("", `reason: ${run.reason}`);
   if (run.error) lines.push("", `error: ${run.error}`);
   const timed = steps.map(step => ({ step, seconds: spanSeconds(step.started_at, step.finished_at, false) })).filter(item => item.seconds > 0).sort((a, b) => b.seconds - a.seconds);
@@ -1378,7 +1375,7 @@ async function renderRunDetailView(detail, seq) {
       </div>
     </div>
     <div id="runBanners">${kind === "fail" ? `<div class="fbanner"><b>✗ ${esc(run.failed_step ? (run.failed_burn ? run.failed_burn + " / " : "") + run.failed_step : "run failed")}</b><span class="err" title="${esc(run.error)}">${esc(run.error || "")}</span></div>` : ""}
-    ${(status === "cancelled" || status === "superseded") ? `<div class="sbanner${runMessage(run) === "server restart, retry needed" ? " retry-warning" : ""}"><span class="err">${esc(runMessage(run))}</span>${run.superseded_by ? `<button class="chip" data-run-id="${esc(run.superseded_by)}">view successor ${esc(shortSuccessor(run.superseded_by))}</button>` : ""}</div>` : ""}
+    ${(status === "cancelled") ? `<div class="sbanner${runMessage(run) === "server restart, retry needed" ? " retry-warning" : ""}"><span class="err">${esc(runMessage(run))}</span></div>` : ""}
     </div>
     <div id="runHistory" class="run-history">${runHistory(run)}</div>
     <div class="v4-body">

@@ -48,6 +48,9 @@ var _ JobAdopter = (*pendingCreateJobs)(nil)
 var _ JobCreateSettler = (*pendingCreateJobs)(nil)
 
 func (j *pendingCreateJobs) SettleCreate(ctx context.Context, name, id string, boundary time.Time) (bool, error) {
+	if j.settle == nil {
+		return j.fakeJobs.SettleCreate(ctx, name, id, boundary)
+	}
 	return j.settle(ctx, name, id, boundary)
 }
 
@@ -343,56 +346,6 @@ func TestWorkflowCreateProcessNextAndCancelNeverSettleInline(t *testing.T) {
 	}
 }
 
-// Legacy owner_restart rows represent trusted-KVM cleanup, not uncertain CI
-// creates. A settler-capable engine must still reach Delete (and its VMI cleanup).
-type legacyOwnerRestartStore struct {
-	SchedulerStore
-	cancellation model.RunCancellation
-	completed    bool
-}
-
-func (s *legacyOwnerRestartStore) PendingRunCancellations(context.Context) ([]model.RunCancellation, error) {
-	if s.completed {
-		return nil, nil
-	}
-	return []model.RunCancellation{s.cancellation}, nil
-}
-func (s *legacyOwnerRestartStore) CompleteObservedRunCancellation(context.Context, model.RunCancellation) error {
-	s.completed = true
-	return nil
-}
-func TestWorkflowCreateLegacyOwnerRestartStillUsesDeleteWithSettlerEngine(t *testing.T) {
-	f := newControlFixture(t)
-	source, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "legacy-preflight", Repository: f.repo, Branch: "feature/preflight", SHA: strings.Repeat("f", 40), Actor: "pusher"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	run, err := f.store.ClaimNextRun(t.Context())
-	if err != nil || run.ID != source.ID {
-		t.Fatal(err)
-	}
-	run, err = f.store.SetRunWorkflowName(t.Context(), run.ID, "preflight-workflow")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunInterrupted, Phase: "interrupted"}); err != nil {
-		t.Fatal(err)
-	}
-	ledger := &legacyOwnerRestartStore{SchedulerStore: f.store, cancellation: model.RunCancellation{RunID: run.ID, WorkflowName: run.WorkflowName, Reason: "owner_restart", CreatedAt: time.Now()}}
-	f.scheduler.store = ledger
-	jobs := &pendingCreateJobs{fakeJobs: f.jobs, settle: func(context.Context, string, string, time.Time) (bool, error) {
-		t.Fatal("trusted-KVM owner_restart bypassed VMI Delete cleanup")
-		return false, nil
-	}}
-	f.scheduler.jobs = jobs
-	if err := f.scheduler.completePendingCancellations(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if !ledger.completed || len(f.jobs.deleted) != 1 || f.jobs.deleted[0] != run.WorkflowName {
-		t.Fatalf("legacy cleanup not deleted: completed=%t deleted=%v", ledger.completed, f.jobs.deleted)
-	}
-}
-
 func TestWorkflowCreateSettlementBackoffIsCapped(t *testing.T) {
 	want := []time.Duration{5, 10, 20, 40, 80, 160, 300, 300}
 	for i, seconds := range want {
@@ -453,7 +406,7 @@ func TestWorkflowCreatePendingPushAndResolvedCancelStayLocal(t *testing.T) {
 				t.Fatal(err)
 			}
 			if mode == "push" {
-				if _, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "superseding", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("c", 40), Actor: "pusher"}); err != nil {
+				if _, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "newer-push", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("c", 40), Actor: "pusher"}); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -473,7 +426,7 @@ func TestWorkflowCreatePendingPushAndResolvedCancelStayLocal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !run.Preempted() || isPendingCreate(run) || f.scheduler.pendingCreateCount() != 0 || f.scheduler.submissionStateForTest().Runs != 0 {
+			if (mode == "cancel" && !run.Cancelled()) || isPendingCreate(run) || f.scheduler.pendingCreateCount() != 0 || f.scheduler.submissionStateForTest().Runs != 0 {
 				t.Fatalf("settled preemption lost state or still pending: %+v", run)
 			}
 		})
@@ -506,7 +459,28 @@ func TestWorkflowCreatePendingStatusDoesNotCallKubernetes(t *testing.T) {
 	}
 	// The uncertain create is the running run's reason; the raw phase and
 	// scheduling state stay machine-readable.
-	if response.DisplayStatus != "running" || response.Run.Phase != "infrastructure-pending" || !strings.Contains(response.DisplayReason, "cleanup pending") || response.Scheduling.State != "infra-pending" {
+	if response.DisplayStatus != "running" || response.Run.Phase != "infrastructure-pending" || !strings.HasPrefix(response.DisplayReason, "cancelling by oberth:") || response.Scheduling.State != "infra-pending" {
 		t.Fatalf("pending status hidden: %+v", response)
+	}
+}
+
+func TestTerminalCancellationHandoffDoesNotRearmStop(t *testing.T) {
+	f := newControlFixture(t)
+	enqueued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "terminal-handoff", Repository: f.repo, Branch: "feature/terminal", SHA: strings.Repeat("a", 40), Actor: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := f.store.ClaimNextRun(t.Context())
+	if err != nil || run.ID != enqueued.ID {
+		t.Fatal(run, err)
+	}
+	if _, err := f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunFailed, Phase: "job", Error: "native terminal verdict"}); err != nil {
+		t.Fatal(err)
+	}
+	f.scheduler.createPending = map[string]*pendingCreate{run.ID: {runID: run.ID}}
+	f.scheduler.settleOneCreate(t.Context())
+	pending, err := f.store.PendingRunCancellations(t.Context())
+	if err != nil || len(pending) != 0 || f.scheduler.pendingCreateCount() != 0 {
+		t.Fatalf("terminal handoff rearmed custody: pending=%+v error=%v", pending, err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
@@ -18,6 +19,7 @@ import (
 // recoveryJobs is a configurable JobController fake for testing the
 // compensation and startup reconciliation paths.
 type recoveryJobs struct {
+	stopResult     JobResult
 	terminalResult JobResult
 	terminalErr    error
 	waitResult     JobResult
@@ -48,15 +50,36 @@ func (j *recoveryJobs) Wait(ctx context.Context, _ string, _ io.Writer) (JobResu
 	return j.waitResult, nil
 }
 
-func (j *recoveryJobs) Delete(_ context.Context, name, _ string) error {
-	j.deleted = append(j.deleted, name)
+func (j *recoveryJobs) Stop(_ context.Context, name, _ string) error {
+	seen := false
+	for _, prior := range j.deleted {
+		if prior == name {
+			seen = true
+		}
+	}
+	if !seen {
+		j.deleted = append(j.deleted, name)
+	}
 	if j.deleteErr != nil {
 		return j.deleteErr
+	}
+	if !j.terminalResult.Status.Terminal() || j.terminalErr != nil {
+		j.terminalResult = j.stopResult
+		if !j.terminalResult.Status.Terminal() {
+			j.terminalResult = j.waitResult
+		}
+		if !j.terminalResult.Status.Terminal() {
+			j.terminalResult = JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: "Stopped with strategy 'Stop'"}
+		}
+		j.terminalErr = nil
 	}
 	return nil
 }
 
 func (j *recoveryJobs) TerminalResult(_ context.Context, _ string) (JobResult, error) {
+	if j.terminalErr == nil && !j.terminalResult.Status.Terminal() {
+		return JobResult{}, ErrJobNotTerminal
+	}
 	return j.terminalResult, j.terminalErr
 }
 
@@ -203,7 +226,7 @@ func TestCompensationPathRecordsRealResultWhenJobCompleted(t *testing.T) {
 // the same queued run. The Job's deletion is owned by the
 // durable obligation — executed by the successor's startup cancellation pass
 // in the upgrade case — never inline during shutdown.
-func TestShutdownRetainsRunningWorkflow(t *testing.T) {
+func TestShutdownLeavesRunningWorkflowForAdoption(t *testing.T) {
 	t.Parallel()
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/running", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
@@ -239,8 +262,8 @@ func TestShutdownRetainsRunningWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunRunning || recovered.SupersededBy != "" {
-		t.Fatalf("run = %#v, want failed under the same ID", recovered)
+	if recovered.Status != model.RunRunning {
+		t.Fatalf("run = %#v, want running under the same ID", recovered)
 	}
 	recoveredRun, err := fixture.store.Run(context.Background(), run.ID)
 	if err != nil {
@@ -250,19 +273,17 @@ func TestShutdownRetainsRunningWorkflow(t *testing.T) {
 		t.Fatalf("recoveredRun run = %#v, want original running Workflow", recoveredRun)
 	}
 	if len(jobs.deleted) != 0 {
-		t.Fatalf("shutdown deleted inline = %v, want deletion left to the durable obligation", jobs.deleted)
+		t.Fatalf("shutdown deleted inline = %v, want no Stop or deletion during shutdown", jobs.deleted)
 	}
 	pending, err := fixture.store.PendingRunCancellations(context.Background())
-	if err != nil {
+	if err != nil || len(pending) != 0 {
 		t.Fatal(err)
 	}
-	if len(pending) != 0 {
-		t.Fatal("shutdown scheduled deletion", pending)
-	}
+
 }
 
 // Tag work resets behind the same durable cancellation fence as branches.
-func TestShutdownRetainsTagWorkflow(t *testing.T) {
+func TestShutdownLeavesTagWorkflowForAdoption(t *testing.T) {
 	t.Parallel()
 	fixture := newRecoveryFixture(t)
 	enqueued, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
@@ -305,7 +326,7 @@ func TestShutdownRetainsTagWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunRunning || recovered.SupersededBy != "" || recovered.Error != "" {
+	if recovered.Status != model.RunRunning || recovered.Error != "" {
 		t.Fatalf("tag run = %#v, want queued under the original ID", recovered)
 	}
 	if len(jobs.deleted) != 0 {
@@ -498,7 +519,7 @@ func TestStartupReconciliationFailsRunWithVanishedWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunFailed || recovered.SupersededBy != "" {
+	if recovered.Status != model.RunFailed {
 		t.Fatalf("reconciled run = %#v, want failed under the same ID", recovered)
 	}
 	if recovered.Error != model.ServerRestartReason {
@@ -594,7 +615,7 @@ func TestStartupReconciliationFailsUnobservedTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunFailed || recovered.SupersededBy != "" {
+	if recovered.Status != model.RunFailed {
 		t.Fatalf("reconciled tag run = %#v, want failed under the original ID", recovered)
 	}
 	if recovered.Error != model.ServerRestartReason {
@@ -614,7 +635,7 @@ func TestStartupReconciliationFailsUnobservedTag(t *testing.T) {
 // TestWaitErrorWithRunningWorkflowDeleteSucceedsFails verifies that when
 // Wait returns an error and TerminalResult reports the Workflow is still
 // running, a successful Delete allows the run to be terminalized as failed.
-func TestWaitErrorWithRunningWorkflowDeleteSucceedsFails(t *testing.T) {
+func TestWaitErrorWithRunningWorkflowStopCompletesCancelled(t *testing.T) {
 	t.Parallel()
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/wait-err-delete-ok", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
@@ -634,11 +655,11 @@ func TestWaitErrorWithRunningWorkflowDeleteSucceedsFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The run must be terminalized as failed — the Workflow was deleted.
-	if recovered.Status != model.RunFailed {
-		t.Fatalf("run status = %q, want %q", recovered.Status, model.RunFailed)
+	// Native unsuccessful Stop uses the existing cancellation verdict.
+	if recovered.Status != model.RunInterrupted || recovered.Phase != model.PhaseCancelled {
+		t.Fatalf("run status = %q, want %q", recovered.Status, model.RunInterrupted)
 	}
-	if recovered.Error != "network blip during log streaming" {
+	if !strings.Contains(recovered.Error, "Stopped with strategy") {
 		t.Fatalf("run error = %q, want original Wait error", recovered.Error)
 	}
 	// The Workflow must have been deleted (the exact name is computed by
@@ -665,11 +686,8 @@ func TestWaitErrorWithRunningWorkflowDeleteFailsNotTerminalized(t *testing.T) {
 
 	scheduler := fixture.scheduler(t, jobs)
 	err := scheduler.executeAndCleanup(context.Background(), run)
-	if err == nil {
-		t.Fatal("expected an error from executeAndCleanup when Delete fails, got nil")
-	}
-	if !strings.Contains(err.Error(), "delete Workflow") {
-		t.Fatalf("error = %v, want error mentioning Workflow deletion", err)
+	if err != nil || !scheduler.ownsCreateCleanup(run.ID) {
+		t.Fatal("Stop refusal lost its background observer", err)
 	}
 
 	// The run must NOT be terminalized — it must still be running so
@@ -720,4 +738,15 @@ func TestWaitErrorWithTerminalResultRecoveryUsesRealResult(t *testing.T) {
 	if len(jobs.deleted) != 0 {
 		t.Fatalf("deleted = %v, want none (TerminalResult succeeded)", jobs.deleted)
 	}
+}
+
+func (j *recoveryJobs) SettleCreate(ctx context.Context, name, id string, _ time.Time) (bool, error) {
+	if err := j.Stop(ctx, name, id); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (j *recoveryJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
 }

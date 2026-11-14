@@ -230,14 +230,14 @@ console.log('live log dashboard checks passed');
 
 // Run-list vocabulary is additive: raw failure/cancellation states survive.
 assert.equal(run(`displayRunStatus({status:'failed'})`), 'failed');
-assert.equal(run(`displayRunStatus({status:'interrupted',superseded_by:'new'})`), 'superseded');
+assert.equal(run(`displayRunStatus({status:'interrupted'})`), 'cancelled');
 assert.equal(run(`displayRunStatus({status:'interrupted'})`), 'cancelled');
 // The list always shows branch/tag heads, with history only on run detail.
-assert.equal(run(`state.filter='all';runMatches({status:'interrupted',superseded_by:'new'})`), true);
-run(`state.attempts.clear();state.attempts.set('head',{rows:[{id:'old',repo_id:1,status:'interrupted',superseded_by:'head'}],next:''});`);
+assert.equal(run(`state.filter='all';runMatches({status:'interrupted'})`), true);
+run(`state.attempts.clear();state.attempts.set('head',{rows:[{id:'old',repo_id:1,status:'interrupted'}],next:''});`);
 const headTable = run(`runsTable([{id:'head',repo_id:1,status:'passed',ref:'feature',earlier_attempts:1}])`);
 assert.ok(!headTable.includes('earlier attempts') && !headTable.includes('data-run-id="old"'));
-assert.ok(run(`runHistory({id:'head',ref_kind:'branch'})`).includes('data-run-id="old"'), 'superseded runs remain available in detail history');
+assert.ok(run(`runHistory({id:'head',ref_kind:'branch'})`).includes('data-run-id="old"'), 'cancelled runs remain available in detail history');
 assert.ok(run(`runHistory({id:'unloaded',ref_kind:'tag'})`).includes('Run history for this tag'));
 
 run(`let rcaRequests=[]; api=async path=>{rcaRequests.push(path);return {body:[],next:''};};awaitResult=loadRuns();`);
@@ -251,7 +251,7 @@ run(`
  // A directly loaded detail has no list-page head in memory.
  state.runs=[];state.repoRuns=[];state.attempts.clear();
  state.detailRun={id:'rca-head',repo_id:1,ref:'feature',ref_kind:'branch',status:'passed'};
- api=async path=>{rcaRequests.push(path);return {body:[state.detailRun,{id:'our-old',repo_id:1,ref:'feature',ref_kind:'branch',status:'interrupted',superseded_by:'rca-head'},{id:'tag-same-name',repo_id:1,ref:'feature',ref_kind:'tag'},{id:'other-repo',repo_id:2,ref:'feature',ref_kind:'branch'},{id:'other-ref',repo_id:1,ref:'elsewhere',ref_kind:'branch'}],next:'opaque-history-cursor'};};
+ api=async path=>{rcaRequests.push(path);return {body:[state.detailRun,{id:'our-old',repo_id:1,ref:'feature',ref_kind:'branch',status:'interrupted'},{id:'tag-same-name',repo_id:1,ref:'feature',ref_kind:'tag'},{id:'other-repo',repo_id:2,ref:'feature',ref_kind:'branch'},{id:'other-ref',repo_id:1,ref:'elsewhere',ref_kind:'branch'}],next:'opaque-history-cursor'};};
  awaitResult=loadRunAttempts('rca-head',false);
 `);
 await run('awaitResult');

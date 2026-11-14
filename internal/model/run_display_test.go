@@ -17,16 +17,12 @@ func TestEveryRawPhaseMapsToExactlyOneDisplayStatus(t *testing.T) {
 	for _, status := range statuses {
 		for _, phase := range phases {
 			for _, startedAt := range []*time.Time{nil, &started} {
-				for _, superseded := range []string{"", "newer"} {
-					for range 1 {
-						run := Run{Status: status, Phase: phase, StartedAt: startedAt, SupersededBy: superseded}
-						got := DisplayRunStatus(run)
-						if !slices.Contains(DisplayStatuses, got) {
-							t.Fatalf("%+v displays %q, outside the vocabulary %v", run, got, DisplayStatuses)
-						}
-						seen[got]++
-					}
+				run := Run{Status: status, Phase: phase, StartedAt: startedAt}
+				got := DisplayRunStatus(run)
+				if !slices.Contains(DisplayStatuses, got) {
+					t.Fatalf("%+v displays %q, outside the vocabulary %v", run, got, DisplayStatuses)
 				}
+				seen[got]++
 			}
 		}
 	}
@@ -59,8 +55,6 @@ func TestDisplayRunStatusCollapsesNotStartedRunsIntoQueued(t *testing.T) {
 		{"failed by memory", Run{Status: RunFailed, Phase: "job", Error: "OOMKilled", StartedAt: &started}, DisplayFailed},
 		{"infra error retried", Run{Status: RunFailed, Phase: "infrastructure"}, DisplayFailed},
 		{"cancelled", Run{Status: RunInterrupted, Phase: PhaseCancelled}, DisplayCancelled},
-		{"cancelled despite a successor", Run{Status: RunInterrupted, Phase: PhaseCancelled, SupersededBy: "newer"}, DisplayCancelled},
-		{"superseded", Run{Status: RunInterrupted, Phase: "interrupted", SupersededBy: "newer"}, DisplaySuperseded},
 		{"restart, retry needed", Run{Status: RunInterrupted, Phase: "interrupted"}, DisplayCancelled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

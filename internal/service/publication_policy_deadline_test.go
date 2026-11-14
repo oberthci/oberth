@@ -35,8 +35,8 @@ type retryingPolicyGit struct {
 	retry *retryPublicationGit
 }
 
-func (g *retryingPolicyGit) SyncBranch(ctx context.Context, repo, ref, sha string) error {
-	return g.retry.SyncBranch(ctx, repo, ref, sha)
+func (g *retryingPolicyGit) SyncBranch(ctx context.Context, repo, ref, sha string, force bool) error {
+	return g.retry.SyncBranch(ctx, repo, ref, sha, force)
 }
 
 func pendingPolicyRun(t *testing.T, f *controlFixture) model.Publication {

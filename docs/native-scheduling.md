@@ -5,12 +5,14 @@ source available, and submits it to Argo. It has no resource admission queue.
 Argo queues Workflows under its global parallelism and native synchronization;
 Kubernetes queues Pods until their authored requests and placement fit.
 Existing queued/running statuses and reason lines reflect those observations.
-Supersede, branch deletion, cancellation, publication and recovery remain CI
+Branch deletion, cancellation, publication and recovery remain CI
 lifecycle operations.
 
 A Workflow can stop through `argo stop` or `argo terminate` on a live Workflow
 or through `spec.shutdown` in its Workflow spec; Oberth reports
-`Workflow stopped: <Argo message>` without attributing who initiated it.
+`Workflow stopped by its Workflow spec: <Argo message>`. Explicit Oberth
+cancellation instead records the stopping actor. Stop waits for exit handlers;
+Argo's phase remains the verdict, and only Argo TTL deletes the Workflow.
 
 ## Repository authors
 
@@ -184,11 +186,11 @@ Failed/Succeeded before preparation, fails this run with a source-seed reason
 and cleans its claim; it does not leave a permanent Running run. Image pull
 back-off and an unbound claim keep waiting without an Oberth expiry. Run
 reasons describe the exact seed Pod’s curated Kubernetes wait before a
-Workflow exists. Cancellation or supersession stops it
+Workflow exists. Cancellation stops it
 and cleans its Pod and PVC. There is no automatic infrastructure retry. A
 manual retry attempts source
 delivery again; YAML retryStrategy cannot cover a failure before Workflow Create.
-Cancellation, supersession and publication can affect retention.
+Cancellation and publication can affect retention.
 This is unbounded source retention. Its native replacement is tracked separately.
 
 ## What Oberth writes into the user's Workflow and Pods
@@ -480,6 +482,8 @@ Block PVCs use ordinary Kubernetes fields: a container may declare
 This does not grant host device access or permission to mount an existing PVC;
 those volume sources remain refused. Device paths follow the same absolute-path
 and reserved-helper-path rules as volume mounts.
+
+A succeeded Workflow publishes and promotes even when a step the author tolerated failed. An Oberth cancellation that did not succeed is shown as cancelled, with failed step evidence retained and no new CI issue. Ordinary branch cancellation uses native Stop so exit handlers run; a second cancel uses Terminate. Release/tag/apply and promotion cancels use Terminate immediately. Restore uses Terminate for all orphaned Workflows because the restored history has no observer to supply their exit Pods with credentials.
 
 Step Pod names belong to Argo. Oberth discovers Pods through their
 `workflows.argoproj.io/node-id` annotation and Workflow controller UID,
