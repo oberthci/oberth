@@ -74,3 +74,57 @@ func (service *API) callRunLogs(ctx context.Context, actor api.Actor, raw json.R
 	}
 	return value, nil
 }
+
+func (service *API) callSHALogs(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
+	var arguments struct {
+		Repo       string `json:"repo"`
+		NodeID     string `json:"node_id"`
+		Container  string `json:"container"`
+		Containers bool   `json:"containers"`
+		Raw        bool   `json:"raw"`
+		SHA        string `json:"sha"`
+		Step       string `json:"step"`
+		Pattern    string `json:"pattern"`
+		Context    int    `json:"context"`
+		Offset     int    `json:"offset"`
+		Limit      int    `json:"limit"`
+		Tail       bool   `json:"tail"`
+		ByteOffset *int64 `json:"byte_offset"`
+	}
+	if err := decodeTool(raw, &arguments); err != nil {
+		return nil, err
+	}
+	if arguments.NodeID != "" || arguments.Container != "" || arguments.Containers || arguments.Raw {
+		if !validSHASelector(arguments.SHA) {
+			return nil, fmt.Errorf("%w: SHA is required", ErrInvalidInput)
+		}
+		_, run, err := service.resolveRun(ctx, arguments.Repo, arguments.SHA)
+		if err != nil {
+			return nil, err
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return nil, err
+		}
+		delete(fields, "repo")
+		delete(fields, "sha")
+		fields["id"], err = json.Marshal(run.ID)
+		if err != nil {
+			return nil, err
+		}
+		forwarded, err := json.Marshal(fields)
+		if err != nil {
+			return nil, err
+		}
+		return service.callRunLogs(ctx, actor, forwarded)
+	}
+	filter, err := toolLogFilter(arguments.Pattern, arguments.Context, arguments.Offset, arguments.Limit, arguments.Tail)
+	if err != nil {
+		return nil, err
+	}
+	if arguments.ByteOffset != nil && *arguments.ByteOffset < 0 {
+		return nil, fmt.Errorf("%w: byte_offset must be nonnegative", ErrInvalidInput)
+	}
+	filter.ByteOffset = arguments.ByteOffset
+	return service.logsFor(ctx, arguments.Repo, arguments.SHA, arguments.Step, filter)
+}

@@ -450,29 +450,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 		return service.status(ctx, arguments.Repo, arguments.Ref, actor.Identity)
 	case "logs":
-		var arguments struct {
-			Repo       string `json:"repo"`
-			SHA        string `json:"sha"`
-			Step       string `json:"step"`
-			Pattern    string `json:"pattern"`
-			Context    int    `json:"context"`
-			Offset     int    `json:"offset"`
-			Limit      int    `json:"limit"`
-			Tail       bool   `json:"tail"`
-			ByteOffset *int64 `json:"byte_offset"`
-		}
-		if err := decodeTool(raw, &arguments); err != nil {
-			return nil, err
-		}
-		filter, err := toolLogFilter(arguments.Pattern, arguments.Context, arguments.Offset, arguments.Limit, arguments.Tail)
-		if err != nil {
-			return nil, err
-		}
-		if arguments.ByteOffset != nil && *arguments.ByteOffset < 0 {
-			return nil, fmt.Errorf("%w: byte_offset must be nonnegative", ErrInvalidInput)
-		}
-		filter.ByteOffset = arguments.ByteOffset
-		return service.logsFor(ctx, arguments.Repo, arguments.SHA, arguments.Step, filter)
+		return service.callSHALogs(ctx, actor, raw)
 
 	case "run_get":
 		var arguments struct {

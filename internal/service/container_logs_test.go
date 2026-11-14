@@ -51,6 +51,22 @@ func TestContainerLogServiceStoredSelectionAndMCPDiscovery(t *testing.T) {
 	if response.Output != retainedLogMarkerFixture+"wait body\n" || response.Container != "wait" {
 		t.Fatal(response)
 	}
+	shaRequest, err := json.Marshal(map[string]any{"repo": f.repo.Name, "sha": run.SHA, "node_id": "node", "container": "wait"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err = f.api.CallTool(t.Context(), actor, "logs", shaRequest)
+	if err != nil || value.(ContainerLogResponse).Output != retainedLogMarkerFixture+"wait body\n" {
+		t.Fatal(value, err)
+	}
+	shaRequest, err = json.Marshal(map[string]any{"repo": f.repo.Name, "sha": run.SHA, "containers": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err = f.api.CallTool(t.Context(), actor, "logs", shaRequest)
+	if err != nil || len(value.(ContainerLogsResponse).Containers) != 2 {
+		t.Fatal(value, err)
+	}
 	reader, err := f.api.OpenRunContainerLog(t.Context(), actor, run.ID, "node", "main", true)
 	if err != nil {
 		t.Fatal(err)

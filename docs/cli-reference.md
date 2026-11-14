@@ -544,7 +544,7 @@ Usage: oberth issues update --id <issue-id> --work-status <status> [flags]
 ## oberth log
 
 ```text
-Usage: oberth log <run-id> [--burn <burn> --step <step>] [flags]
+Usage: oberth log <run-id> [--node-id <node-id> --container <container> | --containers] [flags]
 With no pattern, limit, tail, offset or byte-offset: last 200 lines. Pass --tail --limit N for a larger tail, or --limit 0 for the existing bounded full read.
   -burn string
         burn name
@@ -556,12 +556,18 @@ With no pattern, limit, tail, offset or byte-offset: last 200 lines. Pass --tail
         PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
   -client-key string
         owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -container string
+        native Pod container name
+  -containers
+        list observed native node/container bindings
   -context int
         lines of context around each match
   -json
         emit JSON, including the default window when used
   -limit int
         return at most this many
+  -node-id string
+        native Argo node ID
   -offset int
         skip this many
   -pattern string

@@ -939,6 +939,18 @@
     "value:run_logs.raw": {
       "doc_anchor": "docs/container-logs.md",
       "test_ref": "internal/service/container_logs_test.go TestContainerLogServiceHistoricMarkersArePlain"
+    },
+    "flag:node-id": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "cmd/oberth/remote_container_logs_test.go TestContainerLogCLIUsesNativeSelectors"
+    },
+    "flag:container": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "cmd/oberth/remote_container_logs_test.go TestContainerLogCLIUsesNativeSelectors"
+    },
+    "flag:containers": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "cmd/oberth/remote_container_logs_test.go TestContainerLogCLIUsesNativeSelectors"
     }
   }
 }

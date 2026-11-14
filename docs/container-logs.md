@@ -35,3 +35,9 @@ Authored `ttlStrategy` and `podGC` reach Argo unchanged. The installer shows
 Argo's default TTL in review and supplies `secondsAfterCompletion: 3600` only
 when `controller.workflowDefaults.spec.ttlStrategy` is absent. Explicit
 operator values, including zero, an empty mapping or null, are preserved.
+
+Use `oberth log RUN --containers` to list native selectors, then
+`oberth log RUN --node-id NODE --container NAME` to read a retained copy.
+The native CLI view preserves all container lines. Historical `--burn`/`--step`
+selection remains available for old stored runs. MCP `logs` accepts the same
+native selectors with `repo` and `sha` when a run ID is not yet known.
