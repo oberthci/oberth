@@ -116,6 +116,20 @@ func validateArgoWorkflowDefaults(location string, spec *wfv1.WorkflowSpec) erro
 		}
 	}
 	for key, security := range contexts {
+		extraContainer := key != "container" && key != "script"
+		if extraContainer && !argoWorkflowSecurityContextMeetsFloor(security, pod) {
+			return &argoWorkflowDefaultsInvalid{fmt.Sprintf("%s.templateDefaults.%s.securityContext violates the Argo security floor; configure no privilege escalation, drop ALL capabilities and RuntimeDefault or Localhost seccomp", location, key)}
+		}
+		if security != nil && ((security.Privileged != nil && *security.Privileged) || (security.AllowPrivilegeEscalation != nil && *security.AllowPrivilegeEscalation) || (security.WindowsOptions != nil && security.WindowsOptions.HostProcess != nil && *security.WindowsOptions.HostProcess)) {
+			return &argoWorkflowDefaultsInvalid{fmt.Sprintf("%s.templateDefaults.%s.securityContext violates the Argo security floor", location, key)}
+		}
+		if security != nil && security.Capabilities != nil {
+			for _, capability := range security.Capabilities.Add {
+				if capability != "NET_BIND_SERVICE" {
+					return &argoWorkflowDefaultsInvalid{fmt.Sprintf("%s.templateDefaults.%s.securityContext.capabilities.add violates the Argo security floor", location, key)}
+				}
+			}
+		}
 		if security != nil && !allowedArgoSeccomp(security.SeccompProfile) {
 			return &argoWorkflowDefaultsInvalid{fmt.Sprintf("%s.templateDefaults.%s.securityContext.seccompProfile.type=%q violates the Argo security floor; set it to RuntimeDefault or Localhost", location, key, security.SeccompProfile.Type)}
 		}
