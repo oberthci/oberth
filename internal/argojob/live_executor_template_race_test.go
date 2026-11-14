@@ -154,7 +154,7 @@ spec:
 	}
 	delivered := map[types.UID]bool{}
 	for !current.Status.Phase.Completed() {
-		if err = controller.deliverExecutorTokensObserved(ctx, current, delivered, nil); err != nil {
+		if err = controller.deliverExecutorTokens(ctx, current, delivered); err != nil {
 			observation.Error = err.Error()
 			return
 		}
