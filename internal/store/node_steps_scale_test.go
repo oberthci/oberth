@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,15 +54,47 @@ func TestNodeStepSnapshot4096RowsWith50000HistoricalRuns(t *testing.T) {
 	for i := range rows {
 		rows[i] = model.StepResult{NodeID: fmt.Sprintf("node-%04d", i), Template: "leaf", LocalTemplate: true, Ordinal: i, Status: model.StepRunning}
 	}
-	// The old three audit walks per node take over a minute on this fixture.
-	// Allow ample shared-host headroom while bounding the entire snapshot.
-	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
-	defer cancel()
-	started := time.Now()
-	if err = s.PutStepResults(ctx, run.ID, rows); err != nil {
-		t.Fatal("4096-row snapshot exceeded bounded write budget:", err)
+	// Assert work instead of elapsed time: the shared host may be busy.
+	var seq int
+	var dbName, dbPath string
+	if err := s.db.QueryRowContext(t.Context(), "PRAGMA database_list").Scan(&seq, &dbName, &dbPath); err != nil {
+		t.Fatal(err)
 	}
-	t.Logf("4096 nodes / 50000 historical runs: %s (%.0f nodes/s)", time.Since(started), float64(len(rows))/time.Since(started).Seconds())
+	dsn, err := immediateTransactionDSN(dbPath, defaultBusyTimeout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries := &atomic.Int64{}
+	counted := sql.OpenDB(nodeCountConnector{driver: s.db.Driver(), dsn: dsn, queries: queries})
+	counted.SetMaxOpenConns(1)
+	original := s.db
+	s.db = counted
+	defer func() { s.db = original; _ = counted.Close() }()
+	if err = s.PutStepResults(t.Context(), run.ID, rows); err != nil {
+		t.Fatal(err)
+	}
+	if got := queries.Load(); got != 1 {
+		t.Fatalf("snapshot walked admission receipts %d times; want exactly one", got)
+	}
+	plan, err := s.db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN SELECT 1"+stepAdmissionSourceSQL, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexed := false
+	for plan.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := plan.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		indexed = indexed || strings.Contains(detail, "audit_actions_run_resource_action")
+	}
+	if err := plan.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !indexed {
+		t.Fatal("admission read does not use the run-scoped receipt index")
+	}
 	stored, err := s.StepResults(t.Context(), run.ID)
 	if err != nil || len(stored) != len(rows) {
 		t.Fatal(len(stored), err)
@@ -90,4 +125,43 @@ func TestNodeAdmissionRequiresStringTemplateIdentity(t *testing.T) {
 	if err != nil || row.CredentialEvidenceKnown {
 		t.Fatal("non-string receipt gained native template authority", row, err)
 	}
+}
+
+// Count every SQL read that references audit_actions, including a receipt walk
+// embedded in a node upsert. No production hook or wall-clock bound is needed.
+type nodeCountConnector struct {
+	driver  driver.Driver
+	dsn     string
+	queries *atomic.Int64
+}
+
+func (c nodeCountConnector) Driver() driver.Driver { return c.driver }
+func (c nodeCountConnector) Connect(context.Context) (driver.Conn, error) {
+	conn, err := c.driver.Open(c.dsn)
+	if err != nil {
+		return nil, err
+	}
+	return &nodeCountConn{Conn: conn, queries: c.queries}, nil
+}
+
+type nodeCountConn struct {
+	driver.Conn
+	queries *atomic.Int64
+}
+
+func (c *nodeCountConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	return c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
+}
+func (c *nodeCountConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	if strings.Contains(query, "audit_actions") {
+		c.queries.Add(1)
+	}
+	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+}
+
+func (c *nodeCountConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	if strings.Contains(query, "audit_actions") {
+		c.queries.Add(1)
+	}
+	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
 }

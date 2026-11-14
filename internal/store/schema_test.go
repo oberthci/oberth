@@ -1001,7 +1001,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"workflow_capability_grants",
 	})
 	assertSchemaObjects(t, store.db, "index", []string{
-		"agent_events_repo_idx", "agent_events_run_idx", "audit_actions_page_idx", "audit_actions_type_idx",
+		"agent_events_repo_idx", "agent_events_run_idx", "audit_actions_page_idx", "audit_actions_run_resource_action", "audit_actions_type_idx",
 		"audit_anchors_latest_idx",
 		"branch_deletions_pending_idx",
 		"branch_deletions_repo_idx",

@@ -34,3 +34,6 @@ FROM step_results;
 DROP TABLE step_results;
 ALTER TABLE step_results_nodes RENAME TO step_results;
 CREATE INDEX step_results_order_idx ON step_results(run_id,ordinal,node_id);
+
+-- Native snapshot admission evidence is scoped to one run, regardless of history size.
+CREATE INDEX audit_actions_run_resource_action ON audit_actions(resource_id,action) WHERE resource_type='run';
