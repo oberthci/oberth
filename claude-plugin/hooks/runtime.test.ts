@@ -120,19 +120,23 @@ test('latest watch refreshes every 15 seconds, toasts once and stops at completi
   }
 })
 
-test('a missing watched run stops polling and clears the live line', async ($, on) => {
+test('a failing watched run stops after three consecutive failures with its diagnostic line', async ($, on) => {
   const { clock, state } = fixture(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await clock.settle()
   await $.command.run(command('watch', '1234567890'))
   state.missing = true
   await clock.advance(15000)
+  expect(state.gets).toBe(2)
+  expect(state.toasts).toEqual([])
+  await clock.advance(30000)
+  expect(state.gets).toBe(4)
   const gets = state.gets
-  await clock.advance(45000)
+  await clock.advance(60000)
   expect(state.gets).toBe(gets)
-  expect(state.toasts).toEqual(['Oberth run not found; watch stopped.'])
+  expect(state.toasts).toEqual(['unavailable: oberth: tool returned an error'])
   const ui = await $.ui.mount({ ...band, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /12345678/ })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /unavailable:/ }))?.text).toBe('unavailable: oberth: tool returned an error')
   await ui.unmount()
 })
 
@@ -271,20 +275,37 @@ test('a mid-session watch arms its timer and --off removes even a finished pinne
   await ui.unmount()
 })
 
-test('TLS and network errors retain the watch, mark retrying, and recover', async ($, on) => {
+test('successful refresh resets the consecutive failure count and transient errors can recover', async ($, on) => {
   const { clock, state } = fixture(on)
   await $.command.run(command('watch', '1234567890'))
   const ui = await $.ui.mount({ ...band, surface: 'terminal' })
   for (const failure of ['certificate authentication handshake failed', 'server error: method not found', 'server returned HTTP 404: not found']) {
     state.failure = failure
-    await clock.advance(15000)
-    expect((await ui.find({ type: 'Text', text: /12345678/ }))?.text).toContain('unavailable, retrying')
+    await clock.advance(30000)
+    expect((await ui.find({ type: 'Text', text: /unavailable:/ }))?.text).toBe(`unavailable: ${failure}`)
     expect(state.toasts).toEqual([])
+    state.failure = ''
+    await clock.advance(15000)
+    expect((await ui.find({ type: 'Text', text: /12345678/ }))?.text).toContain('running')
   }
-  state.failure = ''
-  await clock.advance(15000)
-  expect((await ui.find({ type: 'Text', text: /12345678/ }))?.text).not.toContain('retrying')
-  expect(state.gets).toBe(5)
+  expect(state.gets).toBe(10)
+  await ui.unmount()
+})
+
+test('initial watch failure is the first of three tries and --off also removes its stopped error line', async ($, on) => {
+  const { clock, state } = fixture(on)
+  state.failure = 'network unreachable\nprivate second line'
+  expect((await $.command.run(command('watch', '1234567890'))).text).toBe('unavailable: network unreachable')
+  await clock.advance(30000)
+  expect(state.gets).toBe(3)
+  expect(state.toasts).toEqual(['unavailable: network unreachable'])
+  await clock.advance(30000)
+  expect(state.gets).toBe(3)
+  expect((await $.command.run(command('runs'))).text).toBe('unavailable: network unreachable')
+  const ui = await $.ui.mount({ ...band, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /unavailable:/ }))?.text).toBe('unavailable: network unreachable')
+  await $.command.run(command('watch', '--off'))
+  expect(await ui.find({ type: 'Text', text: /unavailable:/ })).toBeUndefined()
   await ui.unmount()
 })
 

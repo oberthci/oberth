@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { EngineInterface } from 'claude-code'
-import { getRun, INSTALL, INVALID_ID, listRuns, UNAVAILABLE } from './client'
+import { getRun, INSTALL, INVALID_ID, listRuns, ReadError, UNAVAILABLE } from './client'
 
 // Direct engine double lets process.run reject as the real spawn does. A hook
 // returning {deny} would exercise hook refusal, not a failed host spawn.
@@ -10,7 +10,7 @@ function client() {
   const state = { installed, env: { HOME: home, CLAUDE_CONFIG_DIR: '/test/config', PATH: '/test/bin' } as Record<string, string>,
     files: new Set([installed, '/test/config/oberth/ca.crt', '/test/cert', '/test/key']),
     cert: true, calls: [] as string[][], stats: [] as string[], reject: false, disappearing: false,
-    exit: 0, stdout: '{"runs":[]}', stderr: '', now: 0 }
+    code: undefined as string | undefined, errorName: 'Error', exit: 0, stdout: '{"runs":[]}', stderr: '', now: 0 }
   const engine = {
     env: { get: async (key: string) => state.env[key] },
     settings: { read: async () => ({ env: state.cert ? {
@@ -25,7 +25,7 @@ function client() {
     process: { run: async (argv: string[]) => {
       state.calls.push(argv)
       if (state.disappearing) state.files.delete(argv[0]!)
-      if (state.reject || state.disappearing) throw new Error('spawn ENOENT executable certificate not found')
+      if (state.reject || state.disappearing) throw Object.assign(new Error('spawn ENOENT executable certificate not found'), { code: state.code, name: state.errorName })
       return { exitCode: state.exit, stdout: state.stdout, stderr: state.stderr, isStdoutTruncated: false, isStderrTruncated: false }
     } },
   } as unknown as EngineInterface
@@ -52,11 +52,13 @@ test('CLI lookup prefers the verified home install then only absolute PATH entri
 test('missing CLI rejects like a real failed spawn and timeout wording never decides setup', async () => {
   const { engine, state } = client()
   state.disappearing = true
-  await expect(listRuns(engine, 5)).rejects.toThrow(INSTALL)
+  state.code = 'ENOENT'
+  await expect(listRuns(engine, 5)).rejects.toThrow('unavailable: CLI could not start.')
   expect(state.calls.length).toBe(1)
   state.disappearing = false
   state.files.add(state.installed)
   state.reject = true
+  state.code = undefined
   await expect(listRuns(engine, 5)).rejects.toThrow(UNAVAILABLE)
 })
 
@@ -68,21 +70,42 @@ test('token-only configuration names the required certificate view without claim
   expect(state.calls.length).toBe(0)
 })
 
-test('only the exact run_get tool-failure envelope means a missing run', async () => {
+test('all CLI failures use the sanitised first error line, never a guessed missing-run status', async () => {
   const { engine, state } = client()
   state.exit = 1
   for (const stderr of ['oberth: server error: method not found (code -32601)', 'oberth: server returned HTTP 404: not found',
-    'certificate authentication failed', 'network unavailable']) {
-    state.stderr = stderr
+    'certificate authentication failed', 'network unavailable', 'oberth: tool returned an error']) {
+    state.stderr = `${stderr}\nsecond line must not display`
     state.stdout = 'not found'
-    await expect(getRun(engine, '12345678')).rejects.toThrow(UNAVAILABLE)
+    for (const request of [() => getRun(engine, '12345678'), () => listRuns(engine, 5)]) {
+      await expect(request()).rejects.toThrow(`unavailable: ${stderr}`)
+    }
   }
-  state.stderr = 'oberth: tool returned an error\n'
-  state.stdout = 'not found\n'
-  await expect(getRun(engine, '12345678')).rejects.toThrow('Oberth run not found.')
-  await expect(listRuns(engine, 5)).rejects.toThrow(UNAVAILABLE)
-  state.exit = 2
-  await expect(getRun(engine, '12345678')).rejects.toThrow(UNAVAILABLE)
+  state.stderr = '\x1b[31mTLS\u202ewarning\x1b[0m' + 'x'.repeat(100) + '\nprivate second line'
+  let failure: unknown
+  try { await getRun(engine, '12345678') } catch (err) { failure = err }
+  expect(failure instanceof ReadError).toBe(true)
+  const line = (failure as ReadError).message
+  expect(line.startsWith('unavailable: ?TLS?warning?')).toBe(true)
+  expect(line.length).toBe(80)
+  expect(line).not.toContain('private')
+  state.stderr = ''
+  state.stdout = 'not found\nignored'
+  await expect(getRun(engine, '12345678')).rejects.toThrow('unavailable: not found')
+})
+
+test('spawn and timeout categories use structured fields rather than exception text', async () => {
+  const { engine, state } = client()
+  state.reject = true
+  for (const code of ['ENOENT', 'EACCES', 'ENOEXEC', 'ETIMEDOUT', undefined]) {
+    state.code = code
+    let error: unknown
+    try { await getRun(engine, '12345678') } catch (err) { error = err }
+    expect((error as ReadError).kind).toBe(code === 'ETIMEDOUT' ? 'timeout' : code ? 'spawn' : 'unavailable')
+    expect((error as ReadError).message).not.toContain('certificate')
+  }
+  state.errorName = 'TimeoutError'
+  await expect(getRun(engine, '12345678')).rejects.toThrow('unavailable: CLI request timed out.')
 })
 
 test('invalid run ids never invoke the CLI and malformed list rows do not hide good rows', async () => {

@@ -8,7 +8,7 @@ import { clip, finished, limit, status, statusLine, table, watchLine } from './f
 // Flip this line to false if the coordinator's shared-namespace check fails.
 export const REGISTER_MODEL_TOOLS = true
 
-const watched = atom({ plugin: 'oberth', key: 'watch' } as const, null as OberthWatch | null, { shape: 'watch-1' })
+const watched = atom({ plugin: 'oberth', key: 'watch' } as const, null as OberthWatch | null, { shape: 'watch-2' })
 const message = (err: unknown): string => err instanceof ReadError ? err.message : UNAVAILABLE
 
 let active = true
@@ -26,18 +26,15 @@ async function refreshWatch($: EngineInterface): Promise<void> {
     if (!active || current !== generation) return
     const line = watchLine(r, await $.clock.now())
     await update($, watched, prior => active && current === generation
-      ? { id: r.id, line, status: status(r), done: finished(r) } : prior)
+      ? { id: r.id, line, status: status(r), done: finished(r), failures: 0 } : prior)
     if (active && current === generation && finished(r)) await $.ui.toast(`Oberth ${clip(line, 100)}`)
   } catch (err) {
     if (!active || current !== generation) return
-    if (err instanceof ReadError && err.kind === 'missing') {
-      generation++
-      await update($, watched, () => null)
-      await $.ui.toast('Oberth run not found; watch stopped.')
-    } else {
-      await update($, watched, prior => active && current === generation && prior
-        ? { ...prior, line: `unavailable, retrying · ${w.line.replace(/^unavailable, retrying · /, '')}` } : prior)
-    }
+    const failures = w.failures + 1
+    const line = err instanceof ReadError && err.kind === 'setup' ? UNAVAILABLE : message(err)
+    await update($, watched, prior => active && current === generation && prior
+      ? { ...prior, line, failures, done: failures >= 3 } : prior)
+    if (active && current === generation && failures >= 3) await $.ui.toast(line)
   }
 }
 
@@ -97,11 +94,19 @@ async function watch($: EngineInterface, requested: string): Promise<string> {
     !best || (Date.parse(row.created_at || '') || 0) > (Date.parse(best.created_at || '') || 0) ? row : best, undefined)
   const id = input || latest?.id
   if (!id) return 'No runs.'
-  const r = await getRun($, id)
+  let r: Run
+  try { r = await getRun($, id) }
+  catch (err) {
+    if (active && current === generation && !(err instanceof ReadError && ['setup', 'invalid'].includes(err.kind))) {
+      await update($, watched, prior => active && current === generation
+        ? { id, line: message(err), status: '', done: false, failures: 1 } : prior)
+    }
+    throw err
+  }
   if (!active || current !== generation) return 'Oberth watch stopped.'
   const line = watchLine(r, await $.clock.now())
   await update($, watched, prior => active && current === generation
-    ? { id: r.id, line, status: status(r), done: finished(r) } : prior)
+    ? { id: r.id, line, status: status(r), done: finished(r), failures: 0 } : prior)
   return `${finished(r) ? 'Finished' : 'Watching'} ${line}`
 }
 

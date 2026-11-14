@@ -304,9 +304,11 @@ including duration and failed step. `/oberth:watch [id]` pins a run above the
 prompt; without an id it selects the most recently created run in the returned
 page, including every active run and up to 50 finished runs. Use an explicit
 id to select a run outside that page. The line refreshes every 15 seconds,
-marks temporary outages as unavailable and retrying, and reports completion
-with a toast. Polling that run stops on completion, a missing run, or session
-end. `/oberth:watch --off` removes the pinned line, including a finished run.
+shows the sanitised first CLI error line on an outage, and reports completion
+with a toast. It retries failures every 15 seconds and stops after three
+consecutive failures, retaining that diagnostic line; a successful refresh
+resets the failure count. Polling also stops on completion or session end.
+`/oberth:watch --off` removes the pinned line, including a finished run.
 `/clear` removes both the watch and status; an explicit watch restarts polling.
 
 The status line refreshes every 60 seconds and reads

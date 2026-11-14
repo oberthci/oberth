@@ -1,13 +1,20 @@
 import type { EngineInterface } from 'claude-code'
+import { clip } from './format'
 import type { Run, Step } from './format'
 
 export const INSTALL = 'This Oberth view needs client-certificate setup. Run /oberth:install.'
-export const UNAVAILABLE = 'Oberth is unavailable, retrying.'
+export const UNAVAILABLE = 'unavailable: CLI request failed.'
 export const VALID_ID = /^[0-9a-f]{8,32}$/i
 export const INVALID_ID = 'Run id must be 8 to 32 hexadecimal characters.'
+
+function errorLine(detail: string): string {
+  const first = detail.split(/[\r\n]/, 1)[0] || 'CLI request failed.'
+  return `unavailable: ${clip(first, 67)}`
+}
+
 export class ReadError extends Error {
-  constructor(public kind: 'setup' | 'missing' | 'unavailable' | 'invalid') {
-    super(kind === 'setup' ? INSTALL : kind === 'missing' ? 'Oberth run not found.' : kind === 'invalid' ? INVALID_ID : UNAVAILABLE)
+  constructor(public kind: 'setup' | 'unavailable' | 'spawn' | 'timeout' | 'invalid', detail = 'CLI request failed.') {
+    super(kind === 'setup' ? INSTALL : kind === 'invalid' ? INVALID_ID : errorLine(detail))
   }
 }
 
@@ -48,25 +55,24 @@ async function executable($: EngineInterface, home: string | undefined): Promise
 async function call($: EngineInterface, tool: 'run_list' | 'run_get', args: object, deadline?: number): Promise<unknown> {
   const argv = await connection($)
   const remaining = deadline === undefined ? 12000 : Math.min(12000, deadline - await $.clock.now())
-  if (remaining <= 0) throw new ReadError('unavailable')
+  if (remaining <= 0) throw new ReadError('timeout', 'CLI request timed out.')
   let out
   try {
     out = await $.process.run([...argv, tool], { stdin: JSON.stringify(args), timeoutMs: remaining })
-  } catch {
-    // Spawn and timeout exceptions have no documented structured error code.
-    // Recheck the selected path: a disappeared CLI is setup, other failures retry.
-    try { if ((await $.fs.stat(argv[0]!)).kind !== 'file') throw new ReadError('setup') }
-    catch { throw new ReadError('setup') }
+  } catch (error) {
+    // Only structured exception fields distinguish spawn/timeout failures.
+    // The engine may omit them; an untyped rejection remains unavailable.
+    const failure = error as { code?: unknown; name?: unknown } | null
+    if (failure?.code === 'ETIMEDOUT' || failure?.name === 'TimeoutError') {
+      throw new ReadError('timeout', 'CLI request timed out.')
+    }
+    if (failure?.code === 'ENOENT' || failure?.code === 'EACCES' || failure?.code === 'ENOEXEC') {
+      throw new ReadError('spawn', 'CLI could not start.')
+    }
     throw new ReadError('unavailable')
   }
-  if (out.isStdoutTruncated || out.isStderrTruncated) throw new ReadError('unavailable')
-  if (out.exitCode !== 0) {
-    // The CLI currently emits plain tool errors, not JSON (mcp.go toolFailure).
-    // Match its entire tool-error envelope, never transport/method prose.
-    if (tool === 'run_get' && out.exitCode === 1 && out.stdout.trim() === 'not found'
-      && out.stderr.trim() === 'oberth: tool returned an error') throw new ReadError('missing')
-    throw new ReadError('unavailable')
-  }
+  if (out.isStdoutTruncated || out.isStderrTruncated) throw new ReadError('unavailable', 'CLI output was truncated.')
+  if (out.exitCode !== 0) throw new ReadError('unavailable', out.stderr || out.stdout)
   try { return JSON.parse(out.stdout) } catch { throw new ReadError('unavailable') }
 }
 
