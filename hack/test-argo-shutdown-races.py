@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Run real pinned Argo races without adding controller dependencies to Oberth."""
+import argparse
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 
-def main():
+PACKAGE = "github.com/oberthci/oberth/hack/argo-shutdown-races"
+
+
+def run(json_events):
     root = Path(__file__).resolve().parent.parent
     # Authenticate test-only dependencies using the shipped checksums and the
     # exact pinned Argo module's own checksum manifest.
@@ -35,9 +40,26 @@ def main():
         subprocess.run(["go", "test", "-mod=mod", "-race",
                         "-gcflags=modernc.org/sqlite/...=-race=false",
                         "-gcflags=modernc.org/libc/...=-race=false",
-                        "-count=1", "-p=2", "-timeout=3m", "-v", "."],
+                        "-count=1", "-p=2", "-timeout=3m", "-json" if json_events else "-v", "."],
                        cwd=module, env=env, check=True)
 
 
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    try:
+        run(args.json)
+    except (subprocess.CalledProcessError, OSError, ValueError, KeyError):
+        if args.json:
+            # Setup/build failures may have no Go test event. Publish only the
+            # owning fixture package, never captured output or exception text.
+            print(json.dumps(dict(Action="fail", Package=PACKAGE)), flush=True)
+        else:
+            print("Argo shutdown race fixture failed: " + PACKAGE, file=sys.stderr)
+        return 1
+    return 0
+
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -55,7 +55,9 @@ def main():
         # their real GET/PATCH races in a disposable module, never the shipped
         # module manifests. A failure is a failure of this required CI group.
         subprocess.run([sys.executable, "-I", "-S", "-B",
-                        str(Path(__file__).resolve().parent.parent / "hack" / "test-argo-shutdown-races.py")], stdout=sys.stderr, check=True)
+                        str(Path(__file__).resolve().parent.parent / "hack" / "test-argo-shutdown-races.py"),
+                        *(["--json"] if args.json else [])],
+                       stdout=None if args.json else sys.stderr, check=True)
     # Whole-package race deadlines need max(1.5 * observed, observed + 120s).
     timeout = {"service": "60m", "rest": "55m"}.get(args.group, "20m")
     output = ["-json"] if args.json else ["-v"]

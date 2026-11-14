@@ -103,6 +103,12 @@ channel. Final scanning cannot replace the originating failure with its own
 stage; a secondary scan failure gets its own separate redacted line. There is no public upload
 of private logs or inventories.
 
+The required Argo shutdown race preamble supplies Go JSON events to this same
+recorder. Its failures identify the package and available top-level test even
+before the ordinary rest packages start. A preamble setup or build failure
+without test events emits a failure event naming its fixed fixture package;
+captured output and exception text remain private.
+
 The existing race command has a 3120-second wall bound (including compilation),
 followed by a 120-second bound for the added cell stages and final scan. This
 leaves cleanup headroom inside the existing 3300-second rest Pod deadline.

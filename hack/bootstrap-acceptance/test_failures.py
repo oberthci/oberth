@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import signal
+import sys
 import tempfile
 import time
 import unittest
@@ -140,6 +141,34 @@ class FixtureIdentity(unittest.TestCase):
             self.assertIn('package=' + package, line)
             self.assertNotIn('private', line.removesuffix('; private artifacts withheld'))
             self.assertIn('check=go-', line)
+
+
+class PreambleFailureDiagnostics(unittest.TestCase):
+    def test_failure_without_go_events_identifies_its_package_without_output(self):
+        import contextlib
+        import importlib.util
+        import io
+        import subprocess
+        script = Path(__file__).resolve().parents[1] / 'test-argo-shutdown-races.py'
+        spec = importlib.util.spec_from_file_location('argo_shutdown_races', script)
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        errors = [subprocess.CalledProcessError(1, ['private-argv'], output='private-output'),
+                  OSError('private-path'), ValueError('private-output'), KeyError('private-key')]
+        for error in errors:
+            output, stderr = io.StringIO(), io.StringIO()
+            with self.subTest(error=type(error).__name__), \
+                 patch.object(sys, 'argv', [str(script), '--json']), \
+                 patch.object(runner, 'run', side_effect=error), \
+                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(stderr):
+                self.assertEqual(runner.main(), 1)
+            with self.assertRaises(Refused) as caught:
+                ci.require_pass_events(output.getvalue().encode(), 1)
+            line = diagnostic(caught.exception)
+            self.assertIn('package=' + runner.PACKAGE, line)
+            self.assertIn('check=go-package-pass', line)
+            self.assertEqual(stderr.getvalue(), '')
+            self.assertNotIn('private', output.getvalue())
 
 
 class FailurePathBudget(unittest.TestCase):
