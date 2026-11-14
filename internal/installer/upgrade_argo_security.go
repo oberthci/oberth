@@ -134,7 +134,7 @@ func validateArgoSecurityReview(ns string, stored map[string]any, review []ArgoS
 		switch s := entry.Planned.(type) {
 		case *corev1.PodSecurityContext:
 			if !argoPodSecurityContextMeetsFloor(s) {
-				return argoSecurityUpgradeRemedy(ns, fmt.Errorf("operator-set %s.%s cannot pass the Pod policy", entry.Component, entry.Field))
+				return argoSecurityUpgradeRemedy(ns, fmt.Errorf("operator-set %s.%s violates the Argo security floor", entry.Component, entry.Field))
 			}
 		case *corev1.SecurityContext:
 			valid := argoSecurityContextMeetsFloor(s, false)
@@ -142,7 +142,7 @@ func validateArgoSecurityReview(ns string, stored map[string]any, review []ArgoS
 				valid = argoWorkflowSecurityContextMeetsFloor(s, workflowPod)
 			}
 			if !valid {
-				return argoSecurityUpgradeRemedy(ns, fmt.Errorf("operator-set %s.%s cannot pass the Pod policy", entry.Component, entry.Field))
+				return argoSecurityUpgradeRemedy(ns, fmt.Errorf("operator-set %s.%s violates the Argo security floor", entry.Component, entry.Field))
 			}
 		}
 	}
