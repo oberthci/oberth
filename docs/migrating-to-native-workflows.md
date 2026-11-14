@@ -67,15 +67,15 @@ oberth upgrade --no-backup --context CONTEXT --namespace oberth --wait-idle --ar
 Use the actual running version and selected cluster, not necessarily the example
 version. Keep that archive for manual recovery: `--no-backup` does not record it
 as the upgrade's automatic backup. Stop new submissions while draining.
-v0.22.7 does not drain by default: pass `--wait-idle` (or `--wait-for=all`).
+A version-changing v0.22.8 upgrade waits by default; `--wait-for=30m` changes
+the deadline.
 This wait does not freeze admission. The API cutover observes native Workflows
 through Kubernetes on older servers; if that observation is unavailable,
-independently confirm idle before deliberately omitting wait flags. The consent
+independently confirm idle before deliberately using `--no-wait-idle`. The consent
 flag fills absent Argo security defaults; interactive review approval is the
-alternative. From v0.22.8 a version-changing upgrade waits for idle by default.
+alternative.
 
-The exact S8 message for the example version/context/namespace, without wait
-flags, is below. It is verified in the slice, absent from the documentation base:
+For the example version, context and namespace, the refusal prints:
 
 ```text
 running release v0.22.6 has no administration API; pre-upgrade backup refused before any change. Use the verified v0.22.6 CLI saved as oberth-v0.22.6, then run:
@@ -83,13 +83,12 @@ running release v0.22.6 has no administration API; pre-upgrade backup refused be
   ./oberth-v0.22.6 backup --history-only --context CONTEXT --namespace oberth
   oberth upgrade --no-backup --context CONTEXT --namespace oberth
 
-If Kubernetes Workflow observation is unavailable, confirm no runs are active before retrying without --wait-idle or --wait-for. No exec fallback is used
+If Kubernetes Workflow observation is unavailable, confirm no runs are active before retrying with --no-wait-idle. No exec fallback is used. Reapply your other upgrade options: --openbao-namespace, --values/--set, --backup-dir, --timeout, TLS flags, chart/release-source flags and downgrade consent are not copied into this retry command.
 ```
 
 The command printer retains selected idle/security flags when supplied. S8 also
 moves later admin operations to authenticated APIs; first-admin enrollment keeps
-one install-time exec, recoverable using the saved enrollment identity. This
-cutover and interrupted-install resume await the administration API merge.
+one install-time exec, recoverable using the saved enrollment identity. Interrupted installations resume with their saved enrollment identity.
 
 Before upgrade:
 

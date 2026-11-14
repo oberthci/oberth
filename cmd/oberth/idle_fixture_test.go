@@ -102,7 +102,7 @@ func probeIdle(ctx context.Context, client *http.Client, target, mode string) (s
 	switch response.StatusCode {
 	case http.StatusNoContent, http.StatusConflict:
 		if mode == "critical" && response.Header.Get("X-Oberth-Idle-Version") != "1" {
-			return state, false, false, false, errors.New("server does not support critical queue observation; upgrade its wait-idle support first or use --wait-for=all")
+			return state, false, false, false, errors.New("server does not support critical queue observation; upgrade its wait-idle support first or use --wait-scope=all")
 		}
 		if response.StatusCode == http.StatusNoContent {
 			return state, false, false, false, nil
