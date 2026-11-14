@@ -1,6 +1,7 @@
 package argojob
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
