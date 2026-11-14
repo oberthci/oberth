@@ -147,7 +147,11 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 			}
 			alias := regexp.QuoteMeta(name)
 			reference := regexp.MustCompile(prefix + `(?:\.` + alias + `|\[\s*['"]` + alias + `['"]\s*\])\.outputs\.result\b`)
-			found = found || reference.MatchString(text)
+			// Argo's native scan also accepts suffixes and uses an unescaped
+			// separator in the indexed form; those still enable wait's read.
+			native, _ := regexp.Match(prefix+`\.`+name+`\.outputs\.result`, body)
+			nativeIndexed, _ := regexp.Match(prefix+`\[['"]`+name+`['"]\]\.outputs.result`, body)
+			found = found || native || nativeIndexed || reference.MatchString(text)
 		}
 		for _, group := range parent.Steps {
 			for _, step := range group.Steps {

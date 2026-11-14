@@ -159,7 +159,7 @@ func TestCredentialOtherContainersPathOutputsRefused(t *testing.T) {
 func TestCredentialOtherContainersResultReferencesRefused(t *testing.T) {
 	for _, shape := range []string{"sidecar", "containerSet"} {
 		for _, graph := range []string{"steps", "tasks", "inline-steps", "inline-tasks"} {
-			for _, reference := range []string{"%s.alias.outputs.result", "%s['alias'].outputs.result", `%s["alias"].outputs.result`} {
+			for _, reference := range []string{"%s.alias.outputs.result", "%s['alias'].outputs.result", `%s["alias"].outputs.result`, "%s.alias.outputs.resultSuffix", "%s['alias'].outputsXresult"} {
 				t.Run(shape+"/"+graph+"/"+reference, func(t *testing.T) {
 					target := wfv1.Template{Name: "credential-leaf", Container: &corev1.Container{Image: "example.invalid/main"}}
 					credentialOtherContainer(&target, shape)
