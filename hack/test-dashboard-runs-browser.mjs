@@ -22,6 +22,7 @@ const makeRun = (ID, extra = {}) => {
     row.priority_class ??= 'normal'; row.priority_reason ??= 'ordinary run';
     row.display_reason ??= ''; // Messages are supplied by the server, never fabricated by the UI.
   }
+  row.display_status ??= row.status === 'interrupted' ? 'cancelled' : row.status;
   return row;
 };
 const heads = [makeRun('head-main', {earlier_attempts: 3, priority_class:'highest', priority_reason:'fixture priority'}), makeRun('head-tag', {ref:'v1', ref_kind:'tag', release:true, display_reason:'release'}), makeRun('head-branch', {ref:'v1', status:'failed'}), makeRun('head-queued', {repo_id:2, status:'queued', started_at:null, finished_at:null}), makeRun('head-retry', {ref:'feature', status:'queued', started_at:null, finished_at:null, auto_retry_of:'retry-failed'})];
@@ -29,7 +30,7 @@ const older = makeRun('old-failed', {status:'failed', error:'fixture failure', t
 const superseded = makeRun('old-superseded', {status:'interrupted', superseded_by:'head-main'});
 const oldest = makeRun('oldest');
 const scheduled = makeRun('scheduled-running', {status:'running', trigger:'schedule', schedule_entry:'nightly', finished_at:null, display_reason:'schedule: nightly'});
-const scheduledQueued = makeRun('scheduled-queued', {status:'queued', trigger:'schedule', schedule_entry:'daily', started_at:null, finished_at:null, display_reason:'awaiting scheduler'});
+const scheduledQueued = makeRun('scheduled-queued', {status:'queued', trigger:'schedule', schedule_entry:'daily', started_at:null, finished_at:null, display_reason:'waiting for Argo'});
 const nightlyFailed = makeRun('nightly-failed', {status:'failed', trigger:'schedule', schedule_entry:'nightly', error:'nightly failed before a newer successful push'});
 const retried = makeRun('retry-failed', {ref:'feature', status:'failed'});
 const active = [scheduled, scheduledQueued, heads[3], heads[4]];
@@ -141,7 +142,7 @@ try {
     assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-running"] > div:last-child').textContent(),'schedule: nightly');
     assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-running"] > div:last-child').getAttribute('title'),'schedule: nightly');
     assert.ok(!(await page.locator('.runs-table > .trow > div:last-child').allTextContents()).some(text=>text.startsWith('Priority ')));
-    assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-queued"] > div:last-child').textContent(),'awaiting scheduler','a queued fixture without an admission observation uses the scheduler fallback');
+    assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-queued"] > div:last-child').textContent(),'waiting for Argo','a native Pending fixture shows the server reason');
     assert.equal(await page.locator('.repo-side .side-head').textContent(),'Retained runs');
     await capture('after-runs');
     if (width === 1440) {
@@ -155,7 +156,7 @@ try {
       await page.evaluate(()=>route(true));
       assert.ok((await page.locator('.runs-footer').textContent()).includes('all active runs included'));
     }
-    for (const [filter, id] of [['failed','nightly-failed'],['superseded','old-superseded'],['failed','retry-failed'],['running','scheduled-running']]) {
+    for (const [filter, id] of [['failed','nightly-failed'],['cancelled','old-superseded'],['failed','retry-failed'],['running','scheduled-running']]) {
       const start = requests.length;
       await page.locator(`[data-status-filter="${filter}"]`).click();
       await page.locator(`.runs-table > [data-run-id="${id}"]`).waitFor();

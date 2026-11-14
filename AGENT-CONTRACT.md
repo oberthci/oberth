@@ -1210,11 +1210,13 @@ trust assumptions and complete invalidation rules.
   passed run, including releases; `display_status` is always `passed`.
   An interrupted result neither opens nor resolves a CI-red issue.
 
-  `/api/runs/counts` retains `Total` and `ByRepo`, and adds `Queued`, `Running`,
-  `QueuedByRepo` and `RunningByRepo`. Queued includes claimed/unadmitted runs;
-  running means admitted and non-terminal. Counts respect uplink scope. The
-  dashboard header uses these counts; its dated-page footer uses `Total - Queued`
-  (or the corresponding per-repository counts). Status chips and the independent
+  `/api/runs/counts` reports `Total`, `ByRepo`, `Preparing`, `Running`,
+  `PreparingByRepo` and `RunningByRepo`. Preparing counts accepted work whose
+  submission has not started; running counts non-terminal runs with a recorded
+  start. These counters describe submission progress, independently of native
+  Argo Pending and its `queued` display status. Counts respect uplink scope.
+  The dashboard sidebar uses the retained totals; its footer shows the page and
+  whether all active runs are included. Status chips and the independent
   release toggle compose, so failed releases can be selected. A pruned cursor
   returns 404 with an instruction to restart from the first page.
 - Execution scheduling observation has a two-second request budget, one exact
