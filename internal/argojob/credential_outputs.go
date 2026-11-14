@@ -187,12 +187,12 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 		if parent.DAG != nil {
 			prefix = "tasks"
 		}
-		check := func(name, template string, inline *wfv1.Template) {
+		check := func(name string, unknownAlias bool, template string, inline *wfv1.Template) {
 			if inline != target && (target.Name == "" || (template != target.Name && !strings.Contains(template, "{{"))) {
 				return
 			}
 			// An unmatched hook closer can consume an unknown ancestor name.
-			if name == "" {
+			if unknownAlias {
 				found = true
 				return
 			}
@@ -208,22 +208,23 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 			for name, hook := range hooks {
 				// Argo runs only the effective exit invocation separately.
 				if name != wfv1.ExitLifecycleEvent {
-					check(credentialHookResultAlias(name), hook.Template, nil)
+					alias, unknown := credentialHookResultAlias(name)
+					check(alias, unknown, hook.Template, nil)
 				}
 			}
 			if exit != nil {
-				check("onExit", exit.Template, nil)
+				check("onExit", false, exit.Template, nil)
 			}
 		}
 		for _, group := range parent.Steps {
 			for _, step := range group.Steps {
-				check(step.Name, step.Template, step.Inline)
+				check(step.Name, false, step.Template, step.Inline)
 				checkHooks(step.Hooks, step.GetExitHook(wfv1.Arguments{}))
 			}
 		}
 		if parent.DAG != nil {
 			for _, task := range parent.DAG.Tasks {
-				check(task.Name, task.Template, task.Inline)
+				check(task.Name, false, task.Template, task.Inline)
 				checkHooks(task.Hooks, task.GetExitHook(wfv1.Arguments{}))
 			}
 		}
@@ -234,9 +235,9 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 // Match Argo v4.0.8: workflow/controller/hooks.go:114 names lifecycle nodes,
 // workflow/common/util.go:313 names exit nodes, and
 // workflow/controller/operator.go:3383-3418 extracts the result-capture alias.
-func credentialHookResultAlias(event wfv1.LifecycleEvent) string {
+func credentialHookResultAlias(event wfv1.LifecycleEvent) (alias string, unknown bool) {
 	if event == wfv1.ExitLifecycleEvent {
-		return "onExit"
+		return "onExit", false
 	}
 	nodeName := "hooks." + string(event)
 	opener := ""
@@ -257,14 +258,14 @@ loop:
 		}
 	}
 	// Without a matching opener, Argo can derive an ancestor's alias from
-	// the full node name. Signal capture rather than guessing that alias.
+	// the full node name. Keep uncertainty separate from a valid empty alias.
 	if opener != "" {
-		return ""
+		return "", true
 	}
 	if lastDotIndex := strings.LastIndex(nodeName, "."); lastDotIndex >= 0 {
 		nodeName = nodeName[lastDotIndex+1:]
 	}
-	return nodeName
+	return nodeName, false
 }
 
 // Resolve workflow Pod metadata as Argo does for named templates, and include

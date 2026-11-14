@@ -303,3 +303,46 @@ func TestCredentialHookExitPrecedence(t *testing.T) {
 		}
 	}
 }
+
+func TestCredentialHookEmptyAlias(t *testing.T) {
+	for _, dag := range []bool{false, true} {
+		for _, key := range []string{"", "scan"} {
+			for _, form := range []string{"unreferenced", "dot", "indexed", "expression"} {
+				t.Run(fmt.Sprintf("dag=%t/key=%q/%s", dag, key, form), func(t *testing.T) {
+					config, request := credentialHookOutputRequest(t, dag, false, false, key, "unused")
+					request = changeCredentialOutputRequest(t, request, func(wf *wfv1.Workflow) {
+						prefix := "steps"
+						if dag {
+							prefix = "tasks"
+						}
+						for i := range wf.Spec.Templates {
+							parent := &wf.Spec.Templates[i]
+							if parent.Name != "parent" {
+								continue
+							}
+							parent.Outputs = wfv1.Outputs{}
+							if form == "unreferenced" {
+								continue
+							}
+							reference := "{{" + prefix + "." + key + ".outputs.result}}"
+							if form == "indexed" {
+								reference = "{{" + prefix + "['" + key + "'].outputs.result}}"
+							} else if form == "expression" {
+								reference = "{{=" + prefix + "[\"" + key + "\"].outputs.result}}"
+							}
+							parent.Outputs.Parameters = []wfv1.Parameter{{Name: "result", ValueFrom: &wfv1.ValueFrom{Parameter: reference}}}
+						}
+					})
+					_, err := Build(config, request)
+					if form == "unreferenced" {
+						if err != nil {
+							t.Fatalf("unreferenced credentialed hook was refused: %v", err)
+						}
+					} else if err == nil || !strings.Contains(err.Error(), "referenced outputs.result") {
+						t.Fatalf("referenced credentialed hook was admitted or returned an unexpected error: %v", err)
+					}
+				})
+			}
+		}
+	}
+}
