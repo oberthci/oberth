@@ -1071,7 +1071,6 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	}
 	// The Workflow has reached its native terminal phase.
 	workflowSettled = true
-	reservation.cancel()
 	return scheduler.finishObservedRun(finalizeCtx, run, repository, require, jobResult, index, stoppedByOberth)
 }
 
