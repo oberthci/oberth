@@ -27,7 +27,9 @@ changing `expect.txt` to `broken`.
 `release.yaml` repeats the tests and parameter handoff on a version tag, then
 reads **one** KV v2 secret, `oberth/data/release/example-repo`, granted only to
 `read-secret` in `.oberth/release.yaml`. The secret must have a nonempty `marker`
-field. The only public result is `secret: marker present`, followed by the tag.
+field. The public log includes `secret: marker present`, followed by
+`release: v0.1.0` for tag `v0.1.0`. Receive strips `refs/tags/` before passing
+the bare tag through the `oberth-release-tag` workflow parameter.
 No secret is passed through an output parameter. The example release records
 a successful tag run; it does not publish an application to an external service.
 

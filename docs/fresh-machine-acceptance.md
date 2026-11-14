@@ -378,11 +378,11 @@ values with the actual run, repository and environment identities.
 
    ```text
    secret: marker present
-   release: refs/tags/v0.1.0
+   release: v0.1.0
    ```
 
-   The final line uses the server's release-tag parameter (the full ref on
-   v0.22.7). Require a passed release run, no marker value in any capture,
+   The final line uses the server's bare release-tag parameter: receive strips
+   `refs/tags/` before enqueueing the run. Require a passed release run, no marker value in any capture,
    no secret-store settings in the test/report steps or HTTP sidecar, and the
    file/step-scoped identity only on `read-secret`. This demonstration reads a
    secret and completes a tag release; it has no external application publisher.

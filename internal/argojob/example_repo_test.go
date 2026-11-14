@@ -42,7 +42,8 @@ func exampleRepoRequest(t *testing.T, trigger argoworkflow.RunTrigger) (Config, 
 	r.RunTrigger = trigger
 	r.SourceVolume = SourceVolume{ClaimName: "example-source", SubPath: "src", VaultCASubPath: vaultCASubPath, BinarySubPath: binarySubPath}
 	if tier == pipeline.TriggerRelease {
-		r.Ref = "refs/tags/v0.1.0"
+		// ReceiveHandler.dispatch strips the Git tag namespace before enqueueing.
+		r.Ref = strings.TrimPrefix("refs/tags/v0.1.0", "refs/tags/")
 		r.ApprovedSecrets = map[string]bool{exampleSecret: true}
 		r.StepGrants = map[string]map[string]bool{exampleSecret: {"read-secret": true}}
 	}
@@ -109,6 +110,9 @@ func TestExampleRepoAdmissionAndBuild(t *testing.T) {
 				}
 			}
 			if trigger == argoworkflow.RunTriggerTag {
+				if got := runFacts(t, built)["oberth-release-tag"]; got != "v0.1.0" {
+					t.Fatalf("release tag = %q, want bare tag v0.1.0", got)
+				}
 				secret := exampleRepoTemplate(t, built, "read-secret")
 				if secret.ServiceAccountName != "example-read-secret" {
 					t.Fatal("named release grant identity missing")
