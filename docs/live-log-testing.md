@@ -1,66 +1,25 @@
-# Live-log streaming checks
+# Native container log checks
 
-The existing branch `test-rest` and release `release-test` Go race suites include
-`internal/api`. They run the live-log SSE server tests without Node or a browser:
+The API race tests cover plain Kubernetes bytes, immediate flushing, client
+cancellation, write deadlines and scope/credential revalidation. The server
+stream-cap test proves excess connections are refused and completed requests
+release their slot. There are no log frames, cursors or automatic reconnects.
 
-```sh
-go test -race -count=1 ./internal/api -run TestLiveLogStream
-```
+`TestNativeCaptureLargeLogMemoryBound` generates 96 MiB without allocating it,
+captures a bounded copy, and requires less than 8 MiB of allocations and source
+reads at most 32 KiB. Stored stream readers use file sections.
+`TestNativeSlowCaptureDoesNotDelayObservationOrRetirement` blocks a kubelet read
+while Workflow completion and executor identity retirement must proceed.
+`TestNativeFinalCaptureIncludesRunningContainers` exercises timeout, Stop and an
+unhealthy watch with containers still running. Native named-reader tests cover
+active and terminal runs, marker-looking bytes and the CI failure excerpt.
 
-These checks cover initial authentication and cursor validation, immediate flush,
-heartbeats, write deadlines, cancellation, terminal tails, idle stat hints and
-bounded credential revalidation. `TestLiveLogStreamDroppedConnectionResumesExactCursor`
-uses real authenticated HTTP connections: it disconnects after a UTF-8 chunk,
-resumes by both polling and SSE from the exact delivered byte cursor, and checks
-the final unterminated tail and terminal flag without duplicate bytes.
+`TestNativeTTLDeletedWorkflowUsesObservedVerdict` proves that a cached terminal
+verdict survives a live NotFound and that deletion before any observation has
+the documented missing-result error. Cleanup compilation tests include TTL zero
+and authored PodGC without rewriting. Upgrade tests cover absent-only default
+reconciliation, explicit null/empty/zero/custom values, rereads and dry runs.
 
-The Playwright suite in `hack/test-live-log-stream.mjs` remains an optional
-browser check. The existing Go test images (`golang:1.26.10-trixie`) and setup
-leaves do not provision Playwright or Chromium and its shared-library/font
-runtime. The Go test leaves provision Node for the function-level checks below;
-this does not provide a browser. The Playwright suite requires a separately
-pinned browser runtime and dependencies.
-
-On a developer machine with Playwright and its Chromium installed:
-
-```sh
-PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node hack/test-live-log-stream.mjs
-```
-
-The browser suite additionally checks DOM identity, animation-frame batching,
-scroll preservation, row eviction, navigation and sign-out. The Go tests do not
-establish those browser-layout behaviors.
-
-`TestDashboardLiveLogBehavior` runs both `hack/test-live-logs.mjs` and
-`hack/test-dashboard-runs.mjs` against the shipped dashboard functions. Missing
-Node is a test failure, including on developer machines. These scripts use only
-Node built-ins: no npm install, Playwright or browser is needed.
-
-Branch `test-rest` and release `release-test` use `hack/with-test-node.sh`
-(Linux/x86_64, matching the committed Node pin). It verifies both the
-archive and extracted binary against `.oberth/pins/node*.sha256` before execution.
-Branch CI caches only the archive under `GOCACHE/oberth-test-node`, so warm runs
-need no Node download. A private copy is verified on every run; missing/corrupt
-cache entries are downloaded again with bounded curl retries. With no persistent
-Go cache, the archive cache lasts only as long as that leaf. Release tests reuse
-the already fetched Node archive through a read-only mount, without another
-download. Extraction and execution use Pod-private scratch, removed on exit.
-Setup/publisher tools, other test leaves and the workflow DAG are unchanged.
-Both Go suites keep `-race` and `-count=1`, so this gate runs on every CI attempt.
-
-The required Node harness also runs `hack/test-step-timers-reconnect.mjs`.
-Running step durations use the shared one-second local ticker and authoritative
-start timestamps, retain step duration formatting, and refresh on visibility
-resume. Terminal rows have no ticker metadata. The checks advance the clock
-without network responses and cover invalid/future timestamps and completion.
-
-A transient stream failure falls back to cursor-based polling while scheduling
-another streaming attempt after 1, 2, 4, 8, 16, then at most 30 seconds. A received
-stream chunk resets backoff. Reconnection waits for the in-flight poll before
-reading its updated cursor; a fallback request is bounded to 10 seconds.
-Navigation, sign-out and terminal EOF cancel transport and reconnect work.
-The Node checks cover fragmented UTF-8/SSE frames, partial command records,
-exact-cursor handoff, repeated failures, and aborting a pending fallback request.
-The browser suite additionally checks timer focus/DOM stability and restoration
-of streaming after a transient drop. These local checks do not measure a deployed
-proxy or producer's output latency.
+Run the train's fast gate with these focused tests under race. The full CI race
+suites remain the final integration gate. These unit checks do not establish
+browser layout or deployed proxy latency.

@@ -199,3 +199,27 @@ func TestContainerLogHTTPAcceptsFullNativeNodeIDs(t *testing.T) {
 		t.Fatal(response.Code, response.Body.String())
 	}
 }
+
+func TestNativeContainerStreamCapacityIsBoundedPerServer(t *testing.T) {
+	backend := &containerStreamBackend{open: func(context.Context, Actor, string, string, string, bool) (io.ReadCloser, error) {
+		return io.NopCloser(strings.NewReader("plain")), nil
+	}}
+	server, err := New(backend, backend, backend, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range maxContainerLogStreams {
+		server.containerLogStreams <- struct{}{}
+	}
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, containerStreamRequest(t.Context(), ""))
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	<-server.containerLogStreams
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, containerStreamRequest(t.Context(), ""))
+	if response.Code != http.StatusOK || response.Body.String() != "plain" || len(server.containerLogStreams) != maxContainerLogStreams-1 {
+		t.Fatal(response.Code, response.Body.String(), len(server.containerLogStreams))
+	}
+}

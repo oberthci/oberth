@@ -21,6 +21,8 @@ type ContainerLogSource interface {
 
 type ContainerLogInfo struct {
 	NodeID    string `json:"node_id"`
+	Stage     string `json:"burn,omitempty"`
+	Step      string `json:"step,omitempty"`
 	PodName   string `json:"pod_name,omitempty"`
 	Container string `json:"container"`
 	Stored    bool   `json:"stored"`
@@ -92,7 +94,10 @@ func (service *API) RunContainerLogs(ctx context.Context, actor api.Actor, id st
 	}
 	result := ContainerLogsResponse{RunID: run.ID, Containers: []ContainerLogInfo{}}
 	for _, entry := range entries {
-		result.Containers = append(result.Containers, ContainerLogInfo{NodeID: entry.NodeID, PodName: entry.PodName, Container: entry.ContainerName, Stored: entry.Captured, Reason: entry.Reason})
+		if helperLogContainer(entry.ContainerName) {
+			continue
+		}
+		result.Containers = append(result.Containers, ContainerLogInfo{NodeID: entry.NodeID, Stage: entry.Stage, Step: entry.Step, PodName: entry.PodName, Container: entry.ContainerName, Stored: entry.Captured, Reason: entry.Reason})
 	}
 	sort.Slice(result.Containers, func(i, j int) bool {
 		a, b := result.Containers[i], result.Containers[j]
@@ -113,6 +118,13 @@ func (service *API) OpenRunContainerLog(ctx context.Context, actor api.Actor, id
 	}
 	if strings.TrimSpace(node) == "" {
 		return nil, fmt.Errorf("%w: node_id is required", ErrInvalidInput)
+	}
+	stored, storedErr := scoped.logs.OpenStoredContainerLog(ctx, run.ID, node, container)
+	if storedErr == nil {
+		return stored, nil
+	}
+	if !errors.Is(storedErr, os.ErrNotExist) {
+		return nil, storedErr
 	}
 	if !follow || !run.Status.Active() {
 		return scoped.logs.OpenStoredContainerLog(ctx, run.ID, node, container)
@@ -172,4 +184,11 @@ func (service *API) rawRunLog(ctx context.Context, actor api.Actor, id string, f
 		return nil, boundedRunReadError(err)
 	}
 	return newLogResponse(run.ID, "", "", body, meta), nil
+}
+
+// Native helpers can log resolved templates, output values and error bodies.
+// Keep them out of default discovery; an explicitly selected helper remains
+// available through the same scoped, authenticated native reader.
+func helperLogContainer(name string) bool {
+	return name == "init" || name == "wait" || name == "oberth-executor-token" || strings.HasPrefix(name, "init-artifact-")
 }

@@ -338,9 +338,6 @@ type LogStore interface {
 	ReadFiltered(string, string, string, runlog.Filter) ([]byte, runlog.Meta, error)
 	ReadActiveFiltered(string, string, string, runlog.Filter) ([]byte, runlog.Meta, error)
 	Tail(string, int64) ([]byte, error)
-	// ReadFrom serves the dashboard's live view of a run in progress: bytes
-	// from offset (negative means tail), the next poll offset, and the
-	// current size of the append-only run log.
 	AppendStepProgress(string, runprogress.Event) error
 	StepProgress(string) ([]runprogress.Event, error)
 	StepProgressHistory(string) ([]runprogress.Event, error)

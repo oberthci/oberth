@@ -34,13 +34,13 @@ func TestContainerLogServiceStoredSelectionAndMCPDiscovery(t *testing.T) {
 	run := f.run(t, "main", "ci", true)
 	actor := api.Actor{Identity: "operator"}
 	logs := f.retention.Logs
-	for _, container := range []string{"main", "wait"} {
-		if err := logs.StoreContainerLog(run.ID, runlog.ContainerLog{NodeID: "node", PodUID: "uid", PodName: "opaque", ContainerName: container, Body: []byte(retainedLogMarkerFixture + container + " body\n")}, 1024); err != nil {
+	for _, container := range []string{"main", "wait", "init", "oberth-executor-token", "init-artifact-oberth"} {
+		if err := logs.StoreContainerLog(run.ID, runlog.ContainerLog{NodeID: "node", PodUID: "uid", PodName: "opaque", ContainerName: container, Reader: strings.NewReader(retainedLogMarkerFixture + container + " body\n")}, 1024); err != nil {
 			t.Fatal(err)
 		}
 	}
 	value, err := f.api.CallTool(t.Context(), actor, "run_logs", json.RawMessage(`{"id":"`+run.ID+`","containers":true}`))
-	if err != nil || len(value.(ContainerLogsResponse).Containers) != 2 {
+	if err != nil || len(value.(ContainerLogsResponse).Containers) != 1 {
 		t.Fatal(value, err)
 	}
 	value, err = f.api.CallTool(t.Context(), actor, "run_logs", json.RawMessage(`{"id":"`+run.ID+`","node_id":"node","container":"wait"}`))
@@ -64,7 +64,7 @@ func TestContainerLogServiceStoredSelectionAndMCPDiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	value, err = f.api.CallTool(t.Context(), actor, "logs", shaRequest)
-	if err != nil || len(value.(ContainerLogsResponse).Containers) != 2 {
+	if err != nil || len(value.(ContainerLogsResponse).Containers) != 1 {
 		t.Fatal(value, err)
 	}
 	reader, err := f.api.OpenRunContainerLog(t.Context(), actor, run.ID, "node", "main", true)
@@ -113,5 +113,58 @@ func TestContainerLogServiceHistoricMarkersArePlain(t *testing.T) {
 	value, err := f.api.CallTool(t.Context(), actor, "run_logs", json.RawMessage(`{"id":"`+run.ID+`","raw":true}`))
 	if err != nil || value.(LogResponse).Output != "[test/unit] retained output\n"+body {
 		t.Fatal(value, err)
+	}
+}
+
+func TestNativeStepNameReadersAndFailureExcerpt(t *testing.T) {
+	f := newRetentionFixture(t)
+	run := f.run(t, "main", "ci", true)
+	actor := api.Actor{Identity: "operator"}
+	const body = "[other/fake] ordinary text\nError: native failure\n"
+	entry := runlog.ContainerLog{NodeID: "native-node", PodUID: "native-pod", ContainerName: "main", Stage: "test", Step: "unit", Reader: strings.NewReader(body)}
+	if err := f.retention.Logs.StoreContainerLog(run.ID, entry, 4096); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"run_logs", "logs"} {
+		args := map[string]any{"id": run.ID}
+		if name == "logs" {
+			args = map[string]any{"repo": f.repo.Name, "sha": run.SHA, "step": "unit"}
+		}
+		raw, err := json.Marshal(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := f.api.CallTool(t.Context(), actor, name, raw)
+		if err != nil || value.(LogResponse).Output != body {
+			t.Fatal(name, value, err)
+		}
+	}
+	value, err := f.api.RunLogFiltered(t.Context(), actor, run.ID, "test", "unit", runlog.Filter{})
+	if err != nil || value.(LogResponse).Output != body {
+		t.Fatal(value, err)
+	}
+	excerpt := stepFailureExcerpt(f.retention.Logs, run.ID, "test", "unit", 1024)
+	if string(excerpt) != body {
+		t.Fatal("CI excerpt lost native step", string(excerpt))
+	}
+}
+
+func TestNativeActiveStreamServesStoredCopyFirst(t *testing.T) {
+	f := newRetentionFixture(t)
+	run := f.run(t, "main", "ci", false)
+	source := &fakeContainerLogSource{}
+	f.api.containerLogSource = source
+	entry := runlog.ContainerLog{NodeID: "node", PodUID: "pod", ContainerName: "main", Reader: strings.NewReader("stored before PodGC\n")}
+	if err := f.retention.Logs.StoreContainerLog(run.ID, entry, 4096); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := f.api.OpenRunContainerLog(t.Context(), api.Actor{Identity: "operator"}, run.ID, "node", "main", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	body, err := io.ReadAll(stream)
+	if err != nil || string(body) != "stored before PodGC\n" || source.opened != 0 {
+		t.Fatal(string(body), source.opened, err)
 	}
 }

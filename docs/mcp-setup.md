@@ -513,7 +513,7 @@ its policies and budgets are configured with the chart's `retention` values.
 | `retention.artifacts.budgetBytes` | `4294967296` (4 GiB) | `--artifacts-budget-bytes`: total artifact budget; `0` disables size retention |
 
 `retention.logs.limitBytes` maps to `--run-log-limit-bytes`, the maximum retained
-bytes per container copy. Truncation includes an incomplete-log reason. See the
+bytes per run across container copies. Truncation includes an incomplete-log reason. See the
 [CLI reference](cli-reference.md#oberth-serve) for the generated default.
 
 The artifact budget default applies to fresh installs; `oberth upgrade` keeps an existing

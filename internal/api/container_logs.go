@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const maxContainerLogStreams = 32
+
 func (server *Server) handleRunContainerLogs(writer http.ResponseWriter, request *http.Request) {
 	id := request.PathValue("run")
 	if !validRunSelector(id) {
@@ -65,6 +67,14 @@ func (server *Server) handleRunContainerLogStream(writer http.ResponseWriter, re
 	}
 	if !supportsMCPFlush(writer) {
 		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "streaming unavailable"})
+		return
+	}
+	select {
+	case server.containerLogStreams <- struct{}{}:
+		defer func() { <-server.containerLogStreams }()
+	default:
+		writer.Header().Set("Retry-After", "1")
+		writeJSON(writer, http.StatusTooManyRequests, map[string]string{"error": "container log stream capacity reached; retry shortly"})
 		return
 	}
 	ctx, cancel := context.WithCancel(request.Context())

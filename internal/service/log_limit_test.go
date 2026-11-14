@@ -63,7 +63,7 @@ func (overflowingJobs) Wait(_ context.Context, _ string, destination io.Writer) 
 	return JobResult{Status: model.RunPassed, Phase: "passed"}, err
 }
 
-func TestRunObservationOutputDoesNotApplyAnAggregateContainerBudget(t *testing.T) {
+func TestRunObservationOutputPreservesArgoVerdict(t *testing.T) {
 	fixture := newControlFixture(t)
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: overflowingJobs{},

@@ -459,6 +459,29 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		t.Errorf("livelog: hidden %v, missing %v", hiddenErr, missingErr)
 	}
 
+	for _, read := range []func(string) error{
+		func(id string) error {
+			_, err := fixture.service.RunContainerLogs(t.Context(), scopedActor, id)
+			return err
+		},
+		func(id string) error {
+			_, err := fixture.service.RunContainerLogFiltered(t.Context(), scopedActor, id, "node", "main", runlog.Filter{})
+			return err
+		},
+		func(id string) error {
+			stream, err := fixture.service.OpenRunContainerLog(t.Context(), scopedActor, id, "node", "main", true)
+			if stream != nil {
+				_ = stream.Close()
+			}
+			return err
+		},
+	} {
+		hidden, missing := read(hiddenRun.ID), read(missingRunID)
+		if hidden == nil || fmt.Sprint(hidden) != fmt.Sprint(missing) {
+			t.Errorf("native reader disclosed a hidden run: hidden=%v missing=%v", hidden, missing)
+		}
+	}
+
 	if run, err := fixture.store.Run(context.Background(), hiddenRun.ID); err != nil || !run.Status.Active() {
 		t.Fatalf("scoped run_cancel reached a hidden run: %#v, %v", run, err)
 	}
