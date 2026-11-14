@@ -1045,8 +1045,8 @@
       "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
     },
     "flag:wait-for": {
-      "doc_anchor": "docs/cli-reference.md",
-      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+      "doc_anchor": "docs/cli-reference.md#oberth-upgrade",
+      "test_ref": "cmd/oberth/upgrade_test.go TestUpgradeRejectsInvalidWaitOptionsBeforeClusterAccess"
     },
     "value:runnerImagePrefixes": {
       "doc_anchor": "docs/cli-reference.md#oberth-serve",
@@ -1084,9 +1084,17 @@
       "doc_anchor": "docs/container-logs.md",
       "test_ref": "cmd/oberth/remote_container_logs_test.go TestContainerLogCLIUsesNativeSelectors"
     },
+    "flag:no-wait-idle": {
+      "doc_anchor": "docs/restart-handover.md",
+      "test_ref": "internal/installer/upgrade_idle_test.go TestUpgradeNoWaitIdleAndNegativeControls"
+    },
     "flag:wait-idle": {
-      "doc_anchor": "docs/cli-reference.md#oberth-upgrade",
-      "test_ref": "internal/installer/upgrade_released_server_test.go TestUpgradeReleasedServerWithoutAdminAPI"
+      "doc_anchor": "docs/restart-handover.md",
+      "test_ref": "cmd/oberth/upgrade_wait_process_linux_test.go TestUpgradeWaitProcessGraph"
+    },
+    "flag:wait-scope": {
+      "doc_anchor": "docs/cli-reference.md#oberth-wait-idle",
+      "test_ref": "cmd/oberth/idle_test.go TestWaitIdleScopeFlag"
     }
   }
 }

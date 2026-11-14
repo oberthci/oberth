@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -83,6 +84,10 @@ func TestUpgradePinsTLSOverridesOnlyForLivePKI(t *testing.T) {
 							t.Fatal("override validation must not inspect or write PKI")
 							return nil, nil
 						},
+					})
+					withUpgradeWorkflowAPI(t, &deps, func(w http.ResponseWriter, _ *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						_, _ = io.WriteString(w, upgradeWorkflowList())
 					})
 					_, err := RunUpgrade(t.Context(), cfg, deps)
 					if enabled {

@@ -34,7 +34,7 @@ func runAdmin(ctx context.Context, args []string, output io.Writer) error {
 		return runCreateFirstAdmin(ctx, os.Stdin, output, config)
 	}
 	flags, connection, parse := adminCLIFlags("admin "+args[0], args[1:])
-	waitFor := flags.String("wait-for", "all", "idle observation: all or critical")
+	waitFor := flags.String("wait-scope", "all", "idle observation: all or critical")
 	positional, help, err := parse()
 	if err != nil {
 		return err

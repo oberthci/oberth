@@ -624,10 +624,11 @@ including `--argo-security-defaults` when consenting to absent security defaults
 Upgrade `--wait-idle` observes native Workflows through Kubernetes for every
 server version, using the pipeline namespace stored in the release. Pending,
 running and unclassified Workflows count as active; terminal Workflows do not.
-`--wait-for critical` conservatively waits for all active Oberth Workflows.
+Version-changing upgrades wait for all active Oberth Workflows by default.
+Use `--wait-for=30m` to change the idle deadline independently of rollout time.
 This advisory read neither freezes admission nor observes the server's queue.
 If Workflow reads are unavailable, the wait refuses: confirm no runs are active
-before deliberately retrying without the wait flags.
+before deliberately retrying with `--no-wait-idle`.
 
 Run this upgrade from a machine whose Oberth client is connected to this server
 as an unscoped administrator. The installer checks that it can build that admin

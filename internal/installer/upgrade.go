@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -17,8 +16,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
-	"github.com/oberthci/oberth/internal/client"
-	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/releaseverify"
 )
 
@@ -26,7 +23,7 @@ import (
 // Oberth release images. Published chart refs must resolve to this registry.
 const canonicalGARPrefix = "europe-west4-docker.pkg.dev/skipopsmain/oberth/"
 
-// DefaultUpgradeWaitTimeout bounds queue observation independently of rollout.
+// DefaultUpgradeWaitTimeout bounds Workflow observation independently of rollout.
 const DefaultUpgradeWaitTimeout = 2 * time.Hour
 
 // UpgradeConfig holds options for the upgrade command.
@@ -34,9 +31,8 @@ type UpgradeConfig struct {
 	// ArgoSecurityDefaults explicitly permits absent-only changes to an existing Argo release.
 	ArgoSecurityDefaults bool
 	ReissueServerCA      bool
-	WaitTimeout          time.Duration // independent queue-observation limit
-	WaitFor              string        // all or critical; a nonempty selection enables waiting
-	WaitIdle             bool          // optional advisory queue drain; ordinary upgrades adopt in-flight work
+	WaitTimeout          time.Duration // independent Workflow-observation limit
+	NoWaitIdle           bool          // explicitly skip the default wait before a version change
 	Namespace            string
 	DryRun               bool
 	Yes                  bool   // --yes, with --rollback: replace the database with the pre-upgrade backup without a second run
@@ -135,14 +131,8 @@ func (cfg *UpgradeConfig) ValidateUpgrade() error {
 		return err
 	}
 	cfg.TLSExtraIPs, cfg.TLSRemoveIPs = tls.TLSExtraIPs, tls.TLSRemoveIPs
-	if cfg.WaitFor != "" {
-		if cfg.WaitFor != "all" && cfg.WaitFor != "critical" {
-			return errors.New("--wait-for must be all or critical")
-		}
-		cfg.WaitIdle = true
-	}
 	if cfg.WaitTimeout < 0 {
-		return errors.New("--wait-timeout must be positive")
+		return errors.New("--wait-for must be positive")
 	}
 	if cfg.WaitTimeout == 0 {
 		cfg.WaitTimeout = DefaultUpgradeWaitTimeout
@@ -455,10 +445,8 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return printUpgradeDryRun(w, cfg, result, retryFailed)
 	}
 
-	if cfg.WaitIdle {
-		if err := waitForUpgradeIdle(ctx, cfg, deps); err != nil {
-			return result, err
-		}
+	if err := waitBeforeUpgrade(ctx, cfg, deps, cmp != 0); err != nil {
+		return result, err
 	}
 
 	// The backup and the rollback record come last before the first write,
@@ -852,8 +840,12 @@ func verifyRunningVersion(ctx context.Context, deps Deps, cfg UpgradeConfig, tar
 
 func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, retryFailed bool) (UpgradeResult, error) {
 	_, _ = fmt.Fprintf(w, "\nDry-run plan (no cluster changes will be made):\n\n")
-	if cfg.WaitIdle {
-		_, _ = fmt.Fprintf(w, "  Wait for %s active Kubernetes Workflows (critical includes all active Workflows) (--wait-idle; --wait-timeout=%s).\n", upgradeWaitSelection(cfg), cfg.WaitTimeout)
+	if canonicalChartVersion(result.PreviousVersion) != canonicalChartVersion(result.TargetVersion) {
+		if cfg.NoWaitIdle {
+			_, _ = fmt.Fprintln(w, "  The real upgrade will skip waiting (--no-wait-idle); running Workflows of the previous version will fail on their next step.")
+		} else {
+			_, _ = fmt.Fprintf(w, "  The real upgrade will wait for active Workflows before any change (--wait-for=%s); timeout refuses the upgrade.\n", cfg.WaitTimeout)
+		}
 	}
 	_, _ = fmt.Fprintln(w, "  Verify Helm >= 3.14, read installed values (including defaults), pin compatibility identities, and validate stored values against the target chart schema before applying changes.")
 	if cfg.serverPKI {
@@ -909,77 +901,4 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 
 	_, _ = fmt.Fprintln(w, "No cluster changes were made (--dry-run).")
 	return result, nil
-}
-
-func upgradeWaitSelection(cfg UpgradeConfig) string {
-	if cfg.WaitFor == "critical" {
-		return "critical"
-	}
-	return "all"
-}
-
-// waitForUpgradeIdle observes active native Workflows without a server-version dependency.
-func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
-	if err := waitForUpgradeWorkflows(ctx, cfg, deps); err != nil {
-		return fmt.Errorf("upgrade not attempted: %w", err)
-	}
-	return nil
-}
-
-// WaitForAdminIdle observes the complete queue with an authenticated unscoped admin.
-func WaitForAdminIdle(ctx context.Context, remote AdminAPI, mode string, timeout time.Duration, output io.Writer) error {
-	if mode != "all" && mode != "critical" || timeout <= 0 {
-		return errors.New("invalid admin idle observation options")
-	}
-	if output == nil {
-		output = io.Discard
-	}
-	return observeAdminIdle(ctx, UpgradeConfig{WaitFor: mode, WaitTimeout: timeout}, Deps{Admin: remote, Output: output, PollInterval: time.Second})
-}
-func observeAdminIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
-	limit := cfg.WaitTimeout
-	if limit == 0 {
-		limit = DefaultUpgradeWaitTimeout
-	}
-	ctx, cancel := context.WithTimeout(ctx, limit)
-	defer cancel()
-	start := time.Now()
-	nextProgress := time.Time{}
-	var lastErr error
-	for {
-		var result struct {
-			Busy  bool                  `json:"busy"`
-			Queue model.IdleQueueStatus `json:"queue"`
-		}
-		err := CallAdmin(ctx, Config{Namespace: cfg.Namespace}, deps, "idle", map[string]string{"wait_for": upgradeWaitSelection(cfg)}, &result)
-		if err == nil {
-			if !result.Queue.Valid() {
-				return errors.New("invalid admin idle observation")
-			}
-			if !result.Busy {
-				return nil
-			}
-			lastErr = nil
-		} else {
-			var status *client.AdminError
-			var network net.Error
-			if errors.As(err, &status) {
-				if status.StatusCode < 500 && status.StatusCode != 429 {
-					return err
-				}
-			} else if !errors.As(err, &network) && !errors.Is(err, context.DeadlineExceeded) {
-				return err
-			}
-			lastErr = err
-		}
-		if !time.Now().Before(nextProgress) {
-			if _, err := fmt.Fprintf(deps.Output, "Waiting for %s queue: preparing=%d running=%d critical=%d elapsed=%s\n", upgradeWaitSelection(cfg), result.Queue.Preparing, result.Queue.Running, result.Queue.Critical(), time.Since(start).Truncate(time.Second)); err != nil {
-				return err
-			}
-			nextProgress = time.Now().Add(15 * time.Second)
-		}
-		if err := sleepContext(ctx, pollInterval(deps)); err != nil {
-			return fmt.Errorf("wait for %s queue via admin API (elapsed=%s limit=%s): %w", upgradeWaitSelection(cfg), time.Since(start).Truncate(time.Millisecond), limit, errors.Join(err, lastErr))
-		}
-	}
 }

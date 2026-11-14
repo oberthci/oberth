@@ -33,27 +33,23 @@ func checkUpgradeBackupAPI(ctx context.Context, cfg UpgradeConfig, deps Deps, cu
 func missingUpgradeAdminAPI(cfg UpgradeConfig, deps Deps, currentVersion string) error {
 	version := displayVersion(currentVersion)
 	if deps.ContextName == "" {
-		return fmt.Errorf("running release %s has no admin API; select its Kubernetes context explicitly and retry for the matching backup command; confirm no runs are active before upgrading without idle observation", version)
+		return fmt.Errorf("running release %s has no admin API; select its Kubernetes context explicitly and retry for the matching backup command; confirm no runs are active before retrying with --no-wait-idle", version)
 	}
 	binary := "./oberth-" + version
 	target := " --context " + shellQuoteWord(deps.ContextName) + " --namespace " + shellQuoteWord(cfg.Namespace)
 	retry := upgradeRetryCommand(cfg, deps)
-	return fmt.Errorf("running release %s has no administration API; pre-upgrade backup refused before any change. Use the verified %s CLI saved as %s, then run:\n\n  %s backup --history-only%s\n  %s\n\nIf Kubernetes Workflow observation is unavailable, confirm no runs are active before retrying without --wait-idle or --wait-for. No exec fallback is used. %s", version, version, strings.TrimPrefix(binary, "./"), shellQuoteWord(binary), target, retry, upgradeRetryOptionsNote)
+	return fmt.Errorf("running release %s has no administration API; pre-upgrade backup refused before any change. Use the verified %s CLI saved as %s, then run:\n\n  %s backup --history-only%s\n  %s\n\nIf Kubernetes Workflow observation is unavailable, confirm no runs are active before retrying with --no-wait-idle. No exec fallback is used. %s", version, version, strings.TrimPrefix(binary, "./"), shellQuoteWord(binary), target, retry, upgradeRetryOptionsNote)
 }
 
 const upgradeRetryOptionsNote = "Reapply your other upgrade options: --openbao-namespace, --values/--set, --backup-dir, --timeout, TLS flags, chart/release-source flags and downgrade consent are not copied into this retry command."
 
 func upgradeRetryCommand(cfg UpgradeConfig, deps Deps) string {
 	retry := "oberth upgrade --no-backup --context " + shellQuoteWord(deps.ContextName) + " --namespace " + shellQuoteWord(cfg.Namespace)
-	if cfg.WaitIdle {
-		if cfg.WaitFor == "critical" {
-			retry += " --wait-for critical"
-		} else {
-			retry += " --wait-idle"
-		}
-		if cfg.WaitTimeout > 0 {
-			retry += " --wait-timeout " + cfg.WaitTimeout.String()
-		}
+	if cfg.NoWaitIdle {
+		retry += " --no-wait-idle"
+	}
+	if cfg.WaitTimeout > 0 && cfg.WaitTimeout != DefaultUpgradeWaitTimeout {
+		retry += " --wait-for " + cfg.WaitTimeout.String()
 	}
 	if cfg.ArgoSecurityDefaults {
 		retry += " --argo-security-defaults"

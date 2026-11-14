@@ -99,7 +99,7 @@ func testReleasedServerUpgrade(t *testing.T, version string, noBackup bool) {
 		return runHelm(ctx, args)
 	}
 	backupCalls := 0
-	cfg := UpgradeConfig{BinaryVersion: "0.22.7", BinarySchemaVersion: store.LatestMigrationVersion(), Namespace: "oberth", NoBackup: noBackup, WaitIdle: true, WaitFor: "critical", WaitTimeout: time.Second, Timeout: time.Second, RecordDir: t.TempDir(), Backup: func(context.Context) (UpgradeBackup, error) {
+	cfg := UpgradeConfig{BinaryVersion: "0.22.7", BinarySchemaVersion: store.LatestMigrationVersion(), Namespace: "oberth", NoBackup: noBackup, WaitTimeout: time.Second, Timeout: time.Second, RecordDir: t.TempDir(), Backup: func(context.Context) (UpgradeBackup, error) {
 		backupCalls++
 		return UpgradeBackup{}, errors.New("old-server backup must be refused before callback")
 	}}
@@ -110,7 +110,7 @@ func testReleasedServerUpgrade(t *testing.T, version string, noBackup bool) {
 		}
 		// These exact flags exist in v0.22.6 cmd/oberth/backup.go, including
 		// --history-only and addClusterFlags' --context/--namespace.
-		for _, command := range []string{"./oberth-v" + version + " backup --history-only --context fixture --namespace oberth", "oberth upgrade --no-backup --context fixture --namespace oberth", "confirm no runs are active", "--wait-for critical"} {
+		for _, command := range []string{"./oberth-v" + version + " backup --history-only --context fixture --namespace oberth", "oberth upgrade --no-backup --context fixture --namespace oberth", "confirm no runs are active", "--wait-for 1s"} {
 			if !strings.Contains(err.Error(), command) {
 				t.Fatal("refusal lacks exact recovery instruction", command, err)
 			}

@@ -44,15 +44,12 @@ func TestUpgradeWaitProcessHelper(t *testing.T) {
 	switch os.Getenv("OBERTH_TEST_WAIT_ROLE") {
 	case "cli":
 		version = "0.17.52"
-		os.Args = []string{"oberth", "upgrade", "--wait-idle", "--chart=/fixture", "--timeout=1m", "--wait-timeout=" + os.Getenv("OBERTH_TEST_WAIT_LIMIT")}
+		os.Args = []string{"oberth", "upgrade", "--wait-idle", "--chart=/fixture", "--timeout=1m", "--wait-for=" + os.Getenv("OBERTH_TEST_WAIT_LIMIT")}
 		home, err := os.UserHomeDir()
 		if err != nil {
 			os.Exit(93)
 		}
 		os.Args = append(os.Args, "--context=fixture", "--no-backup", "--backup-dir="+home)
-		if os.Getenv("OBERTH_TEST_OLD_CRITICAL") == "yes" {
-			os.Args = append(os.Args, "--wait-for=critical")
-		}
 		main()
 		os.Exit(0)
 	}
@@ -283,7 +280,7 @@ func (f *upgradeWaitProcessFixture) check(t *testing.T, err error, text string, 
 				t.Fatalf("deadline: %v: %s", err, text)
 			}
 		case "unavailable", "observer-disconnected":
-			if exit.ExitCode() != 1 || !strings.Contains(text, "cannot observe active Kubernetes Workflows") {
+			if exit.ExitCode() != 1 || !strings.Contains(text, "read active Workflows from Kubernetes") {
 				t.Fatalf("failed observer: %v: %s", err, text)
 			}
 		}

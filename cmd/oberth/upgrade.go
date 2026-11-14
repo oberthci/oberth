@@ -32,9 +32,9 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.OpenBaoNamespace, "openbao-namespace", "", "OpenBao namespace (default: openbao)")
 	flags.StringVar(&cfg.Namespace, "namespace", "", "Oberth namespace (default: oberth)")
 	flags.StringVar(&kubeContext, "context", "", "kubeconfig context to upgrade (required when the kubeconfig has more than one context)")
-	flags.BoolVar(&cfg.WaitIdle, "wait-idle", false, "wait for active Kubernetes Workflows before upgrading (advisory, not an admission freeze)")
-	flags.DurationVar(&cfg.WaitTimeout, "wait-timeout", installer.DefaultUpgradeWaitTimeout, "maximum queue wait, independent of --timeout")
-	flags.StringVar(&cfg.WaitFor, "wait-for", "", "enable native Workflow observation; critical conservatively waits for all active Workflows")
+	waitIdle := flags.Bool("wait-idle", true, "wait for active Workflows before a version change (the default)")
+	flags.BoolVar(&cfg.NoWaitIdle, "no-wait-idle", false, "skip waiting; running Workflows of the previous version will fail on their next step")
+	flags.DurationVar(&cfg.WaitTimeout, "wait-for", installer.DefaultUpgradeWaitTimeout, "maximum wait for active Workflows before a version change, independent of --timeout")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "show what would change without doing it")
 	flags.BoolVar(&cfg.Yes, "yes", false, "with --rollback: accept the plan, including replacing the server database with the pre-upgrade backup")
 	flags.StringVar(&cfg.ChartOverride, "chart", "", "deploy this chart instead of the signed release (development only: not verified)")
@@ -61,6 +61,9 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: upgrade accepts flags only, no positional arguments", errUsage)
 	}
+	if !*waitIdle {
+		return fmt.Errorf("%w: --wait-idle=false is not supported; use --no-wait-idle", errUsage)
+	}
 	if *rollback != "" {
 		return runUpgradeRollback(ctx, *rollback, kubeContext, cfg, *forceRecord, *timeout, input, output)
 	}
@@ -72,23 +75,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	}
 
 	if cfg.WaitTimeout <= 0 {
-		return fmt.Errorf("%w: --wait-timeout must be positive", errUsage)
-	}
-	waitForProvided, waitTimeoutProvided := false, false
-	flags.Visit(func(f *flag.Flag) {
-		if f.Name == "wait-for" {
-			cfg.WaitIdle = true
-			waitForProvided = true
-		}
-		if f.Name == "wait-timeout" {
-			waitTimeoutProvided = true
-		}
-	})
-	if waitTimeoutProvided && !cfg.WaitIdle {
-		return fmt.Errorf("%w: --wait-timeout requires --wait-idle or --wait-for", errUsage)
-	}
-	if (waitForProvided || cfg.WaitFor != "") && cfg.WaitFor != "all" && cfg.WaitFor != "critical" {
-		return fmt.Errorf("%w: --wait-for must be all or critical", errUsage)
+		return fmt.Errorf("%w: --wait-for must be positive", errUsage)
 	}
 	cfg.Timeout = *timeout
 	cfg.BinaryVersion = version

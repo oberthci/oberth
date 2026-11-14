@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -84,8 +85,8 @@ func TestUpgradeMissingCurrentAdminAPIGivesRetryCommand(t *testing.T) {
 		t.Fatal("failed-release guidance missing", err)
 	}
 	var output bytes.Buffer
-	_, err = printUpgradeDryRun(&output, UpgradeConfig{WaitIdle: true, WaitFor: "critical"}, UpgradeResult{}, false)
-	if err != nil || !strings.Contains(output.String(), "active Kubernetes Workflows") || strings.Contains(output.String(), "live daemon queue") {
+	_, err = printUpgradeDryRun(&output, UpgradeConfig{WaitTimeout: time.Minute}, UpgradeResult{PreviousVersion: "0.22.7", TargetVersion: "0.22.8"}, false)
+	if err != nil || !strings.Contains(output.String(), "active Workflows") || strings.Contains(output.String(), "live daemon queue") {
 		t.Fatal("dry-run describes the wrong observer", err, output.String())
 	}
 }

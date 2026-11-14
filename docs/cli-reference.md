@@ -98,7 +98,7 @@ Usage: oberth admin public-identity [flags]
         owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
   -url string
         server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
-  -wait-for string
+  -wait-scope string
         idle observation: all or critical (default "all")
 ```
 
@@ -116,7 +116,7 @@ Usage: oberth admin readiness [flags]
         owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
   -url string
         server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
-  -wait-for string
+  -wait-scope string
         idle observation: all or critical (default "all")
 ```
 
@@ -1880,6 +1880,8 @@ Flags:
         Oberth namespace (default: oberth)
   -no-backup
         upgrade without the pre-upgrade history backup (a rollback across a schema migration is then impossible)
+  -no-wait-idle
+        skip waiting; running Workflows of the previous version will fail on their next step
   -openbao-namespace string
         OpenBao namespace (default: openbao)
   -reissue-server-ca
@@ -1904,12 +1906,10 @@ Flags:
         remove a permitted IP SAN; refused while served (repeatable)
   -values value
         values file to pass to helm upgrade (repeatable)
-  -wait-for string
-        enable native Workflow observation; critical conservatively waits for all active Workflows
+  -wait-for duration
+        maximum wait for active Workflows before a version change, independent of --timeout (default 2h0m0s)
   -wait-idle
-        wait for active Kubernetes Workflows before upgrading (advisory, not an admission freeze)
-  -wait-timeout duration
-        maximum queue wait, independent of --timeout (default 2h0m0s)
+        wait for active Workflows before a version change (the default) (default true)
   -yes
         with --rollback: accept the plan, including replacing the server database with the pre-upgrade backup
 ```
@@ -2313,6 +2313,6 @@ Usage: oberth wait-idle [flags]
         owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
   -url string
         server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
-  -wait-for string
+  -wait-scope string
         runs to wait for: all or critical (default "all")
 ```

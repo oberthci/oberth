@@ -133,3 +133,15 @@ func TestWaitIdleCriticalReportsStatusBeforeCapability(t *testing.T) {
 		})
 	}
 }
+
+func TestWaitIdleScopeFlag(t *testing.T) {
+	var help bytes.Buffer
+	if err := runWaitIdle(t.Context(), []string{"--help"}, &help); err != nil || !strings.Contains(help.String(), "-wait-scope") || strings.Contains(help.String(), "-wait-for") {
+		t.Fatalf("standalone scope help: %v %s", err, &help)
+	}
+	for _, args := range [][]string{{"--wait-for=critical"}, {"--wait-for=1m"}, {"--wait-scope=unknown"}} {
+		if err := runWaitIdle(t.Context(), args, io.Discard); !errors.Is(err, errUsage) {
+			t.Fatalf("ambiguous or invalid scope accepted: %v: %v", args, err)
+		}
+	}
+}
