@@ -85,7 +85,7 @@ func TestRunCancelQueuedRunIsNeverClaimed(t *testing.T) {
 	response := mustRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": queued.ID[:8], "reason": "pushed by mistake"})
 	if response.RunID != queued.ID || response.PreviousState != "waiting" || response.Workflow != "not_submitted" ||
 		response.Status != "running" || response.Phase != "cancelled" || response.CancelledBy != cancelAgent.Identity ||
-		response.Reason != "cancelling by agent@host: pushed by mistake" || response.Warning != "" {
+		response.Reason != "cancelling by agent@host: pushed by mistake" || !strings.Contains(response.Warning, "repeat cancel") {
 		t.Fatalf("queued cancel response = %#v", response)
 	}
 	fixture.start(t)

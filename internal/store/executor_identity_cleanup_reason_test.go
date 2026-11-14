@@ -8,11 +8,11 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestWorkflowMismatchReasonSurvivesRecoveryAndCleanupRearm(t *testing.T) {
+func TestExecutorIdentityReasonSurvivesRecoveryAndCleanupRearm(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
-	if _, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "feature/mismatch", strings.Repeat("a", 40))); err != nil {
+	if _, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "feature/identity", strings.Repeat("a", 40))); err != nil {
 		t.Fatal(err)
 	}
 	run, err := s.ClaimNextRun(t.Context())
@@ -22,7 +22,7 @@ func TestWorkflowMismatchReasonSurvivesRecoveryAndCleanupRearm(t *testing.T) {
 	if _, err := s.SetRunWorkflowName(t.Context(), run.ID, "wf"); err != nil {
 		t.Fatal(err)
 	}
-	const reason = "Workflow spec mismatch; cleanup pending"
+	const reason = ExecutorIdentityPendingMessage
 	if _, err := s.db.Exec(`UPDATE runs SET error=?, phase='infrastructure-pending' WHERE id=?`, reason, run.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestWorkflowMismatchReasonSurvivesRecoveryAndCleanupRearm(t *testing.T) {
 	}
 	current, err := s.Run(t.Context(), run.ID)
 	if err != nil || current.Status != model.RunRunning || current.Error != reason {
-		t.Fatalf("recovery/rearm lost mismatch: %+v %v", current, err)
+		t.Fatalf("recovery/rearm lost identity readiness reason: %+v %v", current, err)
 	}
 	if _, err := s.CancelRun(t.Context(), model.RunCancelRequest{RunID: run.ID, Actor: "operator"}); err != nil {
 		t.Fatal(err)

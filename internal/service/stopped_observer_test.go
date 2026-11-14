@@ -111,7 +111,7 @@ func TestStopRacedSucceededPromotionUsesNormalPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.git.remoteRefs = map[string]string{"refs/heads/" + f.repo.DefaultBranch: previous}
-	f.jobs.stopResult = JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{{Stage: "ci", Step: "tolerated", Status: model.StepFailed, ExitCode: 42}}}
+	f.jobs.stopResult = JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{{NodeID: "ci-tolerated", Stage: "ci", Step: "tolerated", Status: model.StepFailed, ExitCode: 42}}}
 	if err := f.store.MarkRunCreatePending(t.Context(), run.ID, claimed.WorkflowName); err != nil {
 		t.Fatal(err)
 	}
