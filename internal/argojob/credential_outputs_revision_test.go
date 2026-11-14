@@ -118,13 +118,36 @@ func credentialOtherContainer(t *wfv1.Template, shape string) {
 func TestCredentialOtherContainersPathOutputsRefused(t *testing.T) {
 	for _, cloud := range []bool{false, true} {
 		for _, shape := range []string{"sidecar", "containerSet"} {
-			if cloud && shape == "containerSet" {
-				continue
-			}
 			t.Run(fmt.Sprintf("cloud=%t/%s", cloud, shape), func(t *testing.T) {
 				config, request := credentialOutputRequest(t, cloud, false, "/root-result")
 				request = changeCredentialOutputRequest(t, request, func(wf *wfv1.Workflow) { credentialOtherContainer(&wf.Spec.Templates[0], shape) })
-				_, err := Build(config, request)
+				var err error
+				if shape == "containerSet" {
+					// Existing secret delivery recognizes only Container/Script;
+					// cloud identities refuse containerSet before mount injection.
+					// Exercise the conditional guard with an explicit mount decision.
+					wf, decodeErr := argoworkflow.Decode(request.Source)
+					if decodeErr != nil {
+						t.Fatal(decodeErr)
+					}
+					leaf := &wf.Spec.Templates[0]
+					if cloud {
+						err = validateCredentialOutputPaths(wf, nil, []*wfv1.Template{leaf})
+					} else {
+						err = validateCredentialOutputPaths(wf, map[*wfv1.Template]bool{leaf: true}, nil)
+						built, buildErr := Build(config, request)
+						if buildErr != nil {
+							t.Fatalf("uncredentialed containerSet refused: %v", buildErr)
+						}
+						for _, m := range templateMainContainer(&built.Spec.Templates[0]).VolumeMounts {
+							if m.Name == SecretsVolumeName || m.Name == ReleaseTokenVolumeName {
+								t.Fatal("containerSet unexpectedly received store credentials")
+							}
+						}
+					}
+				} else {
+					_, err = Build(config, request)
+				}
 				if err == nil || !strings.Contains(err.Error(), "another container of the Pod can redirect what Argo reads") || !strings.Contains(err.Error(), `template "main"`) {
 					t.Fatalf("shared parameter read admitted: %v", err)
 				}
