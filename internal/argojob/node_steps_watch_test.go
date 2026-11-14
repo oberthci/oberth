@@ -47,7 +47,7 @@ func TestWatchWaitStoresStepsWhileRunIsRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.ClaimNextRun(ctx); err != nil {
+	if _, err = db.StartRun(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	wf := watchWaitWorkflow(wfv1.WorkflowRunning)
