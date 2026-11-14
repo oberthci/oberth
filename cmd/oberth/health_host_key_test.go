@@ -11,11 +11,11 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestConfiguredHealthCarriesRealHostKeyToSystemStatus(t *testing.T) {

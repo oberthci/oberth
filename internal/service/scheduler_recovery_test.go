@@ -9,10 +9,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // recoveryJobs is a configurable JobController fake for testing the

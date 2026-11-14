@@ -10,9 +10,9 @@ import (
 	"golang.org/x/crypto/ssh"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type listedUpstreams []model.Upstream

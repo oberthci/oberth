@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitssh"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/pushretry"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // Use the durable scheduler path for each attempt, as both live dispatch and

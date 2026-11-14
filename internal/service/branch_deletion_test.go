@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // blockingUpstream never answers until its context ends, like the forge in

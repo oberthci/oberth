@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestAdminRunLogsResolvesUniqueStepBeforeFailedBurnDefault(t *testing.T) {

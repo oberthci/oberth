@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func (f *agentFixture) runList(t *testing.T, arguments map[string]any) ([]model.Run, error) {

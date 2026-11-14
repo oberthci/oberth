@@ -4,10 +4,10 @@ import (
 	"context"
 	"path/filepath"
 
-	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func removeTestRepository(ctx context.Context, path, root, input string) (store.RemovedRepository, error) {

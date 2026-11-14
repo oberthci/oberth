@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/identityname"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // testService creates a minimal API instance with an auditor and secret access
