@@ -27,7 +27,8 @@ test('missing configuration prints one install instruction without invoking CLI'
 // The bottom process hook is the fake CLI. No host command or network runs.
 function fixture(on: import('claude-code').On) {
   const clock = mock.clock(on, { now: Date.parse('2026-11-14T12:00:00Z') })
-  mock.env(on, { HOME: '/test/home', CLAUDE_CONFIG_DIR: '/test/config' })
+  const fixtureHome = '/test/user'
+  mock.env(on, { HOME: fixtureHome, CLAUDE_CONFIG_DIR: '/test/config' })
   on('settings.read', () => ({ value: { env: {
     CLAUDE_CODE_CLIENT_CERT: '/test/client.crt', CLAUDE_CODE_CLIENT_KEY: '/test/client.key',
   } } }))
@@ -44,7 +45,7 @@ function fixture(on: import('claude-code').On) {
   on('ui.status', (_, e) => { state.statuses.push(e.text ?? ''); return { value: undefined } })
   on('ui.toast', (_, e) => { state.toasts.push(e.text); return { value: undefined } })
   on('process.run', async (_, e) => {
-    expect(e.argv[0]).toBe('/test/home/.local/bin/oberth')
+    expect(e.argv[0]).toBe(`${fixtureHome}/.local/bin/oberth`)
     expect(e.argv).toContain('--client-cert')
     expect(e.argv).toContain('/test/client.crt')
     expect(e.argv).toContain('--client-key')
