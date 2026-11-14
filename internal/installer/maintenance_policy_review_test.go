@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -133,6 +135,10 @@ func TestRunUpgradePreservesPolicyWithoutProbePrivileges(t *testing.T) {
 					return nil, fmt.Errorf("unexpected helm %v", args)
 				},
 			}
+			withUpgradeWorkflowAPI(t, &deps, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, upgradeWorkflowList())
+			})
 			result, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.21.11", Namespace: "oberth", Yes: true, NoBackup: true, ChartOverride: testLocalChart, Timeout: time.Second}, deps)
 			if err != nil || !result.Upgraded || !applied {
 				t.Fatal("maintenance refused", err, output.String())

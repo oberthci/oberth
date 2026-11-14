@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -77,6 +78,10 @@ func TestPlainPKIUpgradeNeedsNoBaoToken(t *testing.T) {
 					return nil, nil
 				},
 			}
+			withUpgradeWorkflowAPI(t, &deps, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, upgradeWorkflowList())
+			})
 			result, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.17.81", ChartOverride: "fixture", DryRun: dryRun, NoBackup: true}, deps)
 			if err != nil || result.Upgraded != !dryRun || applied != !dryRun {
 				t.Fatalf("result=%+v applied=%t err=%v", result, applied, err)

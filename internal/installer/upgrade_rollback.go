@@ -164,9 +164,13 @@ type RollbackRestore struct {
 }
 
 // releasePipelineNamespace reads argo.namespace of the oberth release in
-// namespace ("" when its values name none).
-func releasePipelineNamespace(ctx context.Context, deps Deps, namespace string) (string, error) {
-	raw, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", namespace, "--all", "-o", "json"})
+// namespace at revision (latest when empty; "" when its values name none).
+func releasePipelineNamespace(ctx context.Context, deps Deps, namespace, revision string) (string, error) {
+	args := []string{"get", "values", "oberth", "-n", namespace, "--all", "-o", "json"}
+	if revision != "" {
+		args = append(args, "--revision", revision)
+	}
+	raw, err := deps.RunHelm(ctx, args)
 	if err != nil {
 		return "", fmt.Errorf("read the pipeline namespace of release oberth in %s: %w", namespace, err)
 	}
@@ -258,7 +262,7 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 		if _, err := os.Stat(record.Backup); err != nil {
 			return fmt.Errorf("pre-upgrade backup %s: %w", record.Backup, err)
 		}
-		if restore.ArgoNamespace, err = releasePipelineNamespace(ctx, deps, record.Namespace); err != nil {
+		if restore.ArgoNamespace, err = releasePipelineNamespace(ctx, deps, record.Namespace, ""); err != nil {
 			return err
 		}
 	}

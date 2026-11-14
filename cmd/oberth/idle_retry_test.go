@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -17,7 +16,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/oberthci/oberth/internal/installer"
 )
@@ -36,75 +34,6 @@ func upgradeWaitArgoObjects() []runtime.Object {
 
 func idleResponse(code int, body string) *http.Response {
 	return &http.Response{StatusCode: code, Header: http.Header{"X-Oberth-Idle-Version": {"1"}}, Body: io.NopCloser(strings.NewReader(body))}
-}
-
-func TestUpgradeWaitRetriesTimeoutBeforeUpgrade(t *testing.T) {
-	for _, persistent := range []bool{false, true} {
-		t.Run(fmt.Sprint(persistent), func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				start := time.Now()
-				calls, upgrades := 0, 0
-				client := &http.Client{Timeout: 5 * time.Second, Transport: idleRoundTrip(func(r *http.Request) (*http.Response, error) {
-					calls++
-					if calls == 1 || persistent {
-						<-r.Context().Done()
-						return nil, r.Context().Err()
-					}
-					return idleResponse(204, ""), nil
-				})}
-				var output bytes.Buffer
-				upgradeReached := errors.New("fixture reached Helm upgrade")
-				deps := installer.Deps{
-					KubeClient: fake.NewClientset(upgradeWaitArgoObjects()...),
-					Output:     &output,
-					RunCommandStream: func(ctx context.Context, w io.Writer, name string, args ...string) error {
-						if name != "kubectl" || !slices.Contains(args, "--wait-for=critical") {
-							t.Fatalf("unexpected command %s %v", name, args)
-						}
-						return waitIdle(ctx, client, "http://fixture/v1/idle?wait_for=critical", time.Second, idleWaitOptions{mode: "critical", output: w})
-					},
-					RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-						switch args[0] {
-						case "list":
-							return []byte(`[{"name":"oberth","status":"deployed","chart":"oberth-0.17.66"}]`), nil
-						case "version":
-							return []byte("v4.2.3"), nil
-						case "show":
-							return []byte("image:\n  ref: example.invalid/oberth@sha256:" + strings.Repeat("a", 64) + "\n"), nil
-						case "history":
-							return []byte(`[{"revision":1,"status":"deployed"}]`), nil
-						case "get":
-							if slices.Contains(args, "--all") {
-								return []byte(`{"compatibility":{"schemaIdentity":"legacy-schema-v1","auditDomain":"legacy-audit-v1","witnessKeyInfo":"legacy-witness-v1"}}`), nil
-							}
-							return []byte(`{"argo":{"podPolicy":{"enabled":false}}}`), nil
-						case "template":
-							return nil, nil
-						case "upgrade":
-							if slices.Contains(args, "--dry-run=server") {
-								return []byte(`{"config":{"argo":{"podPolicy":{"enabled":false}}}}`), nil
-							}
-							upgrades++
-							return nil, upgradeReached
-						default:
-							return nil, fmt.Errorf("unexpected Helm command %v", args)
-						}
-					},
-				}
-				_, err := installer.RunUpgrade(t.Context(), installer.UpgradeConfig{BinaryVersion: "0.17.67", ChartOverride: "/fixture", NoBackup: true, Yes: true, WaitFor: "critical", WaitTimeout: 2 * time.Minute}, deps)
-				if persistent {
-					if upgrades != 0 || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "last idle probe failure: read live daemon queue") || !strings.Contains(err.Error(), "upgrade not attempted") || time.Since(start) != 2*time.Minute {
-						t.Fatalf("upgrades=%d elapsed=%s err=%v", upgrades, time.Since(start), err)
-					}
-					if n := strings.Count(output.String(), "transient idle probe failure:"); n != 2 {
-						t.Fatalf("got %d diagnostics, want two: %s", n, &output)
-					}
-				} else if !errors.Is(err, upgradeReached) || upgrades != 1 || calls != 2 || time.Since(start) != 6*time.Second {
-					t.Fatalf("upgrades=%d calls=%d elapsed=%s err=%v", upgrades, calls, time.Since(start), err)
-				}
-			})
-		})
-	}
 }
 
 type idleBrokenBody struct{}

@@ -9,7 +9,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/oberthci/oberth/internal/releaseverify"
@@ -24,7 +23,7 @@ import (
 // Oberth release images. Published chart refs must resolve to this registry.
 const canonicalGARPrefix = "europe-west4-docker.pkg.dev/skipopsmain/oberth/"
 
-// DefaultUpgradeWaitTimeout bounds queue observation independently of rollout.
+// DefaultUpgradeWaitTimeout bounds Workflow observation independently of rollout.
 const DefaultUpgradeWaitTimeout = 2 * time.Hour
 
 // UpgradeConfig holds options for the upgrade command.
@@ -32,9 +31,8 @@ type UpgradeConfig struct {
 	// ArgoSecurityDefaults explicitly permits absent-only changes to an existing Argo release.
 	ArgoSecurityDefaults bool
 	ReissueServerCA      bool
-	WaitTimeout          time.Duration // independent queue-observation limit
-	WaitFor              string        // all or critical; a nonempty selection enables waiting
-	WaitIdle             bool          // optional advisory queue drain; ordinary upgrades adopt in-flight work
+	WaitTimeout          time.Duration // independent Workflow-observation limit
+	NoWaitIdle           bool          // explicitly skip the default wait before a version change
 	Namespace            string
 	DryRun               bool
 	Yes                  bool   // --yes, with --rollback: replace the database with the pre-upgrade backup without a second run
@@ -133,14 +131,8 @@ func (cfg *UpgradeConfig) ValidateUpgrade() error {
 		return err
 	}
 	cfg.TLSExtraIPs, cfg.TLSRemoveIPs = tls.TLSExtraIPs, tls.TLSRemoveIPs
-	if cfg.WaitFor != "" {
-		if cfg.WaitFor != "all" && cfg.WaitFor != "critical" {
-			return errors.New("--wait-for must be all or critical")
-		}
-		cfg.WaitIdle = true
-	}
 	if cfg.WaitTimeout < 0 {
-		return errors.New("--wait-timeout must be positive")
+		return errors.New("--wait-for must be positive")
 	}
 	if cfg.WaitTimeout == 0 {
 		cfg.WaitTimeout = DefaultUpgradeWaitTimeout
@@ -446,10 +438,8 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return printUpgradeDryRun(w, cfg, result, retryFailed)
 	}
 
-	if cfg.WaitIdle {
-		if err := waitForUpgradeIdle(ctx, cfg, deps); err != nil {
-			return result, err
-		}
+	if err := waitBeforeUpgrade(ctx, cfg, deps, cmp != 0); err != nil {
+		return result, err
 	}
 
 	// The backup and the rollback record come last before the first write,
@@ -899,8 +889,12 @@ func verifyRunningVersion(ctx context.Context, deps Deps, cfg UpgradeConfig, tar
 
 func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, retryFailed bool) (UpgradeResult, error) {
 	_, _ = fmt.Fprintf(w, "\nDry-run plan (no cluster changes will be made):\n\n")
-	if cfg.WaitIdle {
-		_, _ = fmt.Fprintf(w, "  Wait for %s runs in the selected live daemon queue (--wait-idle; --wait-timeout=%s).\n", upgradeWaitSelection(cfg), cfg.WaitTimeout)
+	if canonicalChartVersion(result.PreviousVersion) != canonicalChartVersion(result.TargetVersion) {
+		if cfg.NoWaitIdle {
+			_, _ = fmt.Fprintln(w, "  The real upgrade will skip waiting (--no-wait-idle); running Workflows of the previous version will fail on their next step.")
+		} else {
+			_, _ = fmt.Fprintf(w, "  The real upgrade will wait for active Workflows before any change (--wait-for=%s); timeout refuses the upgrade.\n", cfg.WaitTimeout)
+		}
 	}
 	_, _ = fmt.Fprintln(w, "  Verify Helm >= 3.14, read installed values (including defaults), pin compatibility identities, and validate stored values against the target chart schema before applying changes.")
 	if cfg.serverPKI {
@@ -956,153 +950,4 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 
 	_, _ = fmt.Fprintln(w, "No cluster changes were made (--dry-run).")
 	return result, nil
-}
-
-func upgradeWaitSelection(cfg UpgradeConfig) string {
-	if cfg.WaitFor == "critical" {
-		return "critical"
-	}
-	return "all"
-}
-
-// waitForUpgradeIdle observes the selected Deployment through its private admin
-// socket, preserving the full queue rather than a scoped remote API view.
-func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
-	limit := cfg.WaitTimeout
-	if limit == 0 {
-		limit = DefaultUpgradeWaitTimeout
-	}
-	ctx, cancel := context.WithTimeout(ctx, limit)
-	defer cancel()
-	start := time.Now()
-	output := deps.Output
-	if output == nil {
-		output = io.Discard
-	}
-	// Only this wait owns these concurrent writes; join the heartbeat before
-	// returning so the following upgrade phase has exclusive output ownership.
-	writer := &upgradeWaitWriter{output: output}
-	if _, err := fmt.Fprintf(writer, "Waiting before upgrade: selection=%s wait-timeout=%s rollout-timeout=%s\n", upgradeWaitSelection(cfg), limit, cfg.Timeout); err != nil {
-		return err
-	}
-	stop, joined := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(joined)
-		ticker := time.NewTicker(15 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				if _, err := fmt.Fprintf(writer, "Still waiting for %s runs; elapsed=%s limit=%s\n", upgradeWaitSelection(cfg), time.Since(start).Truncate(time.Second), limit); err != nil {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
-	defer func() { close(stop); <-joined }()
-	args := []string{"exec", "-c", "oberth", "-n", cfg.Namespace, "deploy/oberth", "--", "/usr/local/bin/oberth", "wait-idle", "--timeout=" + limit.String()}
-	if cfg.WaitFor == "critical" {
-		args = append(args, "--wait-for=critical")
-	}
-	if deps.ContextName != "" {
-		args = append([]string{"--context", deps.ContextName}, args...)
-	}
-	// Keep child diagnostics separate from heartbeat writes so split messages
-	// remain recognizable without retaining unbounded subprocess output.
-	childOutput := &upgradeWaitWriter{output: writer}
-	var err error
-	if deps.RunCommandStream != nil {
-		err = deps.RunCommandStream(ctx, childOutput, "kubectl", args...)
-	} else if deps.RunCommand != nil {
-		var body []byte
-		body, err = deps.RunCommand(ctx, nil, "kubectl", args...)
-		if len(body) > 0 {
-			_, writeErr := childOutput.Write(body)
-			err = errors.Join(err, writeErr)
-		}
-	} else {
-		err = DefaultRunCommandStream(ctx, childOutput, "kubectl", args...)
-	}
-	if err != nil || ctx.Err() != nil || writer.err() != nil {
-		cause := err
-		if ctx.Err() != nil && !errors.Is(cause, ctx.Err()) {
-			cause = errors.Join(cause, ctx.Err())
-		}
-		cause = errors.Join(cause, writer.err())
-		// The local deadline may kill kubectl before the in-pod waiter can
-		// print its final error. Retain its last reported probe cause too.
-		if ctx.Err() != nil {
-			if reason := childOutput.probeFailure(); reason != "" {
-				cause = fmt.Errorf("%w; last reported idle probe failure: %s", cause, reason)
-			}
-		}
-		if cfg.WaitFor == "critical" && childOutput.unsupportedFlag() {
-			cause = fmt.Errorf("server too old for --wait-for=critical; use --wait-for=all: %w", cause)
-		}
-		return fmt.Errorf("wait for %s queue via local kubectl exec failed (elapsed=%s limit=%s); upgrade not attempted: %w", upgradeWaitSelection(cfg), time.Since(start).Truncate(time.Millisecond), limit, cause)
-	}
-	return nil
-}
-
-type upgradeWaitWriter struct {
-	mu                 sync.Mutex
-	output             io.Writer
-	failure            error
-	diagnosticTail     string
-	unsupportedWaitFor bool
-	probeLine          string
-	lastProbeFailure   string
-}
-
-func (w *upgradeWaitWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	const unknownFlag = "flag provided but not defined: -wait-for"
-	diagnostic := w.diagnosticTail + string(p)
-	w.unsupportedWaitFor = w.unsupportedWaitFor || strings.Contains(diagnostic, unknownFlag)
-	if len(diagnostic) >= len(unknownFlag) {
-		diagnostic = diagnostic[len(diagnostic)-len(unknownFlag)+1:]
-	}
-	w.diagnosticTail = strings.Clone(diagnostic)
-	// Child stdout/stderr may split diagnostics at any byte. Keep at most one
-	// bounded line and one reason; never retain the whole subprocess output.
-	for _, part := range strings.SplitAfter(string(p), "\n") {
-		w.probeLine += part
-		if len(w.probeLine) > 4096 {
-			w.probeLine = strings.Clone(w.probeLine[len(w.probeLine)-4096:])
-		}
-		if strings.HasSuffix(w.probeLine, "\n") {
-			if strings.HasPrefix(w.probeLine, "Waiting for ") {
-				if _, reason, ok := strings.Cut(w.probeLine, " queue: transient idle probe failure: "); ok {
-					reason, _, _ = strings.Cut(reason, "; retrying (elapsed=")
-					w.lastProbeFailure = strings.TrimSpace(reason)
-				} else if strings.Contains(w.probeLine, " queue: queued=") || strings.Contains(w.probeLine, " queue: busy ") {
-					w.lastProbeFailure = ""
-				}
-			}
-			w.probeLine = ""
-		}
-	}
-	n, err := w.output.Write(p)
-	if err == nil && n != len(p) {
-		err = io.ErrShortWrite
-	}
-	w.failure = errors.Join(w.failure, err)
-	return n, err
-}
-func (w *upgradeWaitWriter) err() error { w.mu.Lock(); defer w.mu.Unlock(); return w.failure }
-
-func (w *upgradeWaitWriter) unsupportedFlag() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.unsupportedWaitFor
-}
-
-func (w *upgradeWaitWriter) probeFailure() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.lastProbeFailure
 }

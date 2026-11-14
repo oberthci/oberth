@@ -19,7 +19,7 @@ func TestRunUpgradeHelpReturnsNil(t *testing.T) {
 		t.Fatalf("runUpgrade --help = %v", err)
 	}
 	text := output.String()
-	for _, flag := range []string{"namespace", "context", "dry-run", "yes", "timeout", "wait-timeout", "wait-for", "chart", "values", "set"} {
+	for _, flag := range []string{"namespace", "context", "dry-run", "yes", "timeout", "wait-idle", "no-wait-idle", "wait-for", "chart", "values", "set"} {
 		if !strings.Contains(text, flag) {
 			t.Fatalf("help output missing flag %q: %q", flag, text)
 		}
@@ -63,8 +63,16 @@ func TestUpgradeCompletionExitStatus(t *testing.T) {
 }
 
 func TestUpgradeRejectsInvalidWaitOptionsBeforeClusterAccess(t *testing.T) {
-	for _, args := range [][]string{{"--wait-idle", "--wait-timeout=0"}, {"--wait-idle", "--wait-timeout=-1s"}, {"--wait-for=unknown"}, {"--wait-for="}, {"--wait-timeout=1h"}} {
+	for _, args := range [][]string{{"--wait-for=0"}, {"--wait-for=-1s"}, {"--wait-for=critical"}, {"--wait-for="}, {"--wait-timeout=1h"}} {
 		if err := runUpgrade(t.Context(), args, nil, io.Discard); !errors.Is(err, errUsage) {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+}
+
+func TestUpgradeAcceptsDefaultWaitOptionsBeforeClusterAccess(t *testing.T) {
+	for _, args := range [][]string{nil, {"--wait-idle"}, {"--wait-for=1h"}, {"--no-wait-idle"}} {
+		if err := runUpgrade(t.Context(), args, nil, io.Discard); err == nil || !strings.Contains(err.Error(), "dev build") {
 			t.Fatalf("%v: %v", args, err)
 		}
 	}

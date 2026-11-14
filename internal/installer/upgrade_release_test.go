@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,6 +23,8 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/releaseverify"
+
+	"k8s.io/client-go/rest"
 )
 
 // testReleaseChart is the stand-in chart archive a test release signs.
@@ -84,6 +87,17 @@ func testReleaseObjects(t testing.TB, key *ecdsa.PrivateKey, version, imageRef s
 func withSignedRelease(t testing.TB, deps *Deps, version, imageRef string) {
 	t.Helper()
 	deps.ReleaseGetter, deps.releaseKey = signedReleaseServer(t, version, imageRef)
+	if deps.RestConfig != nil {
+		deps.RestConfig = rest.CopyConfig(deps.RestConfig)
+		deps.RestConfig.Wrap(func(next http.RoundTripper) http.RoundTripper {
+			return upgradeIdleRoundTrip(func(r *http.Request) (*http.Response, error) {
+				if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/workflows") {
+					return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(upgradeWorkflowList()))}, nil
+				}
+				return next.RoundTrip(r)
+			})
+		})
+	}
 }
 
 // signedReleaseServer serves a signed release of version whose record pins
@@ -261,3 +275,7 @@ func TestInstallReconcileOfANewerReleaseNeverDeploysThePreflightChart(t *testing
 		t.Fatalf("helm upgrade deployed %v, want the verified chart of the installed version %s", upgradeArgs, installed)
 	}
 }
+
+type upgradeIdleRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f upgradeIdleRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
