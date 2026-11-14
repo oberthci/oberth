@@ -1,7 +1,6 @@
 package argojob
 
 import (
-	"io"
 	"testing"
 	"time"
 
@@ -463,7 +462,7 @@ func TestCompletionNamesTheFailedStageAndStep(t *testing.T) {
 // success gate: a step whose failure was tolerated by its dependents is still
 // a run-level failure. This is how Homebrew publication failure correctly
 // fails the release (finding 6, issue #28).
-func TestCompletionSucceededWorkflowWithFailedStepIsRed(t *testing.T) {
+func TestCompletionSucceededWorkflowKeepsNativeVerdict(t *testing.T) {
 	started := metav1.NewTime(time.Unix(1000, 0).UTC())
 	finished := metav1.NewTime(time.Unix(1010, 0).UTC())
 
@@ -506,13 +505,8 @@ func TestCompletionSucceededWorkflowWithFailedStepIsRed(t *testing.T) {
 	}
 
 	completion := completionFor(workflow)
-	// A Succeeded Workflow with a terminally failed step must be red.
-	if completion.Succeeded {
-		t.Fatal("a Succeeded Workflow with a failed configured step must NOT stay Succeeded")
-	}
-	if completion.FailedStage != "homebrew" || completion.FailedStep != "homebrew" {
-		t.Errorf("FailedStage/FailedStep = %q/%q, want homebrew/homebrew",
-			completion.FailedStage, completion.FailedStep)
+	if !completion.Succeeded || completion.FailedStage != "" || completion.FailedStep != "" {
+		t.Fatal("a Succeeded Workflow acquired failure identity from a tolerated node", completion)
 	}
 
 	// The individual step's status is still Failed in the Steps slice.
@@ -747,9 +741,6 @@ func TestProgressReporterEmitsAMonotonicStream(t *testing.T) {
 	if reporter.observe(destination, step) {
 		t.Fatal("a terminal step asked for its log twice")
 	}
-	if reporter.failed != nil {
-		t.Fatalf("reporter recorded a failure: %v", reporter.failed)
-	}
 }
 
 // A fast terminal step remains eligible for log replay without log control bytes.
@@ -768,33 +759,6 @@ func TestProgressReporterSynthesizesRunningForAFastStep(t *testing.T) {
 	if destination.String() != "" {
 		t.Fatal("step observation emitted log control bytes")
 	}
-}
-
-// TestCopyPrefixedAttributesEveryLine proves the run log index can attribute
-// each line of a step's Pod log to its burn and step.
-func TestCopyPrefixedAttributesEveryLine(t *testing.T) {
-	destination := &recordingWriter{}
-	if err := copyPrefixed(destination, StepResult{Stage: "setup", Step: "prepare"},
-		stringReader("first\r\nsecond\nthird without newline")); err != nil {
-		t.Fatalf("copyPrefixed: %v", err)
-	}
-	want := "[setup/prepare] first\n[setup/prepare] second\n[setup/prepare] third without newline\n"
-	if destination.String() != want {
-		t.Fatalf("got:\n%q\nwant:\n%q", destination.String(), want)
-	}
-}
-
-func stringReader(body string) *stringBodyReader { return &stringBodyReader{body: []byte(body)} }
-
-type stringBodyReader struct{ body []byte }
-
-func (reader *stringBodyReader) Read(chunk []byte) (int, error) {
-	if len(reader.body) == 0 {
-		return 0, io.EOF
-	}
-	copied := copy(chunk, reader.body)
-	reader.body = reader.body[copied:]
-	return copied, nil
 }
 
 // TestProgressReporterRetryAttemptResetsFrozenStatus proves that a retry

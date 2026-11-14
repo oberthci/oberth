@@ -6,74 +6,9 @@ const source = readFileSync(new URL('../internal/api/static/app.js', import.meta
 const sandbox = vm.createContext({ console, URLSearchParams, Map, Set, Date, location:{pathname:'/runs/live-run'}, document: {getElementById(){return null;}}, localStorage:{getItem(){return null;}}, AbortController, setTimeout() {}, clearTimeout() {}, setInterval() {}, clearInterval() {}, requestAnimationFrame() {return 1;}, cancelAnimationFrame() {} });
 vm.runInContext(source.slice(0, source.indexOf('/* ---------- events ---------- */')), sandbox);
 const run = code => vm.runInContext(code, sandbox);
-run(`
-  repoName = () => 'oberth';
-  const fixtureRun = { id: 'live-run', ref: 'fix/live', phase: 'test', status: 'running' };
-  // Drive fallback ticks explicitly; metadata rendering no longer polls logs.
-  const realLiveLogContent = liveLogContent;
-  liveLogContent = async (...args) => {
-    if (state.live) await pollLiveLog(state.live);
-    const html = await realLiveLogContent(...args);
-    return html + liveDeliverySummary(state.live, args[1], args[2]);
-  };
-  let polls = [];
-  api = async () => { const next = polls.shift(); if (next instanceof Error) throw next; return next; };
-`);
-assert.equal(run(`JSON.stringify(selectedLiveLines(['[build/one] one', '[build/two] wrong', '[build/one-extra] wrong', '[build/one] repeat', '[build/one] repeat'], 'build', 'one'))`), JSON.stringify(['one', 'repeat', 'repeat']));
-run(`polls.push({chunk:'[build/one] fir', offset:15}); awaitResult = liveLogContent(fixtureRun, 'build', 'one');`);
-await run('awaitResult');
-assert.equal(run('state.live.text'), '');
-run(`polls.push({chunk:'st\\n[build/two] foreign\\n::oberth-log:: {"burn":"build","step":"one","state":"following"}\\n', offset:150}); awaitResult = liveLogContent(fixtureRun, 'build', 'one');`);
-let html = await run('awaitResult');
-assert.ok(html.includes('first'));
-assert.ok(!html.includes('foreign'));
-assert.ok(!html.includes('::oberth-log::'));
-assert.ok(html.includes('following'));
-assert.ok(html.includes('delivery unconfirmed'));
-run(`state.live.delivery.get('build/one/').at = new Date().toISOString();`);
-assert.ok(run(`liveDeliverySummary(state.live, 'build', 'one')`).includes('pod delivery: following'));
-assert.ok(run(`liveDeliverySummary(state.live, 'build', 'one', Date.now()+11000)`).includes('delivery unconfirmed'));
-run(`polls.push(new Error('offline')); awaitResult = liveLogContent(fixtureRun, 'build', 'one');`);
-html = await run('awaitResult');
-assert.ok(html.includes('reconnecting: offline'));
-assert.ok(html.includes('first'));
-assert.equal(run('state.live.offset'), 150);
-run(`polls.push({chunk:'', offset:150}); awaitResult = liveLogContent(fixtureRun, 'build', 'one');`);
-html = await run('awaitResult');
-assert.ok(html.includes('polling connected'));
-assert.ok(!html.includes('offline'));
-assert.ok(run(`liveDeliverySummary(state.live, 'build', 'one', Date.now() + 60000)`).includes('quiet period'));
-// Scope raw records before interpreting carriage returns as visual lines.
-// A sibling's progress text must not impersonate a selected-step prefix.
-run(`polls.push({chunk:'[build/one] progress-1\\rprogress-2\\n[build/two] sibling\\r[build/one] foreign-progress\\n', offset:250}); awaitResult = liveLogContent(fixtureRun, 'build', 'one');`);
-html = await run('awaitResult');
-assert.ok(html.includes('progress-2'), 'carriage-return output stays visible');
-assert.ok(!html.includes('foreign-progress'), 'carriage returns cannot change attribution');
-assert.ok(!html.includes('[build/one]'), 'selected logs omit the retained attribution prefix');
-run(`polls.push({chunk:'[build/one] final-without-newline', offset:280, done:true}); awaitResult = liveLogContent(fixtureRun, 'build', 'one');`);
-html = await run('awaitResult');
-assert.ok(html.includes('final-without-newline'), 'the final poll flushes an unterminated tail');
-assert.equal(run('state.live.pending'), '');
-assert.equal(run('state.live.done'), true);
-// Empty final polls must flush a fragment retained by the preceding poll too.
-run(`state.live.done = false; polls.push({chunk:'[build/one] split-final', offset:300}); awaitResult = liveLogContent(fixtureRun, 'build', 'one');`);
-await run('awaitResult');
-assert.ok(!run('state.live.text').includes('split-final'));
-run(`polls.push({chunk:'', offset:300, done:true}); awaitResult = liveLogContent(fixtureRun, 'build', 'one');`);
-assert.ok((await run('awaitResult')).includes('split-final'));
-// Retained single-step logs remove only the outer transport attribution,
-// leaving command-authored bracketed messages untouched.
-run(`polls.push({output:'[release-build/full-our-step-name] actual log\\n[release-build/full-our-step-name] [INFO] user message\\n'}); awaitResult = stepLogContent('completed', {burn:'release-build', step:'full-our-step-name', status:'passed'}, false);`);
-html = await run('awaitResult');
-assert.ok(html.includes('actual log') && html.includes('[INFO] user message'));
-assert.ok(!html.includes('[release-build/full-our-step-name]'));
-html = run(`renderLogLines(['[build/one] actual one', '[build/two] actual two', '[build/one] actual next'], {groupSteps:true})`);
-assert.ok(!html.includes('[build/one]') && !html.includes('[build/two]'));
-assert.equal((html.match(/log-hdr/g) || []).length, 3, 'combined output labels each change of step');
-html = run(`renderLogLines(splitAttributedLogText('[build/two] progress\\r[build/one] command text\\n'), {groupSteps:true})`);
-assert.equal((html.match(/log-hdr/g) || []).length, 1, 'CR updates cannot forge combined-view step headers');
-assert.ok(html.includes('── build / two ──'));
-
+run(`repoName = () => 'oberth';`);
+let html;
+assert.ok(run(`renderLogLines(['@@oberth:step plain', '::oberth-log:: plain', '[build/one] command'])`).includes('::oberth-log:: plain'));
 // Equal display names from fan-out and retries retain separate selection keys.
 run(`const nativeRows = [
  {node_id:'attempt-1',display_name:'check',template:'shared',phase:'Succeeded',status:'passed',ordinal:1},
@@ -99,16 +34,24 @@ assert.ok(run('state.live.pending.length') <= 400000);
 run(`ingestLiveChunk(state.live, ('[build/one] small\\n').repeat(10000), Date.now());`);
 assert.equal(run(`(renderLogLines(splitLogText(state.live.text)).match(/class="log-line/g) || []).length`), 5001);
 
+// Failure selection follows the recorded native node, not the earliest retry.
+assert.equal(run(`defaultStep({run:{status:'failed',failed_step:'attempt-1'},steps:nativeRows})`),'attempt-1');
+assert.equal(run(`defaultStep({run:{status:'passed'},steps:nativeRows})`),'');
+// Selecting a node with no copy must not silently show a sibling's bytes.
+run(`api=async path=>path.endsWith('/containers')?{containers:[{node_id:'other',container:'main',stored:true}]}:{output:'selected node reason'}; awaitResult=containerLogContent({id:'missing',status:'failed'},'target');`);
+html=await run('awaitResult');
+assert.ok(html.html.includes('selected node reason'));
+
 // Exercise the actual detail renderer's scroll restoration and combined-view
 // selection, including a terminal poll that must continue draining chunks.
 run(`
   state.repos = [{id: 1, name:'oberth'}];
   state.stepRunID = 'scroll-run'; state.step = '__summary__';
   currentRoute = () => true; setChrome = () => {}; replaceApp = () => {};
-  liveLogContent = async () => 'fixture log';
+  containerLogContent = async () => ({html:'fixture log',options:'',live:true}); state.live = {key:'fixture',controller:new AbortController(),done:false}; paintContainerLog = () => {};
   const oldTerm = {scrollHeight:1000, scrollTop:123, clientHeight:100};
   const oldSteps = {scrollTop:45};
-  const newTerm = {scrollHeight:1200, scrollTop:0, clientHeight:100};
+  const newTerm = {scrollHeight:1200, scrollTop:0, clientHeight:100,dataset:{}};
   const newSteps = {scrollTop:0};
   let termReads = 0, stepReads = 0;
   document = {getElementById(id) {

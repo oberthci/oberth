@@ -57,6 +57,13 @@ func TestArgoSecurityLiveConsentAndMigration(t *testing.T) {
 				if strings.HasPrefix(mode, "old-profile") {
 					stored = `{"controller":{"configMap":{"create":false}}}`
 				}
+				if safe {
+					if strings.HasPrefix(mode, "old-profile") {
+						stored = `{"controller":{"configMap":{"create":false},"workflowDefaults":{"spec":{"ttlStrategy":{"secondsAfterCompletion":3600}}}}}`
+					} else {
+						stored = `{"controller":{"workflowDefaults":{"spec":{"ttlStrategy":{"secondsAfterCompletion":3600}}}}}`
+					}
+				}
 				var output bytes.Buffer
 				writes := 0
 				client := fake.NewClientset(argoSecurityLiveObjects(DefaultArgoNamespace, safe)...)

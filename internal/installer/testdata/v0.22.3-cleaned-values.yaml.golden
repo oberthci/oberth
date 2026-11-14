@@ -139,7 +139,6 @@ argo:
   perRepoIdentities: []
   perRepoCIIdentities: []
   perStepIdentities: []
-  workflowTTL: 3600
   sourceStorageClass: ''
   vault:
     address: ''

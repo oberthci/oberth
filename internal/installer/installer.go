@@ -152,6 +152,7 @@ type Config struct {
 	RekorChartVersion     string
 	ArgoChartVersion      string
 	argoExecutorResources *ArgoExecutorResourcesReview
+	argoWorkflowTTL       *ArgoWorkflowTTLReview
 	// ArgoParallelism and ArgoNamespaceParallelism set native controller limits;
 	// nil preserves the stored value.
 	ArgoParallelism           *int
@@ -2186,6 +2187,7 @@ Next steps:
 
 func printDryRunPlan(cfg Config, w io.Writer, cluster ClusterInfo) error {
 	printArgoExecutorResources(w, argoExecutorResourcesForReview(cfg))
+	printArgoWorkflowTTL(w, argoWorkflowTTLForReview(cfg))
 	_, _ = fmt.Fprintf(w, "\nDry-run plan (no cluster changes will be made):\n\n")
 	step := 1
 

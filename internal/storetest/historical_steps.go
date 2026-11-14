@@ -43,3 +43,20 @@ func PutHistoricalStepResult(database *store.Store, ctx context.Context, result 
 		stamp(result.StartedAt), stamp(result.FinishedAt), fixtureNow(fixture).UnixNano(), diagnostic)
 	return result, err
 }
+
+// PutStepResult seeds one live native row through the bulk snapshot writer.
+func PutStepResult(ctx context.Context, database *store.Store, result model.StepResult) (model.StepResult, error) {
+	if err := database.PutStepResults(ctx, result.RunID, []model.StepResult{result}); err != nil {
+		return model.StepResult{}, err
+	}
+	rows, err := database.StepResults(ctx, result.RunID)
+	if err != nil {
+		return model.StepResult{}, err
+	}
+	for _, row := range rows {
+		if row.NodeID == result.NodeID {
+			return row, nil
+		}
+	}
+	return model.StepResult{}, store.ErrNotFound
+}

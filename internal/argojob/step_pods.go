@@ -93,37 +93,11 @@ func (controller *Controller) observedStepAttempts(ctx context.Context, workflow
 		bindStepPodNames(workflow, steps, pods)
 		return steps
 	}
-	budget, attempts := time.Second, 1
-	if workflow.Status.Phase.Completed() {
-		budget, attempts = finalLogDrainBudget, 3
-	}
-	readCtx, cancel := context.WithTimeout(ctx, budget)
+	readCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	for attempt := 0; attempt < attempts; attempt++ {
-		attemptCtx, cancelAttempt := context.WithTimeout(readCtx, finalLogReadTimeout)
-		pods, complete := controller.stepLogPodSnapshot(attemptCtx, workflow)
-		cancelAttempt()
-		if complete {
-			bindStepPodNames(workflow, steps, pods)
-			bound := true
-			for _, step := range steps {
-				if workflow.Status.Nodes[step.NodeID].Type == wfv1.NodeTypePod && step.PodName == "" {
-					bound = false
-				}
-			}
-			if bound {
-				return steps
-			}
-		}
-		if attempt+1 < attempts {
-			timer := time.NewTimer(time.Duration(attempt+1) * 250 * time.Millisecond)
-			select {
-			case <-readCtx.Done():
-				timer.Stop()
-				return steps
-			case <-timer.C:
-			}
-		}
+	if pods, complete := controller.stepLogPodSnapshot(readCtx, workflow); complete {
+		bindStepPodNames(workflow, steps, pods)
 	}
+
 	return steps
 }

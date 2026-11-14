@@ -25,6 +25,7 @@ import (
 	"github.com/oberthci/oberth/internal/artifacts"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 )
@@ -40,6 +41,7 @@ func buildArgoEngine(
 	kube kubernetes.Interface,
 	auditor service.Auditor,
 	secretAccess app.SecretAccessLoader,
+	containerLogs runlog.ContainerLogStore,
 	artifactStore app.ArtifactStore,
 	artifactLimit int64,
 	perRepoIdentities map[string]argojob.PerRepoIdentityConfig,
@@ -92,8 +94,6 @@ func buildArgoEngine(
 
 		Assist: options.assist,
 
-		// #nosec G115 -- validateServeOptions bounds argoWorkflowTTL to a positive int32.
-		TTLSeconds:          int32(options.argoWorkflowTTL),
 		PerRepoIdentities:   perRepoIdentities,
 		PerRepoCIIdentities: buildPerRepoCIIdentities(perRepoIdentities),
 	}
@@ -106,7 +106,7 @@ func buildArgoEngine(
 	if err != nil {
 		return nil, err
 	}
-	controller.WithWatchHub(hub)
+	controller.WithWatchHub(hub).WithContainerLogStore(containerLogs)
 	if writer, ok := auditor.(argojob.StepResultWriter); ok {
 		controller.WithStepResultWriter(writer)
 	}
@@ -125,6 +125,7 @@ func buildArgoEngine(
 		return nil, err
 	}
 	jobs.SetWatchHub(hub)
+	jobs.SetContainerLogSource(controller)
 	if artifactStore != nil {
 		jobs.SetArtifacts(seeder, artifactStore, artifactLimit)
 	}
@@ -158,9 +159,6 @@ func validateArgoServeOptions(options serveOptions) error {
 	}
 	if options.argoNamespace == options.namespace {
 		return errors.New("serve: --argo-namespace must differ from --namespace; pipeline identities must not share a namespace with the server")
-	}
-	if options.argoWorkflowTTL <= 0 || options.argoWorkflowTTL > 1<<31-1 {
-		return errors.New("serve: --argo-workflow-ttl must be positive")
 	}
 	if options.argoVaultCredentialedRole != "" && options.argoVaultAddress == "" {
 		return errors.New("serve: --argo-vault-credentialed-role needs --argo-vault-address")

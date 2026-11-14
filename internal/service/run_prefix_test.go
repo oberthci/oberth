@@ -45,7 +45,7 @@ func TestRunLogDefaults(t *testing.T) {
 			}
 			for i, step := range steps {
 				step.RunID, step.Status, step.Ordinal = run.ID, model.StepPassed, i
-				if _, err := f.retention.Database.PutStepResult(ctx, step); err != nil {
+				if _, err := storetest.PutStepResult(ctx, f.retention.Database, step); err != nil {
 					t.Fatal(err)
 				}
 			}

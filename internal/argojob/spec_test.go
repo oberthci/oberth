@@ -272,8 +272,8 @@ func TestBuildStampsServerOwnedIdentity(t *testing.T) {
 	if built.Labels["oberth.ci/engine"] != "argo" || built.Labels["oberth.ci/trigger"] != "ci" {
 		t.Fatalf("labels = %v", built.Labels)
 	}
-	if built.Spec.TTLStrategy == nil || built.Spec.TTLStrategy.SecondsAfterCompletion == nil {
-		t.Fatal("no retention policy was pinned")
+	if built.Spec.TTLStrategy != nil {
+		t.Fatal("retention default must come from Argo workflowDefaults")
 	}
 }
 

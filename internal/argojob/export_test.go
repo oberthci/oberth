@@ -7,11 +7,10 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 )
 
-// publish emits the progress transitions and step logs this observation
-// reveals that previous ones did not. It returns an error when the aggregate
-// run log budget is breached during step log replay, naming the offending step.
+// publish drives the production status observer without opening Pod logs.
 func (controller *Controller) publish(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, destination io.Writer) error {
-	return controller.publishLogs(ctx, workflow, controller.observedStepAttempts(ctx, workflow), reporter, destination, nil)
+	controller.observeStepProgress(ctx, workflow, reporter, destination)
+	return nil
 }
 
 // NewIdentityStore creates a store seeded with the given maps.
@@ -19,8 +18,4 @@ func NewIdentityStore(release, ci map[string]PerRepoIdentityConfig) *IdentitySto
 	store := &IdentityStore{}
 	store.Replace(release, ci)
 	return store
-}
-
-func (worker *stepLogFollower) consume(reader io.Reader) error {
-	return worker.consumeRecords(reader, false)
 }

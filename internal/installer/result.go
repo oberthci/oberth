@@ -37,6 +37,7 @@ type CheckResult struct {
 }
 
 type InstallReview struct {
+	ArgoWorkflowTTL          *ArgoWorkflowTTLReview       `json:"argo_workflow_ttl,omitempty"`
 	ArgoSecurity             []ArgoSecurityReview         `json:"argo_security,omitempty"`
 	ArgoParallelism          string                       `json:"argo_parallelism"`
 	ArgoNamespaceParallelism string                       `json:"argo_namespace_parallelism"`
@@ -62,7 +63,7 @@ func Review(cfg Config) InstallReview {
 	if cfg.ClientHost != "" {
 		dns, ips = CertificateNamesForClientHost(cfg.ClientHost, dns, ips)
 	}
-	return InstallReview{ArgoSecurity: cfg.argoSecurityReview, ArgoParallelism: argoReviewLimit(cfg, cfg.ArgoParallelism, "parallelism", DefaultArgoParallelism), ArgoNamespaceParallelism: argoReviewLimit(cfg, cfg.ArgoNamespaceParallelism, "namespaceParallelism", DefaultArgoNamespaceParallelism), ArgoExecutorResources: argoExecutorResourcesForReview(cfg), UpstreamName: name, ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: dns, IPs: ips}
+	return InstallReview{ArgoWorkflowTTL: argoWorkflowTTLForReview(cfg), ArgoSecurity: cfg.argoSecurityReview, ArgoParallelism: argoReviewLimit(cfg, cfg.ArgoParallelism, "parallelism", DefaultArgoParallelism), ArgoNamespaceParallelism: argoReviewLimit(cfg, cfg.ArgoNamespaceParallelism, "namespaceParallelism", DefaultArgoNamespaceParallelism), ArgoExecutorResources: argoExecutorResourcesForReview(cfg), UpstreamName: name, ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: dns, IPs: ips}
 }
 
 func PrintReviewJSON(w io.Writer, cfg Config) error {
@@ -121,6 +122,7 @@ func printReview(w io.Writer, review InstallReview) {
 	_, _ = fmt.Fprintln(w, "NetworkPolicy enforcement check runs first at install, after approval, using temporary probe Pods and their scratch namespace; fresh installs refuse unless enforcement is measured.")
 	printArgoExecutorResources(w, review.ArgoExecutorResources)
 	_, _ = fmt.Fprintf(w, "Argo controller.parallelism: %s; controller.namespaceParallelism: %s (0 means unlimited)\n", review.ArgoParallelism, review.ArgoNamespaceParallelism)
+	printArgoWorkflowTTL(w, review.ArgoWorkflowTTL)
 	for _, requirement := range review.ClientRequirements {
 		_, _ = fmt.Fprintln(w, requirement)
 	}

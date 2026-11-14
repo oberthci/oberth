@@ -923,6 +923,34 @@
     "flag:runner-image-prefixes": {
       "doc_anchor": "docs/cli-reference.md#oberth-validate",
       "test_ref": "pkg/argoworkflow/admit_test.go TestAdmitEnforcesTheRunnerImageAllowlist"
+    },
+    "value:run_logs.containers": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "internal/api/live_log_stream_test.go TestContainerLogHTTPPassesPlainBytes"
+    },
+    "value:run_logs.node_id": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "internal/api/live_log_stream_test.go TestContainerLogHTTPPassesPlainBytes"
+    },
+    "value:run_logs.container": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "internal/api/live_log_stream_test.go TestContainerLogHTTPPassesPlainBytes"
+    },
+    "value:run_logs.raw": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "internal/service/container_logs_test.go TestContainerLogServiceHistoricMarkersArePlain"
+    },
+    "flag:node-id": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "cmd/oberth/remote_container_logs_test.go TestContainerLogCLIUsesNativeSelectors"
+    },
+    "flag:container": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "cmd/oberth/remote_container_logs_test.go TestContainerLogCLIUsesNativeSelectors"
+    },
+    "flag:containers": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "cmd/oberth/remote_container_logs_test.go TestContainerLogCLIUsesNativeSelectors"
     }
   }
 }

@@ -83,6 +83,8 @@ func reportMode(mode string) {
 
 // remoteSubcommands lists the verbs a command dispatches before parsing its
 // own flags, so --help shows every form the command accepts.
+const remoteLogArguments = "<run-id> [--node-id <node-id> --container <container> | --containers] [flags]"
+
 var remoteSubcommands = map[string]string{
 	"run":  "       oberth run wait|resources|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)",
 	"runs": "       oberth runs cancel --repo <repo> --ref <branch> [flags] (see oberth runs cancel --help)",
@@ -94,7 +96,7 @@ func setRemoteUsage(flags *flag.FlagSet) {
 	case "run":
 		suffix = "<run-id> [flags]"
 	case "log":
-		suffix = "<run-id> [--burn <burn> --step <step>] [flags]"
+		suffix = remoteLogArguments
 	case "issues update":
 		suffix = "--id <issue-id> --work-status <status> [flags]"
 	}
@@ -508,6 +510,7 @@ type remoteLog struct {
 	TotalScannedBytes int64  `json:"total_scanned_bytes"`
 	ScanLimitBytes    int64  `json:"scan_limit_bytes"`
 	RunID             string `json:"run_id"`
+	NodeID            string `json:"node_id"`
 	Stage             string `json:"burn"`
 	Step              string `json:"step"`
 	Output            string `json:"output"`
@@ -531,8 +534,11 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	flags := flag.NewFlagSet("log", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	setRemoteUsage(flags)
+	nodeID := flags.String("node-id", "", "native Argo node ID")
+	container := flags.String("container", "", "native Pod container name")
+	containers := flags.Bool("containers", false, "list observed native node/container bindings")
 	stage := flags.String("burn", "", "burn name")
-	step := flags.String("step", "", "step name")
+	step := flags.String("step", "", "Argo node ID or unique step display name")
 	pattern := flags.String("pattern", "", "RE2 pattern; offset and limit then page over matches")
 	context_ := flags.Int("context", 0, "lines of context around each match")
 	offset := flags.Int("offset", 0, "skip this many")
@@ -551,10 +557,17 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 		return usageError(err)
 	}
 	if flags.NArg() != 1 {
-		return fmt.Errorf("%w: log <run-id> --burn <burn> --step <step>", errUsage)
+		return fmt.Errorf("%w: log %s", errUsage, remoteLogArguments)
 	}
-	if err := refuseVerbAsRunID("log", flags.Arg(0), "<run-id> [--burn <burn> --step <step>]"); err != nil {
+	if err := refuseVerbAsRunID("log", flags.Arg(0), remoteLogArguments); err != nil {
 		return err
+	}
+	native := *nodeID != "" || *container != ""
+	if (*containers && native) || ((native || *containers) && (*stage != "" || *step != "")) {
+		return fmt.Errorf("%w: choose node/container selectors or a step selector", errUsage)
+	}
+	if *container != "" && *nodeID == "" {
+		return fmt.Errorf("%w: --container requires --node-id", errUsage)
 	}
 	api, err := remoteClient(ctx, transport)
 	if err != nil {
@@ -565,8 +578,15 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	if err != nil {
 		return err
 	}
+	if *containers {
+		return emitJSON(ctx, api, "/api/runs/"+runID+"/containers", nil, output)
+	}
 	path := "/api/runs/" + runID + "/logs"
 	query := map[string]string{"burn": *stage, "step": *step, "pattern": *pattern}
+	if native {
+		path = "/api/runs/" + runID + "/containerlog"
+		query = map[string]string{"node_id": *nodeID, "container": *container, "pattern": *pattern}
+	}
 	for name, value := range map[string]int{"context": *context_, "offset": *offset, "limit": *limit} {
 		if value > 0 {
 			query[name] = fmt.Sprint(value)
@@ -609,7 +629,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 		return err
 	}
 	body, hidden := log.Output, 0
-	if !*raw {
+	if !*raw && !native && log.NodeID == "" {
 		body = stripStepPrefix(body, log.Stage, log.Step)
 		body, hidden = dropExecutorLines(body)
 	}

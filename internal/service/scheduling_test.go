@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/oberthci/oberth/internal/storetest"
 	"reflect"
 	"strings"
 	"testing"
@@ -111,17 +112,9 @@ func TestSchedulingAvailableInMCPStatusRunGetAndAPIRun(t *testing.T) {
 	if err != nil || waitingDetail.(RunDetailResponse).Run.Status != model.RunWaiting || waitingDetail.(RunDetailResponse).Run.StartedAt != nil {
 		t.Fatalf("run detail started before submission: %#v, %v", waitingDetail, err)
 	}
-	waitingLog, err := service.RunLogLive(t.Context(), api.Actor{Identity: "agent@host"}, run.ID, 0)
-	if err != nil || waitingLog.(LiveLogResponse).Status != "waiting" {
-		t.Fatalf("live log started before submission: %#v, %v", waitingLog, err)
-	}
 	running, err = fixture.store.MarkRunSubmitted(t.Context(), running.ID)
 	if err != nil || running.StartedAt == nil {
 		t.Fatalf("submitted run did not get a start time: %#v, %v", running, err)
-	}
-	runningLog, err := service.RunLogLive(t.Context(), api.Actor{Identity: "agent@host"}, run.ID, 0)
-	if err != nil || runningLog.(LiveLogResponse).Status != "running" {
-		t.Fatalf("live log did not advance at submission: %#v, %v", runningLog, err)
 	}
 	service.schedulingObserver = schedulingObserverFunc(func(_ context.Context, got model.Run) (*model.ExecutionObservation, error) {
 		if got.ID != run.ID {
@@ -240,7 +233,7 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = fixture.store.PutStepResult(ctx, model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
+	if _, err = storetest.PutStepResult(ctx, fixture.store, model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
 		t.Fatal(err)
 	}
 	service := fixture.api(t)

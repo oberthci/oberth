@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -245,5 +246,32 @@ func TestNativeNodeStepRetainsObservedPodAfterCollection(t *testing.T) {
 	retained, err := s.PutStepResult(t.Context(), step)
 	if err != nil || retained.PodName != "opaque-pod-name" || retained.Phase != "Succeeded" {
 		t.Fatal("Pod collection erased observed node history", retained, err)
+	}
+}
+
+func TestNativeNodeDisplayFieldsAreBoundedBeforeStorage(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	run, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "names", strings.Repeat("a", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := "fan(0:\x1b[31m" + strings.Repeat("界", 900) + "\x1b[0m\n\u202e)"
+	row := model.StepResult{NodeID: "opaque-node-id", DisplayName: text, Stage: text, Step: text, Message: text, Status: model.StepRunning}
+	if err := s.PutStepResults(t.Context(), run.ID, []model.StepResult{row}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.StepResults(t.Context(), run.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatal(rows, err)
+	}
+	for _, value := range []string{rows[0].DisplayName, rows[0].Stage, rows[0].Step, rows[0].Message} {
+		if utf8.RuneCountInString(value) > 512 || strings.ContainsAny(value, "\x1b\n\u202e") {
+			t.Fatal("unbounded native display text", utf8.RuneCountInString(value))
+		}
+	}
+	if rows[0].NodeID != row.NodeID {
+		t.Fatal("sanitizing text changed identity", rows[0].NodeID)
 	}
 }

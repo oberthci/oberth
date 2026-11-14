@@ -597,7 +597,7 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 		_ = database.Close()
 		t.Fatal(err)
 	}
-	if _, err := database.PutStepResult(ctx, model.StepResult{NodeID: "test.unit",
+	if _, err := storetest.PutStepResult(ctx, database, model.StepResult{NodeID: "test.unit",
 		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 0,
 		Status: model.StepPassed, ExitCode: 0,
 	}); err != nil {

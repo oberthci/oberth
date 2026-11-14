@@ -24,7 +24,7 @@ import (
 // including PutStepResult in a file-backed store. Controller completion and
 // progress emission are supplied by the fixture; source planning and admission
 // are outside this test. Unfinished nodes are progress, never durable outcomes.
-func TestArgoCollectUnfinishedNodesPreservesFailure(t *testing.T) {
+func TestArgoCollectPreservesNativeVerdictAndUnfinishedNodes(t *testing.T) {
 	for _, phase := range []wfv1.NodePhase{wfv1.NodePending, wfv1.NodeRunning} {
 		for _, succeeded := range []bool{false, true} {
 			t.Run(string(phase)+"/succeeded="+map[bool]string{true: "true", false: "false"}[succeeded], func(t *testing.T) {
@@ -84,14 +84,18 @@ func TestArgoCollectUnfinishedNodesPreservesFailure(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if finished.Status != model.RunFailed || finished.Phase == "collect" {
+				expected := model.RunFailed
+				if succeeded {
+					expected = model.RunPassed
+				}
+				if finished.Status != expected || finished.Phase == "collect" {
 					t.Fatalf("failure replaced by collection or success: %+v", finished)
 				}
-				if !succeeded && (finished.FailedStage != "verify" || finished.FailedStep != "verify" || finished.Error != "original workflow failure") {
+				if !succeeded && (finished.FailedStage != "verify" || finished.FailedStep != "failed" || finished.Error != "original workflow failure") {
 					t.Fatalf("failure evidence changed: %+v", finished)
 				}
-				if succeeded && !strings.Contains(finished.Error, "unfinished") {
-					t.Fatalf("partial success was not explained: %+v", finished)
+				if succeeded && (finished.Error != "" || finished.FailedStep != "") {
+					t.Fatal("green Workflow acquired an unfinished-node failure", finished)
 				}
 				rows, err := db.StepResults(ctx, run.ID)
 				if err != nil {

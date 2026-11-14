@@ -568,14 +568,13 @@ func TestParseServeOptionsRejectsArgoVaultRoleWithoutAddress(t *testing.T) {
 	}
 }
 
-func TestParseServeOptionsRejectsInvalidArgoWorkflowTimings(t *testing.T) {
+func TestParseServeOptionsLeavesWorkflowCleanupToArgo(t *testing.T) {
 	t.Parallel()
-	_, err := parseServeOptions([]string{
-		"--argo-namespace", "argo-pipelines",
-		"--argo-workflow-ttl", "0",
-	}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "positive") {
-		t.Fatalf("zero TTL error = %v", err)
+	if _, err := parseServeOptions([]string{"--argo-namespace", "argo-pipelines"}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseServeOptions([]string{"--argo-workflow-ttl", "3600"}, io.Discard); err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatal("removed TTL flag accepted", err)
 	}
 }
 

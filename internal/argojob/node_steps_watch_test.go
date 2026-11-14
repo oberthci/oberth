@@ -140,7 +140,7 @@ func TestWatchWaitWritesOnlyChangedNodeRows(t *testing.T) {
 		hub.setWorkflow(changed)
 		synctest.Wait()
 		writer.fail = false
-		hub.setWorkflow(changed.DeepCopy())
+		time.Sleep(waitIdleInterval)
 		synctest.Wait()
 		if len(writer.batches) != 3 || len(writer.batches[1]) != 1 || len(writer.batches[2]) != 1 || writer.batches[2][0].NodeID != "two" || writer.batches[2][0].Message != "failed" {
 			t.Fatal("changed row lost or failed write was not retried", writer.batches)

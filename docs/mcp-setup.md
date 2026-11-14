@@ -507,13 +507,16 @@ its policies and budgets are configured with the chart's `retention` values.
 | `retention.interval` | `10m` | `--retention-sweep-interval`: positive interval between sweeps, independent of artifact collection |
 | `retention.keepNewestPerRef` | `1` | `--retention-keep-newest`: newest terminal runs kept per repository/ref; `0` disables this extra protection |
 | `retention.logs.maxAge` | `0s` | `--log-retention`: age since run completion; `0s` disables age retention |
-| `retention.logs.limitBytes` | `67108864` | `--run-log-limit-bytes`: maximum retained bytes per run; exceeding it fails the run |
 | `retention.logs.budgetBytes` | `2147483648` (2 GiB) | `--logs-budget-bytes`: total log budget; `0` disables size retention |
 | `retention.artifacts.maxAge` | `0s` | `--artifact-retention`: age since run completion; `0s` disables age retention |
 | `retention.artifacts.limitBytes` | `268435456` (256 MiB) | `--artifacts-limit-bytes`: maximum collected artifact bytes per run |
 | `retention.artifacts.budgetBytes` | `4294967296` (4 GiB) | `--artifacts-budget-bytes`: total artifact budget; `0` disables size retention |
 
-That default applies to fresh installs; `oberth upgrade` keeps an existing
+`retention.logs.limitBytes` maps to `--run-log-limit-bytes`, the maximum retained
+bytes per run across container copies. Truncation includes an incomplete-log reason. See the
+[CLI reference](cli-reference.md#oberth-serve) for the generated default.
+
+The artifact budget default applies to fresh installs; `oberth upgrade` keeps an existing
 release's rendered value (`0` before v0.21.0) unless you set one.
 
 Age values use Go durations, for example `720h` for 30 days. Sweeps delete

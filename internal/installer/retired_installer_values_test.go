@@ -51,3 +51,19 @@ func TestRetiredInstallerCleanupKeepsEveryOtherKey(t *testing.T) {
 		t.Fatal("cleanup printed stored values")
 	}
 }
+
+func TestRetiredWorkflowTTLValueIsRemovedWithoutChangingNativeOperatorDefaults(t *testing.T) {
+	native := map[string]any{"secondsAfterCompletion": 0}
+	argo := map[string]any{"workflowTTL": 3600, "otherOperatorValue": "kept", "workflowDefaults": map[string]any{"spec": map[string]any{"ttlStrategy": native}}}
+	values := map[string]any{"argo": argo}
+	var output bytes.Buffer
+	if !dropRetiredInstallerValues(values, &output) {
+		t.Fatal("retired server override remained")
+	}
+	if _, ok := argo["workflowTTL"]; ok {
+		t.Fatal("retired TTL remains")
+	}
+	if argo["otherOperatorValue"] != "kept" || native["secondsAfterCompletion"] != 0 || !strings.Contains(output.String(), "argo.workflowTTL") {
+		t.Fatal(values, output.String())
+	}
+}

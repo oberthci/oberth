@@ -153,7 +153,7 @@ func TestPromoteRetryReusesExactTransientPushCandidate(t *testing.T) {
 			}
 			step := stepResult(model.StepPassed)
 			step.RunID = pending.ID
-			if _, err = f.store.PutStepResult(t.Context(), step); err != nil {
+			if _, err = storetest.PutStepResult(t.Context(), f.store, step); err != nil {
 				t.Fatal(err)
 			}
 			promotion, err := f.store.Promotion(t.Context(), id)

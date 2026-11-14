@@ -224,7 +224,4 @@ func observedTagResult(result JobResult) JobResult {
 }
 func ensureTagJournal(t *testing.T, harness *rerunHarness, run model.Run) {
 	t.Helper()
-	if err := harness.fixture.logs.AppendStepProgress(run.ID, runprogress.Event{Version: 1, Stage: "test", Step: "unit", Ordinal: 0, Status: runprogress.StepQueued}); err != nil {
-		t.Fatal(err)
-	}
 }

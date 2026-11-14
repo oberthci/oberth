@@ -88,17 +88,6 @@ func validateStepResult(result model.StepResult) error {
 	return nil
 }
 
-func (s *Store) PutStepResult(ctx context.Context, result model.StepResult) (model.StepResult, error) {
-	if err := validateStepResult(result); err != nil {
-		return model.StepResult{}, err
-	}
-	admission, err := s.stepAdmission(ctx, result.RunID)
-	if err != nil {
-		return model.StepResult{}, err
-	}
-	return s.putStepResult(ctx, s.db, result, admission)
-}
-
 // PutStepResults has no node-count ceiling. Each transaction writes at most
 // 128 rows, so a large native fan-out never holds the writer for the whole run.
 func (s *Store) PutStepResults(ctx context.Context, runID string, results []model.StepResult) error {
@@ -148,6 +137,10 @@ func (s *Store) putStepBatch(ctx context.Context, runID string, results []model.
 func (s *Store) putStepResult(ctx context.Context, database interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, result model.StepResult, admission stepAdmission) (model.StepResult, error) {
+	result.DisplayName = model.SanitizeNodeMessage(result.DisplayName)
+	result.Stage = model.SanitizeNodeMessage(result.Stage)
+	result.Step = model.SanitizeNodeMessage(result.Step)
+	result.Message = model.SanitizeNodeMessage(result.Message)
 	var fact stepAdmissionTemplate
 	if result.LocalTemplate {
 		fact = admission.templates[result.Template]

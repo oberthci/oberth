@@ -57,48 +57,4 @@ for(const step of ["{status:'pending'}","{status:'interrupted'}","{status:'runni
 assert.match(run(`stepRow(orderSteps([{...runningStep,started_at:'2099-01-01T00:00:00Z'}])[0],'')`),/&lt;1s/);
 assert.ok(!run(`stepRow(orderSteps([{...runningStep,finished_at:'2026-11-05T12:00:02Z'}])[0],'')`).includes('data-started'),'finished timestamp freezes even before the status catches up');
 assert.match(run(`stepRow(orderSteps([{...runningStep,finished_at:'invalid'}])[0],'')`),/data-timer-kind="step"/);
-// Receive partial UTF-8/SSE frames, then a partial command record. No render poll.
-await run(`liveLogContent({id:'timers'},'test','store')`); await settle();
-assert.equal(streams.length,1);
-const bytes=frame('[test/store] first 🚀\n[test/store] par',42), split=bytes.indexOf(0xf0)+1;
-streams[0].controller.enqueue(bytes.slice(0,split));await settle();assert.equal(run('state.live.offset'),-1);
-streams[0].controller.enqueue(bytes.slice(split));await settle();
-assert.equal(run('state.live.text'),'[test/store] first 🚀\n');assert.equal(run('state.live.pending'),'[test/store] par');
-assert.equal(run('state.live.view.pending.length'),1,'chunk queued for the next animation frame before any route refresh');
-streams[0].controller.error(new Error('transient'));await settle();
-assert.equal(polls.length,1);assert.ok(polls[0].url.endsWith('offset=42'));
-const retry=fire(1000);await settle();assert.equal(streams.length,1,'reconnect waits for in-flight poll');
-polls[0].resolve({chunk:'tial\n',offset:49});await retry;await settle();
-assert.equal(streams.length,2);assert.ok(streams[1].url.endsWith('offset=49'));
-assert.equal(run('state.live.text'),'[test/store] first 🚀\n[test/store] partial\n');
-assert.equal(run('state.live.fallback'),false);assert.equal(run('state.live.pollTimer'),null);
-// Repeated failures back off even when HTTP opens successfully but no chunk arrives.
-for(const delay of [2000,4000,8000,16000,30000,30000]){
-  streams.at(-1).controller.error(new Error('still transient'));await settle();
-  polls.at(-1).resolve({chunk:'',offset:49});await settle();await fire(delay);await settle();
-}
-streams.at(-1).controller.enqueue(frame('[test/store] final',68,true));await settle();
-assert.equal(run('state.live.text'),'[test/store] first 🚀\n[test/store] partial\n[test/store] final\n');
-assert.equal(run('state.live.done'),true);assert.equal(run('state.live.source'),null);assert.equal(timers.size,0);
-assert.equal(intervals.size,1,'only local clock interval remains');
-// Navigation aborts a pending fallback request and cancels its reconnect.
-run('closeLiveLog()');await run(`liveLogContent({id:'next'},'test','store')`);await settle();
-streams.at(-1).controller.error(new Error('offline'));await settle();
-run('const abandoned=state.live; closeLiveLog()');await settle();
-assert.equal(polls.at(-1).options.signal.aborted,true);assert.equal(timers.size,0);
-const count=streams.length;
-run(`receiveLiveChunk(abandoned,{chunk:'stale\\n',offset:999})`);
-assert.equal(run('abandoned.offset'),-1);assert.equal(streams.length,count);
-// Fire the actual fallback watchdog while retry waits for cursor ownership.
-await run(`liveLogContent({id:'timeout'},'test','store')`);await settle();
-streams.at(-1).controller.error(new Error('offline'));await settle();
-const stalledPoll=polls.at(-1), beforeTimeout=streams.length;
-const waitingRetry=fire(1000);await settle();
-assert.equal(streams.length,beforeTimeout);
-await fire(10000);await waitingRetry;await settle();
-assert.equal(stalledPoll.options.signal.aborted,true,'10s watchdog aborts the actual fetch signal');
-assert.equal(streams.length,beforeTimeout+1,'stream resumes only after aborted poll settles');
-assert.ok(streams.at(-1).url.endsWith('offset=-1'),'timeout cannot advance the byte cursor');
-assert.equal(run('state.live.busy'),false);assert.equal(run('state.live.pollTimer'),null);
-run('closeLiveLog()');await settle();assert.equal(timers.size,0);
-console.log('local step clocks, partial UTF-8, exact-cursor reconnect, bounded backoff and cancellation pass');
+console.log('step and run clocks use timestamps without requesting logs');

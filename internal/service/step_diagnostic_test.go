@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oberthci/oberth/internal/storetest"
 	"reflect"
 	"strings"
 	"testing"
@@ -27,7 +28,7 @@ func TestRunGetRetainsBoundTerminationAndUnavailableHistory(t *testing.T) {
 		if name == "new" {
 			step.Termination = record
 		}
-		if _, err = f.store.PutStepResult(ctx, step); err != nil {
+		if _, err = storetest.PutStepResult(ctx, f.store, step); err != nil {
 			t.Fatal(err)
 		}
 	}

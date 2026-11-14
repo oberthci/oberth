@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 )
 
@@ -66,9 +65,6 @@ func TestRestartAmbiguousCreateAdoptsLateWorkflowOrFailsConfirmedAbsence(t *test
 				t.Fatal(err)
 			}
 			if err = file.Close(); err != nil {
-				t.Fatal(err)
-			}
-			if err = scheduler.logs.(*runlog.Store).AppendStepProgress(run.ID, runprogress.Event{Version: runprogress.Version, Stage: "test", Step: "unit", Status: runprogress.StepRunning, StartedAt: &now}); err != nil {
 				t.Fatal(err)
 			}
 			if err = scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(model.Run) error { t.Fatal("absent Workflow adopted"); return nil }); err != nil {
@@ -138,10 +134,6 @@ func prepareRestartJournal(t *testing.T, scheduler *Scheduler, run model.Run) {
 		t.Fatal(err)
 	}
 	if err := file.Close(); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	if err := scheduler.logs.(*runlog.Store).AppendStepProgress(run.ID, runprogress.Event{Version: runprogress.Version, Stage: "test", Step: "unit", Status: runprogress.StepRunning, StartedAt: &now}); err != nil {
 		t.Fatal(err)
 	}
 }

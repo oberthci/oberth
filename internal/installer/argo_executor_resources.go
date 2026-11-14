@@ -75,6 +75,10 @@ func resolveArgoExecutorResources(ctx context.Context, cfg *Config, deps Deps) e
 	}
 	resources, err := readArgoExecutorResources(ctx, deps, namespace, exists)
 	cfg.argoExecutorResources = resources
+	if err != nil {
+		return err
+	}
+	cfg.argoWorkflowTTL, err = readArgoWorkflowTTL(ctx, deps, namespace, exists)
 	return err
 }
 

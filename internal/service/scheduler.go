@@ -44,7 +44,6 @@ type SchedulerConfig struct {
 	Signals         *Signals
 	WorkspaceRoot   string
 	RemoveWorkspace func(string) error
-	MaxRunLogBytes  int64
 	MutationGate    func(context.Context) error
 
 	// RestoredRunsFile is oberth restore's marker (RestoredRunsFile in the
@@ -69,8 +68,6 @@ type Scheduler struct {
 	workspaceRoot      string
 	submissions        *submissionRegistry
 
-	maxRunLogBytes int64
-
 	mutationGate       func(context.Context) error
 	wake               chan struct{}
 	publicationWake    chan struct{}
@@ -82,10 +79,7 @@ type Scheduler struct {
 	deliveryPermit     chan struct{}
 	policyRetryWait    func(context.Context) error
 	policyWaitTimeout  time.Duration // tests may shorten the fixed production limit
-	// deferredJournals holds the pod-log journal of a run whose worker left
-	// its Workflow deletion to the dispatch pass; that pass prunes it.
-	deferredJournalMu sync.Mutex
-	deferredJournals  map[string]string
+
 	// promotionRetrier re-promotes a promotion whose delivery found its
 	// target moved (#1097); nil leaves such a promotion failed.
 	promotionRetrier atomic.Pointer[promotionRetrierHook]
@@ -133,9 +127,6 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	if config.Store == nil || config.Git == nil || config.Logs == nil || config.Jobs == nil || config.Auditor == nil {
 		return nil, errors.New("service: scheduler store, Git, logs, jobs, and auditor are required")
 	}
-	if config.MaxRunLogBytes <= 0 {
-		config.MaxRunLogBytes = runlog.DefaultRunLimitBytes
-	}
 	if strings.TrimSpace(config.WorkspaceRoot) == "" {
 		config.WorkspaceRoot = "/data/work"
 	}
@@ -160,9 +151,9 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		releaseJobs: config.ReleaseJobs,
 		auditor:     config.Auditor, signals: signals,
 		workspaces: workspaces, workspaceRoot: workspaceRoot, restoredRunsFile: config.RestoredRunsFile,
-		submissions:    newSubmissionRegistry(),
-		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate,
-		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
+		submissions:  newSubmissionRegistry(),
+		mutationGate: mutationGate,
+		wake:         make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
 		recoveredWorkflows: make(chan adoptedRun, 1), createWake: make(chan struct{}, 1), createPending: make(map[string]*pendingCreate),
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, policyRetryWait: waitPolicyRetry,
 	}
@@ -390,7 +381,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		if err := scheduler.database().CompleteObservedRunCancellation(ctx, cancellation); err != nil {
 			return fmt.Errorf("complete cancellation for run %s: %w", cancellation.RunID, err)
 		}
-		scheduler.pruneDeferredPodJournal(ctx, cancellation.RunID)
+
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
 		cleanupErr := scheduler.workspaces.cleanupRunDeferred(cleanupCtx, cancellation.RunID)
 		cancelCleanup()
@@ -905,59 +896,13 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	if checkoutSHA == "" {
 		checkoutSHA = run.SHA
 	}
-	journal, journalErr := runlog.OpenPodLogJournal(logFile, scheduler.maxRunLogBytes)
-	// A journal is optional delivery evidence. A bad file must not strand an
-	// otherwise-owned Workflow or return a fatal error to the dispatcher.
-	seekSize, seekErr := logFile.Seek(0, io.SeekEnd)
-	if seekErr != nil && journalErr == nil {
-		journalErr = seekErr
-	}
 	logDetached := false
-	var logDestination io.Writer = logFile
-	retained := observation.retained
-	if info, err := logFile.Stat(); err == nil {
-		retained = info.Size()
-	} else {
-		journalErr = errors.Join(journalErr, err)
-		if seekErr == nil {
-			retained = seekSize
-		} else {
-			// No safe retained-file access: keep progress/termination observation
-			// alive without writing unbounded bytes to a file of unknown size.
-			logDetached = true
-			logDestination = io.Discard
-			log.Printf("WARN: run=%s log continuity lost: retained log unavailable", run.ID)
-		}
+	var logDestination io.Writer = runLogAppender{store: scheduler.logs, runID: run.ID}
+	if _, err := logFile.Stat(); err != nil {
+		logDetached = true
+		logDestination = io.Discard
 	}
-	observation.retained = retained
-	progressLog := newStepProgressLogWriter(newRunLogWriter(logDestination, scheduler.maxRunLogBytes-retained))
-	progressLog.logFile = logFile
-	progressLog.onContinuityLost = func() {
-		if scheduler.auditor == nil {
-			return
-		}
-		auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-		defer cancel()
-		_, _ = scheduler.auditor.AppendAuditAction(auditCtx, model.AuditActionSpec{Actor: "oberth", Action: "run.log-continuity.lost", ResourceType: "run", ResourceID: run.ID, Details: `{"reason":"durable-journal-unavailable"}`})
-	}
-	progressLog.journal = journal
-	if journalErr != nil {
-		if journal != nil {
-			_ = journal.Close()
-			progressLog.journal = nil
-		}
-		progressLog.losePodLogDurability()
-		if info, err := logFile.Stat(); err == nil {
-			observation.retained = info.Size()
-		}
-	}
-	projectionReady, workflowSettled, journalDeferred := false, false, false
-	defer func() {
-		if progressLog.journal != nil {
-			_ = progressLog.journal.Close()
-		}
-		scheduler.settlePodJournal(ctx, run.ID, logFile.Name(), projectionReady, workflowSettled, journalDeferred)
-	}()
+	progressLog := logDestination
 
 	var jobResult JobResult
 	var waitErr error
@@ -965,10 +910,6 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		jobResult, waitErr = scheduler.jobs.(JobAdopter).WaitResumed(ctx, workflowName, progressLog, observation.events, observation.retained)
 	} else {
 		jobResult, waitErr = scheduler.jobs.Wait(ctx, workflowName, progressLog)
-	}
-	progressLog.recoverPodProjection(scheduler.maxRunLogBytes)
-	if progressErr := progressLog.Close(); progressErr != nil && waitErr == nil {
-		waitErr = progressErr
 	}
 	finalizeCtx := ctx
 	var cancelFinalize context.CancelFunc
@@ -1000,7 +941,6 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		waitErr = closeErr
 	}
 	index, indexErr := scheduler.logs.BuildIndex(run.ID)
-	projectionReady = projectionSyncErr == nil && indexErr == nil
 	if !logDetached && indexErr != nil && waitErr == nil {
 		waitErr = indexErr
 	}
@@ -1015,10 +955,8 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		if current, lookupErr := scheduler.database().Run(finalizeCtx, run.ID); lookupErr == nil && current.Preempted() {
 			if err := scheduler.completePendingCancellationsWithGate(finalizeCtx, require); err != nil {
 				err = scheduler.deferRefusedDeletions(finalizeCtx, run.ID, err)
-				journalDeferred = err == nil // the pass that deletes the Workflow prunes the journal
 				return err
 			}
-			workflowSettled = true
 			scheduler.signals.NotifyRun(run.ID)
 			return nil
 		}
@@ -1072,7 +1010,6 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		}
 	}
 	// The Workflow is terminal or its deletion has been accepted.
-	workflowSettled = true
 	reservation.cancel()
 	if !validJobRunStatus(jobResult.Status) {
 		jobResult.Status, jobResult.Phase, jobResult.Error = model.RunFailed, "job", "Job returned an invalid terminal status"
@@ -1698,20 +1635,6 @@ func workflowNameFragment(value string) string {
 		}
 	}
 	return strings.Trim(result.String(), "-")
-}
-
-// Cleanup is best effort after the durable terminal verdict and index. Active
-// owner resumptions retain their checkpoint; cleanup errors never stop dispatch.
-func (scheduler *Scheduler) pruneTerminalPodJournal(parent context.Context, runID, logPath string) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), time.Second)
-	defer cancel()
-	run, err := scheduler.store.Run(ctx, runID)
-	if err != nil || !run.Status.Terminal() {
-		return
-	}
-	if err := runlog.PrunePodLogJournal(logPath); err != nil {
-		log.Print("WARN: terminal pod-log journal cleanup unavailable")
-	}
 }
 
 func (scheduler *Scheduler) queuePublicationRetry(id string) {

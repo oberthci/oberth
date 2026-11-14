@@ -1251,14 +1251,11 @@ trust assumptions and complete invalidation rules.
   and per-step usage figures and resource reports are absent. The forward
   migration deletes historical measurements, preserving outcomes, logs, timing
   and bound termination diagnostics. Static YAML resource checks remain.
-- Retained output is prefixed by burn and step, redacted before disk for
-  streams the oberth credential chain (exec or materialize) wraps, indexed by
-  byte range, and served only through bounded reads. Retained logs are bounded
-  per step (32 MiB) and per run (64 MiB), enforced at two points of one write
-  path: the engine's step-log replay writer (step-attributed) and the
-  scheduler's run-log writer. On breach the run fails with an error naming the
-  offending step instead of filling the PVC unchecked. Step status is stored
-  separately from the plain retained log.
+- Native Kubernetes container logs are plain bytes. Native node IDs bind stored
+  step rows, run failure identity and log selection; names are display text.
+  Capture runs outside Workflow/identity observation with bounded memory and
+  one configured aggregate run limit (64 MiB by default). Missing, interrupted
+  and truncated copies carry reasons. Historical log ranges stay readable.
 - Job CPU, memory, and ephemeral storage are bounded. Private scratch uses a size-limited
   `emptyDir`; persistent source state and the split CI/release caches retain the
   fixed PVC and node-path topology.

@@ -3,16 +3,15 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/oberthci/oberth/internal/storetest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runprogress"
 )
 
 func TestScopedRunListUnknownPositionDoesNotInventQueueHead(t *testing.T) {
@@ -71,28 +70,11 @@ func TestRunListsObserveArgoWithoutDependingOnLocalStepHistory(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if i != 5 {
-					if err := f.logs.InitializeStepProgress(run.ID); err != nil {
-						t.Fatal(err)
-					}
-				}
 				runs = append(runs, run)
-			}
-			now := time.Now()
-			event := runprogress.Event{Version: runprogress.Version, Stage: "test", Step: "unit", Status: runprogress.StepRunning, StartedAt: &now}
-			if err := f.logs.AppendStepProgress(runs[1].ID, event); err != nil {
-				t.Fatal(err)
-			}
-			if err := f.logs.AppendStepProgress(runs[2].ID, event); err != nil {
-				t.Fatal(err)
-			}
-			event.Status, event.StartedAt = runprogress.StepQueued, nil
-			if err := f.logs.AppendStepProgress(runs[2].ID, event); err != nil {
-				t.Fatal(err)
 			}
 			step := stepResult(model.StepPassed)
 			step.RunID = runs[3].ID
-			if _, err := f.store.PutStepResult(t.Context(), step); err != nil {
+			if _, err := storetest.PutStepResult(t.Context(), f.store, step); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(f.root, "logs", runs[4].ID+".progress.jsonl"), []byte("corrupt progress\n"), 0600); err != nil {
@@ -130,10 +112,6 @@ func TestRunListsObserveArgoWithoutDependingOnLocalStepHistory(t *testing.T) {
 					}
 				}
 				callsMu.Unlock()
-			}
-			event.Status, event.StartedAt = runprogress.StepRunning, &now
-			if err := f.logs.AppendStepProgress(runs[0].ID, event); err != nil {
-				t.Fatal(err)
 			}
 			if _, err := service.Runs(t.Context(), api.Actor{Identity: "owner"}, api.RunFilter{View: view}); err != nil {
 				t.Fatal(err)

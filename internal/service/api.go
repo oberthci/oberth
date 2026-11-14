@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +51,7 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
+	ContainerLogs          ContainerLogSource
 	Tags                   *PushIngestor
 	IssueStaleAfter        time.Duration
 	IssueActiveStaleAfter  time.Duration
@@ -121,6 +121,7 @@ type APIConfig struct {
 }
 
 type API struct {
+	containerLogSource     ContainerLogSource
 	tags                   *PushIngestor
 	branchPrune            BranchPruneGit
 	branchDeletions        BranchDeletionRecords
@@ -247,7 +248,8 @@ func NewAPI(config APIConfig) (*API, error) {
 	}
 	lifetime, stopLifetime := context.WithCancel(context.Background())
 	created := &API{
-		branchPrune: config.BranchPrune, branchDeletions: config.BranchDeletions, deletionQueued: config.DeletionQueued,
+		containerLogSource: config.ContainerLogs,
+		branchPrune:        config.BranchPrune, branchDeletions: config.BranchDeletions, deletionQueued: config.DeletionQueued,
 		issueStaleAfter: config.IssueStaleAfter, issueActiveStaleAfter: config.IssueActiveStaleAfter,
 		releasePreflight:   config.ReleasePreflight,
 		clientCertificates: config.ClientCertificates,
@@ -445,29 +447,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 		return service.status(ctx, arguments.Repo, arguments.Ref, actor.Identity)
 	case "logs":
-		var arguments struct {
-			Repo       string `json:"repo"`
-			SHA        string `json:"sha"`
-			Step       string `json:"step"`
-			Pattern    string `json:"pattern"`
-			Context    int    `json:"context"`
-			Offset     int    `json:"offset"`
-			Limit      int    `json:"limit"`
-			Tail       bool   `json:"tail"`
-			ByteOffset *int64 `json:"byte_offset"`
-		}
-		if err := decodeTool(raw, &arguments); err != nil {
-			return nil, err
-		}
-		filter, err := toolLogFilter(arguments.Pattern, arguments.Context, arguments.Offset, arguments.Limit, arguments.Tail)
-		if err != nil {
-			return nil, err
-		}
-		if arguments.ByteOffset != nil && *arguments.ByteOffset < 0 {
-			return nil, fmt.Errorf("%w: byte_offset must be nonnegative", ErrInvalidInput)
-		}
-		filter.ByteOffset = arguments.ByteOffset
-		return service.logsFor(ctx, arguments.Repo, arguments.SHA, arguments.Step, filter)
+		return service.callSHALogs(ctx, actor, raw)
 
 	case "run_get":
 		return service.getRunTool(ctx, actor, raw)
@@ -564,52 +544,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 		return value, err
 	case "run_logs":
-		var arguments struct {
-			ID         string `json:"id"`
-			Stage      string `json:"burn"`
-			Step       string `json:"step"`
-			Pattern    string `json:"pattern"`
-			Context    int    `json:"context"`
-			Offset     int    `json:"offset"`
-			Limit      int    `json:"limit"`
-			Tail       bool   `json:"tail"`
-			ByteOffset *int64 `json:"byte_offset"`
-		}
-		if err := decodeTool(raw, &arguments); err != nil {
-			return nil, err
-		}
-		if strings.TrimSpace(arguments.ID) == "" {
-			return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
-		}
-		filter, err := toolLogFilter(arguments.Pattern, arguments.Context, arguments.Offset, arguments.Limit, arguments.Tail)
-		if err != nil {
-			return nil, err
-		}
-		if arguments.ByteOffset != nil && *arguments.ByteOffset < 0 {
-			return nil, fmt.Errorf("%w: byte_offset must be nonnegative", ErrInvalidInput)
-		}
-		filter.ByteOffset = arguments.ByteOffset
-		var fields map[string]json.RawMessage
-		_ = json.Unmarshal(raw, &fields) // decodeTool already validated the object.
-		defaultWindow := true
-		for field := range fields {
-			switch strings.ToLower(field) {
-			case "pattern", "limit", "tail", "offset", "byte_offset":
-				defaultWindow = false
-			}
-		}
-		if defaultWindow {
-			filter.Tail, filter.Limit = true, runlog.DefaultWindowLines
-		}
-		value, err := service.RunLogFiltered(ctx, actor, arguments.ID, arguments.Stage, arguments.Step, filter)
-		if err != nil {
-			return nil, err
-		}
-		if response, ok := value.(LogResponse); ok && defaultWindow {
-			response.Window = runlog.DefaultWindowDescription
-			value = response
-		}
-		return value, nil
+		return service.callRunLogs(ctx, actor, raw)
 	case "artifacts":
 		var arguments struct {
 			ID string `json:"id"`
@@ -1257,15 +1192,16 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 	return service.stripScopedSequences(response), nil
 }
 
-// RunLog is the read-only dashboard view of one known step's bounded redacted
-// log. Active runs authorize against their progress journal and read an
-// in-memory index snapshot; terminal runs authorize against durable results
-// and their finalized retained-log index.
+// RunLog resolves one stored node before reading its bounded retained output.
+// Active and terminal native reads use the same node/container binding.
 func (service *API) RunLog(ctx context.Context, actor api.Actor, id, stage, step string) (any, error) {
 	return service.RunLogFiltered(ctx, actor, id, stage, step, runlog.Filter{})
 }
 
 func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, stage, step string, filter runlog.Filter) (value any, resultErr error) {
+	if filter.Raw {
+		return service.rawRunLog(ctx, actor, id, filter)
+	}
 	var availablePairs []string
 	ctx = withRunLogCaller(ctx, actor)
 	var cancel context.CancelFunc
@@ -1302,151 +1238,33 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, sta
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
-	if stage == "" && step == "" && run.Status == model.RunPassed && len(steps) > 0 {
-		stage, step = steps[0].Stage, steps[0].Step
-		for _, result := range steps {
-			availablePairs = append(availablePairs, result.Stage+"/"+result.Step)
-		}
-	}
-	if strings.TrimSpace(stage) == "" {
-		if strings.TrimSpace(step) != "" {
-			stages := map[string]bool{}
-			for _, result := range steps {
-				if result.Step == step {
-					stages[result.Stage] = true
+	if stage == "" && step == "" {
+		if run.Status == model.RunPassed {
+			for _, row := range steps {
+				if !loggableNode(row) {
+					continue
 				}
-			}
-			candidates := make([]string, 0, len(stages))
-			for candidate := range stages {
-				candidates = append(candidates, candidate)
-			}
-			sort.Strings(candidates)
-			switch len(candidates) {
-			case 0:
-				return nil, fmt.Errorf("%w: no recorded step %q in this run", store.ErrNotFound, step)
-			case 1:
-				stage = candidates[0]
-			default:
-				return nil, fmt.Errorf("%w: step %q matches burns: %s; specify burn", ErrInvalidInput, step, strings.Join(candidates, ", "))
+				if step == "" {
+					stage, step = row.Stage, logStepSelector(row)
+				}
+				availablePairs = append(availablePairs, row.Stage+"/"+row.Step)
 			}
 		} else {
 			stage, step = run.FailedStage, run.FailedStep
 		}
 	}
-	if strings.TrimSpace(stage) == "" {
-		pairs := make([]string, 0, len(steps))
-		for _, result := range steps {
-			pairs = append(pairs, result.Stage+"/"+result.Step)
-		}
-		sort.Strings(pairs)
-		available := strings.Join(pairs, ", ")
-		if available == "" {
-			available = "none recorded"
-		}
-		return nil, fmt.Errorf("%w: no failed step; specify burn and step; available burn/step pairs: %s", ErrInvalidInput, available)
+	if stage == "" && step == "" {
+		return nil, fmt.Errorf("%w: no failed step; specify a step or Argo node ID", ErrInvalidInput)
 	}
-	if strings.TrimSpace(step) == "" {
-		var count int
-		for _, result := range steps {
-			if result.Stage == stage {
-				step = result.Step
-				count++
-			}
-		}
-		if count != 1 {
-			return nil, fmt.Errorf("%w: step is required unless burn %q has exactly one step", ErrInvalidInput, stage)
-		}
+	selected, err := selectLogNode(steps, stage, step)
+	if err != nil {
+		return nil, err
 	}
-	recorded := false
-	for _, result := range steps {
-		if result.Stage == stage && result.Step == step {
-			recorded = true
-			break
-		}
-	}
-	if !recorded {
-		return nil, fmt.Errorf("no log range for burn %q step %q: %w", stage, step, store.ErrNotFound)
-	}
+	stage, step = selected.Stage, logStepSelector(selected)
+
 	response, err := service.stepLogResponse(ctx, run, steps, stage, step, filter)
 	response.AvailablePairs = availablePairs
 	return response, err
-}
-
-// maxLiveLogChunk bounds one live-log poll response. 256 KiB keeps a fast
-// producer from turning a dashboard poll into a multi-megabyte transfer while
-// still draining bursts within a couple of poll cycles.
-const maxLiveLogChunk = 256 << 10
-
-// LiveLogSize is an internal stream hint, used only after an authorized live
-// read. It confers no read authority; streams still refresh the full view roughly
-// once a second for terminal state, scope and evidence retention checks.
-func (service *API) LiveLogSize(id string) (int64, error) {
-	if source, ok := service.logs.(interface{ LiveLogSize(string) (int64, error) }); ok {
-		return source.LiveLogSize(id)
-	}
-	return 0, ErrUnavailable
-}
-
-// RunLogLive is the read-only polled live view of a run's redacted log
-// stream. The run's terminal state is resolved BEFORE the chunk is read, so
-// Done=true can never be reported while unread bytes remain: a run finishing
-// between the two reads surfaces as one more running poll, and the client's
-// next call drains the remainder with Done set. The underlying file receives
-// only the secret-masked stream (masking happens in the Job controller before
-// any byte reaches the log writer), so this view exposes exactly what the
-// retained per-step view exposes — earlier.
-func (service *API) RunLogLive(ctx context.Context, actor api.Actor, id string, offset int64) (any, error) {
-	service, err := service.forActor(ctx, actor)
-	if err != nil {
-		return nil, err
-	}
-	if service.logs == nil || service.history == nil {
-		return nil, refuse(ErrUnavailable, "logs")
-	}
-	if strings.TrimSpace(id) == "" {
-		return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
-	}
-	run, err := service.resolveReadRunID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if err := service.purgedEvidence(ctx, run, "logs"); err != nil {
-		return nil, err
-	}
-	terminal := run.Status.Terminal()
-	presented := service.presentationRun(ctx, run)
-	if presented.DisplayStatus == model.DisplayQueued {
-		scheduling, reason := service.observeScheduling(ctx, run, nil, true)
-		applyQueuedDisplay(&presented, scheduling, reason)
-	}
-	response := LiveLogResponse{RunID: run.ID, Status: string(visibleRun(run).Status), DisplayStatus: presented.DisplayStatus, DisplayReason: presented.DisplayReason}
-	// Status and purge checks above still run on idle refreshes, but an
-	// unchanged append-only log needs no open/read even when it just finished.
-	if offset >= 0 {
-		if size, err := service.LiveLogSize(run.ID); err == nil && size == offset {
-			response.Offset, response.Size, response.Done = size, size, terminal
-			return response, nil
-		}
-	}
-	chunk, next, size, err := service.logs.ReadFrom(run.ID, offset, maxLiveLogChunk)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			// The log file appears when the Job starts streaming; a queued or
-			// just-admitted run legitimately has none yet. A terminal run with
-			// no file is genuinely done.
-			response.Done = terminal
-			return response, nil
-		}
-		return nil, fmt.Errorf("read live run log: %w", err)
-	}
-	response.Chunk = string(chunk)
-	response.Offset = next
-	response.Size = size
-	// Done is true only when the run is terminal AND the read has reached
-	// the end of the file. This prevents reporting done while unread bytes
-	// remain in a multi-chunk terminal log.
-	response.Done = terminal && next >= size
-	return response, nil
 }
 
 func (service *API) Repositories(ctx context.Context, actor api.Actor) (any, error) {
@@ -1924,14 +1742,13 @@ func wireStages(steps []model.StepResult, run model.Run) (map[string]string, *in
 // When neither is populated, the first failed step wins (the caller already
 // checks exitCode == nil).
 func matchesFailedStep(step model.StepResult, run model.Run) bool {
-	stageRecorded := run.FailedStage != ""
-	stepRecorded := run.FailedStep != ""
-	if !stageRecorded && !stepRecorded {
-		return true // no identity recorded; take the first failed step
+	if run.Status != model.RunFailed || run.FailedStep == "" {
+		return false
 	}
-	stageMatch := !stageRecorded || step.Stage == run.FailedStage
-	stepMatch := !stepRecorded || step.Step == run.FailedStep
-	return stageMatch && stepMatch
+	if step.NodeType != "" {
+		return step.NodeID == run.FailedStep
+	}
+	return (step.NodeID == run.FailedStep || step.Step == run.FailedStep) && (run.FailedStage == "" || step.Stage == run.FailedStage)
 }
 
 // stepsForRun reads observed native nodes, including retained historical rows.
@@ -1945,6 +1762,9 @@ func (service *API) stepsForRun(ctx context.Context, run model.Run) ([]model.Ste
 	steps = append([]model.StepResult(nil), steps...)
 	for i := range steps {
 		steps[i].Message = model.SanitizeNodeMessage(steps[i].Message)
+		steps[i].DisplayName = model.SanitizeNodeMessage(steps[i].DisplayName)
+		steps[i].Stage = model.SanitizeNodeMessage(steps[i].Stage)
+		steps[i].Step = model.SanitizeNodeMessage(steps[i].Step)
 	}
 	return steps, nil
 }
@@ -1987,41 +1807,30 @@ func (service *API) stepLogResponse(ctx context.Context, run model.Run, steps []
 	if run.Status.Terminal() {
 		forgetActiveLogIndex(service.logs, run.ID)
 	}
-	for _, result := range steps {
-		if result.Stage != stage || result.Step != step {
-			continue
-		}
-		// A workflow can fail before this step ever gets a pod or writes a
-		// output. Its durable diagnostic explains an absent file/range;
-		// do not turn that expected absence into a storage failure.
-		if run.Status.Terminal() &&
-			result.Termination != nil && !result.Termination.Available && result.Termination.Unavailable == "not-executed" {
-			if err := service.purgedEvidence(ctx, run, "logs"); err != nil {
-				return LogResponse{}, err
-			}
-			retained, meta, readErr := service.readStepLogFiltered(ctx, run, stage, step, filter)
-			if readErr == nil {
-				return newLogResponse(run.ID, stage, step, retained, meta), nil
-			}
-			if !errors.Is(readErr, os.ErrNotExist) {
-				return LogResponse{}, fmt.Errorf("read bounded run log: %w", readErr)
-			}
-			body, meta, err := runlog.FilterBytes(nil, filter)
-			if err != nil {
-				return LogResponse{}, err
-			}
-			response := newLogResponse(run.ID, stage, step, body, meta)
-			response.Note = "step was not executed; no log recorded"
-			response.RunError = run.Error
-			return response, nil
-		}
-		break
+	row, err := selectLogNode(steps, stage, step)
+	if err != nil {
+		return LogResponse{}, err
 	}
-	body, meta, err := service.readStepLogFiltered(ctx, run, stage, step, filter)
+	if run.Status.Terminal() && row.Termination != nil && !row.Termination.Available && row.Termination.Unavailable == "not-executed" {
+		if err := service.purgedEvidence(ctx, run, "logs"); err != nil {
+			return LogResponse{}, err
+		}
+		body, meta, err := runlog.FilterBytes(nil, filter.WithContext(ctx))
+		if err != nil {
+			return LogResponse{}, err
+		}
+		response := newLogResponse(run.ID, row.Stage, row.Step, body, meta)
+		response.Note = "step was not executed; no log recorded"
+		response.RunError = run.Error
+		return response, nil
+	}
+	body, meta, err := service.readSelectedNodeLog(ctx, run, row, filter)
 	if err != nil {
 		return LogResponse{}, fmt.Errorf("read bounded run log: %w", err)
 	}
-	return newLogResponse(run.ID, stage, step, body, meta), nil
+	response := newLogResponse(run.ID, row.Stage, row.Step, body, meta)
+	response.NodeID = row.NodeID
+	return response, nil
 }
 
 func newLogResponse(runID, stage, step string, body []byte, meta runlog.Meta) LogResponse {
@@ -2064,21 +1873,12 @@ func (service *API) readStepLogFiltered(ctx context.Context, run model.Run, stag
 	return service.logs.ReadFiltered(run.ID, stage, step, filter)
 }
 
-func selectLogRange(results []model.StepResult, wanted string) (string, string, error) {
-	selectedStage := ""
-	for _, result := range results {
-		if result.Step != wanted {
-			continue
-		}
-		if selectedStage != "" {
-			return "", "", fmt.Errorf("%w: step %q is ambiguous across burns", ErrInvalidInput, wanted)
-		}
-		selectedStage = result.Stage
+func selectLogRange(rows []model.StepResult, wanted string) (string, string, error) {
+	row, err := selectLogNode(rows, "", wanted)
+	if err != nil {
+		return "", "", err
 	}
-	if selectedStage == "" {
-		return "", "", fmt.Errorf("no log range for step %q: %w", wanted, store.ErrNotFound)
-	}
-	return selectedStage, wanted, nil
+	return row.Stage, logStepSelector(row), nil
 }
 
 func (service *API) prepareWaitRun(ctx context.Context, repositoryName, selector, trigger string, requestedSeconds int, actor string) (func(context.Context) (WaitResponse, error), error) {

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/argojob"
@@ -20,14 +21,14 @@ func TestNativeExitAvailabilitySurvivesStoreAndRunReaders(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			node := wfv1.NodeStatus{ID: "node", Name: "leaf", DisplayName: "leaf", Type: wfv1.NodeTypePod, Phase: wfv1.NodeError}
+			node := wfv1.NodeStatus{ID: "node", BoundaryID: "root", Name: "leaf", DisplayName: "leaf", Type: wfv1.NodeTypePod, Phase: wfv1.NodeError}
 			if input != "missing" {
 				node.Outputs = &wfv1.Outputs{ExitCode: &input}
 			}
-			workflow := &wfv1.Workflow{Status: wfv1.WorkflowStatus{Nodes: wfv1.Nodes{"node": node}}}
+			workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "workflow"}, Status: wfv1.WorkflowStatus{Nodes: wfv1.Nodes{"root": {ID: "root", Name: "workflow", DisplayName: "entry", Type: wfv1.NodeTypeDAG, Phase: wfv1.NodeFailed}, "node": node}}}
 			rows := argojob.NodeStepResults(workflow, nil)
 			unknown := input == "missing" || input == "malformed"
-			if len(rows) != 1 || rows[0].ExitCodeUnknown != unknown {
+			if len(rows) != 2 || rows[0].NodeID != "node" || rows[0].ExitCodeUnknown != unknown {
 				t.Fatal("native availability lost", rows)
 			}
 			if err = f.store.PutStepResults(t.Context(), run.ID, rows); err != nil {
@@ -38,10 +39,10 @@ func TestNativeExitAvailabilitySurvivesStoreAndRunReaders(t *testing.T) {
 				t.Fatal(err)
 			}
 			detail := value.(RunDetailResponse)
-			if len(detail.Steps) != 1 || detail.Steps[0].ExitCodeUnknown != unknown {
+			if len(detail.Steps) != 2 || detail.Steps[0].ExitCodeUnknown != unknown {
 				t.Fatal("stored availability lost", detail.Steps)
 			}
-			_, exit := wireStages(detail.Steps, model.Run{FailedStep: "leaf"})
+			_, exit := wireStages(detail.Steps, model.Run{Status: model.RunFailed, FailedStage: rows[0].Stage, FailedStep: rows[0].NodeID})
 			want := 0
 			if input == "42" {
 				want = 42
@@ -77,5 +78,13 @@ func TestNativeExitAvailabilitySurvivesStoreAndRunReaders(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNativeGreenRetryStatusHasNoFailureExit(t *testing.T) {
+	rows := []model.StepResult{{NodeID: "first", NodeType: "Pod", Stage: "workflow", Step: "compile(0)", Status: model.StepFailed, ExitCode: 7}, {NodeID: "second", NodeType: "Pod", Stage: "workflow", Step: "compile(1)", Status: model.StepPassed}}
+	_, exit := wireStages(rows, model.Run{Status: model.RunPassed})
+	if exit != nil {
+		t.Fatal("green retry exposed an earlier failed exit", *exit)
 	}
 }

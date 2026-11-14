@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -39,7 +40,7 @@ func TestDeclaredRetryOutcomeInRunDetailAndStatus(t *testing.T) {
 			if err := fixture.scheduler.ProcessNext(ctx); err != nil {
 				t.Fatal(err)
 			}
-			// Assign a real indexed range as persistSteps does for replayed logs.
+			// Seed a retained historical range for the read fixture.
 			if err := fixture.scheduler.seedHistoricalSteps(ctx, fixture.store, run.ID, result.Steps, runlog.Index{Ranges: []runlog.Range{
 				{Stage: "retry", Step: "check", Start: 10, End: 100},
 			}}); err != nil {
@@ -87,25 +88,7 @@ func runDetailSteps(t *testing.T, control *API, runID string) []model.StepResult
 	return value.(RunDetailResponse).Steps
 }
 
-// TestSeededPlanIsVisibleBeforeAnyStepStarts is the defect this exists to fix:
-// a run that has just been submitted showed "No step results recorded yet"
-// because the step list was built purely from what had already happened.
-
-// TestPlannedStepsThatNeverRanReportSkipped retains unreached branches on a
-// terminal run without suggesting that they are still waiting to execute.
-
-// TestObservedStepsUpdateSeededRowsInPlace proves the count is the planned
-// count for the whole life of the run, rather than however many steps happened
-// to have started.
-
-// TestInterruptedRunRetainsItsPlanAndTheProgressItMade is the second defect the
-// plan closes. persistSteps only ever runs from a completed engine result, and
-// the interrupted path builds an empty one -- so a run cancelled mid-flight
-// discarded every step it had visibly executed and returned Steps: null.
-
-// TestRunWithoutAPlanKeepsItsExistingBehaviour holds the compatibility line:
-// every run submitted before plans existed, and every engine that cannot
-// enumerate its own document, reports exactly what it always did.
+// Stored outcomes remain readable without a declaration plan.
 func TestRunWithoutAPlanKeepsItsExistingBehaviour(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
 		Status: model.RunPassed, Phase: "passed",
@@ -126,7 +109,7 @@ func TestRunWithoutAPlanKeepsItsExistingBehaviour(t *testing.T) {
 	if err := fixture.scheduler.ProcessNext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.logs.StepPlan(enqueued.ID); !os.IsNotExist(unwrapPathError(err)) {
+	if _, err := os.Stat(filepath.Join(fixture.root, "logs", enqueued.ID+".plan.json")); !os.IsNotExist(unwrapPathError(err)) {
 		t.Fatalf("a plan was written for an engine that reported none: %v", err)
 	}
 	steps := runDetailSteps(t, fixture.api(t), enqueued.ID)

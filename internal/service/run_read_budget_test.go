@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/oberthci/oberth/internal/storetest"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -114,7 +115,7 @@ func TestRunLogsEmptyActiveWindowHasMCPContinuation(t *testing.T) {
 	if _, err := f.retention.Database.ClaimNextRun(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.retention.Database.PutStepResult(t.Context(), model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
+	if _, err := storetest.PutStepResult(t.Context(), f.retention.Database, model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
 		t.Fatal(err)
 	}
 	wanted := "[test/unit] actual error\n"
@@ -174,7 +175,7 @@ func TestRunLogsRunningIndexFindsLateStepWithIdenticalRequest(t *testing.T) {
 	if _, err := f.retention.Database.ClaimNextRun(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.retention.Database.PutStepResult(t.Context(), model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
+	if _, err := storetest.PutStepResult(t.Context(), f.retention.Database, model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
 		t.Fatal(err)
 	}
 	wanted := "[test/unit] late failure\n"

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/oberthci/oberth/internal/storetest"
 	"strings"
 	"testing"
 	"time"
@@ -226,7 +227,7 @@ func TestRunGetSummary(t *testing.T) {
 		if i == 1 {
 			status = model.StepFailed
 		}
-		_, err := fixture.store.PutStepResult(ctx, model.StepResult{NodeID: ("test") + "." + (name),
+		_, err := storetest.PutStepResult(ctx, fixture.store, model.StepResult{NodeID: ("test") + "." + (name),
 			RunID: run.ID, Stage: "test", Step: name, Ordinal: i, Status: status,
 			StartedAt: &started, FinishedAt: &ended,
 		})
