@@ -98,7 +98,7 @@ func TestActiveRunLogsWithoutRetainedOutputArePending(t *testing.T) {
 			if _, err := fixture.logs.BuildIndex(run.ID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := fixture.store.PutStepResult(ctx, model.StepResult{NodeID: "release-build-variants.release-build-variants", RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants", Status: model.StepPassed}); err != nil {
+			if _, err := putNativeStepFixture(ctx, fixture.store, model.StepResult{NodeID: "release-build-variants.release-build-variants", RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants", Status: model.StepPassed}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := fixture.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed}); err != nil {

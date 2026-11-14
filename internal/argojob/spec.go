@@ -50,8 +50,6 @@ const (
 	triggerLabel = "oberth.ci/trigger"
 	runLabel     = "oberth.ci/run"
 
-	defaultTTLSeconds = int32(3600)
-
 	// defaultSourceVolumeSize bounds one run's checkout. It is a source tree,
 	// not a build output directory: the pipeline's own volumes hold artifacts.
 	defaultSourceVolumeSize = "8Gi"
@@ -181,15 +179,10 @@ type Config struct {
 	// Disabled by default; see assist_hold.go.
 	Assist AssistConfig
 
-	// TTLSeconds is how long a finished Workflow object is retained.
-	TTLSeconds int32
-
 	ArtifactsLimitBytes int64
 
-	// MaxRunLogBytes bounds the aggregate bytes written across all steps of
-	// one run log. Without this ceiling, a pipeline with 512 admitted steps
-	// could write up to 512 * 32 MiB = 16 GiB to the shared server PVC.
-	// Default: 64 MiB.
+	// MaxRunLogBytes bounds the aggregate retained container bytes per run.
+	// Default: 64 MiB. Truncation records a reason without changing the verdict.
 	MaxRunLogBytes int64
 
 	// PerRepoIdentities maps canonical "upstream/org/repo" identity strings
@@ -225,9 +218,6 @@ type Config struct {
 
 func (config *Config) applyDefaults() {
 
-	if config.TTLSeconds <= 0 {
-		config.TTLSeconds = defaultTTLSeconds
-	}
 	if strings.TrimSpace(config.SourceVolumeSize) == "" {
 		config.SourceVolumeSize = defaultSourceVolumeSize
 	}
@@ -688,7 +678,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if request.Capability != nil {
 		workflow.Annotations[capabilityAnnotation] = capabilityBinding(request.RepositoryID, request.Capability)
 	}
-	applyServerBounds(workflow, config)
 	if err := markAssistHolds(workflow, config, request, hasSecretSteps); err != nil {
 		return nil, err
 	}
@@ -920,24 +909,6 @@ func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request
 	workflow.Spec.PodMetadata.Labels[runLabel] = labelValue(request.RunID)
 	workflow.Spec.PodMetadata.Labels[triggerLabel] = string(request.Trigger)
 	workflow.Spec.PodMetadata.Labels[tierLabel] = tierFor(request.Trigger)
-}
-
-// applyServerBounds caps the document's own deadline and pins retention. A
-// document can ask for less than the administrator ceiling but never more.
-func applyServerBounds(workflow *wfv1.Workflow, config Config) {
-	ttl := config.TTLSeconds
-	// Keep Workflow-owned Pods through settling, diagnostics and the shared
-	// two-minute final drain, even if the configured TTL is shorter.
-	if ttl < 180 {
-		ttl = 180
-	}
-	workflow.Spec.TTLStrategy = &wfv1.TTLStrategy{SecondsAfterCompletion: &ttl}
-	// No PodGC: owner-reference collection removes step Pods together with the
-	// TTL-deleted Workflow, preserving pod logs for the full retention window.
-	// PodGCOnWorkflowCompletion deleted pods at completion, before the TTL
-	// collected the Workflow — a late Wait or restart lost the pods that
-	// replayStepLog uses as its only log source.
-	workflow.Spec.PodGC = nil
 }
 
 // SourceVolumeName and SourceMountPath are where every pipeline container

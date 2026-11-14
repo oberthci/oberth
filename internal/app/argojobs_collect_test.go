@@ -24,7 +24,7 @@ import (
 // including PutStepResult in a file-backed store. Controller completion and
 // progress emission are supplied by the fixture; source planning and admission
 // are outside this test. Unfinished nodes are progress, never durable outcomes.
-func TestArgoCollectUnfinishedNodesPreservesWorkflowVerdict(t *testing.T) {
+func TestArgoCollectPreservesNativeVerdictAndUnfinishedNodes(t *testing.T) {
 	for _, phase := range []wfv1.NodePhase{wfv1.NodePending, wfv1.NodeRunning} {
 		for _, succeeded := range []bool{false, true} {
 			t.Run(string(phase)+"/succeeded="+map[bool]string{true: "true", false: "false"}[succeeded], func(t *testing.T) {
@@ -59,10 +59,12 @@ func TestArgoCollectUnfinishedNodesPreservesWorkflowVerdict(t *testing.T) {
 					n.StartedAt = metav1.Time{}
 					wf.Status.Nodes["unfinished"] = n
 				}
-				completion := argojob.Completion{Name: wf.Name, Terminal: true, Succeeded: succeeded, Phase: "Failed", Reason: "original workflow failure", Steps: argojob.StepResults(wf), NodeSteps: argojob.NodeStepResults(wf, nil)}
+				wf.Status.Phase = wfv1.WorkflowFailed
 				if succeeded {
-					completion.Phase, completion.Reason = "Succeeded", ""
+					wf.Status.Phase = wfv1.WorkflowSucceeded
+					delete(wf.Status.Nodes, "failed")
 				}
+				completion := argojob.Completion{Name: wf.Name, Terminal: true, Succeeded: succeeded, Phase: string(wf.Status.Phase), Reason: "original workflow failure", Steps: argojob.StepResults(wf), NodeSteps: argojob.NodeStepResults(wf, nil)}
 				if !succeeded {
 					completion.FailedStage, completion.FailedStep = "verify", "verify"
 				}
@@ -102,11 +104,11 @@ func TestArgoCollectUnfinishedNodesPreservesWorkflowVerdict(t *testing.T) {
 				if finished.Status != wantStatus || finished.Phase == "collect" {
 					t.Fatalf("Workflow verdict replaced by node projection: %+v", finished)
 				}
-				if !succeeded && (finished.FailedStage != "verify" || finished.FailedStep != "verify" || finished.Error != "original workflow failure") {
+				if !succeeded && (finished.FailedStage != "wf" || finished.FailedStep != "failed" || finished.Error != "original workflow failure") {
 					t.Fatalf("failure evidence changed: %+v", finished)
 				}
-				if succeeded && finished.Error != "" {
-					t.Fatalf("invented failure for a succeeded Workflow: %+v", finished)
+				if succeeded && (finished.Error != "" || finished.FailedStep != "") {
+					t.Fatal("green Workflow acquired an unfinished-node failure", finished)
 				}
 				rows, err := db.StepResults(ctx, run.ID)
 				if err != nil {

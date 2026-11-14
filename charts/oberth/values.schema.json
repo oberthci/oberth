@@ -908,10 +908,6 @@
           "type": "string",
           "description": "Identity for Argo's own executor containers. Must differ from all pipeline identities."
         },
-        "workflowTTL": {
-          "type": "integer",
-          "minimum": 1
-        },
         "vault": {
           "type": "object",
           "properties": {

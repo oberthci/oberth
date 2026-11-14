@@ -37,9 +37,6 @@ func TestFinalizeReturnsUnreadableAssistedVerdict(t *testing.T) {
 	if err != nil || run.ID != source.ID {
 		t.Fatalf("claim = %+v %v", run, err)
 	}
-	if err := f.logs.InitializeStepProgress(run.ID); err != nil {
-		t.Fatal(err)
-	}
 	real := f.scheduler.store
 	f.scheduler.store = verdictUnreadableStore{SchedulerStore: real, runID: run.ID}
 	err = f.scheduler.finalizeReconciledRun(t.Context(), run, result, f.scheduler.requireMutation)

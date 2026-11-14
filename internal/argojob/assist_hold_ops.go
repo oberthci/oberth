@@ -442,7 +442,7 @@ type assistSweepHold struct {
 
 // failedAttemptExit is the main container exit code of the attempt whose
 // failure created the hold: the sibling Pod of node "...(N-1)" of the same
-// Workflow. Step Pods have no PodGC, so it stays until the Workflow goes.
+// Workflow. Authored PodGC may remove that Pod before inspection.
 func failedAttemptExit(pods []corev1.Pod, held *corev1.Pod, hold model.AssistHold) *int {
 	base := retryAttemptSuffix.ReplaceAllString(hold.Node, "")
 	node := fmt.Sprintf("%s(%d)", base, hold.Attempt-1)

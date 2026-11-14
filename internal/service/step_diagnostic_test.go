@@ -27,7 +27,7 @@ func TestRunGetRetainsBoundTerminationAndUnavailableHistory(t *testing.T) {
 		if name == "new" {
 			step.Termination = record
 		}
-		if _, err = f.store.PutStepResult(ctx, step); err != nil {
+		if _, err = putNativeStepFixture(ctx, f.store, step); err != nil {
 			t.Fatal(err)
 		}
 	}

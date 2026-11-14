@@ -14,6 +14,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
@@ -273,8 +274,15 @@ func fixtureCompletionNodes(completion argojob.Completion) argojob.Completion {
 	if completion.NodeSteps != nil {
 		return completion
 	}
+	if len(completion.Steps) == 0 && completion.FailedStep != "" {
+		completion.Steps = []argojob.StepResult{{NodeID: "failure-node", Stage: completion.FailedStage, Step: completion.FailedStep, Status: runprogress.StepFailed}}
+	}
 	for i, step := range completion.Steps {
-		completion.NodeSteps = append(completion.NodeSteps, model.StepResult{NodeID: fmt.Sprintf("node-%d", i), Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: model.StepStatus(step.Status), ExitCode: step.ExitCode, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
+		if step.NodeID == "" {
+			step.NodeID = fmt.Sprintf("node-%d", i)
+			completion.Steps[i].NodeID = step.NodeID
+		}
+		completion.NodeSteps = append(completion.NodeSteps, model.StepResult{NodeID: step.NodeID, NodeType: "Pod", Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: model.StepStatus(step.Status), ExitCode: step.ExitCode, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
 	}
 	return completion
 }
@@ -735,12 +743,22 @@ func TestResultMapping(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			result := jobs.result(fixtureCompletionNodes(tc.completion))
+			completion := fixtureCompletionNodes(tc.completion)
+			result := jobs.result(completion)
 			if tc.completion.Infrastructure && (result.FailedStage != "" || result.FailedStep != "") {
 				t.Fatal("infrastructure failure retained test-failure attribution")
 			}
-			if !tc.completion.Infrastructure && !tc.completion.Succeeded && result.FailedStep != tc.completion.FailedStep {
-				t.Fatal("test failure lost step attribution")
+			expectedFailure := ""
+			if !completion.Infrastructure && !completion.Succeeded {
+				for _, row := range completion.Steps {
+					if row.Stage == completion.FailedStage && row.Step == completion.FailedStep {
+						expectedFailure = row.NodeID
+						break
+					}
+				}
+			}
+			if result.FailedStep != expectedFailure {
+				t.Fatalf("failure identity=%q want native node %q", result.FailedStep, expectedFailure)
 			}
 			if result.Status != tc.wantStatus {
 				t.Fatalf("status = %q, want %q", result.Status, tc.wantStatus)
@@ -751,15 +769,15 @@ func TestResultMapping(t *testing.T) {
 			if tc.wantError != "" && result.Error != tc.wantError {
 				t.Fatalf("error = %q, want %q", result.Error, tc.wantError)
 			}
-			if len(tc.completion.Steps) > 0 && len(result.Steps) != len(tc.completion.Steps) {
-				t.Fatalf("steps length = %d, want %d", len(result.Steps), len(tc.completion.Steps))
+			if len(completion.Steps) > 0 && len(result.Steps) != len(completion.Steps) {
+				t.Fatalf("steps length = %d, want %d", len(result.Steps), len(completion.Steps))
 			}
 			for i, step := range result.Steps {
-				if step.Stage != tc.completion.Steps[i].Stage {
-					t.Fatalf("step[%d].Burn = %q, want %q", i, step.Stage, tc.completion.Steps[i].Stage)
+				if step.Stage != completion.Steps[i].Stage {
+					t.Fatalf("step[%d].Burn = %q, want %q", i, step.Stage, completion.Steps[i].Stage)
 				}
-				if step.Step != tc.completion.Steps[i].Step {
-					t.Fatalf("step[%d].Step = %q, want %q", i, step.Step, tc.completion.Steps[i].Step)
+				if step.Step != completion.Steps[i].Step {
+					t.Fatalf("step[%d].Step = %q, want %q", i, step.Step, completion.Steps[i].Step)
 				}
 			}
 		})

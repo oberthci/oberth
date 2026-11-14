@@ -134,6 +134,11 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		return result, err
 	}
 	printArgoExecutorResources(deps.Output, argoExecutorResourcesForReview(cfg))
+	cfg.argoWorkflowTTL, err = readArgoWorkflowTTL(ctx, deps, ns, exists)
+	if err != nil {
+		return result, err
+	}
+	printArgoWorkflowTTL(deps.Output, argoWorkflowTTLForReview(cfg))
 	result.InstalledVersion = chartVersionFromRelease(release.Chart, "argo-workflows")
 	result.TargetVersion = cfg.ArgoChartVersion
 	if result.TargetVersion == "" {
@@ -167,7 +172,7 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	if err := noticeArgoExternalConfigMap(ctx, deps, ns, exists); err != nil {
 		return result, err
 	}
-	if (argoLimitsRequested(cfg) || imageMissing || cfg.argoExecutorResources == nil) && action == actionSkip {
+	if (argoLimitsRequested(cfg) || imageMissing || cfg.argoExecutorResources == nil || cfg.argoWorkflowTTL == nil) && action == actionSkip {
 		if canonicalChartVersion(result.InstalledVersion) == "" {
 			return result, errors.New("cannot reconcile existing Argo values without a known installed chart version")
 		}
@@ -247,7 +252,8 @@ func ArgoHelmArgs(cfg Config) []string {
 	}
 	args = append(args, securityArgs...)
 	args = append(args, argoLimitArgs(cfg)...)
-	return append(args, argoExecutorResourceArgs(cfg)...)
+	args = append(args, argoExecutorResourceArgs(cfg)...)
+	return append(args, argoWorkflowTTLArgs(cfg)...)
 }
 
 // VerifyArgoController checks that a controller is actually watching the

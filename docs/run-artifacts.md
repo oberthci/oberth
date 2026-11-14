@@ -71,7 +71,7 @@ explains a failure is the main thing worth keeping.
 
 The claim is owned by the Workflow, so Kubernetes deletes it when the Workflow's
 TTL expires. Collection runs immediately on completion and finishes in seconds,
-but `--argo-workflow-ttl` is a real bound on this feature. A collection that
+but the authored TTL or the Argo controller workflowDefaults TTL bounds this feature. A collection that
 misses its window is recorded in the audit chain as
 `ci.argo.artifacts` with `stored: false` and a reason, never dropped silently.
 

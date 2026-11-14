@@ -386,3 +386,14 @@ func validatePromotionSpec(spec model.PromotionSpec) error {
 	}
 	return nil
 }
+
+func (s *Store) PutStepResult(ctx context.Context, result model.StepResult) (model.StepResult, error) {
+	if err := validateStepResult(result); err != nil {
+		return model.StepResult{}, err
+	}
+	admission, err := s.stepAdmission(ctx, result.RunID)
+	if err != nil {
+		return model.StepResult{}, err
+	}
+	return s.putStepResult(ctx, s.db, result, admission)
+}

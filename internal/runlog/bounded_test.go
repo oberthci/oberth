@@ -9,10 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
-
-	"github.com/oberthci/oberth/internal/runprogress"
 )
 
 type countedLogReader struct {
@@ -248,26 +245,3 @@ func TestBoundedScanHonorsCancellationAndReadErrors(t *testing.T) {
 type failingLogReader struct{}
 
 func (failingLogReader) ReadAt([]byte, int64) (int, error) { return 0, os.ErrPermission }
-
-func TestRunProgressReadDoesNotWaitForGlobalAppenderLock(t *testing.T) {
-	store, err := Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	if err := store.AppendStepProgress("progress-lock", runprogress.Event{Version: runprogress.Version, Stage: "t", Step: "u", Status: runprogress.StepRunning, StartedAt: &now}); err != nil {
-		t.Fatal(err)
-	}
-	store.progressMu.Lock()
-	defer store.progressMu.Unlock()
-	done := make(chan error, 1)
-	go func() { _, err := store.StepProgress("progress-lock"); done <- err }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("run_get journal read blocked behind unrelated append")
-	}
-}

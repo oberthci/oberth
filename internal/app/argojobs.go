@@ -65,9 +65,10 @@ type DeclarationRecorder interface {
 // contracts the Argo Workflow engine satisfies, so the scheduler, admission
 // gate, store, and audit chain need no knowledge of which engine ran a run.
 type ArgoJobs struct {
-	watchHub       *argowatch.Hub
-	pinnedSources  *PinnedSourceLoader
-	sourceRecorder PinnedSourceRecorder
+	containerLogSource containerLogController
+	watchHub           *argowatch.Hub
+	pinnedSources      *PinnedSourceLoader
+	sourceRecorder     PinnedSourceRecorder
 
 	beforeCreate func(context.Context, service.WorkflowRequest, argojob.Request) error
 
@@ -625,8 +626,7 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 		}); ok {
 			binding := *intent.adoption
 			retainedEvents := append([]runprogress.Event(nil), events...)
-			// A completed observation may have found a real exit after the seed
-			// journal was read. Keep that evidence if a later fallback snapshot
+			// Keep a real exit from this observation if a later fallback snapshot
 			// loses the exit field; a log/index error must not erase a test failure.
 			for _, step := range completion.Steps {
 				if step.ExitCodeKnown && step.ExitCode > 0 && step.Status == runprogress.StepFailed && step.Attempt == "" && !step.AttemptAmbiguous {
@@ -816,11 +816,28 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 			}
 		}
 	}
-	if !completion.Succeeded && completion.FailedStep != "" {
-		result.FailedStage, result.FailedStep = completion.FailedStage, completion.FailedStep
-		result.Phase = completion.FailedStage
+	if result.Status != model.RunPassed && completion.FailedStep != "" {
+		failedID := ""
+		for _, step := range completion.Steps {
+			if step.Stage == completion.FailedStage && step.Step == completion.FailedStep {
+				failedID = step.NodeID
+				break
+			}
+		}
+		for _, row := range result.Steps {
+			if row.BoundaryID == failedID && row.NodeType == "Container" && (row.Status == model.StepFailed || row.Status == model.StepTimedOut) {
+				failedID = row.NodeID
+				break
+			}
+		}
+		for _, row := range result.Steps {
+			if row.NodeID == failedID {
+				result.FailedStage, result.FailedStep = row.Stage, row.NodeID
+				result.Phase = row.Stage
+				break
+			}
+		}
 	}
-
 	if result.Status == model.RunFailed && completion.Infrastructure {
 		result.Phase = "infrastructure"
 		result.FailedStage, result.FailedStep = "", ""

@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 
@@ -22,11 +21,10 @@ import (
 const DefaultRunLimitBytes int64 = 64 << 20
 
 const (
-	maxMarkerBytes   = 64 << 10
-	maxReadBytes     = 4 << 20
-	maxProgressBytes = 1 << 20
-	maxPatternBytes  = 512
-	maxContextLines  = 50
+	maxMarkerBytes  = 64 << 10
+	maxReadBytes    = 4 << 20
+	maxPatternBytes = 512
+	maxContextLines = 50
 )
 
 var ErrLogSliceTooLarge = errors.New("run log slice exceeds response limit")
@@ -41,9 +39,11 @@ type Range struct {
 }
 
 type Index struct {
-	RunID  string  `json:"run_id"`
-	Size   int64   `json:"size"`
-	Ranges []Range `json:"ranges"`
+	Format     string         `json:"format,omitempty"`
+	Containers []ContainerLog `json:"containers,omitempty"`
+	RunID      string         `json:"run_id"`
+	Size       int64          `json:"size"`
+	Ranges     []Range        `json:"ranges"`
 }
 
 // DefaultWindowLines bounds an unfiltered interactive log read.
@@ -52,6 +52,7 @@ const DefaultWindowLines = 200
 const DefaultWindowDescription = "last 200 lines by default; pass tail, limit or pattern for more"
 
 type Filter struct {
+	Raw     bool // Display historical run bytes without interpreting markers.
 	Pattern string
 	Context int
 	Offset  int
@@ -99,6 +100,8 @@ type Meta struct {
 }
 
 type Store struct {
+	limitBytes     int64
+	containerMu    sync.Mutex
 	directory      string
 	progressMu     sync.RWMutex
 	runningMu      sync.Mutex
@@ -108,42 +111,43 @@ type Store struct {
 	runningEntries int
 }
 
-func Open(directory string) (*Store, error) {
+// WithRunLimitBytes applies the existing server run-log bound to ordinary
+// observation writes as well as container copies. Set it only at construction.
+func WithRunLimitBytes(limit int64) func(*Store) {
+	return func(store *Store) { store.limitBytes = limit }
+}
+
+func Open(directory string, options ...func(*Store)) (*Store, error) {
 	if strings.TrimSpace(directory) == "" {
 		return nil, errors.New("log directory is required")
 	}
 	if err := os.MkdirAll(directory, 0o750); err != nil {
 		return nil, fmt.Errorf("create log directory: %w", err)
 	}
-	return &Store{directory: directory}, nil
+	store := &Store{directory: directory, limitBytes: DefaultRunLimitBytes}
+	for _, option := range options {
+		option(store)
+	}
+	if store.limitBytes <= 0 {
+		return nil, errors.New("run log limit must be positive")
+	}
+	return store, nil
 }
 
 func (store *Store) Create(runID string) (*os.File, error) {
-	path, err := store.logPath(runID)
-	if err != nil {
-		return nil, err
-	}
 	// logPath validates the run ID and proves the resulting path remains under
 	// the configured log directory.
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o640) //nolint:gosec
+	file, err := store.openRunLog(runID, os.O_CREATE|os.O_EXCL|os.O_APPEND|os.O_RDWR)
 	if err != nil {
 		return nil, fmt.Errorf("create run log: %w", err)
 	}
 	return file, nil
 }
 
-// Resume opens an existing run log for append and restores its progress journal.
+// Resume opens retained bytes for append without reading retired progress files.
 // A run can have a Workflow even if the owner stopped before its first log write.
 func (store *Store) Resume(runID string) (*os.File, []runprogress.Event, int64, error) {
-	path, err := store.logPath(runID)
-	if err != nil {
-		return nil, nil, 0, err
-	}
-	events, err := store.StepProgress(runID)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, nil, 0, err
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o640) //nolint:gosec
+	file, err := store.openRunLog(runID, os.O_CREATE|os.O_APPEND|os.O_RDWR)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("resume run log: %w", err)
 	}
@@ -152,10 +156,24 @@ func (store *Store) Resume(runID string) (*os.File, []runprogress.Event, int64, 
 		_ = file.Close()
 		return nil, nil, 0, errors.New("resumed run log must be a regular file")
 	}
-	return file, events, info.Size(), nil
+	return file, nil, info.Size(), nil
 }
 
 func (store *Store) BuildIndex(runID string) (Index, error) {
+	store.containerMu.Lock()
+	defer store.containerMu.Unlock()
+	if index, err := store.loadIndexContext(context.Background(), runID); err == nil && index.Format == "containers" {
+		path, err := store.logPath(runID)
+		if err != nil {
+			return Index{}, err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return Index{}, err
+		}
+		index.Size = info.Size()
+		return index, store.writeIndex(runID, index)
+	}
 	store.ForgetActiveIndex(runID)
 	defer store.ForgetActiveIndex(runID)
 	path, err := store.logPath(runID)
@@ -194,6 +212,9 @@ func (store *Store) ReadFiltered(runID, stage, step string, filter Filter) ([]by
 	if err != nil {
 		return nil, Meta{}, err
 	}
+	if index.Format == "containers" {
+		return store.readNativeStepLog(filter.ctx(), runID, stage, step, index, filter)
+	}
 	var selected []Range
 	var total int64
 	for _, candidate := range index.Ranges {
@@ -229,98 +250,14 @@ func (store *Store) ReadActive(runID, stage, step string) ([]byte, error) {
 }
 
 func (store *Store) ReadActiveFiltered(runID, stage, step string, filter Filter) ([]byte, Meta, error) {
+	index, err := store.loadIndexContext(filter.ctx(), runID)
+	if err == nil && index.Format == "containers" {
+		return store.readNativeStepLog(filter.ctx(), runID, stage, step, index, filter)
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, Meta{}, err
+	}
 	return store.readActiveIndexed(runID, stage, step, filter)
-}
-
-// LiveLogSize stats the append-only log without opening or reading its bytes.
-func (store *Store) LiveLogSize(runID string) (int64, error) {
-	path, err := store.logPath(runID)
-	if err != nil {
-		return 0, err
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return 0, err
-	}
-	return info.Size(), nil
-}
-
-// ReadFrom returns up to maximum bytes of the run's append-only log starting
-// at offset, plus the next poll offset and the current log size. It serves the
-// dashboard's live view of a run in progress: the file grows while the Job
-// streams, so callers poll with the returned offset. A negative offset means
-// "start tailing": the read begins near maximum bytes before the current
-// end, rounded back to the start of that record to preserve attribution. A
-// late-joining viewer still receives at most maximum bytes per call. When
-// more bytes remain past the returned chunk, the chunk is trimmed to the last
-// complete line so a multi-byte character split at the read boundary can never
-// be mangled by JSON re-encoding; a chunk without any newline is returned
-// as-is to guarantee forward progress.
-func (store *Store) ReadFrom(runID string, offset, maximum int64) ([]byte, int64, int64, error) {
-	if maximum <= 0 {
-		return nil, 0, 0, errors.New("live log read requires a positive byte bound")
-	}
-	path, err := store.logPath(runID)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	// logPath validated the owner ID and confined this path to the log root.
-	file, err := os.Open(path) //nolint:gosec
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	defer func() { _ = file.Close() }()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	size := info.Size()
-	start := offset
-	if start < 0 {
-		start = max(int64(0), size-maximum)
-		start, err = recordStart(file, start)
-		if err != nil {
-			return nil, 0, 0, err
-		}
-	}
-	if start > size {
-		start = size
-	}
-	if start == size {
-		return []byte{}, size, size, nil
-	}
-	if _, err := file.Seek(start, io.SeekStart); err != nil {
-		return nil, 0, 0, err
-	}
-	chunk, err := io.ReadAll(io.LimitReader(file, maximum))
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	if start+int64(len(chunk)) < size {
-		if newline := bytes.LastIndexByte(chunk, '\n'); newline >= 0 {
-			chunk = chunk[:newline+1]
-		}
-	}
-	return chunk, start + int64(len(chunk)), size, nil
-}
-
-// recordStart scans backward with fixed memory. A log record can exceed the
-// poll response size, so one look-behind chunk is not necessarily sufficient.
-// Only initial tail reads align; explicit continuation cursors stay exact.
-func recordStart(file *os.File, offset int64) (int64, error) {
-	var block [64 << 10]byte
-	for offset > 0 {
-		start := max(int64(0), offset-int64(len(block)))
-		n, err := file.ReadAt(block[:offset-start], start)
-		if err != nil {
-			return 0, err
-		}
-		if newline := bytes.LastIndexByte(block[:n], '\n'); newline >= 0 {
-			return start + int64(newline) + 1, nil
-		}
-		offset = start
-	}
-	return 0, nil
 }
 
 func (store *Store) Tail(runID string, maximum int64) ([]byte, error) {
@@ -367,306 +304,7 @@ func (store *Store) Tail(runID string, maximum int64) ([]byte, error) {
 	return chunk, nil
 }
 
-// InitializeStepProgress records an explicitly empty journal before a fresh
-// dispatch can execute anything. Existing evidence is never truncated/repaired.
-// A missing journal in any later observation/recovery remains unknown.
-func (store *Store) InitializeStepProgress(runID string) error {
-	path, err := store.progressPath(runID)
-	if err != nil {
-		return err
-	}
-	store.progressMu.Lock()
-	defer store.progressMu.Unlock()
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640) //nolint:gosec // Validated run ID under the private log directory.
-	if errors.Is(err, os.ErrExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("initialize step progress: %w", err)
-	}
-	return errors.Join(file.Sync(), file.Close())
-}
-
-// AppendStepProgress durably journals one bounded state transition. The
-// scheduler is the sole writer for a run; the lock also keeps dashboard reads
-// from observing a partial record in this process.
-func (store *Store) AppendStepProgress(runID string, event runprogress.Event) error {
-	if err := event.Validate(); err != nil {
-		return fmt.Errorf("append step progress: %w", err)
-	}
-	path, err := store.progressPath(runID)
-	if err != nil {
-		return err
-	}
-	body, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("encode step progress journal: %w", err)
-	}
-	body = append(body, '\n')
-	store.progressMu.Lock()
-	defer store.progressMu.Unlock()
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o640) //nolint:gosec
-	if err != nil {
-		return fmt.Errorf("open step progress journal: %w", err)
-	}
-	info, statErr := file.Stat()
-	if statErr != nil {
-		_ = file.Close()
-		return fmt.Errorf("inspect step progress journal: %w", statErr)
-	}
-	size := info.Size()
-	if size > maxProgressBytes {
-		_ = file.Close()
-		return errors.New("step progress journal exceeds its byte bound")
-	}
-	if size > 0 {
-		var last [1]byte
-		if _, err := file.ReadAt(last[:], size-1); err != nil {
-			_ = file.Close()
-			return fmt.Errorf("inspect step progress journal tail: %w", err)
-		}
-		if last[0] != '\n' {
-			existing := make([]byte, size)
-			if _, err := file.ReadAt(existing, 0); err != nil {
-				_ = file.Close()
-				return fmt.Errorf("read step progress journal tail: %w", err)
-			}
-			lastNewline := bytes.LastIndexByte(existing, '\n')
-			size = int64(lastNewline + 1)
-			if err := file.Truncate(size); err != nil {
-				_ = file.Close()
-				return fmt.Errorf("repair step progress journal tail: %w", err)
-			}
-		}
-	}
-	if size > maxProgressBytes-int64(len(body)) {
-		_ = file.Close()
-		return errors.New("step progress journal exceeds its byte bound")
-	}
-	if _, err := file.Seek(0, io.SeekEnd); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("seek step progress journal: %w", err)
-	}
-	written, writeErr := file.Write(body)
-	if writeErr == nil && written != len(body) {
-		writeErr = io.ErrShortWrite
-	}
-	closeErr := file.Close()
-	if err := errors.Join(writeErr, closeErr); err != nil {
-		return fmt.Errorf("write step progress journal: %w", err)
-	}
-	return nil
-}
-
-// WriteStepPlan records what the run intends to do, before its first Pod
-// exists. It is written once per run, immediately after the pipeline object is
-// submitted, and never rewritten: a plan is a statement about the reviewed
-// document, and the document cannot change while the run is alive.
-//
-// The plan lives beside the run's log and progress journal rather than in the
-// durable store because a store row is a *result*, and PutStepResult refuses
-// anything non-terminal precisely so a half-finished run can never be recorded
-// as one. Seeding rows there would have meant relaxing that guard, or a schema
-// migration -- and store migrations past v2 are backup-and-replace by design,
-// which for a visibility record would cost the audit chain, the run history,
-// and every uplink token. The plan belongs with the other run-scoped,
-// bounded, non-authoritative observations instead.
-func (store *Store) WriteStepPlan(runID string, steps []runprogress.PlannedStep) error {
-	plan := runprogress.Plan{Version: runprogress.PlanVersion, Steps: steps}
-	if err := plan.Validate(); err != nil {
-		return fmt.Errorf("write step plan: %w", err)
-	}
-	body, err := json.Marshal(plan)
-	if err != nil {
-		return fmt.Errorf("encode step plan: %w", err)
-	}
-	if len(body) > runprogress.MaxPlanBytes {
-		return errors.New("step plan exceeds its byte bound")
-	}
-	path, err := store.planPath(runID)
-	if err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(store.directory, ".plan-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create step plan: %w", err)
-	}
-	temporaryName := temporary.Name()
-	defer func() { _ = os.Remove(temporaryName) }()
-	if err := temporary.Chmod(0o640); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(body); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("write step plan: %w", err)
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryName, path); err != nil {
-		return fmt.Errorf("replace step plan: %w", err)
-	}
-	return nil
-}
-
-// StepPlan returns the run's planned step list. A run submitted before this
-// existed, or by an engine that cannot enumerate its own document, has no plan
-// file; the error wraps os.ErrNotExist so callers can treat that as "no plan"
-// rather than as a failure.
-func (store *Store) StepPlan(runID string) ([]runprogress.PlannedStep, error) {
-	plan, err := store.StepPlanRecord(runID)
-	return plan.Steps, err
-}
-
-// StepPlanRecord retains version provenance for fail-closed replay decisions.
-func (store *Store) StepPlanRecord(runID string) (runprogress.Plan, error) {
-	path, err := store.planPath(runID)
-	if err != nil {
-		return runprogress.Plan{}, err
-	}
-	// planPath validated the run ID and confined this path to the log root.
-	file, err := os.Open(path) //nolint:gosec
-	if err != nil {
-		return runprogress.Plan{}, fmt.Errorf("open step plan: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-	body, err := io.ReadAll(io.LimitReader(file, runprogress.MaxPlanBytes+1))
-	if err != nil {
-		return runprogress.Plan{}, fmt.Errorf("read step plan: %w", err)
-	}
-	if len(body) > runprogress.MaxPlanBytes {
-		return runprogress.Plan{}, errors.New("step plan exceeds its byte bound")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	var plan runprogress.Plan
-	if err := decoder.Decode(&plan); err != nil {
-		return runprogress.Plan{}, fmt.Errorf("decode step plan: %w", err)
-	}
-	if err := plan.Validate(); err != nil {
-		return runprogress.Plan{}, fmt.Errorf("decode step plan: %w", err)
-	}
-	if plan.Version == runprogress.PlanVersion {
-		var wire struct {
-			Steps []struct {
-				Credentialed *bool `json:"credentialed"`
-			}
-		}
-		if err := json.Unmarshal(body, &wire); err != nil {
-			return runprogress.Plan{}, err
-		}
-		for _, step := range wire.Steps {
-			if step.Credentialed == nil {
-				return runprogress.Plan{}, errors.New("current plan lacks explicit credential classification")
-			}
-		}
-	}
-	sort.Slice(plan.Steps, func(left, right int) bool { return plan.Steps[left].Ordinal < plan.Steps[right].Ordinal })
-	return plan, nil
-}
-
-// StepProgress returns the latest transition for every planned step in stable
-// ordinal order. A crash-truncated final record is ignored; every preceding
-// newline-terminated record remains authoritative.
-func (store *Store) StepProgress(runID string) ([]runprogress.Event, error) {
-	events, err := store.readStepProgress(runID, false)
-	if err != nil {
-		return nil, err
-	}
-	known := make(map[string]bool)
-	for _, event := range events {
-		known[event.Stage+"\x00"+event.Step] = true
-	}
-	// Legacy aliases remain filtered only in this display projection.
-	planned := make(map[string]bool)
-	if plan, err := store.StepPlan(runID); err == nil {
-		for _, step := range plan {
-			key := step.Stage + "\x00" + step.Step
-			planned[key], known[key] = true, true
-		}
-	}
-	latest := make(map[string]runprogress.Event)
-	ordinals := make(map[int]string)
-	for _, event := range events {
-		key := event.Stage + "\x00" + event.Step
-		if canonical := LegacyRetryStage(event.Stage); canonical != event.Stage &&
-			!planned[key] && known[canonical+"\x00"+event.Step] {
-			continue
-		}
-		if previous, exists := latest[key]; exists && previous.Ordinal != event.Ordinal {
-			return nil, errors.New("step progress ordinal changed")
-		}
-		if previousKey, exists := ordinals[event.Ordinal]; exists && previousKey != key {
-			return nil, errors.New("step progress ordinal is shared")
-		}
-		latest[key] = event
-		ordinals[event.Ordinal] = key
-	}
-	result := make([]runprogress.Event, 0, len(latest))
-	for _, event := range latest {
-		result = append(result, event)
-	}
-	sort.Slice(result, func(left, right int) bool { return result[left].Ordinal < result[right].Ordinal })
-	return result, nil
-}
-
-// StepProgressHistory returns every validated observation, retaining earlier
-// starts and legacy attempts. Replay decisions must not use the latest-only
-// display projection, and must not ignore a torn final record.
-func (store *Store) StepProgressHistory(runID string) ([]runprogress.Event, error) {
-	return store.readStepProgress(runID, true)
-}
-
-func (store *Store) readStepProgress(runID string, strict bool) ([]runprogress.Event, error) {
-	path, err := store.progressPath(runID)
-	if err != nil {
-		return nil, err
-	}
-	// Writers append one validated record and only repair an unterminated tail.
-	// Readers consume the immutable newline-terminated prefix below, so a
-	// slow append for any run must not hold all run_get requests behind a lock.
-	file, err := os.Open(path) //nolint:gosec
-	if err != nil {
-		return nil, fmt.Errorf("open step progress journal: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-	body, err := io.ReadAll(io.LimitReader(file, maxProgressBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read step progress journal: %w", err)
-	}
-	if len(body) > maxProgressBytes {
-		return nil, errors.New("step progress journal exceeds its byte bound")
-	}
-	lastNewline := bytes.LastIndexByte(body, '\n')
-	if strict && len(body) > 0 && lastNewline != len(body)-1 {
-		return nil, errors.New("step progress journal has an incomplete record")
-	}
-	if lastNewline < 0 {
-		return []runprogress.Event{}, nil
-	}
-	var events []runprogress.Event
-	for index, line := range bytes.Split(body[:lastNewline], []byte("\n")) {
-		if len(line) == 0 {
-			continue
-		}
-		event, decodeErr := runprogress.Decode(line)
-		if decodeErr != nil {
-			return nil, fmt.Errorf("decode step progress journal record %d: %w", index, decodeErr)
-		}
-		events = append(events, event)
-	}
-	return events, nil
-}
-
-// LegacyRetryBurn removes an exact numeric attempt suffix, task(N), from a
-// legacy burn name. Callers must also establish that the original key is
-// unplanned and the canonical key is known before treating it as an alias.
-// Hook names such as task(N).onExit do not have an attempt suffix.
+// LegacyRetryStage normalizes historical display labels for retained readers.
 func LegacyRetryStage(stage string) string {
 	if !strings.HasSuffix(stage, ")") {
 		return stage
@@ -825,20 +463,6 @@ func (store *Store) indexPath(runID string) (string, error) {
 		return "", errors.New("invalid run ID")
 	}
 	return filepath.Join(store.directory, runID+".index.json"), nil
-}
-
-func (store *Store) progressPath(runID string) (string, error) {
-	if !safeID(runID) {
-		return "", errors.New("invalid run ID")
-	}
-	return filepath.Join(store.directory, runID+".progress.jsonl"), nil
-}
-
-func (store *Store) planPath(runID string) (string, error) {
-	if !safeID(runID) {
-		return "", errors.New("invalid run ID")
-	}
-	return filepath.Join(store.directory, runID+".plan.json"), nil
 }
 
 func safeID(value string) bool {

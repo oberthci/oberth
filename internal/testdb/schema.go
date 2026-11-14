@@ -660,5 +660,6 @@ INSERT OR IGNORE INTO step_results_pre_nodes
 DROP TABLE step_results;
 ALTER TABLE step_results_pre_nodes RENAME TO step_results;
 CREATE INDEX step_results_order_idx ON step_results(run_id,ordinal,burn,step);
+DROP INDEX IF EXISTS audit_actions_run_resource_action;
 DELETE FROM schema_migrations WHERE id='20261114004723-native-node-steps-27f59fc788a4a8304c21bda8085e8936';
 `

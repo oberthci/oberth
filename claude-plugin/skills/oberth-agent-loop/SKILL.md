@@ -48,8 +48,10 @@ events_wait {"kinds": ["run.held", "run.finished"], "own": true, "after_id": <cu
 ## Failures
 
 `retry_hint.class` says what to do: `infrastructure` means retry unchanged
-(`run_rerun`); `code` means read `run_logs` for the failed step
-(filter with `pattern`) and fix the code.
+(`run_rerun`); `code` means list native containers with
+`run_logs {"id":"RUN","containers":true}`, then read the failed node's
+`node_id` and `container` with a `pattern` filter and fix the code. The `logs`
+tool accepts the same native selectors with `repo` and `sha`.
 
 ## Assisted continuation (holds)
 

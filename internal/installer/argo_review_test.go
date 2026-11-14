@@ -65,8 +65,8 @@ func TestArgoPlanReviewUsesNativeValues(t *testing.T) {
 			if plan.Review.ArgoParallelism != global || plan.Review.ArgoNamespaceParallelism != namespace {
 				t.Fatalf("review changed native values: %+v", plan.Review)
 			}
-			if existing && (reads != 1 || resourceReads != 2) {
-				t.Fatal("effective limits read once; raw resources and security each read once", reads, resourceReads)
+			if existing && (reads != 1 || resourceReads != 3) {
+				t.Fatal("effective limits read once; raw resources, security and TTL each read once", reads, resourceReads)
 			}
 		}
 	}

@@ -74,7 +74,7 @@ func TestNodeRebootClassifiesOwnedUnknownTerminationAcrossResume(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = db.Close() })
 			controller = (&Controller{kube: kube}).WithNodeBootRecorder(db)
-			controller.logs = func(context.Context, string, string, string) (io.ReadCloser, error) {
+			controller.containerLogSource = func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
 				return io.NopCloser(strings.NewReader("")), nil
 			}
 			resumed := time.Now().UTC()
@@ -117,23 +117,20 @@ func TestNodeRebootClassifiesOwnedUnknownTerminationAcrossResume(t *testing.T) {
 				node.Outputs.ExitCode = ptr.To("137")
 			}
 			if kind == "output-255" {
-				controller.logs = func(context.Context, string, string, string) (io.ReadCloser, error) {
+				controller.containerLogSource = func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
 					return io.NopCloser(strings.NewReader("output")), nil
 				}
 			}
 			if kind == "old-output-255" {
-				controller.followLogs = func(_ context.Context, _, _ string, options corev1.PodLogOptions) (io.ReadCloser, error) {
+				controller.containerLogSource = func(_ context.Context, _, _ string, options corev1.PodLogOptions) (io.ReadCloser, error) {
 					if options.SinceTime == nil || !options.SinceTime.Time.Equal(resumed) || options.Follow || options.Container != "main" {
 						t.Fatalf("resume log scope: %+v", options)
 					}
 					return io.NopCloser(strings.NewReader("")), nil
 				}
-				controller.logs = func(context.Context, string, string, string) (io.ReadCloser, error) {
-					return io.NopCloser(strings.NewReader("before resume")), nil
-				}
 			}
 			if kind == "unreadable-255" {
-				controller.logs = func(context.Context, string, string, string) (io.ReadCloser, error) {
+				controller.containerLogSource = func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
 					return nil, context.DeadlineExceeded
 				}
 			}
@@ -141,7 +138,7 @@ func TestNodeRebootClassifiesOwnedUnknownTerminationAcrossResume(t *testing.T) {
 				resumed = time.Time{}
 			}
 			if kind == "replaced-log-pod" {
-				controller.logs = func(context.Context, string, string, string) (io.ReadCloser, error) {
+				controller.containerLogSource = func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
 					replacement := pod.DeepCopy()
 					replacement.UID = "66666666-6666-4666-8666-666666666666"
 					_, err := kube.CoreV1().Pods(pod.Namespace).Update(ctx, replacement, metav1.UpdateOptions{})

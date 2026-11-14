@@ -226,7 +226,7 @@ func TestRunGetSummary(t *testing.T) {
 		if i == 1 {
 			status = model.StepFailed
 		}
-		_, err := fixture.store.PutStepResult(ctx, model.StepResult{NodeID: ("test") + "." + (name),
+		_, err := putNativeStepFixture(ctx, fixture.store, model.StepResult{NodeID: ("test") + "." + (name),
 			RunID: run.ID, Stage: "test", Step: name, Ordinal: i, Status: status,
 			StartedAt: &started, FinishedAt: &ended,
 		})

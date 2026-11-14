@@ -341,10 +341,12 @@ win name/path collisions; validated workspace opt-outs remain available.
   Those helper executables are native binaries; authors/operators must choose
   compatible execution environments if they use those features. They no longer
   cause Oberth to select a worker architecture.
-- **Retention and native fields.** Oberth writes `ttlStrategy` with
-  `secondsAfterCompletion` from configured retention (at least 180 seconds)
-  and removes authored PodGC so step logs remain for the Workflow's retention
-  window. **These clean up completed work, not the live scheduling queue**.
+- **Retention and native fields.** Authored `ttlStrategy` and `podGC` pass
+  through unchanged. The installer offers Argo's
+  `controller.workflowDefaults.spec.ttlStrategy.secondsAfterCompletion=3600`
+  when the operator has no explicit TTL value; review shows the default and
+  existing operator values are preserved. Missing Pod logs get a retained
+  reason. **These clean up completed work, not the live scheduling queue**.
   Authorized assisted continuation separately retains its documented retry,
   hold-lifetime and scratch behavior. Ordinary authored resource requests,
   affinity, node selectors, tolerations, parallelism, priority,

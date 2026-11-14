@@ -1,9 +1,7 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"io"
 	"path/filepath"
 	"strings"
@@ -11,44 +9,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 )
-
-func TestRunLogWriterRetainsExactBoundAndFailsClosed(t *testing.T) {
-	t.Parallel()
-	var retained bytes.Buffer
-	writer := newRunLogWriter(&retained, 5)
-	if written, err := writer.Write([]byte("1234")); err != nil || written != 4 {
-		t.Fatalf("first write = %d, %v", written, err)
-	}
-	if written, err := writer.Write([]byte("567")); !errors.Is(err, errRunLogLimit) || written != 1 {
-		t.Fatalf("limited write = %d, %v", written, err)
-	}
-	if written, err := writer.Write([]byte("8")); !errors.Is(err, errRunLogLimit) || written != 0 {
-		t.Fatalf("post-limit write = %d, %v", written, err)
-	}
-	if retained.String() != "12345" {
-		t.Fatalf("retained log = %q", retained.String())
-	}
-}
-
-func TestRunLogProjectionKeepsAllBytesPlain(t *testing.T) {
-	var retained bytes.Buffer
-	writer := newStepProgressLogWriter(&retained)
-	input := "command output\n@@oberth-step-progress@@ invalid json " + strings.Repeat("x", 20000) + "\nunterminated"
-	for _, fragment := range []string{input[:7], input[7:31], input[31:]} {
-		if _, err := writer.Write([]byte(fragment)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if retained.String() != input {
-		t.Fatal("plain log bytes changed")
-	}
-	if _, err := writer.Write([]byte("closed")); err == nil {
-		t.Fatal("write after close succeeded")
-	}
-}
 
 type overflowingJobs struct{}
 
@@ -62,12 +22,12 @@ func (overflowingJobs) Wait(_ context.Context, _ string, destination io.Writer) 
 	return JobResult{Status: model.RunPassed, Phase: "passed"}, err
 }
 
-func TestRunLogOverflowMakesRunFailClearly(t *testing.T) {
+func TestRunObservationOutputPreservesArgoVerdict(t *testing.T) {
 	fixture := newControlFixture(t)
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: overflowingJobs{},
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "bounded-log-work"), MaxRunLogBytes: 64,
+		WorkspaceRoot: filepath.Join(fixture.root, "bounded-log-work"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +46,7 @@ func TestRunLogOverflowMakesRunFailClearly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finished.Status != model.RunFailed || finished.Phase != "job" || !strings.Contains(finished.Error, errRunLogLimit.Error()) {
+	if finished.Status != model.RunPassed || finished.Error != "" {
 		t.Fatalf("overflow run = %#v", finished)
 	}
 }

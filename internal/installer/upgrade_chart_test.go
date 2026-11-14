@@ -225,7 +225,7 @@ func testUpgradeArgoSecurityPreflight(args []string) ([]byte, bool) {
 		if err != nil {
 			panic(err)
 		}
-		values := map[string]any{}
+		values := map[string]any{"controller": map[string]any{"workflowDefaults": map[string]any{"spec": map[string]any{"ttlStrategy": map[string]any{"secondsAfterCompletion": 3600}}}}}
 		for i := 0; i+1 < len(flags); i += 2 {
 			key, raw, _ := strings.Cut(flags[i+1], "=")
 			var value any

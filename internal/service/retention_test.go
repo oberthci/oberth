@@ -84,7 +84,7 @@ func (f *retentionFixture) run(t *testing.T, ref, trigger string, terminal bool)
 		if _, err := storetest.ClaimNextRun(f.retention.Database, ctx); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.retention.Database.PutStepResult(ctx, model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
+		if _, err := putNativeStepFixture(ctx, f.retention.Database, model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
 			t.Fatal(err)
 		}
 		run, err = f.retention.Database.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, TestedSHA: run.SHA})
@@ -160,7 +160,7 @@ func TestRunPurgeAuditsRemovalAndPreservesHistory(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
-	if _, err := f.api.RunLogLive(ctx, actor, run.ID, 0); !errors.Is(err, ErrEvidencePurged) {
+	if err := f.api.CheckContainerLogAccess(ctx, actor, run.ID); !errors.Is(err, ErrEvidencePurged) {
 		t.Fatalf("live purged log=%v", err)
 	}
 	if _, err := f.retention.Database.VerifyAuditChain(ctx); err != nil {

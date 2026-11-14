@@ -107,14 +107,6 @@ func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 	if err != nil || status.DisplayStatus != "running" || status.DisplayReason == "" || status.Run.DisplayReason != status.DisplayReason {
 		t.Fatalf("status display pair = %+v, %v", status, err)
 	}
-	logValue, err := service.RunLogLive(ctx, actor, run.ID, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	log := logValue.(LiveLogResponse)
-	if log.DisplayStatus != "running" || log.DisplayReason == "" {
-		t.Fatalf("live log display pair = %+v", log)
-	}
 	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{EventID: "successor", Repository: fixture.repo,
 		Branch: "feature/display", SHA: strings.Repeat("b", 40), Actor: "agent@host"}); err != nil {
 		t.Fatal(err)

@@ -34,50 +34,6 @@ func (scheduler *Scheduler) deferRefusedStops(ctx context.Context, runID string,
 	return nil
 }
 
-// settlePodJournal prunes a terminal run's pod-log journal once its log
-// projection is indexed: now when the Workflow is settled, or by the dispatch
-// pass that observes Argo terminal after the worker deferred Stop.
-func (scheduler *Scheduler) settlePodJournal(ctx context.Context, runID, logPath string, projectionReady, workflowSettled, deletionDeferred bool) {
-	switch {
-	case projectionReady && workflowSettled:
-		scheduler.pruneTerminalPodJournal(ctx, runID, logPath)
-	case projectionReady && deletionDeferred:
-		scheduler.deferPodJournalPrune(ctx, runID, logPath)
-	}
-}
-
-// deferPodJournalPrune hands a deferred run's pod-log journal to the dispatch
-// pass that observes its terminal Workflow. When that pass already completed the run's
-// obligation, the journal is pruned here instead; either way exactly once.
-func (scheduler *Scheduler) deferPodJournalPrune(ctx context.Context, runID, logPath string) {
-	scheduler.deferredJournalMu.Lock()
-	if scheduler.deferredJournals == nil {
-		scheduler.deferredJournals = map[string]string{}
-	}
-	scheduler.deferredJournals[runID] = logPath
-	scheduler.deferredJournalMu.Unlock()
-	pending, err := scheduler.database().PendingRunCancellations(context.WithoutCancel(ctx))
-	if err != nil {
-		return // the pass, or evidence retention, prunes it later
-	}
-	for _, cancellation := range pending {
-		if cancellation.RunID == runID {
-			return
-		}
-	}
-	scheduler.pruneDeferredPodJournal(ctx, runID)
-}
-
-func (scheduler *Scheduler) pruneDeferredPodJournal(ctx context.Context, runID string) {
-	scheduler.deferredJournalMu.Lock()
-	logPath, ok := scheduler.deferredJournals[runID]
-	delete(scheduler.deferredJournals, runID)
-	scheduler.deferredJournalMu.Unlock()
-	if ok {
-		scheduler.pruneTerminalPodJournal(ctx, runID, logPath)
-	}
-}
-
 // cancellationRetryMaximum caps the steady-state cancellation pass backoff.
 const cancellationRetryMaximum = 30 * time.Second
 

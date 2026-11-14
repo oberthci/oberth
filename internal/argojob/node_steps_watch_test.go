@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -96,12 +97,12 @@ func TestWatchWaitStoresStepsWhileRunIsRunning(t *testing.T) {
 
 type changedNodeWriter struct {
 	batches [][]model.StepResult
-	fail    bool
+	fail    atomic.Bool
 }
 
 func (w *changedNodeWriter) PutStepResults(_ context.Context, _ string, rows []model.StepResult) error {
 	w.batches = append(w.batches, append([]model.StepResult(nil), rows...))
-	if w.fail {
+	if w.fail.Load() {
 		return errors.New("history write unavailable")
 	}
 	return nil
@@ -136,11 +137,11 @@ func TestWatchWaitWritesOnlyChangedNodeRows(t *testing.T) {
 		node.Phase = wfv1.NodeFailed
 		node.Message = "\x1b[31mfailed\x1b[0m\n"
 		changed.Status.Nodes["two"] = node
-		writer.fail = true
+		writer.fail.Store(true)
 		hub.setWorkflow(changed)
 		synctest.Wait()
-		writer.fail = false
-		hub.setWorkflow(changed.DeepCopy())
+		writer.fail.Store(false)
+		time.Sleep(waitIdleInterval)
 		synctest.Wait()
 		if len(writer.batches) != 3 || len(writer.batches[1]) != 1 || len(writer.batches[2]) != 1 || writer.batches[2][0].NodeID != "two" || writer.batches[2][0].Message != "failed" {
 			t.Fatal("changed row lost or failed write was not retried", writer.batches)

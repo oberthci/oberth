@@ -16,6 +16,11 @@ func dropRetiredInstallerValues(values map[string]any, output io.Writer) bool {
 	store, _ := values["secretstore"].(map[string]any)
 	transit, _ := store["transit"].(map[string]any)
 	var removed []string
+	argo, _ := values["argo"].(map[string]any)
+	if _, present := argo["workflowTTL"]; present {
+		delete(argo, "workflowTTL")
+		removed = append(removed, "argo.workflowTTL")
+	}
 	for _, key := range []string{"enabled", "mount", "key"} {
 		if _, exists := transit[key]; exists {
 			delete(transit, key)

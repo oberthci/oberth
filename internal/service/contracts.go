@@ -326,16 +326,17 @@ type EnqueueObserver interface {
 }
 
 type LogStore interface {
+	AppendRunLog(string, []byte) (int, error)
+	ContainerLogs(context.Context, string) ([]runlog.ContainerLog, error)
+	ReadRunLog(context.Context, string, runlog.Filter) ([]byte, runlog.Meta, error)
+	ReadContainerLog(context.Context, string, string, string, runlog.Filter) ([]byte, runlog.Meta, runlog.ContainerLog, error)
+	OpenStoredContainerLog(context.Context, string, string, string) (io.ReadCloser, error)
 	Resume(string) (*os.File, []runprogress.Event, int64, error)
 	Create(string) (*os.File, error)
 	BuildIndex(string) (runlog.Index, error)
 	ReadFiltered(string, string, string, runlog.Filter) ([]byte, runlog.Meta, error)
 	ReadActiveFiltered(string, string, string, runlog.Filter) ([]byte, runlog.Meta, error)
 	Tail(string, int64) ([]byte, error)
-	// ReadFrom serves the dashboard's live view of a run in progress: bytes
-	// from offset (negative means tail), the next poll offset, and the
-	// current size of the append-only run log.
-	ReadFrom(string, int64, int64) ([]byte, int64, int64, error)
 }
 
 type WorkflowRequest struct {
@@ -490,6 +491,7 @@ type StatusResponse struct {
 }
 
 type LogResponse struct {
+	NodeID            string   `json:"node_id,omitempty"`
 	AvailablePairs    []string `json:"available_pairs,omitempty"`
 	Window            string   `json:"window,omitempty"`
 	TotalScannedBytes int64    `json:"total_scanned_bytes"`
@@ -515,12 +517,6 @@ type LogResponse struct {
 	HasMore           bool     `json:"has_more"`
 	NextByteOffset    int64    `json:"next_byte_offset"`
 }
-
-// LiveLogResponse is one polled slice of a running Job's redacted log stream.
-// Offset is the value to pass on the next poll; Done reports whether the run
-// reached a terminal state (read before the chunk, so a terminal answer can
-// never precede unread bytes).
-type LiveLogResponse = api.LiveLogResponse
 
 // RunDetailResponse shares the wire contract with the dashboard handler.
 type RunDetailResponse = api.RunDetailResponse

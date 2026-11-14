@@ -597,7 +597,7 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 		_ = database.Close()
 		t.Fatal(err)
 	}
-	if _, err := database.PutStepResult(ctx, model.StepResult{NodeID: "test.unit",
+	if _, err := putNativeStepFixture(ctx, database, model.StepResult{NodeID: "test.unit",
 		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 0,
 		Status: model.StepPassed, ExitCode: 0,
 	}); err != nil {
@@ -1248,4 +1248,21 @@ func TestOpenStartupDatabaseWitnessChainResetResumesVirginStates(t *testing.T) {
 			t.Fatalf("empty-genesis resume acknowledgment = %+v, %v", action, actionErr)
 		}
 	})
+}
+
+// putNativeStepFixture seeds a snapshot through the production batch writer.
+func putNativeStepFixture(ctx context.Context, database *store.Store, result model.StepResult) (model.StepResult, error) {
+	if err := database.PutStepResults(ctx, result.RunID, []model.StepResult{result}); err != nil {
+		return model.StepResult{}, err
+	}
+	rows, err := database.StepResults(ctx, result.RunID)
+	if err != nil {
+		return model.StepResult{}, err
+	}
+	for _, row := range rows {
+		if row.NodeID == result.NodeID {
+			return row, nil
+		}
+	}
+	return model.StepResult{}, store.ErrNotFound
 }

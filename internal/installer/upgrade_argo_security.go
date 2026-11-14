@@ -16,6 +16,7 @@ type upgradeArgoSecurity struct {
 	args               []string
 	review             []ArgoSecurityReview
 	consent            bool
+	workflowCleanup    bool
 }
 
 func argoSecurityUpgradeRemedy(namespace string, cause error) error {
@@ -36,7 +37,11 @@ func planUpgradeArgoSecurity(ctx context.Context, deps Deps, values map[string]a
 	if ns == "" {
 		ns = DefaultArgoNamespace
 	}
-	return prepareArgoSecurity(ctx, deps, ns, consent, false, nil)
+	plan, err := prepareArgoSecurity(ctx, deps, ns, consent, false, nil)
+	if err != nil {
+		return nil, err
+	}
+	return planUpgradeWorkflowCleanup(ctx, deps, ns, plan)
 }
 
 func prepareArgoSecurity(ctx context.Context, deps Deps, ns string, consent, freshInstall bool, snapshot *helmRelease) (*upgradeArgoSecurity, error) {
@@ -196,7 +201,13 @@ func (plan *upgradeArgoSecurity) reconcile(ctx context.Context, deps Deps) error
 		return nil
 	}
 	// Read again at apply. A concurrent operator override remains authoritative.
-	fresh, err := planUpgradeArgoSecurity(ctx, deps, map[string]any{"argo": map[string]any{"namespace": plan.namespace}}, plan.consent)
+	var fresh *upgradeArgoSecurity
+	var err error
+	if plan.workflowCleanup {
+		fresh, err = planUpgradeArgoSecurity(ctx, deps, map[string]any{"argo": map[string]any{"namespace": plan.namespace}}, plan.consent)
+	} else {
+		fresh, err = prepareArgoSecurity(ctx, deps, plan.namespace, plan.consent, false, nil)
+	}
 	if err != nil {
 		return err
 	}

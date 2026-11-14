@@ -92,9 +92,6 @@ func TestRCARevisionRetryRequiresSettledWorkAndNoTestFailure(t *testing.T) {
 			scheduler := fixture.scheduler(t, jobs)
 			// Explicit empty history permits settled infrastructure recovery; an
 			// observed test failure still cannot authorize replay.
-			if err := scheduler.logs.(*runlog.Store).InitializeStepProgress(run.ID); err != nil {
-				t.Fatal(err)
-			}
 			switch kind {
 			case "submitted-write-failed":
 				scheduler.store = &rcaRevisionStore{Store: fixture.store, submitFailure: true}
@@ -271,8 +268,5 @@ func TestRCARevisionExistingIntentDoesNotManufactureMissingJournal(t *testing.T)
 	finished, err := fixture.store.Run(t.Context(), run.ID)
 	if err != nil {
 		t.Fatal("unknown old intent acquired empty evidence", finished, err)
-	}
-	if _, err := scheduler.logs.(*runlog.Store).StepProgressHistory(run.ID); err == nil {
-		t.Fatal("missing old history manufactured")
 	}
 }

@@ -303,7 +303,7 @@ func TestSelectLogRangeRequiresOneUnambiguousNamedStep(t *testing.T) {
 		{NodeID: "test.unit", Stage: "test", Step: "unit"},
 		{NodeID: "test.integration", Stage: "test", Step: "integration"},
 	}
-	if stage, step, err := selectLogRange(steps, "unit"); err != nil || stage != "test" || step != "unit" {
+	if stage, step, err := selectLogRange(steps, "unit"); err != nil || stage != "test" || step != "test.unit" {
 		t.Fatalf("named step selection = %q/%q, %v", stage, step, err)
 	}
 	steps = append(steps, model.StepResult{NodeID: "release.unit", Stage: "release", Step: "unit"})

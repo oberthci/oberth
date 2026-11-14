@@ -28,7 +28,7 @@ func (c *restartReadController) WaitResumed(_ context.Context, name, runID strin
 	if name != c.request.Name || runID != c.request.RunID || !reflect.DeepEqual(binding, c.binding) {
 		panic("adoption identity lost")
 	}
-	return c.observed, c.observationError
+	return fixtureCompletionNodes(c.observed), c.observationError
 }
 func (c *restartReadController) TerminalStateResumed(_ context.Context, name, runID string, binding argojob.Adoption, events []runprogress.Event) (*argojob.Completion, error) {
 	if name != c.request.Name || runID != c.request.RunID || !reflect.DeepEqual(binding, c.binding) {
@@ -36,12 +36,13 @@ func (c *restartReadController) TerminalStateResumed(_ context.Context, name, ru
 	}
 	c.resumedReads++
 	c.readEvents = events
-	return &c.next, c.readError
+	completion := fixtureCompletionNodes(c.next)
+	return &completion, c.readError
 }
 
 func TestRestartCutArgoJobsMapsInterruptionAndKeepsFallbackBinding(t *testing.T) {
-	cut := argojob.Completion{Name: "workflow", Interrupted: true, Infrastructure: true, Reason: "server restart interrupted build/test: missing exit", Steps: []argojob.StepResult{{Stage: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 1}}}
-	real := argojob.Completion{Name: "workflow", Terminal: true, FailedStage: "build", FailedStep: "test", Reason: "test exited 2", Steps: []argojob.StepResult{{Stage: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 2, ExitCodeKnown: true}}}
+	cut := argojob.Completion{Name: "workflow", Interrupted: true, Infrastructure: true, Reason: "server restart interrupted build/test: missing exit", Steps: []argojob.StepResult{{NodeID: "build-test-node", Stage: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 1}}}
+	real := argojob.Completion{Name: "workflow", Terminal: true, FailedStage: "build", FailedStep: "test", Reason: "test exited 2", Steps: []argojob.StepResult{{NodeID: "build-test-node", Stage: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 2, ExitCodeKnown: true}}}
 	for _, mode := range []string{"normal", "terminal-log-error", "late-terminal", "partial-running", "late-real-failure", "real-failure", "earlier-real-failure", "read-error"} {
 		t.Run(mode, func(t *testing.T) {
 			c := &restartReadController{adoptingArgoControl: adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "identity"}}, observed: cut, next: cut}
@@ -91,7 +92,7 @@ func TestRestartCutArgoJobsMapsInterruptionAndKeepsFallbackBinding(t *testing.T)
 				t.Fatal("native phase lost", result, err)
 			}
 			realFailure := mode == "late-real-failure" || mode == "real-failure" || mode == "earlier-real-failure"
-			if realFailure && (result.FailedStep != "test" || result.Phase != "build") {
+			if realFailure && (result.FailedStep != "build-test-node" || result.Phase != "build") {
 				t.Fatal("real failure lost attribution", result)
 			}
 			if !realFailure && (result.FailedStep != "" || result.Phase != "infrastructure") {
@@ -107,7 +108,7 @@ var _ service.JobAdopter = (*ArgoJobs)(nil)
 func TestRestartCutFallbackOwnsJournalAndNewlyObservedExit(t *testing.T) {
 	start := time.Now().UTC()
 	finish := start.Add(time.Second)
-	completion := argojob.Completion{Name: "workflow", Terminal: true, FailedStage: "build", FailedStep: "test", Steps: []argojob.StepResult{{Stage: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 2, ExitCodeKnown: true, StartedAt: &start, FinishedAt: &finish}}}
+	completion := argojob.Completion{Name: "workflow", Terminal: true, FailedStage: "build", FailedStep: "test", Steps: []argojob.StepResult{{NodeID: "build-test-node", Stage: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 2, ExitCodeKnown: true, StartedAt: &start, FinishedAt: &finish}}}
 	c := &restartReadController{adoptingArgoControl: adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "identity"}}, observed: completion, next: completion}
 	jobs := &ArgoJobs{controller: c, intents: map[string]argoIntent{}}
 	run := model.Run{ID: "run", WorkflowName: "workflow", RefKind: model.RefBranch, Ref: "feature", SHA: "sha", Trigger: "branch"}

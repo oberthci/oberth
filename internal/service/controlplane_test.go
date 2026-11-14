@@ -756,6 +756,7 @@ func (git *controlGit) setRemoteRefLocked(ref, sha string) {
 }
 
 type fakeJobs struct {
+	nativeLogs      *runlog.Store
 	nativeAdmission func(context.Context, WorkflowRequest) error
 	terminated      []string
 	mu              sync.Mutex
@@ -972,13 +973,31 @@ func (jobs *fakeJobs) Wait(_ context.Context, name string, output io.Writer) (Jo
 		transcript = jobs.transcripts[0]
 		jobs.transcripts = jobs.transcripts[1:]
 	}
+	nativeLogs := jobs.nativeLogs
+	runID := ""
+	if nativeLogs != nil {
+		for _, request := range jobs.createdCI {
+			if request.WorkflowName == name {
+				runID = request.Run.ID
+				break
+			}
+		}
+	}
 	jobs.mu.Unlock()
 	if transcript != "" {
 		_, _ = io.WriteString(output, transcript)
 		return result, nil
 	}
 	for _, step := range result.Steps {
-		_, _ = fmt.Fprintf(output, "[%s/%s] output for %s\n", step.Stage, step.Step, step.Status)
+		body := fmt.Sprintf("[%s/%s] output for %s\n", step.Stage, step.Step, step.Status)
+		if nativeLogs != nil {
+			entry := runlog.ContainerLog{NodeID: step.NodeID, PodUID: "fixture-" + step.NodeID, ContainerName: "main", Main: true, Stage: step.Stage, Step: step.Step, Reader: strings.NewReader(body)}
+			if err := nativeLogs.StoreContainerLog(runID, entry, 1<<20); err != nil {
+				return JobResult{}, err
+			}
+		} else {
+			_, _ = io.WriteString(output, body)
+		}
 	}
 	return result, nil
 }
@@ -1301,10 +1320,11 @@ func waitForFixtureRunStatus(t *testing.T, fixture *controlFixture, runID string
 
 func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 	fixture := newControlFixture(t,
-		JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "first red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
-		JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "second red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
+		JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "test.unit", Error: "first red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
+		JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "test.unit", Error: "second red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
 		JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}},
 	)
+	fixture.jobs.nativeLogs = fixture.logs
 	ctx := context.Background()
 	shas := []string{
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1339,7 +1359,7 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 			if !strings.Contains(page.Issues[0].Body, sha) ||
 				!strings.Contains(page.Issues[0].Body, "[test/unit] output for failed") ||
 				!strings.Contains(page.Issues[0].Body, "full step log: run_logs ") ||
-				!strings.Contains(page.Issues[0].Body, " test unit") ||
+				!strings.Contains(page.Issues[0].Body, " test test.unit") ||
 				(index == 1 && strings.Contains(page.Issues[0].Body, shas[0])) {
 				t.Fatalf("red issue did not replace its SHA, bounded tail, and log hint: %#v", page.Issues[0])
 			}
@@ -1361,7 +1381,7 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 		if status.Repo != "oberth" || status.Ref != "main" || status.SHA != sha || status.RunID == "" || status.Stages["test"] == "" {
 			t.Fatalf("wire status after run %d = %#v", index, status)
 		}
-		if index < 2 && (status.Status != "failed" || status.FailedStep != "unit" || status.ExitCode == nil || *status.ExitCode != 1 || status.Issue == nil || *status.Issue != issueID || status.Stages["test"] != "failed") {
+		if index < 2 && (status.Status != "failed" || status.FailedStep != "test.unit" || status.ExitCode == nil || *status.ExitCode != 1 || status.Issue == nil || *status.Issue != issueID || status.Stages["test"] != "failed") {
 			t.Fatalf("red wire status = %#v", status)
 		}
 		if index == 2 && (status.Status != "delivered" || status.Issue != nil || status.Stages["test"] != "passed") {
@@ -1468,13 +1488,14 @@ func TestStatusRefWithoutRunRespectsRepoDisambiguator(t *testing.T) {
 
 func TestLogsReturnOnlyOneNamedStep(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
-		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "unit failed",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "test.unit", Error: "unit failed",
 		Steps: []model.StepResult{
 			{NodeID: "lint.vet", Stage: "lint", Step: "vet", Status: model.StepPassed, ExitCode: 0},
 			{NodeID: "test.setup", Stage: "test", Step: "setup", Status: model.StepPassed, ExitCode: 0},
 			{NodeID: "test.unit", Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1},
 		},
 	})
+	fixture.jobs.nativeLogs = fixture.logs
 	const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	ctx := context.Background()
 	if _, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
@@ -1502,12 +1523,13 @@ func TestLogsReturnOnlyOneNamedStep(t *testing.T) {
 
 func TestDashboardRunDetailAndLogViewsAreReadOnly(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
-		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "unit failed",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "test.unit", Error: "unit failed",
 		Steps: []model.StepResult{
 			{NodeID: "lint.vet", Stage: "lint", Step: "vet", Status: model.StepPassed, ExitCode: 0},
 			{NodeID: "test.unit", Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1},
 		},
 	})
+	fixture.jobs.nativeLogs = fixture.logs
 	const sha = "abababababababababababababababababababab"
 	ctx := context.Background()
 	enqueued, err := fixture.scheduler.recordCIForTest(ctx, CIRequest{
@@ -1673,6 +1695,9 @@ func TestActiveMCPAndDashboardLogsReadCurrentStepRange(t *testing.T) {
 		Version: runprogress.Version, Stage: "release", Step: "advance-stable-aliases", Ordinal: 0,
 		Status: runprogress.StepRunning, StartedAt: &started,
 	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.logs.StoreContainerLog(enqueued.ID, runlog.ContainerLog{NodeID: "release.advance-stable-aliases", PodUID: "active-pod", ContainerName: "main", Main: true, Reader: strings.NewReader("[release/advance-stable-aliases] $ publish alias\n[release/advance-stable-aliases] publishing current digest\n")}, 1<<20); err != nil {
 		t.Fatal(err)
 	}
 	control := fixture.api(t)

@@ -166,8 +166,8 @@ func summarizeRunPage(run model.Run, steps []model.StepResult, offset, limit int
 			message = model.SanitizeNodeMessage(step.Message)
 		}
 		response.Steps[i] = RunStepSummary{
-			NodeID: step.NodeID, DisplayName: step.DisplayName, Template: step.Template, Phase: step.Phase, Message: message, PodName: step.PodName,
-			Stage: step.Stage, Name: step.Step, Status: step.Status,
+			NodeID: step.NodeID, DisplayName: model.SanitizeNodeMessage(step.DisplayName), Template: step.Template, Phase: step.Phase, Message: message, PodName: step.PodName,
+			Stage: model.SanitizeNodeMessage(step.Stage), Name: step.Step, Status: step.Status,
 			StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
 		}
 	}

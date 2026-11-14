@@ -386,9 +386,6 @@ argo:
   # that specific step. Wildcard grants keep the per-repo identity.
   perStepIdentities: []
 
-  # Finished Workflow retention, independent of authored execution deadlines.
-  workflowTTL: 3600
-
   # Storage class for the per-run source volume the server creates in this
   # namespace. A Pod may only mount claims in its own namespace, so a pipeline
   # cannot mount the server's checkout directly; the server copies the revision

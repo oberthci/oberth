@@ -6,9 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/oberthci/oberth/internal/runprogress"
 )
 
 func TestIndexAndReadStageOrStepSlices(t *testing.T) {
@@ -168,132 +165,6 @@ func TestBuildIndexOnReconciledRunProducesReadableIndex(t *testing.T) {
 	}
 }
 
-func TestReadFromServesGrowingLogWithTailAndCursor(t *testing.T) {
-	store, err := Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Absent log (queued run): callers see os.ErrNotExist and decide.
-	if _, _, _, err := store.ReadFrom("r-live", -1, 64); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("missing log error = %v", err)
-	}
-	file, err := store.Create("r-live")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = file.Close() }()
-	write := func(text string) {
-		t.Helper()
-		if _, err := file.WriteString(text); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("[setup/go] one\n[setup/go] two\n")
-	chunk, next, size, err := store.ReadFrom("r-live", -1, 1<<20)
-	if err != nil || string(chunk) != "[setup/go] one\n[setup/go] two\n" || next != size || size != 30 {
-		t.Fatalf("tail read = %q next=%d size=%d err=%v", chunk, next, size, err)
-	}
-	// Nothing new: empty chunk, cursor unchanged.
-	chunk, next2, _, err := store.ReadFrom("r-live", next, 1<<20)
-	if err != nil || len(chunk) != 0 || next2 != next {
-		t.Fatalf("idle read = %q next=%d err=%v", chunk, next2, err)
-	}
-	// The file grew: only the appended bytes come back.
-	write("[lint/vet] three\n")
-	chunk, next3, _, err := store.ReadFrom("r-live", next2, 1<<20)
-	if err != nil || string(chunk) != "[lint/vet] three\n" || next3 != next2+17 {
-		t.Fatalf("grow read = %q next=%d err=%v", chunk, next3, err)
-	}
-	// A bounded mid-stream read is trimmed to the last complete line.
-	chunk, next4, _, err := store.ReadFrom("r-live", 0, 20)
-	if err != nil || string(chunk) != "[setup/go] one\n" || next4 != 15 {
-		t.Fatalf("trimmed read = %q next=%d err=%v", chunk, next4, err)
-	}
-	// A bound smaller than the first line still makes progress untrimmed.
-	chunk, next5, _, err := store.ReadFrom("r-live", 0, 4)
-	if err != nil || string(chunk) != "[set" || next5 != 4 {
-		t.Fatalf("progress read = %q next=%d err=%v", chunk, next5, err)
-	}
-	// Tail mode with a small bound starts near the end, not at zero.
-	chunk, _, size, err = store.ReadFrom("r-live", -1, 10)
-	if err != nil || size != 47 || len(chunk) == 0 || len(chunk) > 10 {
-		t.Fatalf("bounded tail = %q size=%d err=%v", chunk, size, err)
-	}
-	// An offset beyond the file clamps cleanly.
-	chunk, next6, _, err := store.ReadFrom("r-live", 9000, 64)
-	if err != nil || len(chunk) != 0 || next6 != 47 {
-		t.Fatalf("clamped read = %q next=%d err=%v", chunk, next6, err)
-	}
-	// Bounds and identifiers stay validated.
-	if _, _, _, err := store.ReadFrom("r-live", 0, 0); err == nil {
-		t.Fatal("zero byte bound was accepted")
-	}
-	if _, _, _, err := store.ReadFrom("../escape", 0, 64); err == nil {
-		t.Fatal("path traversal was accepted")
-	}
-}
-
-func TestStepProgressJournalReducesTransitionsInPlanOrder(t *testing.T) {
-	store, err := Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	queued := runprogress.Event{
-		Version: runprogress.Version, Stage: "test", Step: "unit", Ordinal: 0,
-		Status: runprogress.StepQueued,
-	}
-	if err := store.AppendStepProgress("r-progress", queued); err != nil {
-		t.Fatal(err)
-	}
-	second := queued
-	second.Step, second.Ordinal = "race", 1
-	if err := store.AppendStepProgress("r-progress", second); err != nil {
-		t.Fatal(err)
-	}
-	started := time.Now().UTC()
-	running := queued
-	running.Status, running.StartedAt = runprogress.StepRunning, &started
-	if err := store.AppendStepProgress("r-progress", running); err != nil {
-		t.Fatal(err)
-	}
-
-	events, err := store.StepProgress("r-progress")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(events) != 2 || events[0].Step != "unit" || events[0].Status != runprogress.StepRunning ||
-		events[1].Step != "race" || events[1].Status != runprogress.StepQueued {
-		t.Fatalf("progress snapshot = %#v", events)
-	}
-	// A crash may leave one non-newline-terminated tail. Earlier complete
-	// records remain readable and authoritative.
-	file, err := os.OpenFile(filepath.Join(store.directory, "r-progress.progress.jsonl"), os.O_APPEND|os.O_WRONLY, 0o640)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := file.WriteString(`{"version":`); err != nil {
-		t.Fatal(err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatal(err)
-	}
-	events, err = store.StepProgress("r-progress")
-	if err != nil || len(events) != 2 || events[0].Status != runprogress.StepRunning {
-		t.Fatalf("progress after truncated tail = %#v, %v", events, err)
-	}
-	second.Status, second.StartedAt = runprogress.StepRunning, &started
-	if err := store.AppendStepProgress("r-progress", second); err != nil {
-		t.Fatal(err)
-	}
-	events, err = store.StepProgress("r-progress")
-	if err != nil || len(events) != 2 || events[1].Status != runprogress.StepRunning {
-		t.Fatalf("progress after repaired tail = %#v, %v", events, err)
-	}
-	if err := store.AppendStepProgress("../escape", queued); err == nil {
-		t.Fatal("progress journal accepted a traversal run ID")
-	}
-}
-
 func TestReadActiveReturnsOnlyCurrentStepWithoutWritingTerminalIndex(t *testing.T) {
 	store, err := Open(t.TempDir())
 	if err != nil {
@@ -329,7 +200,7 @@ func TestReadActiveReturnsOnlyCurrentStepWithoutWritingTerminalIndex(t *testing.
 	}
 }
 
-func TestResumeRetainsBytesAndProgress(t *testing.T) {
+func TestResumeRetainsBytesWithoutProgressAuthority(t *testing.T) {
 	logs, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -344,16 +215,11 @@ func TestResumeRetainsBytesAndProgress(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	now := time.Now().UTC()
-	event := runprogress.Event{Version: runprogress.Version, Stage: "test", Step: "unit", Status: runprogress.StepPassed, StartedAt: &now, FinishedAt: &now}
-	if err := logs.AppendStepProgress("resumed", event); err != nil {
-		t.Fatal(err)
-	}
 	file, events, size, err := logs.Resume("resumed")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 1 || !events[0].Terminal() || size != int64(len("[test/unit] before\n")) {
+	if len(events) != 0 || size != int64(len("[test/unit] before\n")) {
 		t.Fatalf("resume = %#v %d", events, size)
 	}
 	if _, err := file.WriteString("[test/unit] after\n"); err != nil {
@@ -384,33 +250,18 @@ func TestResumeRetainsBytesAndProgress(t *testing.T) {
 	}
 }
 
-func TestLiveLogSizeTracksAppendAndMissing(t *testing.T) {
-	store, err := Open(t.TempDir())
+func TestResumeIgnoresRetiredProgressFiles(t *testing.T) {
+	directory := t.TempDir()
+	logs, err := Open(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.LiveLogSize("missing"); !errors.Is(err, os.ErrNotExist) {
+	if err := os.WriteFile(filepath.Join(directory, "run.progress.jsonl"), []byte("malformed retired data\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	file, err := store.Create("stat")
-	if err != nil {
-		t.Fatal(err)
+	file, events, _, err := logs.Resume("run")
+	if err != nil || len(events) != 0 {
+		t.Fatal(events, err)
 	}
-	defer file.Close()
-	for _, body := range []string{"", "one\n", "two\n"} {
-		if _, err := file.WriteString(body); err != nil {
-			t.Fatal(err)
-		}
-		info, err := file.Stat()
-		if err != nil {
-			t.Fatal(err)
-		}
-		size, err := store.LiveLogSize("stat")
-		if err != nil || size != info.Size() {
-			t.Fatalf("size=%d info=%v error=%v", size, info, err)
-		}
-	}
-	if _, err := store.LiveLogSize("../escape"); err == nil {
-		t.Fatal("invalid ID accepted")
-	}
+	_ = file.Close()
 }

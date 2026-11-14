@@ -610,6 +610,9 @@ func completionFor(workflow *wfv1.Workflow) Completion {
 	sort.Strings(completion.ObservedNodeIDs)
 
 	for _, step := range completion.Steps {
+		if completion.Succeeded {
+			break
+		}
 		if step.Status == runprogress.StepPassed || step.Status == runprogress.StepSkipped {
 			continue
 		}

@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
@@ -121,21 +120,6 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			if err := file.Close(); err != nil {
 				t.Fatal(err)
 			}
-			now := time.Now().UTC()
-			event := runprogress.Event{Version: runprogress.Version, Stage: "test", Step: "unit", Status: runprogress.StepPassed, StartedAt: &now, FinishedAt: &now}
-			// v0.17.44 retained DAG-attempt burns beside the planned key.
-			// A colliding orphan must not stop scheduler startup/adoption.
-			if err := scheduler.logs.(*runlog.Store).WriteStepPlan(run.ID, []runprogress.PlannedStep{{Stage: "test", Step: "unit", Ordinal: 0}}); err != nil {
-				t.Fatal(err)
-			}
-			orphan := event
-			orphan.Stage = "test(0)"
-			if err := scheduler.logs.(*runlog.Store).AppendStepProgress(run.ID, orphan); err != nil {
-				t.Fatal(err)
-			}
-			if err := scheduler.logs.(*runlog.Store).AppendStepProgress(run.ID, event); err != nil {
-				t.Fatal(err)
-			}
 			// Reopen as a new owner, exercising the durable recovery transition.
 			if err := fixture.store.Close(); err != nil {
 				t.Fatal(err)
@@ -195,7 +179,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			if err != nil || len(steps) != 1 {
 				t.Fatalf("steps = %#v, %v", steps, err)
 			}
-			if jobs.created != 0 || len(jobs.deleted) != 0 || len(jobs.adopted) != 1 || jobs.retained != int64(len("[test/unit] before restart\n")) || len(jobs.resumed) != 1 {
+			if jobs.created != 0 || len(jobs.deleted) != 0 || len(jobs.adopted) != 1 || jobs.retained != int64(len("[test/unit] before restart\n")) || len(jobs.resumed) != 0 {
 				t.Fatalf("adoption did not preserve intent/logs: %#v", jobs)
 			}
 			scheduler.submissions.mu.Lock()

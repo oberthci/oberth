@@ -1,7 +1,6 @@
 package argojob
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -18,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clienttesting "k8s.io/client-go/testing"
 
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -186,19 +186,42 @@ func TestStartupAdoptionCompletedWaitPublishesLogsAndRetiresIdentity(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	store, err := runlog.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pods []*corev1.Pod
+	for _, pod := range fixtureStepPods(wf) {
+		pod.Spec.Containers = []corev1.Container{{Name: "main"}}
+		pods = append(pods, pod)
+	}
+	controller.hub = containerLogCache{workflow: wf, pods: pods}
+	controller.WithContainerLogStore(store)
 	reads := 0
-	controller.WithPodLogReader(func(context.Context, string, string, string) (io.ReadCloser, error) {
+	controller.WithContainerLogSource(func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
 		reads++
 		return io.NopCloser(strings.NewReader("finished during downtime\n")), nil
+	}, func(_ context.Context, _, name string) (*corev1.Pod, error) {
+		for _, pod := range pods {
+			if pod.Name == name {
+				return pod.DeepCopy(), nil
+			}
+		}
+		return nil, apierrors.NewNotFound(corev1.Resource("pods"), name)
 	})
 	binding, found, err := controller.Adopt(t.Context(), request)
 	if err != nil || !found || client.reads != 0 {
 		t.Fatal(binding, found, err, client.reads)
 	}
-	var output bytes.Buffer
-	result, err := controller.WaitResumed(t.Context(), wf.Name, request.RunID, &output, nil, 0, binding)
-	if err != nil || !result.Succeeded || !strings.Contains(output.String(), "finished during downtime") || reads != len(StepResults(wf)) {
-		t.Fatal(result, err, output.String(), reads)
+	result, err := controller.WaitResumed(t.Context(), wf.Name, request.RunID, io.Discard, nil, 0, binding)
+	if err != nil || !result.Succeeded || reads != len(pods) {
+		t.Fatal(result, err, reads)
+	}
+	for _, pod := range pods {
+		body, _, _, err := store.ReadContainerLog(t.Context(), request.RunID, pod.Annotations["workflows.argoproj.io/node-id"], "main", runlog.Filter{})
+		if err != nil || string(body) != "finished during downtime\n" {
+			t.Fatal("completed adoption lost retained bytes", string(body), err)
+		}
 	}
 	if _, err := kube.CoreV1().Pods(wf.Namespace).Get(t.Context(), lifetime.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Fatal("completed adoption retained executor identity", err)

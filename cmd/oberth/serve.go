@@ -138,7 +138,6 @@ type serveOptions struct {
 	argoReleaseWIFConfig       string
 	argoReleaseTagRoutesConfig string
 
-	argoWorkflowTTL int
 	// argoSourceStorageClass names the class for the per-run source claim the
 	// server creates in the pipeline namespace. Empty selects the cluster
 	// default, which is what a single-node install wants.
@@ -262,7 +261,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoVaultCACert, "argo-vault-ca-cert", "", "PEM file pinning the trust anchors granted step containers verify --argo-vault-address against")
 	flags.StringVar(&options.argoReleaseTagRoutesConfig, "argo-release-tag-routes-config", "", "absolute path to administrator-owned release tag pattern -> workflow file JSON")
 	flags.StringVar(&options.argoReleaseWIFConfig, "argo-release-wif-config", "", "absolute path to administrator-owned public JSON release WIF capabilities (empty disables federation)")
-	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
 	flags.StringVar(&options.reservedBranches, "reserved-branches", "main,master", "comma-separated branch globs that, like the default branch, no push or prune may delete")
@@ -720,7 +718,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err := git.MigrateToQualifiedLayout(qualifications); err != nil {
 		return fmt.Errorf("migrate git cache to qualified layout: %w", err)
 	}
-	logs, err := runlog.Open(filepath.Join(options.dataRoot, "logs"))
+	logs, err := runlog.Open(filepath.Join(options.dataRoot, "logs"), runlog.WithRunLimitBytes(options.runLogLimitBytes))
 	if err != nil {
 		return err
 	}
@@ -752,7 +750,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		logger.Printf("per-step identities: %d (repo, step) pairs with named grants", len(perStepIdentities))
 	}
 	identityStore := argojob.NewIdentityStoreWithSteps(perRepoIdentities, buildPerRepoCIIdentities(perRepoIdentities), perStepIdentities)
-	argoJobs, err := buildArgoEngine(options, restConfig, kube, database, database,
+	argoJobs, err := buildArgoEngine(options, restConfig, kube, database, database, logs,
 		artifactStoreAdapter{store: artifactStore, scanPatterns: artifacts.DefaultScanPatterns},
 		options.artifactsLimitBytes, perRepoIdentities, identityStore)
 	if err != nil {
@@ -784,8 +782,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
 		Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"),
 
-		MaxRunLogBytes: options.runLogLimitBytes,
-		MutationGate:   anchors.AllowMutation,
+		MutationGate: anchors.AllowMutation,
 
 		RestoredRunsFile: filepath.Join(options.dataRoot, service.RestoredRunsFile),
 	})
@@ -973,6 +970,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		UplinkLifecycle:    database, DeclarationDismissal: database,
 		IssueLifecycle:     database,
 		SchedulingObserver: argoJobs,
+		ContainerLogs:      argoJobs,
 		Runs:               database, History: database, Repositories: database, Issues: database,
 		IssueStaleAfter: options.issueStaleAfter, IssueActiveStaleAfter: options.issueActiveStaleAfter,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Git: git,

@@ -146,7 +146,7 @@ func (controller *Controller) observeRunningNodeBoots(ctx context.Context, workf
 }
 
 func (controller *Controller) stepOutputEmpty(ctx context.Context, workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod, resumedAt time.Time) bool {
-	if controller.logs == nil && controller.followLogs == nil {
+	if controller.containerLogSource == nil {
 		return false
 	}
 	samePod := func() bool {
@@ -158,12 +158,9 @@ func (controller *Controller) stepOutputEmpty(ctx context.Context, workflow *wfv
 	}
 	var reader io.ReadCloser
 	var err error
-	if controller.followLogs != nil {
-		since := metav1.NewTime(resumedAt)
-		reader, err = controller.followLogs(ctx, pod.Namespace, pod.Name, corev1.PodLogOptions{Container: mainContainerName, SinceTime: &since})
-	} else {
-		reader, err = controller.logs(ctx, pod.Namespace, pod.Name, mainContainerName)
-	}
+	since := metav1.NewTime(resumedAt)
+	reader, err = controller.containerLogSource(ctx, pod.Namespace, pod.Name, corev1.PodLogOptions{Container: mainContainerName, SinceTime: &since})
+
 	if err != nil {
 		return false
 	}

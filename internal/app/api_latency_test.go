@@ -90,11 +90,6 @@ func newAPILatencyFixture(tb testing.TB) apiLatencyFixture {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	for i := 50051; i <= 50060; i++ {
-		if err := logs.InitializeStepProgress(fmt.Sprintf("%032x", i)); err != nil {
-			tb.Fatal(err)
-		}
-	}
 	var token bytes.Buffer
 	issuer := auth.Issuer{Tokens: database, Bind: func(ctx context.Context, c model.TokenCredential) error {
 		_, err := database.RegisterUplink(ctx, "fixture", model.UplinkSpec{Identity: "fixture", Fingerprint: "SHA256:fixture", TokenCredentialID: c.ID, Admin: true})

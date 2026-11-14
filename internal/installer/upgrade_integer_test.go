@@ -20,10 +20,9 @@ import (
 // upgrade serialization, and reuse of that serialized release. No cluster writes.
 func TestUpgradeIntegerFlagsThroughHelmRoundTrip(t *testing.T) {
 	requireHelmForUpgradeTest(t)
-	const numericValues = `{"kubernetesClient":{"burst":1000000,"qps":50.5},"argo":{"workflowTTL":2592000},"retention":{"logs":{"limitBytes":21474836480,"budgetBytes":21474836480},"artifacts":{"limitBytes":21474836480,"budgetBytes":21474836480},"keepNewestPerRef":0}}`
+	const numericValues = `{"kubernetesClient":{"burst":1000000,"qps":50.5},"retention":{"logs":{"limitBytes":21474836480,"budgetBytes":21474836480},"artifacts":{"limitBytes":21474836480,"budgetBytes":21474836480},"keepNewestPerRef":0}}`
 	expected := map[string]int64{
 		"kubernetes-client-burst": 1000000,
-		"argo-workflow-ttl":       2592000,
 		"run-log-limit-bytes":     21474836480, "logs-budget-bytes": 21474836480,
 		"artifacts-limit-bytes": 21474836480, "artifacts-budget-bytes": 21474836480,
 		"retention-keep-newest": 0,
@@ -155,7 +154,7 @@ func upgradeServerArgs(t *testing.T, manifest string) map[string]string {
 // configuration. Every retired disk-floor value is rejected.
 func TestUpgradeIntegerFlagSchemaAndRemovedFloor(t *testing.T) {
 	requireHelmForUpgradeTest(t)
-	for _, value := range []string{"admission.diskFloorBytes=0", "admission.diskFloorBytes=-1", "admission.diskFloorBytes=0.5", "kubernetesClient.burst=1.5", "argo.workflowTTL=1.5"} {
+	for _, value := range []string{"admission.diskFloorBytes=0", "admission.diskFloorBytes=-1", "admission.diskFloorBytes=0.5", "kubernetesClient.burst=1.5"} {
 		t.Run(value, func(t *testing.T) {
 			args := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@sha256:" + strings.Repeat("1", 64), "--set-json", value}
 			_, err := exec.CommandContext(t.Context(), "helm", args...).CombinedOutput()
