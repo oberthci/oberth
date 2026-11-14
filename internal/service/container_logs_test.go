@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -166,5 +168,59 @@ func TestNativeActiveStreamServesStoredCopyFirst(t *testing.T) {
 	body, err := io.ReadAll(stream)
 	if err != nil || string(body) != "stored before PodGC\n" || source.opened != 0 {
 		t.Fatal(string(body), source.opened, err)
+	}
+}
+
+func TestFinishedUncapturedContainerLogReadReason(t *testing.T) {
+	for _, terminal := range []bool{false, true} {
+		t.Run(fmt.Sprint(terminal), func(t *testing.T) {
+			f := newRetentionFixture(t)
+			run := f.run(t, "main", "ci", terminal)
+			actor := api.Actor{Identity: "operator"}
+			entry := runlog.ContainerLog{NodeID: "unread", PodUID: "uid", PodName: "opaque", ContainerName: "main"}
+			if err := f.retention.Logs.TrackContainerLogs(run.ID, []runlog.ContainerLog{entry}); err != nil {
+				t.Fatal(err)
+			}
+			value, err := f.api.RunContainerLogs(t.Context(), actor, run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			info := value.(ContainerLogsResponse).Containers[0]
+			want := ""
+			if terminal {
+				want = "oberth: not captured: observation ended"
+			}
+			if info.Stored || info.Reason != want {
+				t.Fatal(info)
+			}
+			value, err = f.api.RunContainerLogFiltered(t.Context(), actor, run.ID, "unread", "main", runlog.Filter{})
+			if terminal {
+				if err != nil || value.(ContainerLogResponse).Output != want+"\n" {
+					t.Fatal(value, err)
+				}
+			} else if !errors.Is(err, ErrStepLogPending) {
+				t.Fatal(value, err)
+			}
+			stream, err := f.api.OpenRunContainerLog(t.Context(), actor, run.ID, "unread", "main", false)
+			if terminal {
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, readErr := io.ReadAll(stream)
+				_ = stream.Close()
+				if readErr != nil || string(body) != want+"\n" {
+					t.Fatal(string(body), readErr)
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				t.Fatal(err)
+			}
+			if _, err := f.api.OpenRunContainerLog(t.Context(), actor, run.ID, "unknown", "main", false); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("invented unknown container", err)
+			}
+			entries, err := f.retention.Logs.ContainerLogs(t.Context(), run.ID)
+			if err != nil || entries[0].Captured || entries[0].Pending || entries[0].Reason != "" {
+				t.Fatal("read changed receipt", entries, err)
+			}
+		})
 	}
 }

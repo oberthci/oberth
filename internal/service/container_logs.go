@@ -97,7 +97,7 @@ func (service *API) RunContainerLogs(ctx context.Context, actor api.Actor, id st
 		if helperLogContainer(entry.ContainerName) {
 			continue
 		}
-		result.Containers = append(result.Containers, ContainerLogInfo{NodeID: entry.NodeID, Stage: entry.Stage, Step: entry.Step, PodName: entry.PodName, Container: entry.ContainerName, Stored: entry.Captured, Reason: entry.Reason})
+		result.Containers = append(result.Containers, ContainerLogInfo{NodeID: entry.NodeID, Stage: entry.Stage, Step: entry.Step, PodName: entry.PodName, Container: entry.ContainerName, Stored: entry.Captured, Reason: containerLogReason(run, entry)})
 	}
 	sort.Slice(result.Containers, func(i, j int) bool {
 		a, b := result.Containers[i], result.Containers[j]
@@ -126,8 +126,22 @@ func (service *API) OpenRunContainerLog(ctx context.Context, actor api.Actor, id
 	if !errors.Is(storedErr, os.ErrNotExist) {
 		return nil, storedErr
 	}
-	if !follow || !run.Status.Active() {
-		return scoped.logs.OpenStoredContainerLog(ctx, run.ID, node, container)
+	if run.Status.Terminal() {
+		entries, err := scoped.logs.ContainerLogs(ctx, run.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			if entry.NodeID == node && entry.ContainerName == container {
+				if reason := containerLogReason(run, entry); reason != "" {
+					return io.NopCloser(strings.NewReader(reason + "\n")), nil
+				}
+			}
+		}
+		return nil, storedErr
+	}
+	if !follow {
+		return nil, storedErr
 	}
 	if scoped.containerLogSource == nil {
 		return nil, refuse(ErrUnavailable, "native container logs")
@@ -153,7 +167,12 @@ func (service *API) RunContainerLogFiltered(ctx context.Context, actor api.Actor
 		}
 		defer release()
 	}
-	body, meta, _, err := scoped.logs.ReadContainerLog(ctx, run.ID, node, container, filter.WithContext(ctx))
+	body, meta, entry, err := scoped.logs.ReadContainerLog(ctx, run.ID, node, container, filter.WithContext(ctx))
+	if errors.Is(err, os.ErrNotExist) && run.Status.Terminal() {
+		if reason := containerLogReason(run, entry); reason != "" {
+			body, meta, err = runlog.FilterBytes([]byte(reason+"\n"), filter.WithContext(ctx))
+		}
+	}
 	if errors.Is(err, os.ErrNotExist) && run.Status.Active() {
 		return nil, fmt.Errorf("%w: stored container log is pending; request the live container stream", ErrStepLogPending)
 	}
@@ -191,4 +210,13 @@ func (service *API) rawRunLog(ctx context.Context, actor api.Actor, id string, f
 // available through the same scoped, authenticated native reader.
 func helperLogContainer(name string) bool {
 	return name == "init" || name == "wait" || name == "oberth-executor-token" || strings.HasPrefix(name, "init-artifact-")
+}
+
+// Finished runs have no observer left to attempt an uncaptured physical copy.
+// Explain that at read time without changing the stored capture receipt.
+func containerLogReason(run model.Run, entry runlog.ContainerLog) string {
+	if run.Status.Terminal() && entry.NodeID != "" && !entry.Captured && !entry.Pending && entry.Reason == "" {
+		return "oberth: not captured: observation ended"
+	}
+	return entry.Reason
 }
