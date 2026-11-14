@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
@@ -46,7 +47,7 @@ func TestNativeOperatorShutdownTerminalMapping(t *testing.T) {
 					} else if result.Status == model.RunInterrupted || strings.HasPrefix(result.Error, "Workflow stopped:") {
 						t.Fatalf("invented shutdown outcome: %+v", result)
 					}
-					if client.posts != 0 || client.deletes != 0 {
+					if client.posts != 0 || client.deletes != 0 || client.patches != 0 {
 						t.Fatal("terminal observation mutated the Workflow")
 					}
 				})
@@ -112,7 +113,7 @@ spec:
 			if result.Status != model.RunFailed || result.Phase != model.PhaseCancelled || result.Error != "Workflow stopped by its Workflow spec: "+message {
 				t.Fatalf("authored shutdown attributed to an actor: %+v", result)
 			}
-			if client.posts != 1 || client.deletes != 0 || client.object.Spec.Shutdown != strategy {
+			if client.posts != 1 || client.deletes != 0 || client.patches != 0 || client.object.Spec.Shutdown != strategy {
 				t.Fatal("restart observation changed the live Workflow")
 			}
 		})
@@ -120,9 +121,9 @@ spec:
 }
 
 type shutdownWorkflowFake struct {
-	object               *wfv1.Workflow
-	posts, gets, deletes int
-	err                  error
+	object                        *wfv1.Workflow
+	posts, gets, deletes, patches int
+	err                           error
 }
 
 func (w *shutdownWorkflowFake) Create(_ context.Context, object *wfv1.Workflow, _ metav1.CreateOptions) (*wfv1.Workflow, error) {
@@ -156,4 +157,9 @@ func (w *shutdownWorkflowFake) Delete(_ context.Context, _ string, options metav
 	w.deletes++
 	w.object = nil
 	return nil
+}
+
+func (w *shutdownWorkflowFake) Patch(context.Context, string, types.PatchType, []byte, metav1.PatchOptions, ...string) (*wfv1.Workflow, error) {
+	w.patches++
+	return nil, errors.New("terminal observation must not patch the Workflow")
 }
