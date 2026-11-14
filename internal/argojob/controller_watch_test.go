@@ -273,15 +273,25 @@ func TestWatchWaitCompletionClassifiesLivePodNotStaleCache(t *testing.T) {
 	if err != nil || len(completion.Steps) != 1 || completion.Steps[0].Termination == nil || !completion.Steps[0].Termination.Available || completion.Steps[0].Termination.Container.Reason != "OOMKilled" {
 		t.Fatal(completion, err)
 	}
-	lists := 0
+	snapshots, retirements := 0, 0
 	for _, action := range kube.Actions() {
-		if action.GetVerb() == "list" && action.GetResource().Resource == "pods" {
-			lists++
+		if action.GetVerb() != "list" || action.GetResource().Resource != "pods" {
+			continue
+		}
+		selector := action.(ktesting.ListAction).GetListRestrictions().Labels.String()
+		switch selector {
+		case "oberth.ci/role=executor-identity":
+			retirements++
+		case argoWorkflowLabel + "=" + wf.Name:
+			snapshots++
+		default:
+			t.Fatalf("unexpected completion Pod list: %s", selector)
 		}
 	}
-	if lists != 1 || client.reads() != 1 {
-		t.Fatal("completion snapshot/settle count", lists, client.reads())
+	if snapshots != 1 || retirements != 1 || client.reads() != 1 {
+		t.Fatal("completion snapshot/identity retirement/settle count", snapshots, retirements, client.reads())
 	}
+
 }
 
 func TestWatchWaitIdleWithoutWaiterDoesNotRevalidateCapability(t *testing.T) {
