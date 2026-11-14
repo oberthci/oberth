@@ -538,7 +538,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	container := flags.String("container", "", "native Pod container name")
 	containers := flags.Bool("containers", false, "list observed native node/container bindings")
 	stage := flags.String("burn", "", "burn name")
-	step := flags.String("step", "", "Argo node ID or unique step display name")
+	step := flags.String("step", "", "step name")
 	pattern := flags.String("pattern", "", "RE2 pattern; offset and limit then page over matches")
 	context_ := flags.Int("context", 0, "lines of context around each match")
 	offset := flags.Int("offset", 0, "skip this many")

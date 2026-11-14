@@ -575,7 +575,7 @@ With no pattern, limit, tail, offset or byte-offset: last 200 lines. Pass --tail
   -raw
         keep the [burn/step] prefix on each line and the Argo executor lines
   -step string
-        Argo node ID or unique step display name
+        step name
   -tail
         read from the end
   -token-file string
