@@ -72,11 +72,7 @@ func TestReleaseWIFComposesVaultAndWaitProtection(t *testing.T) {
 			t.Errorf("main lost %s", name)
 		}
 	}
-	for _, m := range after.Containers[0].VolumeMounts {
-		if m.Name == releaseWIFVolume || m.Name == SecretsVolumeName || m.Name == ReleaseTokenVolumeName {
-			t.Errorf("wait retained credential mount %s", m.Name)
-		}
-	}
+	assertNativeWaitCredentialMirrors(t, before.Containers[0], after.Containers[0])
 	if len(after.Containers[0].VolumeMounts) == 0 {
 		t.Fatal("wait lost its independent executor token")
 	}

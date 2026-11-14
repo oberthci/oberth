@@ -15,44 +15,6 @@ const (
 // DefaultRunnerImagePrefixes is empty: only an explicitly configured list restricts images.
 var DefaultRunnerImagePrefixes []string
 
-// ValidateRunnerImage validates Oberth-owned seed images. Authored container
-// image syntax belongs to Kubernetes; their optional allowlist is separate.
-func ValidateRunnerImage(image string) error {
-	if image == "" || len(image) > maxRunnerImageBytes {
-		return fmt.Errorf("runner image must contain 1-%d bytes", maxRunnerImageBytes)
-	}
-	if strings.TrimSpace(image) != image || strings.ContainsAny(image, " \t\x00\r\n\"'\\") {
-		return fmt.Errorf("runner image %q must not contain whitespace, quotes, or control characters", image)
-	}
-	name := image
-	atIndex := strings.Index(name, "@")
-	if atIndex < 0 {
-		return fmt.Errorf("runner image %q must contain an @sha256:<64 hex> digest; tag-only references are mutable and rejected at admission", image)
-	}
-	digest := name[atIndex+1:]
-	name = name[:atIndex]
-	if !validImageDigest(digest) {
-		return fmt.Errorf("runner image %q digest must be sha256:<64 lowercase hex>", image)
-	}
-	// A tag before the digest is optional but, when present, must be valid.
-	lastColon := strings.LastIndex(name, ":")
-	lastSlash := strings.LastIndex(name, "/")
-	if lastColon >= 0 && lastColon > lastSlash {
-		tag := name[lastColon+1:]
-		if tag == "" || len(tag) > 128 || !validImageTag(tag) {
-			return fmt.Errorf("runner image %q tag is invalid", image)
-		}
-		if tag == "latest" {
-			return fmt.Errorf("runner image %q must not use the mutable %q tag", image, "latest")
-		}
-		name = name[:lastColon]
-	}
-	if name == "" {
-		return fmt.Errorf("runner image %q repository is empty", image)
-	}
-	return nil
-}
-
 // RunnerImageAllowed compares normalized registries and repository boundaries.
 // Tags may still be narrowed by a tag prefix, but a registry port must never
 // be mistaken for a tag. Docker Hub short and fully qualified names agree.
@@ -169,33 +131,4 @@ func ValidateRunnerImagePrefixes(prefixes []string) error {
 		seen[prefix] = struct{}{}
 	}
 	return nil
-}
-
-func validImageDigest(digest string) bool {
-	hexPart, found := strings.CutPrefix(digest, "sha256:")
-	if !found || len(hexPart) != 64 {
-		return false
-	}
-	for _, character := range []byte(hexPart) {
-		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
-			return false
-		}
-	}
-	return true
-}
-
-func validImageTag(tag string) bool {
-	for index, character := range []byte(tag) {
-		switch {
-		case character >= 'a' && character <= 'z', character >= 'A' && character <= 'Z',
-			character >= '0' && character <= '9', character == '_':
-		case character == '.' || character == '-':
-			if index == 0 {
-				return false
-			}
-		default:
-			return false
-		}
-	}
-	return true
 }

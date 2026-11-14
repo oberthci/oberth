@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -18,9 +19,44 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
+
+func upgradeWaitKubeconfig(t *testing.T, root string) string {
+	t.Helper()
+	objects := upgradeWaitArgoObjects()
+	deployment := objects[0].(*appsv1.Deployment)
+	config := objects[1].(*corev1.ConfigMap)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("upgrade wait attempted a Kubernetes mutation: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "mutations refused", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/apis/apps/v1/namespaces/" + deployment.Namespace + "/deployments":
+			_ = json.NewEncoder(w).Encode(&appsv1.DeploymentList{Items: []appsv1.Deployment{*deployment}})
+		case "/api/v1/namespaces/" + config.Namespace + "/configmaps/" + config.Name:
+			_ = json.NewEncoder(w).Encode(config)
+		case "/api/v1/namespaces/kube-system":
+			http.NotFound(w, r)
+		default:
+			t.Errorf("unexpected Kubernetes request: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	kubeconfig := filepath.Join(root, "kubeconfig")
+	if err := os.WriteFile(kubeconfig, []byte("apiVersion: v1\nkind: Config\ncurrent-context: fixture\ncontexts:\n- name: fixture\n  context:\n    cluster: fixture\n    user: fixture\nclusters:\n- name: fixture\n  cluster:\n    server: "+server.URL+"\nusers:\n- name: fixture\n  user: {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return kubeconfig
+}
 
 // The helper runs the actual CLI main, or the production in-pod wait loop in
 // place of kubectl exec. Every host command is a fixture; no cluster is used.
@@ -123,10 +159,7 @@ esac
 					t.Fatal(err)
 				}
 			}
-			kubeconfig := filepath.Join(root, "kubeconfig")
-			if err := os.WriteFile(kubeconfig, []byte("apiVersion: v1\nkind: Config\ncurrent-context: fixture\ncontexts:\n- name: fixture\n  context:\n    cluster: fixture\n    user: fixture\nclusters:\n- name: fixture\n  cluster:\n    server: https://127.0.0.1:1\nusers:\n- name: fixture\n  user: {}\n"), 0600); err != nil {
-				t.Fatal(err)
-			}
+			kubeconfig := upgradeWaitKubeconfig(t, root)
 			ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(170*time.Second))
 			defer cancel()
 			command := exec.CommandContext(ctx, "/bin/sh", "-c", `exec "$@"`, "fixture", executable, "-test.run", "^TestUpgradeWaitProcessHelper$")

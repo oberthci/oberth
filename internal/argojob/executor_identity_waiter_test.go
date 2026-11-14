@@ -1,7 +1,6 @@
 package argojob
 
 import (
-	"fmt"
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -92,25 +91,15 @@ func TestExecutorIdentityRejectsMergedWaiterFields(t *testing.T) {
 	}
 }
 
-func TestExecutorIdentityExactServerHelpers(t *testing.T) {
-	for _, script := range []bool{false, true} {
-		for _, modified := range []bool{false, true} {
-			t.Run(fmt.Sprintf("script=%v/modified=%v", script, modified), func(t *testing.T) {
-				controller, _, pod, _ := executorRetryFixture(t)
-				pod.Spec = executorEnvironmentPod(t, "container", "init", nil)
-				prepare := nonrootPrepareContainer(script, controller.config.SourceSeedImage)
-				prepare.ImagePullPolicy = corev1.PullIfNotPresent
-				prepare.TerminationMessagePath = corev1.TerminationMessagePathDefault
-				prepare.TerminationMessagePolicy = corev1.TerminationMessageReadFile
-				if modified {
-					prepare.Env = []corev1.EnvVar{{Name: "PATH", Value: "/loot"}}
-				}
-				pod.Spec.InitContainers = append(pod.Spec.InitContainers, prepare)
-				err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, false)
-				if (err != nil) != modified {
-					t.Fatalf("server preparation exactness: script=%v modified=%v: %v", script, modified, err)
-				}
-			})
-		}
+func TestRemovedPreparationContainerIsNotAServerHelper(t *testing.T) {
+	controller, _, pod, _ := executorRetryFixture(t)
+	pod.Spec = executorEnvironmentPod(t, "container", "init", nil)
+	prepare := corev1.Container{Name: "oberth-prepare-nonroot", Image: controller.config.SourceSeedImage, Command: []string{"true"}, SecurityContext: nonrootContainerSecurity(0)}
+	if validServerContainer(prepare, controller.config.SourceSeedImage, true) {
+		t.Fatal("removed preparation container trusted")
+	}
+	pod.Spec.InitContainers = append(pod.Spec.InitContainers, prepare)
+	if err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, false); err == nil {
+		t.Fatal("removed helper reached token delivery")
 	}
 }

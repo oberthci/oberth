@@ -150,9 +150,8 @@ credentialed release leaves, Pod-leaf placement and every container shape;
 `TestWorkspaceCacheRefusedOnCredentialedCILeaf` refuses `cache` on a CI-tier
 `secretstore exec` leaf, admits `none` there, and admits `cache` on the same
 leaf on the release tier.
-`TestAdmitWorkspaceMountsValues` refuses unknown values;
-`TestAdmitNonrootRefusesWorkspaceCache` refuses `cache` on leaves that take no
-host cache. `TestValidateRuntimeAdmissionParity` admits unordered Trivy steps
+`TestAdmitWorkspaceMountsValues` refuses unknown values.
+`TestValidateRuntimeAdmissionParity` admits unordered Trivy steps
 sharing a cache through both CLI validation and Build.
 
 Parallel CI race groups: `TestOberthRaceGroupsCoverEveryPackageExactlyOnce`

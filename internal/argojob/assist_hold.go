@@ -234,13 +234,12 @@ func assistActive(config Config, request Request, hasSecretSteps bool) bool {
 // a Pod, with no authored retryStrategy (its own retries keep their meaning),
 // no template timeout (Argo resets the Pod deadline to it after the hold's
 // podSpecPatch, so the parked attempt would die at the timeout), no
-// credential chain, no step identity, no token, and no nonroot launcher
-// (those lanes forbid exec and own their Pod patch).
-func assistHoldEligible(t *wfv1.Template, workflowServiceAccount string, nonroot map[string]bool) bool {
+// credential chain, no step identity and no grant token.
+func assistHoldEligible(t *wfv1.Template, workflowServiceAccount string) bool {
 	if t == nil || t.RetryStrategy != nil || t.Timeout != "" || t.DAG != nil || len(t.Steps) != 0 || t.Suspend != nil || t.Resource != nil || t.ContainerSet != nil || t.Data != nil || t.HTTP != nil || t.Plugin != nil {
 		return false
 	}
-	if assistContainer(t) == nil || nonroot[t.Name] {
+	if assistContainer(t) == nil {
 		return false
 	}
 	if argoworkflow.UsesCredentials(t) || t.Executor != nil {
@@ -283,14 +282,6 @@ func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, ha
 	if defaults := workflow.Spec.TemplateDefaults; (defaults != nil && (defaults.RetryStrategy != nil || defaults.Timeout != "")) || workflow.Spec.RetryStrategy != nil {
 		return nil
 	}
-	names, err := argoworkflow.DeclaredNonrootTemplates(workflow)
-	if err != nil {
-		return err
-	}
-	nonroot := make(map[string]bool, len(names))
-	for _, name := range names {
-		nonroot[name] = true
-	}
 	assist := config.Assist.withDefaults()
 	ttl := int64(assist.HoldTTL / time.Second)
 	workflowDeadline := int64(0)
@@ -299,7 +290,7 @@ func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, ha
 	}
 	eligible := 0
 	walkTemplates(workflow, func(t *wfv1.Template) {
-		if !assistHoldEligible(t, workflow.Spec.ServiceAccountName, nonroot) {
+		if !assistHoldEligible(t, workflow.Spec.ServiceAccountName) {
 			return
 		}
 		// The held attempt keeps the step's whole (#1499-floored) budget for

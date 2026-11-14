@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// Only these leaves were written by the installer for removed features.
+// Only these retired leaves came from installer writes or old chart defaults.
 // Keep every live setting and every other unknown key for validation.
 func dropRetiredInstallerValues(values, target map[string]any, output io.Writer) bool {
 	store, _ := values["secretstore"].(map[string]any)
@@ -26,7 +26,7 @@ func dropRetiredInstallerValues(values, target map[string]any, output io.Writer)
 	}
 	transitRemoved := len(removed) > 0
 	argo, _ := values["argo"].(map[string]any)
-	for _, key := range []string{"controllerProfile", "controllerProfileConfigMap", "executionPlacementConfigMap", "executionTargetConfigMap", "executionTargetCredentialsSecret"} {
+	for _, key := range []string{"controllerProfile", "controllerProfileConfigMap", "executionPlacementConfigMap", "executionTargetConfigMap", "executionTargetCredentialsSecret", "executorScratchSizeLimit"} {
 		if _, exists := argo[key]; exists && !chartOwnsInstallerValue(target, "argo", key) {
 			delete(argo, key)
 			removed = append(removed, "argo."+key)
