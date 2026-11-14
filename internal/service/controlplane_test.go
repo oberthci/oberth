@@ -885,6 +885,7 @@ func (git *controlGit) setRemoteRefLocked(ref, sha string) {
 }
 
 type fakeJobs struct {
+	nativeLogs      *runlog.Store
 	nativeAdmission func(context.Context, WorkflowRequest) error
 	mu              sync.Mutex
 	results         []JobResult
@@ -1144,13 +1145,31 @@ func (jobs *fakeJobs) Wait(_ context.Context, name string, output io.Writer) (Jo
 		transcript = jobs.transcripts[0]
 		jobs.transcripts = jobs.transcripts[1:]
 	}
+	nativeLogs := jobs.nativeLogs
+	runID := ""
+	if nativeLogs != nil {
+		for _, request := range jobs.createdCI {
+			if request.WorkflowName == name {
+				runID = request.Run.ID
+				break
+			}
+		}
+	}
 	jobs.mu.Unlock()
 	if transcript != "" {
 		_, _ = io.WriteString(output, transcript)
 		return result, nil
 	}
 	for _, step := range result.Steps {
-		_, _ = fmt.Fprintf(output, "[%s/%s] output for %s\n", step.Stage, step.Step, step.Status)
+		body := fmt.Sprintf("[%s/%s] output for %s\n", step.Stage, step.Step, step.Status)
+		if nativeLogs != nil {
+			entry := runlog.ContainerLog{NodeID: step.NodeID, PodUID: "fixture-" + step.NodeID, ContainerName: "main", Main: true, Stage: step.Stage, Step: step.Step, Reader: strings.NewReader(body)}
+			if err := nativeLogs.StoreContainerLog(runID, entry, 1<<20); err != nil {
+				return JobResult{}, err
+			}
+		} else {
+			_, _ = io.WriteString(output, body)
+		}
 	}
 	return result, nil
 }
@@ -1458,6 +1477,7 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 		JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "test.unit", Error: "second red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
 		JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}},
 	)
+	fixture.jobs.nativeLogs = fixture.logs
 	ctx := context.Background()
 	shas := []string{
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1492,7 +1512,7 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 			if !strings.Contains(page.Issues[0].Body, sha) ||
 				!strings.Contains(page.Issues[0].Body, "[test/unit] output for failed") ||
 				!strings.Contains(page.Issues[0].Body, "full step log: run_logs ") ||
-				!strings.Contains(page.Issues[0].Body, " test unit") ||
+				!strings.Contains(page.Issues[0].Body, " test test.unit") ||
 				(index == 1 && strings.Contains(page.Issues[0].Body, shas[0])) {
 				t.Fatalf("red issue did not replace its SHA, bounded tail, and log hint: %#v", page.Issues[0])
 			}
@@ -1620,13 +1640,14 @@ func TestStatusRefWithoutRunRespectsRepoDisambiguator(t *testing.T) {
 
 func TestLogsReturnOnlyOneNamedStep(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
-		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "unit failed",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "test.unit", Error: "unit failed",
 		Steps: []model.StepResult{
 			{NodeID: "lint.vet", Stage: "lint", Step: "vet", Status: model.StepPassed, ExitCode: 0},
 			{NodeID: "test.setup", Stage: "test", Step: "setup", Status: model.StepPassed, ExitCode: 0},
 			{NodeID: "test.unit", Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1},
 		},
 	})
+	fixture.jobs.nativeLogs = fixture.logs
 	const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	ctx := context.Background()
 	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
@@ -1638,7 +1659,6 @@ func TestLogsReturnOnlyOneNamedStep(t *testing.T) {
 	if err := fixture.scheduler.ProcessNext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	seedNativeLogCopies(t, fixture)
 	value, err := fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "logs",
 		json.RawMessage(`{"sha":"`+sha+`","step":"unit"}`))
 	if err != nil {
@@ -1655,12 +1675,13 @@ func TestLogsReturnOnlyOneNamedStep(t *testing.T) {
 
 func TestDashboardRunDetailAndLogViewsAreReadOnly(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
-		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "unit failed",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "test.unit", Error: "unit failed",
 		Steps: []model.StepResult{
 			{NodeID: "lint.vet", Stage: "lint", Step: "vet", Status: model.StepPassed, ExitCode: 0},
 			{NodeID: "test.unit", Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1},
 		},
 	})
+	fixture.jobs.nativeLogs = fixture.logs
 	const sha = "abababababababababababababababababababab"
 	ctx := context.Background()
 	enqueued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
@@ -1673,7 +1694,6 @@ func TestDashboardRunDetailAndLogViewsAreReadOnly(t *testing.T) {
 	if err := fixture.scheduler.ProcessNext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	seedNativeLogCopies(t, fixture)
 	issue, err := fixture.store.OpenCIIssue(ctx, fixture.repo.ID, "main")
 	if err != nil {
 		t.Fatal(err)
@@ -4201,22 +4221,5 @@ func TestPublishIssueKindDistinguishesPublishFromCodeFailure(t *testing.T) {
 	_, closedErr := fixture.store.OpenCIIssue(context.Background(), fixture.repo.ID, "main")
 	if !errors.Is(closedErr, store.ErrNotFound) {
 		t.Fatalf("issue after retry = %v, want ErrNotFound (closed)", closedErr)
-	}
-}
-
-// Native reader fixtures supply a stored copy independently of aggregate bytes.
-func seedNativeLogCopies(t *testing.T, fixture *controlFixture) {
-	t.Helper()
-	runID := fixture.jobs.createdCI[0].Run.ID
-	rows, err := fixture.store.StepResults(t.Context(), runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range rows {
-		body := fmt.Sprintf("[%s/%s] output for %s\n", row.Stage, row.Step, row.Status)
-		entry := runlog.ContainerLog{NodeID: row.NodeID, PodUID: "fixture-" + row.NodeID, ContainerName: "main", Main: true, Stage: row.Stage, Step: row.Step, Reader: strings.NewReader(body)}
-		if err := fixture.logs.StoreContainerLog(runID, entry, 1<<20); err != nil {
-			t.Fatal(err)
-		}
 	}
 }
