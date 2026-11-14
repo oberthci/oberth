@@ -34,8 +34,6 @@ const runFilters = ["all", "queued", "running", "passed", "failed", "cancelled"]
 
 function readRunFilter() {
   const saved = localStorage.getItem("oberth-filter");
-  if (saved === "waiting") return "queued";
-  if (saved === "interrupted") return "cancelled";
   return ["queued", "running", "passed", "failed", "cancelled"].includes(saved) ? saved : "all";
 }
 
