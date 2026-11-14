@@ -131,17 +131,42 @@ func testUpgradeUnconfiguredAdmin(t *testing.T, version string, noBackup, dry bo
 		t.Fatal("unconfigured client reached a write", writes, commands, err)
 	}
 	if !noBackup && version != "0.22.7" {
-		for _, want := range []string{"./oberth-v" + version + " backup --history-only --context fixture --namespace oberth", "oberth upgrade --no-backup", "not copied"} {
+		for _, want := range []string{"./oberth-v" + version + " backup --history-only --context fixture --namespace oberth", "oberth upgrade --no-backup", "not copied", "The retry requires this machine's client connected to this server as an unscoped admin.\n"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatal("missing exact backup guidance", want, err)
 			}
 		}
 	} else {
-		for _, want := range []string{"unscoped admin", "export OBERTH_BASE_URL=", "OBERTH_CLIENT_CERT=", "OBERTH_CLIENT_KEY=", "OBERTH_CA_CERT=", "nothing changed"} {
+		for _, want := range []string{"unscoped admin", "export OBERTH_BASE_URL=", "OBERTH_TOKEN=", "OBERTH_CLIENT_CERT=", "OBERTH_CLIENT_KEY=", "OBERTH_CA_CERT=", "nothing changed"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatal("missing client prerequisite", want, err)
 			}
 		}
+	}
+}
+
+func TestUpgradePrereleaseHasAdminAPI(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/api/admin/version" {
+			t.Error("unexpected admin route", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"v0.22.7-rc.1","schema":99}`))
+	}))
+	defer server.Close()
+	remote, err := client.New(t.Context(), client.Config{BaseURL: server.URL, Token: "fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"0.22.7-0", "0.22.7-alpha.1", "0.22.7-rc.1", "0.22.7"} {
+		if err := checkUpgradeBackupAPI(t.Context(), UpgradeConfig{}, Deps{Admin: remote}, version); err != nil {
+			t.Fatal("API-capable release refused", version, err)
+		}
+	}
+	if requests != 4 {
+		t.Fatal("API-capable releases did not probe admin API", requests)
 	}
 }
 

@@ -19,7 +19,7 @@ func checkUpgradeBackupAPI(ctx context.Context, cfg UpgradeConfig, deps Deps, cu
 	if cfg.NoBackup {
 		return nil
 	}
-	if semver.Compare(canonicalChartVersion(currentVersion), "v0.22.7") < 0 {
+	if semver.Compare(canonicalChartVersion(currentVersion), "v0.22.7-0") < 0 {
 		return missingUpgradeAdminAPI(cfg, deps, currentVersion)
 	}
 	_, _, err := adminVersion(ctx, Config{Namespace: cfg.Namespace}, deps)
@@ -38,7 +38,7 @@ func missingUpgradeAdminAPI(cfg UpgradeConfig, deps Deps, currentVersion string)
 	binary := "./oberth-" + version
 	target := " --context " + shellQuoteWord(deps.ContextName) + " --namespace " + shellQuoteWord(cfg.Namespace)
 	retry := upgradeRetryCommand(cfg, deps)
-	return fmt.Errorf("running release %s has no administration API; pre-upgrade backup refused before any change. Use the verified %s CLI saved as %s, then run:\n\n  %s backup --history-only%s\n  %s\n\nIf Kubernetes Workflow observation is unavailable, confirm no runs are active before retrying without --wait-idle or --wait-for. No exec fallback is used. %s", version, version, strings.TrimPrefix(binary, "./"), shellQuoteWord(binary), target, retry, upgradeRetryOptionsNote)
+	return fmt.Errorf("running release %s has no administration API; pre-upgrade backup refused before any change. Use the verified %s CLI saved as %s, then run:\n\n  %s backup --history-only%s\n  %s\n\nThe retry requires this machine's client connected to this server as an unscoped admin.\nIf Kubernetes Workflow observation is unavailable, confirm no runs are active before retrying without --wait-idle or --wait-for. No exec fallback is used. %s", version, version, strings.TrimPrefix(binary, "./"), shellQuoteWord(binary), target, retry, upgradeRetryOptionsNote)
 }
 
 const upgradeRetryOptionsNote = "Reapply your other upgrade options: --openbao-namespace, --values/--set, --backup-dir, --timeout, TLS flags, chart/release-source flags and downgrade consent are not copied into this retry command."
@@ -77,7 +77,7 @@ func checkUpgradeVerificationConnection(ctx context.Context, cfg UpgradeConfig, 
 		_, err = client.New(ctx, configured)
 	}
 	if err != nil {
-		return fmt.Errorf("upgrade requires this machine's client connected to this server as an unscoped admin; configure it with `export OBERTH_BASE_URL='https://<server>:<port>' OBERTH_CLIENT_CERT='/path/admin.crt' OBERTH_CLIENT_KEY='/path/admin.key' OBERTH_CA_CERT='/path/server-ca.crt'`, then retry (nothing changed): %w", err)
+		return fmt.Errorf("upgrade requires this machine's client connected to this server as an unscoped admin; configure it with `export OBERTH_BASE_URL='https://<server>:<port>' OBERTH_TOKEN='<admin-token>' OBERTH_CA_CERT='/path/server-ca.crt'` or `export OBERTH_BASE_URL='https://<server>:<port>' OBERTH_CLIENT_CERT='/path/admin.crt' OBERTH_CLIENT_KEY='/path/admin.key' OBERTH_CA_CERT='/path/server-ca.crt'`, then retry (nothing changed): %w", err)
 	}
 	return nil
 }
