@@ -42,7 +42,7 @@ func testJSONFirstOnboarding(t *testing.T) {
 }
 
 func TestFirstAdminInterruptedInstallResumes(t *testing.T) {
-	for _, interruption := range []string{"before-exec", "lost-response"} {
+	for _, interruption := range []string{"before-exec", "before-exec-explicit", "lost-response"} {
 		t.Run(interruption, func(t *testing.T) { testJSONFirstOnboardingCase(t, false, interruption) })
 	}
 }
@@ -139,6 +139,14 @@ func testJSONFirstOnboardingCase(t *testing.T, pending bool, interruption string
 		return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: []byte(ca)}}, "selected", nil
 	}}
 	cfg := Config{ForgeURL: "ssh://git@github.com/acme", Namespace: DefaultNamespace, ArgoNamespace: DefaultArgoNamespace, ContextName: "selected", UplinkIdentity: "admin@host", ClientAccess: "none", ClientHost: "127.0.0.1", ClientHTTPSPort: port, ClientSSHPort: port, Timeout: time.Second, SecretsFile: filepath.Join(t.TempDir(), "credentials")}
+	if interruption == "before-exec-explicit" {
+		path := filepath.Join(t.TempDir(), "operator.pub")
+		if err := os.WriteFile(path, []byte(key), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg.AdminSSHPublicKeyPath = path
+		cfg.SSHPublicKeyPath = path
+	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +169,7 @@ func testJSONFirstOnboardingCase(t *testing.T, pending bool, interruption string
 		return finishErr
 	}
 
-	cfg.existingRelease = interruption == "before-exec"
+	cfg.existingRelease = strings.HasPrefix(interruption, "before-exec")
 	if interruption == "lost-response" {
 		if err := executeJSON(t.Context(), cfg, host, execute); err == nil {
 			t.Fatal("interrupted exec response was accepted")

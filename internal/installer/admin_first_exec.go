@@ -19,7 +19,7 @@ func runFirstAdminExec(ctx context.Context, deps Deps, body []byte, args []strin
 			return raw, nil
 		}
 		message := string(raw) + " " + err.Error()
-		starting := strings.Contains(message, "daemon audit mutation gate") && (strings.Contains(message, "no such file") || strings.Contains(message, "connection refused"))
+		starting := (strings.Contains(message, "daemon audit mutation gate") || strings.Contains(message, "inspect admin socket directory")) && (strings.Contains(message, "no such file") || strings.Contains(message, "connection refused"))
 		clear(raw)
 		if !starting {
 			return nil, errors.New("create first admin failed")
