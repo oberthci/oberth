@@ -11,6 +11,7 @@ import (
 	argoconfig "github.com/argoproj/argo-workflows/v4/config"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"sigs.k8s.io/yaml"
 )
 
@@ -62,6 +63,27 @@ func renderWorkflowSeccomp(t *testing.T, values map[string]any) (string, corev1.
 		pod.Spec.Containers[0].Name, pod.Spec.Containers[1].Name = "main", "wait"
 		if native.WorkflowDefaults != nil {
 			pod.Spec.SecurityContext = native.WorkflowDefaults.Spec.SecurityContext
+			tmpl := native.WorkflowDefaults.Spec.TemplateDefaults
+			if tmpl != nil {
+				if tmpl.SecurityContext != nil {
+					pod.Spec.SecurityContext = tmpl.SecurityContext
+				}
+				container := tmpl.Container
+				if tmpl.Script != nil {
+					container = &tmpl.Script.Container
+				}
+				if container != nil {
+					base, _ := json.Marshal(pod.Spec.Containers[0])
+					overlay, _ := json.Marshal(container)
+					merged, err := strategicpatch.StrategicMergePatch(base, overlay, corev1.Container{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := json.Unmarshal(merged, &pod.Spec.Containers[0]); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
 		}
 		return raw, pod
 	}
@@ -158,8 +180,109 @@ func checkWorkflowSeccompUpgrade(t *testing.T, stored []byte, live string, pass,
 	if podRefusal && (!strings.Contains(err.Error(), "workflowDefaults.spec.securityContext.seccompProfile.type") || !strings.Contains(err.Error(), "Unconfined")) {
 		t.Fatalf("Pod refusal omitted its exact value: %v", err)
 	}
+	if podRefusal && (strings.Contains(err.Error(), "mainContainer.securityContext") || strings.Contains(err.Error(), "executor.securityContext")) {
+		t.Fatalf("Pod refusal names unrelated container keys: %v", err)
+	}
 	current, err := fixture.deps.KubeClient.CoreV1().ConfigMaps(DefaultArgoNamespace).Get(t.Context(), cm.Name, metav1.GetOptions{})
 	if err != nil || current.Data["config"] != live {
 		t.Fatal("validation rewrote live native configuration", err)
+	}
+}
+
+// The chart supplies native defaults; the Pod construction above follows
+// Argo v4.0.8 operator.go template merging and workflowpod.go context selection.
+func TestArgoSecurityTemplateDefaultsSeccomp(t *testing.T) {
+	evaluate := argoPodPolicyEvaluator(t)
+	for _, tc := range []struct {
+		name, container, defaults, key string
+		livePass, pass                 bool
+	}{
+		{"pod-unconfined", "RuntimeDefault", `{"securityContext":{"seccompProfile":{"type":"Unconfined"}}}`, "templateDefaults.securityContext.seccompProfile.type", false, false},
+		{"pod-without-seccomp", "null", `{"securityContext":{"fsGroup":1000}}`, "mainContainer.securityContext", false, false},
+		{"empty-pod-context", "null", `{"securityContext":{}}`, "mainContainer.securityContext", false, false},
+		{"pod-runtime-inherited", "null", `{"securityContext":{"seccompProfile":{"type":"RuntimeDefault"}}}`, "", true, true},
+		{"container-unconfined", "RuntimeDefault", `{"container":{"securityContext":{"seccompProfile":{"type":"Unconfined"}}}}`, "templateDefaults.container.securityContext.seccompProfile.type", false, false},
+		{"script-unconfined", "RuntimeDefault", `{"script":{"securityContext":{"seccompProfile":{"type":"Unconfined"}}}}`, "templateDefaults.script.securityContext.seccompProfile.type", false, false},
+		{"container-localhost", "RuntimeDefault", `{"container":{"securityContext":{"seccompProfile":{"type":"Localhost","localhostProfile":"profiles/argo.json"}}}}`, "", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, source := range []string{"stored", "live", "both"} {
+				t.Run(source, func(t *testing.T) {
+					stored := workflowSeccompValues("RuntimeDefault", tc.container)
+					liveValues := workflowSeccompValues("RuntimeDefault", tc.container)
+					var defaults map[string]any
+					if err := json.Unmarshal([]byte(tc.defaults), &defaults); err != nil {
+						t.Fatal(err)
+					}
+					if source != "live" {
+						valueAt(stored, "controller", "workflowDefaults", "spec").(map[string]any)["templateDefaults"] = defaults
+					}
+					if source != "stored" {
+						valueAt(liveValues, "controller", "workflowDefaults", "spec").(map[string]any)["templateDefaults"] = defaults
+					}
+					raw, _ := json.Marshal(stored)
+					live, pod := renderWorkflowSeccomp(t, liveValues)
+					if source != "stored" && (len(evaluate(pod)) == 0) != tc.livePass {
+						t.Fatalf("native Pod policy differs: %v", evaluate(pod))
+					}
+					checkWorkflowSeccompUpgrade(t, raw, live, tc.pass, false)
+					deps := fixwaveSecurityDeps(t, true, string(raw))
+					cm := argoSecurityLiveObjects(DefaultArgoNamespace, true)[1].(*corev1.ConfigMap)
+					cm.Data["config"] = live
+					if _, err := deps.KubeClient.CoreV1().ConfigMaps(DefaultArgoNamespace).Update(t.Context(), cm, metav1.UpdateOptions{}); err != nil {
+						t.Fatal(err)
+					}
+					_, err := prepareArgoSecurity(t.Context(), deps, DefaultArgoNamespace, false, false, nil)
+					if !tc.pass && (err == nil || !strings.Contains(err.Error(), tc.key)) {
+						t.Fatalf("refusal omitted the native key %s: %v", tc.key, err)
+					}
+					after, _ := json.Marshal(stored)
+					if !bytes.Equal(raw, after) {
+						t.Fatal("validation rewrote native defaults")
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestArgoSecurityWorkflowDefaultsPodSpecPatch(t *testing.T) {
+	for _, tc := range []struct {
+		name, patch string
+		pass        bool
+	}{
+		{"pod-yaml", "securityContext:\n  seccompProfile:\n    type: Unconfined\n", false},
+		{"container-json", `{"containers":[{"name":"main","securityContext":{"seccompProfile":{"type":"Unconfined"}}}]}`, false},
+		{"init-container", `{"initContainers":[{"name":"init","securityContext":{"seccompProfile":{"type":"Unconfined"}}}]}`, false},
+		{"null-context", `{"securityContext":null}`, false},
+		{"replacement", `{"$patch":"replace","containers":[{"name":"main","image":"alpine"}]}`, false},
+		{"templated-key", `{"{{workflow.parameters.context}}":{"seccompProfile":{"type":"Unconfined"}}}`, false},
+		{"resources", `{"containers":[{"name":"main","resources":{"requests":{"cpu":"50m"}}}]}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, source := range []string{"stored", "live"} {
+				t.Run(source, func(t *testing.T) {
+					stored := workflowSeccompValues("RuntimeDefault", "RuntimeDefault")
+					live := workflowSeccompValues("RuntimeDefault", "RuntimeDefault")
+					values := stored
+					if source == "live" {
+						values = live
+					}
+					valueAt(values, "controller", "workflowDefaults", "spec").(map[string]any)["podSpecPatch"] = tc.patch
+					raw, _ := json.Marshal(stored)
+					config, _ := json.Marshal(map[string]any{"workflowDefaults": valueAt(live, "controller", "workflowDefaults"), "mainContainer": live["mainContainer"], "executor": live["executor"]})
+					deps := fixwaveSecurityDeps(t, true, string(raw))
+					cm := argoSecurityLiveObjects(DefaultArgoNamespace, true)[1].(*corev1.ConfigMap)
+					cm.Data["config"] = string(config)
+					if _, err := deps.KubeClient.CoreV1().ConfigMaps(DefaultArgoNamespace).Update(t.Context(), cm, metav1.UpdateOptions{}); err != nil {
+						t.Fatal(err)
+					}
+					_, err := prepareArgoSecurity(t.Context(), deps, DefaultArgoNamespace, true, false, nil)
+					if (err == nil) != tc.pass || (err != nil && !strings.Contains(err.Error(), "workflowDefaults.spec.podSpecPatch")) {
+						t.Fatalf("patch pass=%v: %v", tc.pass, err)
+					}
+				})
+			}
+		})
 	}
 }

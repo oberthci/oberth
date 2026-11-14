@@ -19,12 +19,16 @@ type upgradeArgoSecurity struct {
 }
 
 func argoSecurityUpgradeRemedy(namespace string, cause error) error {
+	var invalid *argoWorkflowDefaultsInvalid
+	if errors.As(cause, &invalid) {
+		return fmt.Errorf("cannot reconcile Argo security defaults: %w. Correct the named native Argo Helm key in namespace %s; preserve unrelated values", cause, namespace)
+	}
 	args, _, _ := argoSecurityDefaults(nil)
 	values := []string{}
 	for i := 0; i+1 < len(args); i += 2 {
 		values = append(values, args[i+1])
 	}
-	return fmt.Errorf("cannot reconcile Argo security defaults before deploying the Pod policy: %w. Set these exact native Argo Helm values in namespace %s:\n%s\nFor an existing Argo Helm release, approve the security changes in interactive review or pass --argo-security-defaults to fill absent fields only. Without an existing Argo Helm release, configure the live controller directly before retrying", cause, namespace, strings.Join(values, "\n"))
+	return fmt.Errorf("cannot reconcile Argo security defaults: %w. Set these exact native Argo Helm values in namespace %s:\n%s\nFor an existing Argo Helm release, approve the security changes in interactive review or pass --argo-security-defaults to fill absent fields only. Without an existing Argo Helm release, configure the live controller directly before retrying", cause, namespace, strings.Join(values, "\n"))
 }
 
 func planUpgradeArgoSecurity(ctx context.Context, deps Deps, values map[string]any, consent bool) (*upgradeArgoSecurity, error) {
@@ -52,6 +56,12 @@ func prepareArgoSecurity(ctx context.Context, deps Deps, ns string, consent, fre
 	if err != nil {
 		return nil, argoSecurityUpgradeRemedy(ns, err)
 	}
+	if argoExternalControllerConfigMap(stored) {
+		if err := checkLiveArgoSecurity(ctx, deps, ns); err != nil {
+			return nil, argoSecurityConfigMapRemedy(ns, err, stored)
+		}
+		return &upgradeArgoSecurity{namespace: ns, args: []string{}, consent: consent}, nil
+	}
 	args, review, err := argoSecurityDefaults(stored)
 	if err != nil {
 		return nil, argoSecurityUpgradeRemedy(ns, err)
@@ -66,9 +76,6 @@ func prepareArgoSecurity(ctx context.Context, deps Deps, ns string, consent, fre
 		liveErr := checkLiveArgoSecurity(ctx, deps, ns)
 		if liveErr == nil {
 			return plan, nil
-		}
-		if argoExternalControllerConfigMap(stored) {
-			return nil, argoSecurityConfigMapRemedy(ns, liveErr, stored)
 		}
 		var missing *argoSecurityDefaultsMissing
 		if !exists || !errors.As(liveErr, &missing) {
@@ -102,13 +109,14 @@ func prepareArgoSecurity(ctx context.Context, deps Deps, ns string, consent, fre
 }
 
 func validateArgoSecurityReview(ns string, stored map[string]any, review []ArgoSecurityReview) error {
-	workflowPod, err := argoWorkflowPodSecurity(stored)
+	spec, err := argoWorkflowDefaultsSpec(stored)
 	if err != nil {
 		return argoSecurityUpgradeRemedy(ns, err)
 	}
-	if err := validateArgoWorkflowPodSecurity("controller.workflowDefaults.spec.securityContext", workflowPod); err != nil {
+	if err := validateArgoWorkflowDefaults("controller.workflowDefaults.spec", spec); err != nil {
 		return argoSecurityUpgradeRemedy(ns, err)
 	}
+	workflowPod, _ := effectiveArgoWorkflowPodSecurity(spec)
 	// Explicit unsafe settings cannot be overwritten by this absent-only fill.
 	// Refuse before either release changes rather than deploy a policy that
 	// immediately strands ordinary Workflows or the controller itself.
@@ -127,7 +135,7 @@ func validateArgoSecurityReview(ns string, stored map[string]any, review []ArgoS
 			}
 		case *corev1.SecurityContext:
 			valid := argoSecurityContextMeetsFloor(s, false)
-			if (entry.Component == "mainContainer" || entry.Component == "executor") && workflowPod != nil && workflowPod.SeccompProfile != nil {
+			if entry.Component == "mainContainer" || entry.Component == "executor" {
 				valid = argoWorkflowSecurityContextMeetsFloor(s, workflowPod)
 			}
 			if !valid {

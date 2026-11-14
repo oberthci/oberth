@@ -61,10 +61,39 @@ func TestArgoSecurityDisabledPodPolicyKeepsDefaultChecks(t *testing.T) {
 	values := map[string]any{"argo": map[string]any{"podPolicy": map[string]any{"enabled": false}}}
 	if _, err := planUpgradeArgoSecurity(t.Context(), deps, values, false); err == nil || !strings.Contains(err.Error(), "explicit consent") {
 		t.Fatalf("upgrade skipped the live default check: %v", err)
+	} else if strings.Contains(err.Error(), "deploying the Pod policy") || strings.Contains(err.Error(), "deploy the Pod policy") {
+		t.Fatalf("disabled Pod policy has a misleading remedy: %v", err)
 	}
 	cfg := Config{SkipArgo: true}
 	if err := readArgoSecurityReview(t.Context(), &cfg, deps); err == nil || !strings.Contains(err.Error(), "explicit consent") {
 		t.Fatalf("install disagrees with upgrade: %v", err)
+	}
+}
+
+func TestArgoSecurityExternalConfigMapIgnoresStoredContexts(t *testing.T) {
+	for _, safe := range []bool{false, true} {
+		t.Run(fmt.Sprint(safe), func(t *testing.T) {
+			stored := `{"controller":{"configMap":{"create":false},"workflowDefaults":{"spec":{"securityContext":{"seccompProfile":{"type":"Unconfined"}}}},"securityContext":"unused"},"mainContainer":{"securityContext":"unused"},"executor":{"securityContext":{"seccompProfile":{"type":"Unconfined"}}}}`
+			deps := fixwaveSecurityDeps(t, safe, stored)
+			for _, install := range []bool{false, true} {
+				var err error
+				if install {
+					cfg := Config{SkipArgo: true}
+					err = readArgoSecurityReview(t.Context(), &cfg, deps)
+					if len(cfg.argoSecurityArgs) != 0 {
+						t.Fatal("external ConfigMap planned a Helm fill")
+					}
+				} else {
+					_, err = planUpgradeArgoSecurity(t.Context(), deps, map[string]any{}, true)
+				}
+				if (err == nil) != safe {
+					t.Fatalf("external ConfigMap must decide: safe=%v err=%v", safe, err)
+				}
+				if err != nil && (!strings.Contains(err.Error(), "live controller ConfigMap") || strings.Contains(err.Error(), "unused")) {
+					t.Fatalf("external remedy judged unused stored settings: %v", err)
+				}
+			}
+		})
 	}
 }
 
