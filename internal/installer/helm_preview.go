@@ -98,6 +98,19 @@ func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao Open
 	}
 	args := append(OberthHelmArgs(previewCfg, openbao, rekor),
 		"--dry-run=server", "--no-hooks", "--output=json")
+	// A managed-store rerun provisions its CA after this preview. Do not
+	// preview a new internal pipeline endpoint until that real CA exists.
+	if exists && cfg.InstallSecretStore && cfg.ArgoVaultAddress == "" && openbao.CACertPEM == "" {
+		filtered := make([]string, 0, len(args))
+		for i := 0; i < len(args); i++ {
+			if args[i] == "--set" && i+1 < len(args) && strings.HasPrefix(args[i+1], "argo.vault.address=") {
+				i++
+				continue
+			}
+			filtered = append(filtered, args[i])
+		}
+		args = filtered
+	}
 
 	work, err := os.MkdirTemp("", "oberth-preview-stored-")
 	if err != nil {

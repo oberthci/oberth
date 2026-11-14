@@ -56,9 +56,10 @@
   absent native Helm values; operator values are preserved. Without consent the
   command refuses and prints the exact values to set. An external controller
   passes once its live configuration complies, including when installation uses
-  `--skip-argo-workflows`. Unreadable live configuration refuses before policy
-  deployment. With `controller.configMap.create=false`, only the live external
-  ConfigMap decides compliance; unused stored Helm contexts are ignored.
+  `--skip-argo-workflows`. Unreadable live configuration refuses before applying changes. With
+  `controller.configMap.create=false`, the live external ConfigMap decides
+  Workflow-default compliance; controller and server Pod contexts are still
+  checked from their stored Helm values.
   Otherwise the error names the exact ConfigMap keys to configure and
   links the [v0.22.5 migration](releases/v0.22.5.md) for old-profile releases.
 

@@ -186,3 +186,57 @@ func TestInstallDryRunFreshRealHelm(t *testing.T) {
 		})
 	}
 }
+
+func TestInstallSecretStoreRerunWithoutStoredCARealHelm(t *testing.T) {
+	requireHelmForUpgradeTest(t)
+	for _, dev := range []bool{false, true} {
+		t.Run(fmt.Sprint(dev), func(t *testing.T) {
+			values := hotfixStoredValues(t)
+			delete(values, "secretstore")
+			delete(values, "argo")
+			deps, _ := hotfixHelm(t, values, &bytes.Buffer{})
+			original := deps.RunHelm
+			previews := 0
+			cfg := Config{Namespace: "oberth", ChartPath: "../../charts/oberth", InstallSecretStore: true}
+			if err := cfg.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			deps.RunHelm = func(ctx context.Context, args []string) ([]byte, error) {
+				if args[0] == "get" && args[1] == "values" && !slices.Contains(args, "--all") {
+					if dev {
+						return []byte(`{"secretstore":{"address":"http://openbao.openbao.svc:8200"}}`), nil
+					}
+				}
+				if args[0] != "upgrade" {
+					return original(ctx, args)
+				}
+				if !slices.Contains(args, "--dry-run=server") {
+					t.Fatal("preview attempted mutation", args)
+				}
+				previews++
+				render := []string{"template", "oberth", cfg.ChartPath}
+				for i := 0; i+1 < len(args); i++ {
+					if args[i] == "--set" && strings.HasPrefix(args[i+1], "argo.vault.address=") {
+						t.Fatal("preview used an endpoint without its future CA")
+					}
+					if slices.Contains([]string{"--set", "--set-string", "--set-json", "-n", "-f", "--values"}, args[i]) {
+						render = append(render, args[i], args[i+1])
+						i++
+					}
+				}
+				raw, err := exec.CommandContext(ctx, "helm", render...).CombinedOutput()
+				if err != nil {
+					return nil, fmt.Errorf("rerun chart render: %w: %s", err, raw)
+				}
+				return []byte(`{"config":{}}`), nil
+			}
+			if err := previewHelmUpgrade(t.Context(), cfg, deps, OpenBaoResult{}); err != nil || previews != 1 {
+				t.Fatal(err, previews)
+			}
+			actual := OberthHelmArgs(cfg, OpenBaoResult{ServiceAddress: "https://openbao.openbao.svc:8200", CACertPEM: previewOpenBaoCA}, RekorResult{})
+			if !slices.Contains(actual, "argo.vault.address=https://openbao.openbao.svc:8200") {
+				t.Fatal("apply lost the real store endpoint")
+			}
+		})
+	}
+}
