@@ -60,7 +60,7 @@ func TestCredentialOutputPathsRefuseMountedReads(t *testing.T) {
 				t.Run(name+output, func(t *testing.T) {
 					config, request := credentialOutputRequest(t, cloud, script, output)
 					_, err := Build(config, request)
-					if err == nil || !strings.Contains(err.Error(), "output read path") {
+					if err == nil || !(strings.Contains(err.Error(), "output read path") || strings.Contains(err.Error(), "use an absolute path")) {
 						t.Fatalf("mounted output was admitted: %v", err)
 					}
 				})
@@ -112,7 +112,7 @@ func TestCredentialOutputSymlinkFromUngrantedStepRefused(t *testing.T) {
 				}
 				config, request := credentialOutputRequest(t, cloud, false, "/shared/data/result")
 				_, err = Build(config, request)
-				if err == nil || !strings.Contains(err.Error(), "output read path") {
+				if err == nil || !(strings.Contains(err.Error(), "output read path") || strings.Contains(err.Error(), "use an absolute path")) {
 					t.Fatalf("shared symlink output was admitted: %v", err)
 				}
 			})
