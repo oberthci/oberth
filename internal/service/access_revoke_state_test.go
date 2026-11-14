@@ -21,11 +21,11 @@ func TestAccessRevokeReturnsCommittedDatabaseState(t *testing.T) {
 	s := f.api(t)
 	s.secretAccess = f.store
 	actor := api.Actor{Identity: "admin", Admin: true}
-	if _, err := s.accessAllow(t.Context(), actor, "unregistered", ".oberth/release.yaml", "*", "oberth/data/test"); err != nil {
+	if _, err := s.accessAllow(t.Context(), actor, "upstream/org/unregistered", ".oberth/release.yaml", "*", "oberth/data/test"); err != nil {
 		t.Fatal(err)
 	}
 	s.secretAccess = missingRevocationReadback{f.store}
-	value, err := s.accessRevoke(t.Context(), actor, "unregistered", ".oberth/release.yaml", "*", "oberth/data/test")
+	value, err := s.accessRevoke(t.Context(), actor, "upstream/org/unregistered", ".oberth/release.yaml", "*", "oberth/data/test")
 	if err != nil || value.RevokedAt == nil {
 		t.Fatalf("committed revocation missing: %+v, %v", value, err)
 	}

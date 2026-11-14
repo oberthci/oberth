@@ -3095,9 +3095,9 @@ func (service *API) waitDuration(seconds int) (time.Duration, error) {
 // org/repo, upstream/org/repo) onto the qualified persisted grant key the
 // database stores. An ambiguous bare spelling
 // is refused — it names neither same-name repository. An unregistered or
-// syntactically unresolvable spelling is returned verbatim: grants for
-// unregistered repositories are stored and listed as spelled, and stay
-// inert until the repository registers (#245 BLOCKER B, #256).
+// syntactically unresolvable spelling is returned verbatim so listing and
+// revocation can still address inert legacy rows (#245 BLOCKER B, #256).
+// accessAllow separately requires a qualified key before granting.
 func (service *API) canonicalAccessRepo(ctx context.Context, repo string) (string, error) {
 	if service.repositories == nil {
 		return repo, nil
@@ -3190,10 +3190,13 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, work
 		return api.AccessGrantResponse{}, err
 	}
 	repo = canonical
+	if strings.Count(repo, "/") != 2 {
+		return api.AccessGrantResponse{}, fmt.Errorf("%w: repository %q is not registered; use the qualified form upstream/org/repo", ErrInvalidInput, repo)
+	}
 	if service.scope != nil && !service.scope.seesAccessKey(repo) {
 		return api.AccessGrantResponse{}, hiddenRepository(repo)
 	}
-	// Unregistered spellings keep their verbatim form above; only a
+	// Unregistered qualified names permit pre-approval; only a
 	// registered, archived repository is refused here.
 	if service.repositories != nil {
 		if resolved, err := service.repositories.RepositoryByName(ctx, repo); err == nil {

@@ -3418,7 +3418,7 @@ func TestAccessAllowRequiresAdminUplink(t *testing.T) {
 	// Admin actor succeeds.
 	admin := api.Actor{Identity: "admin@host", Fingerprint: "SHA256:admin", Admin: true}
 	_, err = service.CallTool(context.Background(), admin, "access_allow",
-		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials","workflow":".oberth/release.yaml"}`))
+		json.RawMessage(`{"repo":"upstream/org/repo","step":"*","secret":"oberth/data/token","workflow":".oberth/release.yaml"}`))
 	if err != nil {
 		t.Fatalf("access_allow with admin error = %v", err)
 	}
@@ -3714,7 +3714,7 @@ func TestAccessAllowResponseCarriesPolicySyncWarning(t *testing.T) {
 
 	admin := api.Actor{Identity: "admin@host", Fingerprint: "SHA256:admin", Admin: true}
 	result, err := service.CallTool(context.Background(), admin, "access_allow",
-		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials","workflow":".oberth/release.yaml"}`))
+		json.RawMessage(`{"repo":"upstream/org/repo","step":"*","secret":"oberth/data/token","workflow":".oberth/release.yaml"}`))
 	if err != nil {
 		t.Fatalf("access_allow error = %v", err)
 	}

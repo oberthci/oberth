@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -285,7 +286,8 @@ func buildPerRepoIdentities(ctx context.Context, db perRepoStore) (map[string]ar
 	for _, grant := range grants {
 		parts := strings.Split(grant.Repo, "/")
 		if len(parts) != 3 {
-			return nil, fmt.Errorf("invalid qualified repository in secret grant: %q", grant.Repo)
+			log.Printf("per-repo identities: skipping secret grant row %d for repository %q; requires upstream/org/repo", grant.ID, grant.Repo)
+			continue
 		}
 		result[grant.Repo] = argojob.PerRepoIdentityConfig{
 			ServiceAccountName: installer.PerRepoName(parts[0], parts[1], parts[2]),
@@ -330,7 +332,8 @@ func buildPerStepIdentities(ctx context.Context, db perRepoStore) (map[string]ar
 	for _, grant := range grants {
 		parts := strings.Split(grant.Repo, "/")
 		if len(parts) != 3 {
-			return nil, fmt.Errorf("invalid qualified repository in secret grant: %q", grant.Repo)
+			log.Printf("per-step identities: skipping secret grant row %d for repository %q; requires upstream/org/repo", grant.ID, grant.Repo)
+			continue
 		}
 		key := grant.Repo + "/" + grant.Workflow + "/" + grant.Step
 		result[key] = argojob.PerRepoIdentityConfig{
