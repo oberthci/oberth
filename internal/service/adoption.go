@@ -51,6 +51,13 @@ func (scheduler *Scheduler) handleAdoptionFailure(ctx context.Context, adopter J
 
 // adopt restores submission ownership for work already running.
 func (gate *submissionRegistry) adopt(run model.Run) (*submissionOwner, error) {
+	owner, _, err := gate.adoptOwner(run)
+	return owner, err
+}
+
+// adoptOwner reports whether this call acquired ownership. A settlement
+// observer must never share an existing observer's reservation or log file.
+func (gate *submissionRegistry) adoptOwner(run model.Run) (*submissionOwner, bool, error) {
 	order := run.AdmissionSequence
 	if order <= 0 {
 		order = run.QueueSequence
@@ -59,13 +66,13 @@ func (gate *submissionRegistry) adopt(run model.Run) (*submissionOwner, error) {
 	defer gate.mu.Unlock()
 	if previous, ok := gate.owners[run.QueueSequence]; ok {
 		if previous.runID != run.ID || previous.order != order || !previous.adopted || previous.repoID != run.RepoID {
-			return nil, fmt.Errorf("%w: conflicting adopted run", ErrAdoptionRefused)
+			return nil, false, fmt.Errorf("%w: conflicting adopted run", ErrAdoptionRefused)
 		}
-		return previous, nil
+		return previous, false, nil
 	}
 	reservation := &submissionOwner{withdrawn: make(chan struct{}), gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID, adopted: true}
 	gate.owners[run.QueueSequence] = reservation
-	return reservation, nil
+	return reservation, true, nil
 }
 
 func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run, require mutationRequirement, reservation *submissionOwner) error {

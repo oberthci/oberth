@@ -310,9 +310,12 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx, observerCtx context.Context
 					return false, err
 				}
 				if found {
-					reservation, err := scheduler.submissions.adopt(run)
+					reservation, acquired, err := scheduler.submissions.adoptOwner(run)
 					if err != nil {
 						return false, err
+					}
+					if !acquired {
+						return false, nil
 					}
 					pending.observer = make(chan error, 1)
 					done := pending.observer
