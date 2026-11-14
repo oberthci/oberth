@@ -23,7 +23,7 @@ func TestStoppedCompletedWorkflowResumesLogsAndRetiresExecutorIdentity(t *testin
 			return io.NopCloser(strings.NewReader("final exit log\n")), nil
 		},
 	}
-	holder := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: controller.identityPodName(workflow.UID, "executor"), Namespace: workflow.Namespace, UID: "identity-uid", OwnerReferences: []metav1.OwnerReference{{UID: workflow.UID}}}}
+	holder := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: controller.identityPodName(workflow, "executor"), Namespace: workflow.Namespace, UID: "identity-uid", OwnerReferences: []metav1.OwnerReference{{UID: workflow.UID}}}}
 	if _, err := controller.kube.CoreV1().Pods(workflow.Namespace).Create(t.Context(), holder, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
