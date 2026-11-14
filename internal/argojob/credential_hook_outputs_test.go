@@ -366,9 +366,10 @@ func TestCredentialHookEmptyAlias(t *testing.T) {
 								continue
 							}
 							reference := "{{" + prefix + "." + key + ".outputs.result}}"
-							if form == "indexed" {
+							switch form {
+							case "indexed":
 								reference = "{{" + prefix + "['" + key + "'].outputs.result}}"
-							} else if form == "expression" {
+							case "expression":
 								reference = "{{=" + prefix + "[\"" + key + "\"].outputs.result}}"
 							}
 							parent.Outputs.Parameters = []wfv1.Parameter{{Name: "result", ValueFrom: &wfv1.ValueFrom{Parameter: reference}}}
