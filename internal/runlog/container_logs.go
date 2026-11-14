@@ -13,6 +13,9 @@ import (
 // ContainerLog binds one retained copy to a native Pod and container. Its
 // bytes occupy an immutable span in the ordinary run log, without markers.
 type ContainerLog struct {
+	// ParentNodeID is a verified native Container boundary supplied by tracking.
+	// It authorizes only a provisional Pod-to-Container attribution refinement.
+	ParentNodeID  string    `json:"-"`
 	NodeID        string    `json:"node_id"`
 	PodUID        string    `json:"pod_uid"`
 	PodName       string    `json:"pod_name"`
@@ -110,7 +113,18 @@ func (store *Store) TrackContainerLogs(runID string, entries []ContainerLog) err
 		if entry.NodeID == "" || entry.PodUID == "" || entry.PodName == "" || entry.ContainerName == "" {
 			return errors.New("invalid native container binding")
 		}
-		if containerLogPosition(index, entry) >= 0 {
+		if position := containerLogPosition(index, entry); position >= 0 {
+			saved := index.Containers[position]
+			if saved.Namespace != entry.Namespace || saved.PodName != entry.PodName {
+				return errors.New("native container physical binding changed")
+			}
+			if saved.NodeID != entry.NodeID && saved.NodeID != entry.ParentNodeID {
+				continue
+			}
+			if saved.NodeID != entry.NodeID || saved.Stage != entry.Stage || saved.Step != entry.Step || saved.Main != entry.Main {
+				index.Containers[position] = saved.withAttribution(entry)
+				changed = true
+			}
 			continue
 		}
 		entry.Start, entry.End, entry.Reader, entry.Pending, entry.Captured = index.Size, index.Size, nil, false, false
@@ -140,6 +154,9 @@ func (store *Store) ReserveContainerLog(runID string, entry ContainerLog) (bool,
 	position := containerLogPosition(index, entry)
 	if position >= 0 && (index.Containers[position].Captured || index.Containers[position].Pending) {
 		return false, nil
+	}
+	if position >= 0 {
+		entry = entry.withAttribution(index.Containers[position])
 	}
 	file, err := store.openRunLog(runID, os.O_CREATE|os.O_APPEND|os.O_WRONLY)
 	if err != nil {
@@ -207,6 +224,9 @@ func (store *Store) commitContainerLog(runID string, entry ContainerLog, limit i
 	position := containerLogPosition(index, entry)
 	if position >= 0 && index.Containers[position].Captured {
 		return nil
+	}
+	if position >= 0 {
+		entry = entry.withAttribution(index.Containers[position])
 	}
 	file, err := store.openRunLog(runID, os.O_CREATE|os.O_APPEND|os.O_WRONLY)
 	if err != nil {
@@ -393,4 +413,11 @@ func reasonLine(reason string) string {
 		return ""
 	}
 	return reason + "\n"
+}
+
+// Attribution may advance while a physical copy is reserved or being read.
+// Its receipt state, reason and immutable byte span belong to that same copy.
+func (entry ContainerLog) withAttribution(source ContainerLog) ContainerLog {
+	entry.NodeID, entry.Stage, entry.Step, entry.Main = source.NodeID, source.Stage, source.Step, source.Main
+	return entry
 }

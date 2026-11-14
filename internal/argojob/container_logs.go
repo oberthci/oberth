@@ -98,6 +98,9 @@ func (controller *Controller) ObserveContainerLogs(ctx context.Context, workflow
 			step = names[workflow.Status.Nodes[target.NodeID].BoundaryID]
 		}
 		entry.Stage, entry.Step = step.Stage, step.Step
+		if node := workflow.Status.Nodes[target.NodeID]; node.Type == wfv1.NodeTypeContainer {
+			entry.ParentNodeID = node.BoundaryID
+		}
 		entry.Main = target.ContainerName == "main" || workflow.Status.Nodes[target.NodeID].Type == wfv1.NodeTypeContainer
 		known = append(known, entry)
 	}
