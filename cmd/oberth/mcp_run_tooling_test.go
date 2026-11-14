@@ -99,7 +99,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 			t.Fatalf("MCP result = %s", response.Body)
 		}
 		if got := envelope.Result.Structured; (tool == "run_logs" || tool == "logs") && !envelope.Result.IsError {
-			want := service.LogResponse{RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
+			want := service.LogResponse{NodeID: "release-build-variants.release-build-variants", RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
 				Note: "step was not executed; no log recorded", RunError: "Workflow error", ScanComplete: true, BytesExact: true,
 				TotalScannedBytes: 0, ScanLimitBytes: runlog.MaxScanBytes}
 			if tool == "run_logs" {
@@ -160,7 +160,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	want := service.LogResponse{RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
+	want := service.LogResponse{NodeID: "release-build-variants.release-build-variants", RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
 		Note: "step was not executed; no log recorded", RunError: "Workflow error", ScanComplete: true, BytesExact: true,
 		TotalScannedBytes: 0, ScanLimitBytes: runlog.MaxScanBytes}
 	for _, storage := range []string{"missing", "empty", "other-step"} {

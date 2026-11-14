@@ -769,15 +769,15 @@ func TestResultMapping(t *testing.T) {
 			if tc.wantError != "" && result.Error != tc.wantError {
 				t.Fatalf("error = %q, want %q", result.Error, tc.wantError)
 			}
-			if len(tc.completion.Steps) > 0 && len(result.Steps) != len(tc.completion.Steps) {
-				t.Fatalf("steps length = %d, want %d", len(result.Steps), len(tc.completion.Steps))
+			if len(completion.Steps) > 0 && len(result.Steps) != len(completion.Steps) {
+				t.Fatalf("steps length = %d, want %d", len(result.Steps), len(completion.Steps))
 			}
 			for i, step := range result.Steps {
-				if step.Stage != tc.completion.Steps[i].Stage {
-					t.Fatalf("step[%d].Burn = %q, want %q", i, step.Stage, tc.completion.Steps[i].Stage)
+				if step.Stage != completion.Steps[i].Stage {
+					t.Fatalf("step[%d].Burn = %q, want %q", i, step.Stage, completion.Steps[i].Stage)
 				}
-				if step.Step != tc.completion.Steps[i].Step {
-					t.Fatalf("step[%d].Step = %q, want %q", i, step.Step, tc.completion.Steps[i].Step)
+				if step.Step != completion.Steps[i].Step {
+					t.Fatalf("step[%d].Step = %q, want %q", i, step.Step, completion.Steps[i].Step)
 				}
 			}
 		})
