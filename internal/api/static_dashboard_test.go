@@ -414,24 +414,14 @@ func TestRunDetailStepsAreUniformOrderedRows(t *testing.T) {
 	if strings.Contains(css, ".burn-h") {
 		t.Fatal("app.css retains burn header styling")
 	}
-	// Burns stay contiguous in start/plan order, including pending siblings
-	// and legacy retries. The dashboard Node test exercises the live order.
-	order := section("function orderSteps(steps)", "\n/*")
-	for _, want := range []string{"Date.parse(step.started_at", "Number.isFinite(parsed)", "burnStart", "burnOrdinal", "a.identity.attempt - b.identity.attempt", "a.step.ordinal - b.step.ordinal"} {
+	order := section("function orderSteps(steps)", "\nfunction stepDuration(")
+	for _, want := range []string{"a.step.ordinal - b.step.ordinal", "stepKey(step)", "stepDisplay(step)"} {
 		if !strings.Contains(order, want) {
-			t.Fatalf("orderSteps is missing %s", want)
+			t.Fatalf("native node ordering is missing %s", want)
 		}
 	}
-	// Naming: burn/step when they differ, the bare name when they are equal,
-	// and a legacy task(N) attempt resolved onto its logical step.
-	if !strings.Contains(source, "function stepLabel(identity) { return identity.burn === identity.step ? identity.step : `${identity.burn}/${identity.step}`; }") {
-		t.Fatal("stepLabel does not name rows burn/step")
-	}
-	identity := section("function stepIdentity(step, keys)", "\nfunction stepLabel(")
-	for _, want := range []string{`\((\d+)\)$`, "keys.has(`${burn.name}/${name.name}`)", "attempt: 0"} {
-		if !strings.Contains(identity, want) {
-			t.Fatalf("stepIdentity is missing %s", want)
-		}
+	if !strings.Contains(source, "return step.node_id;") || strings.Contains(source, "function stepIdentity(") {
+		t.Fatal("step selection folds native node identities")
 	}
 	// The shared formatter retains the subsecond display for both initial rows
 	// and clock ticks. Only running rows without a finish timestamp tick.
@@ -442,8 +432,10 @@ func TestRunDetailStepsAreUniformOrderedRows(t *testing.T) {
 	// One row shape: icon, name, optional markers, duration or state.
 	row := section("function stepRow(row, selectedKey)", "\nfunction defaultStep(")
 	for _, want := range []string{
-		`<span class="nm">${esc(label)}</span>`,
-		"${identity.attempt ? `<span class=\"tag\">retry ${esc(identity.attempt)}</span>` : \"\"}",
+		`title="${esc(step.node_id)}">${esc(label)}`,
+		`step.message`,
+		`step.template`,
+		`step.phase`,
 		`${step.secrets ? '<span class="tag">secret</span>' : ""}`,
 		"<span class=\"dur\"${ticking ? ` data-started=\"${esc(step.started_at)}\" data-timer-kind=\"step\"` : \"\"}>${esc(column)}</span>",
 		`const ticking = validStart && !validFinish && sk === "run";`,

@@ -419,7 +419,7 @@ DELETE FROM schema_migrations WHERE id='20261113054824-bind-workflow-capability-
 `
 
 // PostStepMeasurementDowngrade restores empty telemetry tables and historical columns only in disposable old-schema fixtures.
-const PostStepMeasurementDowngrade = PostWorkflowCapabilityUIDDowngrade + `
+const PostStepMeasurementDowngrade = PostNativeNodeStepsDowngrade + PostWorkflowCapabilityUIDDowngrade + `
 CREATE TABLE step_results_measurement_fixture (
     run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     burn TEXT NOT NULL,
@@ -603,4 +603,25 @@ INSERT INTO run_cancellations SELECT run_id,job_name,superseded_by,
 DROP TABLE stop_fixture;
 CREATE INDEX run_cancellations_pending_idx ON run_cancellations(completed_at, created_at, run_id);
 DELETE FROM schema_migrations WHERE id='20261114004639-native-workflow-stop-0ee7b6bbcc1aad2cc3414f3973e01bde';
+`
+
+// PostNativeNodeStepsDowngrade reconstructs the old step surface only in
+// disposable migration fixtures. Production migrations are forward-only.
+const PostNativeNodeStepsDowngrade = `
+CREATE TABLE step_results_pre_nodes (
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ burn TEXT NOT NULL,step TEXT NOT NULL,ordinal INTEGER NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('passed','failed','skipped','timed_out')),
+ exit_code INTEGER NOT NULL,log_start INTEGER NOT NULL CHECK(log_start>=0),
+ log_end INTEGER NOT NULL CHECK(log_end>=log_start),started_at INTEGER,finished_at INTEGER,
+ recorded_at INTEGER NOT NULL,termination_json TEXT CHECK(termination_json IS NULL OR length(termination_json)<=4096),
+ PRIMARY KEY(run_id,burn,step)
+);
+INSERT OR IGNORE INTO step_results_pre_nodes
+ SELECT run_id,burn,step,ordinal,status,exit_code,0,0,started_at,finished_at,recorded_at,termination_json
+ FROM step_results WHERE status IN ('passed','failed','skipped','timed_out') ORDER BY ordinal;
+DROP TABLE step_results;
+ALTER TABLE step_results_pre_nodes RENAME TO step_results;
+CREATE INDEX step_results_order_idx ON step_results(run_id,ordinal,burn,step);
+DELETE FROM schema_migrations WHERE id='20261114004723-native-node-steps-27f59fc788a4a8304c21bda8085e8936';
 `

@@ -885,8 +885,9 @@ func (git *controlGit) setRemoteRefLocked(ref, sha string) {
 }
 
 type fakeJobs struct {
-	mu      sync.Mutex
-	results []JobResult
+	nativeAdmission func(context.Context, WorkflowRequest) error
+	mu              sync.Mutex
+	results         []JobResult
 	// transcripts, when set, replace the generated per-step output for the
 	// Wait call at the same position, so a test can stream a realistic
 	// interleaved multi-step log.
@@ -899,7 +900,6 @@ type fakeJobs struct {
 	createdApplies  []WorkflowRequest
 	deleted         []string
 	plan            []runprogress.PlannedStep
-	planErr         error
 }
 
 type blockingJobs struct {
@@ -1012,28 +1012,48 @@ func (*blockingJobs) TerminalResult(context.Context, string) (JobResult, error) 
 	return JobResult{}, ErrJobNotTerminal
 }
 
-func (jobs *fakeJobs) CreateWorkflow(_ context.Context, request WorkflowRequest) error {
+func (jobs *fakeJobs) CreateWorkflow(ctx context.Context, request WorkflowRequest) error {
+	if jobs.nativeAdmission != nil {
+		if err := jobs.nativeAdmission(ctx, request); err != nil {
+			return err
+		}
+	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.createdCI = append(jobs.createdCI, request)
 	return nil
 }
 
-func (jobs *fakeJobs) CreateRelease(_ context.Context, request WorkflowRequest) error {
+func (jobs *fakeJobs) CreateRelease(ctx context.Context, request WorkflowRequest) error {
+	if jobs.nativeAdmission != nil {
+		if err := jobs.nativeAdmission(ctx, request); err != nil {
+			return err
+		}
+	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.createdReleases = append(jobs.createdReleases, request)
 	return nil
 }
 
-func (jobs *fakeJobs) CreatePlan(_ context.Context, request WorkflowRequest) error {
+func (jobs *fakeJobs) CreatePlan(ctx context.Context, request WorkflowRequest) error {
+	if jobs.nativeAdmission != nil {
+		if err := jobs.nativeAdmission(ctx, request); err != nil {
+			return err
+		}
+	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.createdPlans = append(jobs.createdPlans, request)
 	return nil
 }
 
-func (jobs *fakeJobs) CreateApply(_ context.Context, request WorkflowRequest) error {
+func (jobs *fakeJobs) CreateApply(ctx context.Context, request WorkflowRequest) error {
+	if jobs.nativeAdmission != nil {
+		if err := jobs.nativeAdmission(ctx, request); err != nil {
+			return err
+		}
+	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.createdApplies = append(jobs.createdApplies, request)
@@ -1052,6 +1072,23 @@ func (jobs *fakeJobs) Wait(_ context.Context, name string, output io.Writer) (Jo
 		return JobResult{}, errors.New("no fake Job result")
 	}
 	result := jobs.results[0]
+	result.Steps = append([]model.StepResult(nil), result.Steps...)
+	for i := range result.Steps {
+		step := &result.Steps[i]
+		if step.Template == "" {
+			step.Template = step.Stage + "." + step.Step
+			step.LocalTemplate = true
+		}
+		if step.NodeType == "" {
+			step.NodeType = "Pod"
+			if step.Status == model.StepSkipped && (step.StartedAt == nil || (step.Termination != nil && step.Termination.Unavailable == "not-executed")) {
+				step.NodeType = "Skipped"
+			}
+		}
+		if step.Phase == "" {
+			step.Phase = map[model.StepStatus]string{model.StepQueued: "Pending", model.StepRunning: "Running", model.StepPassed: "Succeeded", model.StepFailed: "Failed", model.StepSkipped: "Skipped", model.StepTimedOut: "Failed"}[step.Status]
+		}
+	}
 	if result.TerminalObservation != nil {
 		observation := *result.TerminalObservation
 		observation.WorkflowName = name
@@ -1331,7 +1368,7 @@ func (fixture *controlFixture) api(t *testing.T) *API {
 }
 
 func stepResult(status model.StepStatus) model.StepResult {
-	return model.StepResult{Stage: "test", Step: "unit", Status: status, ExitCode: map[bool]int{true: 0, false: 1}[status == model.StepPassed]}
+	return model.StepResult{NodeID: "test.unit", Stage: "test", Step: "unit", Status: status, ExitCode: map[bool]int{true: 0, false: 1}[status == model.StepPassed]}
 }
 
 func TestSchedulerDoesNotUseStaticSizeForWorkflowAdmission(t *testing.T) {
@@ -1558,9 +1595,9 @@ func TestLogsReturnOnlyOneNamedStep(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
 		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "unit failed",
 		Steps: []model.StepResult{
-			{Stage: "lint", Step: "vet", Status: model.StepPassed, ExitCode: 0},
-			{Stage: "test", Step: "setup", Status: model.StepPassed, ExitCode: 0},
-			{Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1},
+			{NodeID: "lint.vet", Stage: "lint", Step: "vet", Status: model.StepPassed, ExitCode: 0},
+			{NodeID: "test.setup", Stage: "test", Step: "setup", Status: model.StepPassed, ExitCode: 0},
+			{NodeID: "test.unit", Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1},
 		},
 	})
 	const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1592,8 +1629,8 @@ func TestDashboardRunDetailAndLogViewsAreReadOnly(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
 		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "unit failed",
 		Steps: []model.StepResult{
-			{Stage: "lint", Step: "vet", Status: model.StepPassed, ExitCode: 0},
-			{Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1},
+			{NodeID: "lint.vet", Stage: "lint", Step: "vet", Status: model.StepPassed, ExitCode: 0},
+			{NodeID: "test.unit", Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1},
 		},
 	})
 	const sha = "abababababababababababababababababababab"
@@ -1702,6 +1739,12 @@ func TestActiveRunDetailAndStatusExposePersistedStepProgress(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(fixture.root, "logs", enqueued.ID+".progress.jsonl"), []byte(journal), 0o640); err != nil {
 		t.Fatal(err)
 	}
+	if err := fixture.store.PutStepResults(ctx, enqueued.ID, []model.StepResult{
+		{NodeID: "test-node", Stage: "test", Step: "unit", Ordinal: 0, Status: model.StepRunning},
+		{NodeID: "release-node", Stage: "release", Step: "publish", Ordinal: 1, Status: model.StepQueued},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	control := fixture.api(t)
 
 	value, err := control.Run(ctx, api.Actor{Identity: "dashboard@viewer"}, enqueued.ID)
@@ -1751,7 +1794,7 @@ func TestActiveMCPAndDashboardLogsReadCurrentStepRange(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := time.Now().UTC()
-	if err := fixture.logs.AppendStepProgress(enqueued.ID, runprogress.Event{
+	if err := fixtureNodeProgress(fixture.store, enqueued.ID, runprogress.Event{
 		Version: runprogress.Version, Stage: "release", Step: "advance-stable-aliases", Ordinal: 0,
 		Status: runprogress.StepRunning, StartedAt: &started,
 	}); err != nil {
@@ -3809,7 +3852,7 @@ func TestPublishRetryRefusedForRedRun(t *testing.T) {
 	const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	fixture := newControlFixture(t, JobResult{
 		Status: model.RunFailed, Phase: "test", Error: "unit test failed",
-		Steps: []model.StepResult{{Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1}},
+		Steps: []model.StepResult{{NodeID: "test.unit", Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1}},
 	})
 	enqueued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
 		EventID: "receive-red", Repository: fixture.repo,

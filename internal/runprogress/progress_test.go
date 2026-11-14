@@ -7,31 +7,14 @@ import (
 	"time"
 )
 
-func TestMarkerRoundTripAndStrictValidation(t *testing.T) {
-	started := time.Now().UTC()
-	event := Event{
-		Version: Version, Stage: "test", Step: "unit", Ordinal: 2,
-		Status: StepRunning, StartedAt: &started,
+func TestHistoricalEventStrictDecode(t *testing.T) {
+	body := []byte(`{"version":1,"burn":"test","step":"unit","ordinal":0,"status":"queued"}`)
+	event, err := Decode(body)
+	if err != nil || event.Stage != "test" || event.Status != StepQueued {
+		t.Fatal(event, err)
 	}
-	marker, err := MarshalMarker(event)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, found, err := ParseMarker(marker)
-	if err != nil || !found || decoded.Stage != event.Stage || decoded.Step != event.Step ||
-		decoded.Ordinal != event.Ordinal || decoded.Status != StepRunning || decoded.StartedAt == nil {
-		t.Fatalf("decoded marker = %#v, found=%v, err=%v", decoded, found, err)
-	}
-	if _, found, err := ParseMarker([]byte("[test/unit] ordinary output\n")); err != nil || found {
-		t.Fatalf("ordinary output parsed as progress: found=%v err=%v", found, err)
-	}
-	malformed := append([]byte(MarkerPrefix), []byte(`{"version":1,"burn":"test","step":"unit","ordinal":0,"status":"queued","unknown":true}`)...)
-	if _, found, err := ParseMarker(malformed); !found || err == nil {
-		t.Fatalf("malformed marker = found=%v err=%v", found, err)
-	}
-	oversized := append([]byte(MarkerPrefix), bytes.Repeat([]byte("x"), MaxMarkerBytes)...)
-	if _, found, err := ParseMarker(oversized); !found || err == nil {
-		t.Fatalf("oversized marker = found=%v err=%v", found, err)
+	if _, err := Decode([]byte(`{"version":1,"burn":"test","step":"unit","ordinal":0,"status":"queued","unknown":true}`)); err == nil {
+		t.Fatal("unknown field accepted")
 	}
 }
 
@@ -331,7 +314,7 @@ func TestHistoricalProgressClassIsDiscarded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	marker, err := MarshalMarker(event)
+	marker, err := json.Marshal(event)
 	if err != nil || bytes.Contains(marker, []byte("declared_size")) {
 		t.Fatal("class re-emitted", string(marker), err)
 	}

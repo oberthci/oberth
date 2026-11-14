@@ -61,9 +61,9 @@ func (database schedulerDatabase) FinishRun(ctx context.Context, runID string, r
 	})
 }
 
-func (database schedulerDatabase) PutStepResult(ctx context.Context, result model.StepResult) (model.StepResult, error) {
-	return retryDatabase(ctx, "PutStepResult", func(ctx context.Context) (model.StepResult, error) {
-		return database.SchedulerStore.PutStepResult(ctx, result)
+func (database schedulerDatabase) PutStepResults(ctx context.Context, runID string, results []model.StepResult) error {
+	return retryDatabaseError(ctx, "PutStepResults", func(ctx context.Context) error {
+		return database.SchedulerStore.PutStepResults(ctx, runID, results)
 	})
 }
 

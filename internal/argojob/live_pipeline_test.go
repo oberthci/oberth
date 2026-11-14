@@ -141,8 +141,8 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 	}
 
 	body := log.String()
-	if !strings.Contains(body, runprogress.MarkerPrefix) {
-		t.Error("no step progress markers reached the run log")
+	if strings.Contains(body, "@@oberth-step-progress@@") {
+		t.Error("step control marker reached the plain run log")
 	}
 	// Real per-step log slices, not one undifferentiated stream.
 	for _, marker := range []string{"[setup/", "[lint/", "[test-store/", "[test-service/", "[test-rest/"} {

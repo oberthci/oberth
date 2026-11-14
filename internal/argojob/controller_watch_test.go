@@ -155,22 +155,7 @@ func (watchNodeBootRecorder) ObserveNodeBoot(context.Context, model.NodeBootObse
 	return nil, nil
 }
 
-func TestWatchWait(t *testing.T) {
-	t.Run("failed_confirmations_retry_without_watch_events", testWatchWaitFailedConfirmationsRetryWithoutWatchEvents)
-	t.Run("outage_time_does_not_expire_identity_clocks", testWatchWaitOutageTimeDoesNotExpireIdentityClocks)
-	t.Run("completion_classifies_live_pod_not_stale_cache", testWatchWaitCompletionClassifiesLivePodNotStaleCache)
-	t.Run("idle_without_waiter_does_not_revalidate_capability", testWatchWaitIdleWithoutWaiterDoesNotRevalidateCapability)
-	t.Run("idle_outage_completion_and_cleanup", testWatchWaitIdleOutageCompletionAndCleanup)
-	t.Run("pod_event_delivers_token", testWatchWaitPodEventDeliversToken)
-	t.Run("node_boot_reads_are_memoized_and_not_idle_polling", testWatchWaitNodeBootReadsAreMemoizedAndNotIdlePolling)
-	t.Run("failed_settle_waits_for_recovery", testWatchWaitFailedSettleWaitsForRecovery)
-	t.Run("terminal_with_unavailable_pod_cache", testWatchWaitTerminalWithUnavailablePodCache)
-	t.Run("cache_miss_confirms_deletion", testWatchWaitCacheMissConfirmsDeletion)
-	t.Run("live_nonterminal_is_not_a_verdict", testWatchWaitLiveNonterminalIsNotAVerdict)
-	t.Run("cancellation_removes_subscription", testWatchWaitCancellationRemovesSubscription)
-}
-
-func testWatchWaitFailedConfirmationsRetryWithoutWatchEvents(t *testing.T) {
+func TestWatchWaitFailedConfirmationsRetryWithoutWatchEvents(t *testing.T) {
 	for _, missing := range []bool{false, true} {
 		t.Run(fmt.Sprint(missing), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -205,7 +190,7 @@ func testWatchWaitFailedConfirmationsRetryWithoutWatchEvents(t *testing.T) {
 	}
 }
 
-func testWatchWaitOutageTimeDoesNotExpireIdentityClocks(t *testing.T) {
+func TestWatchWaitOutageTimeDoesNotExpireIdentityClocks(t *testing.T) {
 	for _, retried := range []bool{false, true} {
 		t.Run(fmt.Sprint(retried), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -274,7 +259,7 @@ func testWatchWaitOutageTimeDoesNotExpireIdentityClocks(t *testing.T) {
 	}
 }
 
-func testWatchWaitCompletionClassifiesLivePodNotStaleCache(t *testing.T) {
+func TestWatchWaitCompletionClassifiesLivePodNotStaleCache(t *testing.T) {
 	wf, _, pod, _ := diagnosticFixture()
 	stale := pod.DeepCopy()
 	stale.Status.ContainerStatuses = nil
@@ -299,7 +284,7 @@ func testWatchWaitCompletionClassifiesLivePodNotStaleCache(t *testing.T) {
 	}
 }
 
-func testWatchWaitIdleWithoutWaiterDoesNotRevalidateCapability(t *testing.T) {
+func TestWatchWaitIdleWithoutWaiterDoesNotRevalidateCapability(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		wf := watchWaitWorkflow(wfv1.WorkflowRunning)
 		wf.Annotations[capabilityAnnotation] = `{"repository_id":1}`
@@ -324,7 +309,7 @@ func testWatchWaitIdleWithoutWaiterDoesNotRevalidateCapability(t *testing.T) {
 	})
 }
 
-func testWatchWaitIdleOutageCompletionAndCleanup(t *testing.T) {
+func TestWatchWaitIdleOutageCompletionAndCleanup(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		running := watchWaitWorkflow(wfv1.WorkflowRunning)
 		hub := newControlledWaitHub(running)
@@ -374,7 +359,7 @@ func testWatchWaitIdleOutageCompletionAndCleanup(t *testing.T) {
 	})
 }
 
-func testWatchWaitPodEventDeliversToken(t *testing.T) {
+func TestWatchWaitPodEventDeliversToken(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, wf, pod, requests := executorRetryFixture(t)
 		wf.Status.Phase = wfv1.WorkflowRunning
@@ -426,7 +411,7 @@ func testWatchWaitPodEventDeliversToken(t *testing.T) {
 	})
 }
 
-func testWatchWaitNodeBootReadsAreMemoizedAndNotIdlePolling(t *testing.T) {
+func TestWatchWaitNodeBootReadsAreMemoizedAndNotIdlePolling(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		wf, node, pod, _ := diagnosticFixtureAt(time.Now().Add(-time.Minute))
 		wf.Status.Phase = wfv1.WorkflowRunning
@@ -466,7 +451,7 @@ func testWatchWaitNodeBootReadsAreMemoizedAndNotIdlePolling(t *testing.T) {
 	})
 }
 
-func testWatchWaitFailedSettleWaitsForRecovery(t *testing.T) {
+func TestWatchWaitFailedSettleWaitsForRecovery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		final := watchWaitWorkflow(wfv1.WorkflowSucceeded)
 		hub := newControlledWaitHub(final)
@@ -496,7 +481,7 @@ func testWatchWaitFailedSettleWaitsForRecovery(t *testing.T) {
 	})
 }
 
-func testWatchWaitTerminalWithUnavailablePodCache(t *testing.T) {
+func TestWatchWaitTerminalWithUnavailablePodCache(t *testing.T) {
 	final := watchWaitWorkflow(wfv1.WorkflowSucceeded)
 	hub := newControlledWaitHub(final)
 	hub.setHealthy(false)
@@ -508,7 +493,7 @@ func testWatchWaitTerminalWithUnavailablePodCache(t *testing.T) {
 	}
 }
 
-func testWatchWaitCacheMissConfirmsDeletion(t *testing.T) {
+func TestWatchWaitCacheMissConfirmsDeletion(t *testing.T) {
 	wf := watchWaitWorkflow(wfv1.WorkflowRunning)
 	hub := newControlledWaitHub(nil)
 	client := &countedWaitWorkflowClient{err: apierrors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "workflows"}, wf.Name)}
@@ -519,7 +504,7 @@ func testWatchWaitCacheMissConfirmsDeletion(t *testing.T) {
 	}
 }
 
-func testWatchWaitLiveNonterminalIsNotAVerdict(t *testing.T) {
+func TestWatchWaitLiveNonterminalIsNotAVerdict(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cached := watchWaitWorkflow(wfv1.WorkflowSucceeded)
 		hub := newControlledWaitHub(cached)
@@ -546,7 +531,7 @@ func testWatchWaitLiveNonterminalIsNotAVerdict(t *testing.T) {
 	})
 }
 
-func testWatchWaitCancellationRemovesSubscription(t *testing.T) {
+func TestWatchWaitCancellationRemovesSubscription(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		wf := watchWaitWorkflow(wfv1.WorkflowRunning)
 		hub := newControlledWaitHub(wf)

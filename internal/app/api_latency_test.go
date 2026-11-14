@@ -80,8 +80,8 @@ func newAPILatencyFixture(tb testing.TB) apiLatencyFixture {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	_, err = seed.ExecContext(ctx, `INSERT INTO step_results(run_id,burn,step,ordinal,status,exit_code,log_start,log_end,started_at,finished_at,recorded_at)
- SELECT id,'build',step,ordinal,'passed',0,0,0,CASE WHEN runs.status='failed' THEN 1 END,CASE WHEN runs.status='failed' THEN 2 END,2
+	_, err = seed.ExecContext(ctx, `INSERT INTO step_results(run_id,node_id,burn,step,ordinal,status,exit_code,started_at,finished_at,recorded_at)
+ SELECT id,'node-'||step,'build',step,ordinal,'passed',0,CASE WHEN runs.status='failed' THEN 1 END,CASE WHEN runs.status='failed' THEN 2 END,2
  FROM runs CROSS JOIN(SELECT 'test' AS step,0 AS ordinal UNION ALL SELECT 'check',1) WHERE runs.status='failed'`)
 	if err != nil {
 		tb.Fatal(err)

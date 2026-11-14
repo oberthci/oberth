@@ -1,5 +1,4 @@
-// Package runprogress defines the bounded, credential-free runner progress
-// protocol used to expose a selected pipeline while its Job is still active.
+// Package runprogress reads stored historical step journals and plans.
 package runprogress
 
 import (
@@ -15,11 +14,7 @@ import (
 // LogDeliveryPrefix identifies retained delivery observations outside command output.
 const LogDeliveryPrefix = "::oberth-log:: "
 
-const (
-	Version        = 1
-	MarkerPrefix   = "@@oberth-step-progress@@ "
-	MaxMarkerBytes = 16 << 10
-)
+const Version = 1
 
 type Status string
 
@@ -88,41 +83,6 @@ func validName(value string) bool {
 	return strings.TrimSpace(value) != "" && !strings.ContainsAny(value, "\x00\r\n")
 }
 
-// MarshalMarker encodes one event as a single bounded runner-log record.
-func MarshalMarker(event Event) ([]byte, error) {
-	if err := event.Validate(); err != nil {
-		return nil, err
-	}
-	body, err := json.Marshal(event)
-	if err != nil {
-		return nil, fmt.Errorf("encode step progress: %w", err)
-	}
-	if len(MarkerPrefix)+len(body)+1 > MaxMarkerBytes {
-		return nil, errors.New("step progress marker exceeds its byte bound")
-	}
-	marker := make([]byte, 0, len(MarkerPrefix)+len(body)+1)
-	marker = append(marker, MarkerPrefix...)
-	marker = append(marker, body...)
-	marker = append(marker, '\n')
-	return marker, nil
-}
-
-// ParseMarker distinguishes ordinary runner output from a progress record and
-// strictly decodes the latter. found remains true for malformed records so a
-// protocol failure cannot silently become user log output.
-func ParseMarker(line []byte) (event Event, found bool, err error) {
-	if !bytes.HasPrefix(line, []byte(MarkerPrefix)) {
-		return Event{}, false, nil
-	}
-	if len(line) > MaxMarkerBytes {
-		return Event{}, true, errors.New("step progress marker exceeds its byte bound")
-	}
-	body := bytes.TrimSuffix(line[len(MarkerPrefix):], []byte("\n"))
-	body = bytes.TrimSuffix(body, []byte("\r"))
-	event, err = Decode(body)
-	return event, true, err
-}
-
 // Decode strictly decodes one journal event.
 func Decode(body []byte) (Event, error) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
@@ -149,8 +109,7 @@ func Decode(body []byte) (Event, error) {
 func (event Event) Terminal() bool { return event.Status.terminal() }
 
 // PlanVersion pins the durable plan record, and MaxPlanBytes bounds it. The
-// plan is written once per run by the server, so the bound only has to admit a
-// pipeline a human wrote; MaxPlannedSteps caps the entries long before this.
+// bound applies only to reading historical plan files.
 const (
 	PlanVersion  = 2
 	MaxPlanBytes = 256 << 10

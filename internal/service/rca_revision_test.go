@@ -108,7 +108,7 @@ func TestRCARevisionRetryRequiresSettledWorkAndNoTestFailure(t *testing.T) {
 			case "completed-while-down":
 				fixture.setWorkflowName(t, run.ID, "workflow")
 				scheduler.store = &rcaRevisionStore{Store: fixture.store, repoFailure: true}
-				if err := scheduler.finalizeReconciledRun(t.Context(), run, JobResult{Status: model.RunFailed, Phase: "test", Steps: []model.StepResult{{Stage: "ci", Step: "ran", Status: model.StepFailed}}}, scheduler.requireMutation); err != nil {
+				if err := scheduler.finalizeReconciledRun(t.Context(), run, JobResult{Status: model.RunFailed, Phase: "test", Steps: []model.StepResult{{NodeID: "ci.ran", Stage: "ci", Step: "ran", Status: model.StepFailed}}}, scheduler.requireMutation); err != nil {
 					t.Fatal(err)
 				}
 			case "create-settlement":
@@ -270,7 +270,7 @@ func TestRCARevisionExistingIntentDoesNotManufactureMissingJournal(t *testing.T)
 	if err != nil {
 		t.Fatal("unknown old intent acquired empty evidence", finished, err)
 	}
-	if _, err := scheduler.logs.StepProgressHistory(run.ID); err == nil {
+	if _, err := scheduler.logs.(*runlog.Store).StepProgressHistory(run.ID); err == nil {
 		t.Fatal("missing old history manufactured")
 	}
 }

@@ -1112,7 +1112,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"upstreams":                 {"id", "name", "kind", "base_url", "created_at", "updated_at", "key_name"},
 		"repositories":              {"id", "name", "upstream_id", "default_branch", "created_at", "updated_at"},
 		"runs":                      {"queue_sequence", "id", "repo_id", "ref_kind", "ref", "sha", "actor", "release", "trigger", "phase", "job_name", "tested_sha", "base_sha", "failed_burn", "failed_step", "error", "status", "reason", "superseded_by", "queued_at", "started_at", "finished_at", "created_at", "updated_at", "concurrency_group", "admission_sequence", "schedule_entry", "concurrency_limit", "issue_trailers", "failure_cause", "source_bindings", "assist_requested", "assisted", "assist_record"},
-		"step_results":              {"run_id", "burn", "step", "ordinal", "status", "exit_code", "log_start", "log_end", "started_at", "finished_at", "recorded_at", "termination_json"},
+		"step_results":              {"run_id", "node_id", "display_name", "template", "replay_evidence_complete", "credentialed", "grant_evidence_json", "node_type", "boundary_id", "phase", "message", "pod_name", "burn", "step", "ordinal", "status", "exit_code", "exit_code_unknown", "started_at", "finished_at", "recorded_at", "termination_json"},
 		"promotions":                {"sequence", "id", "repo_id", "source_branch", "source_sha", "target_ref", "previous_sha", "result_sha", "actor", "status", "run_id", "error", "created_at", "updated_at", "grant_id", "train_json", "train_key", "branch_ci_skipped", "observed_target_sha"},
 		"promotion_train_grants":    {"promotion_id", "grant_id", "included"},
 		"promotion_grants":          {"id", "repo_id", "source_sha", "target_ref", "issuer", "issuer_fingerprint", "note", "created_at", "expires_at", "revoked_by", "revoked_at", "consumed_by", "consumed_at"},
@@ -1142,9 +1142,8 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	assertSchemaContains(t, store.db, "table", "runs",
 		"status text not null check (status in ('queued', 'running', 'passed', 'failed', 'interrupted'))")
 	assertSchemaContains(t, store.db, "table", "step_results",
-		"status text not null check (status in ('passed', 'failed', 'skipped', 'timed_out'))",
-		"log_start integer not null check (log_start >= 0)",
-		"log_end integer not null check (log_end >= log_start)")
+		"primary key (run_id, node_id)",
+		"node_id text not null check (length(node_id) > 0)")
 	assertSchemaContains(t, store.db, "table", "promotions",
 		"status text not null default 'pending' check (status in ('pending', 'passed', 'failed', 'interrupted'))")
 	assertSchemaContains(t, store.db, "table", "run_cancellations",

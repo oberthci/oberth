@@ -139,22 +139,15 @@ func TestRestartCutR2JournalSurvivesSecondRestartWithoutInventingExit(t *testing
 	if err != nil || !first.Interrupted {
 		t.Fatal(first, err)
 	}
+	if strings.Contains(output.String(), "@@oberth-step-progress@@") {
+		t.Fatal("step marker emitted")
+	}
+	for _, row := range first.NodeSteps {
+		if row.ExitCode != 0 {
+			t.Fatal("unknown native exit invented", row)
+		}
+	}
 	var retained []runprogress.Event
-	for _, line := range strings.Split(output.String(), "\n") {
-		event, found, err := runprogress.ParseMarker([]byte(line))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if found {
-			retained = append(retained, event)
-			if event.Status == runprogress.StepFailed && event.ExitCode != 0 {
-				t.Fatal("unknown exit journaled as real", event)
-			}
-		}
-	}
-	if len(retained) == 0 {
-		t.Fatal("no durable progress emitted")
-	}
 	second, err := c.TerminalStateResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], binding, retained)
 	if err != nil || !second.Interrupted {
 		t.Fatal("second restart fabricated real failure", second, err)
@@ -170,17 +163,11 @@ func TestRestartCutR2JournalSurvivesSecondRestartWithoutInventingExit(t *testing
 		t.Fatal(real, err)
 	}
 	retained = nil
-	for _, line := range strings.Split(output.String(), "\n") {
-		event, found, err := runprogress.ParseMarker([]byte(line))
-		if err != nil {
-			t.Fatal(err)
+	for _, step := range real.Steps {
+		if !step.ExitCodeKnown || step.ExitCode != 2 {
+			t.Fatal("real native exit lost", step)
 		}
-		if found {
-			retained = append(retained, event)
-		}
-	}
-	if len(retained) == 0 || retained[len(retained)-1].ExitCode != 2 {
-		t.Fatal("real exit lost from journal", retained)
+		retained = append(retained, runprogress.Event{Version: 1, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, ExitCode: step.ExitCode, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
 	}
 	for id, node := range wf.Status.Nodes {
 		node.Outputs = nil

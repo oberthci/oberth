@@ -38,8 +38,8 @@ func TestCompactReadInputSchemas(t *testing.T) {
 				good = []string{`{}`, `{"repo":"oberth","view":"history"}`}
 				bad = []string{`{"limit":"many"}`}
 			case "run_get":
-				good = []string{`{"id":"12345678"}`, `{"id":"12345678","summary":true}`, `{"id":"12345678","summary":false}`}
-				bad = []string{`{"id":"12345678","summary":"true"}`, `{"id":"12345678","summary":1}`}
+				good = []string{`{"id":"12345678"}`, `{"id":"12345678","summary":true}`, `{"id":"12345678","step_offset":100,"step_limit":50}`, `{"id":"12345678","summary":false}`}
+				bad = []string{`{"id":"12345678","summary":"true"}`, `{"id":"12345678","summary":1}`, `{"id":"12345678","step_offset":-1}`, `{"id":"12345678","step_limit":101}`}
 			}
 			for _, raw := range append(good, bad...) {
 				var args map[string]any

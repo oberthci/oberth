@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
@@ -256,111 +256,9 @@ func TestCreateRelease_TriggerMismatch(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// PlannedSteps
+// Native step observations
 // ---------------------------------------------------------------------------
 
-func TestPlannedSteps_ValidDocument(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	oberthDir := filepath.Join(dir, ".oberth")
-	if err := os.MkdirAll(oberthDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Two-burn pipeline: a DAG entrypoint with two task invocations, each a
-	// container template.
-	workflow := `apiVersion: argoproj.io/v1alpha1
-kind: Workflow
-metadata:
-  annotations:
-    example.com/tier: S
-spec:
-  entrypoint: main
-  templates:
-    - name: main
-      dag:
-        tasks:
-          - name: lint
-            template: lint-template
-          - name: test
-            template: test-template
-            dependencies: [lint]
-    - name: lint-template
-      container:
-        image: alpine:3.20
-        command: ["echo", "lint"]
-    - name: test-template
-      container:
-        image: alpine:3.20
-        command: ["echo", "test"]
-`
-	if err := os.WriteFile(filepath.Join(oberthDir, "build.yaml"), []byte(workflow), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	steps, err := jobs.PlannedSteps(context.Background(), service.WorkflowRequest{
-		Run:        model.Run{Ref: "refs/heads/main"},
-		Repository: model.Repository{Name: "test-repo"},
-		SourceDir:  dir,
-	})
-	if err != nil {
-		t.Fatalf("PlannedSteps: %v", err)
-	}
-	if len(steps) == 0 {
-		t.Fatal("PlannedSteps returned zero steps")
-	}
-	// Verify the steps are mapped to runprogress.PlannedStep.
-	for _, step := range steps {
-		if step.Step == "" {
-			t.Fatalf("step has empty Step field: %+v", step)
-		}
-	}
-}
-
-func TestPlannedSteps_MissingFile(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	_, err := jobs.PlannedSteps(context.Background(), service.WorkflowRequest{
-		Run:        model.Run{Ref: "refs/heads/main"},
-		Repository: model.Repository{Name: "missing-repo"},
-		SourceDir:  dir,
-	})
-	if err == nil {
-		t.Fatal("PlannedSteps should fail when pipeline file is missing")
-	}
-	if !strings.Contains(err.Error(), "no pipeline configuration") {
-		t.Fatalf("expected user-facing no-pipeline error, got: %v", err)
-	}
-}
-
-func TestPlannedSteps_InvalidDocument(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	oberthDir := filepath.Join(dir, ".oberth")
-	if err := os.MkdirAll(oberthDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(oberthDir, "build.yaml"), []byte("not: valid: yaml: workflow"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	_, err := jobs.PlannedSteps(context.Background(), service.WorkflowRequest{
-		Run:        model.Run{Ref: "refs/heads/main"},
-		Repository: model.Repository{Name: "bad-repo"},
-		SourceDir:  dir,
-	})
-	if err == nil {
-		t.Fatal("PlannedSteps should fail with invalid YAML")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Wait
-// ---------------------------------------------------------------------------
-
-// configuredController extends blockingController with configurable Wait results.
 type configuredController struct {
 	blockingController
 	waitResult argojob.Completion
@@ -371,12 +269,26 @@ type configuredController struct {
 	ownsErr    error
 }
 
+func fixtureCompletionNodes(completion argojob.Completion) argojob.Completion {
+	if completion.NodeSteps != nil {
+		return completion
+	}
+	for i, step := range completion.Steps {
+		completion.NodeSteps = append(completion.NodeSteps, model.StepResult{NodeID: fmt.Sprintf("node-%d", i), Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: model.StepStatus(step.Status), ExitCode: step.ExitCode, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
+	}
+	return completion
+}
+
 func (c *configuredController) Wait(_ context.Context, _, _ string, _ io.Writer) (argojob.Completion, error) {
-	return c.waitResult, c.waitErr
+	return fixtureCompletionNodes(c.waitResult), c.waitErr
 }
 
 func (c *configuredController) TerminalState(_ context.Context, _ string) (*argojob.Completion, error) {
-	return c.termState, c.termErr
+	if c.termState == nil {
+		return nil, c.termErr
+	}
+	completion := fixtureCompletionNodes(*c.termState)
+	return &completion, c.termErr
 }
 
 func (c *configuredController) Owns(_ context.Context, _ string) (bool, error) {
@@ -823,7 +735,7 @@ func TestResultMapping(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			result := jobs.result(tc.completion)
+			result := jobs.result(fixtureCompletionNodes(tc.completion))
 			if tc.completion.Infrastructure && (result.FailedStage != "" || result.FailedStep != "") {
 				t.Fatal("infrastructure failure retained test-failure attribution")
 			}
@@ -1107,108 +1019,6 @@ func TestRunTrigger_Release(t *testing.T) {
 // PlannedSteps step mapping verification
 // ---------------------------------------------------------------------------
 
-func TestPlannedSteps_StepFieldMapping(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	oberthDir := filepath.Join(dir, ".oberth")
-	if err := os.MkdirAll(oberthDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Single-container entrypoint: the simplest valid shape.
-	workflow := `apiVersion: argoproj.io/v1alpha1
-kind: Workflow
-metadata:
-  annotations:
-    example.com/tier: S
-spec:
-  entrypoint: main
-  templates:
-    - name: main
-      container:
-        image: alpine:3.20
-        command: ["echo", "ok"]
-`
-	if err := os.WriteFile(filepath.Join(oberthDir, "build.yaml"), []byte(workflow), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	steps, err := jobs.PlannedSteps(context.Background(), service.WorkflowRequest{
-		Run:        model.Run{Ref: "refs/heads/main"},
-		Repository: model.Repository{Name: "test-repo"},
-		SourceDir:  dir,
-	})
-	if err != nil {
-		t.Fatalf("PlannedSteps: %v", err)
-	}
-	// Verify that every step has the correct type.
-	for _, step := range steps {
-		_ = runprogress.PlannedStep{Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal}
-	}
-}
-
-// TestPlannedSteps_MarksSecretSteps checks the per-step secret flag crosses
-// from the document enumeration into the durable plan record, on exactly the
-// template that runs a credential chain.
-func TestPlannedSteps_MarksSecretSteps(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	oberthDir := filepath.Join(dir, ".oberth")
-	if err := os.MkdirAll(oberthDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	workflow := `apiVersion: argoproj.io/v1alpha1
-kind: Workflow
-metadata:
-  annotations:
-    example.com/tier: S
-    oberth.ci/secret-paths: kv/ci/token
-spec:
-  entrypoint: main
-  templates:
-    - name: main
-      dag:
-        tasks:
-          - name: lint
-            template: lint-template
-          - name: publish
-            template: publish-template
-            dependencies: [lint]
-    - name: lint-template
-      container:
-        image: alpine:3.20
-        command: ["echo", "lint"]
-    - name: publish-template
-      container:
-        image: alpine:3.20
-        command: ["/run/oberth/bin/oberth"]
-        args: ["secretstore", "exec", "--path", "kv/ci/token", "--", "echo", "publish"]
-`
-	if err := os.WriteFile(filepath.Join(oberthDir, "build.yaml"), []byte(workflow), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	steps, err := jobs.PlannedSteps(context.Background(), service.WorkflowRequest{
-		Run:        model.Run{Ref: "refs/heads/main"},
-		Repository: model.Repository{Name: "test-repo"},
-		SourceDir:  dir,
-	})
-	if err != nil {
-		t.Fatalf("PlannedSteps: %v", err)
-	}
-	want := map[string]bool{"lint": false, "publish": true}
-	if len(steps) != len(want) {
-		t.Fatalf("planned %+v, want %d steps", steps, len(want))
-	}
-	for _, step := range steps {
-		if secrets, ok := want[step.Step]; !ok || step.Secrets != secrets {
-			t.Errorf("step %s secrets = %v, want %v (known %v)", step.Step, step.Secrets, secrets, ok)
-		}
-	}
-}
-
-// readArgoSource reads the pipeline document for one trigger out of the
-// immutable run workspace through a bounded, root-confined reader.
 func readArgoSource(sourceDir string, trigger pipeline.Trigger) ([]byte, error) {
 	file, err := argoworkflow.TriggerFile(trigger)
 	if err != nil {

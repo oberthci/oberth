@@ -747,54 +747,17 @@ async function renderRuns(seq) {
 }
 
 /* ---------- run detail: burn/step breakdown + retained logs ---------- */
-function stepKey(step) { return step.burn + " / " + step.step; }
-/* Argo names the attempts of a retried template task(N). The server folds
-   such a row onto its planned declaration, but an attempt of a step the plan
-   never declared keeps the suffix on its burn (or, for a retried Pod, its
-   step). Read it back here so the row renders as the same logical step with a
-   retry marker -- and only when its first attempt is in the list, so a name
-   that merely ends in (N) is left alone. */
-function stepIdentity(step, keys) {
-  const strip = name => { const match = /^(.*[^\s(])\((\d+)\)$/.exec(name || ""); return match ? { name: match[1], attempt: Number(match[2]) } : { name: name || "", attempt: 0 }; };
-  const burn = strip(step.burn), name = strip(step.step);
-  const attempt = burn.attempt || name.attempt;
-  if (attempt && keys.has(`${burn.name}/${name.name}`)) return { burn: burn.name, step: name.name, attempt };
-  return { burn: step.burn || "", step: step.step || "", attempt: 0 };
-}
-function stepLabel(identity) { return identity.burn === identity.step ? identity.step : `${identity.burn}/${identity.step}`; }
-/* Keep each burn contiguous, ordered by its earliest start, then plan order.
-   Within a burn, started steps precede unstarted steps and retries stay with
-   their logical burn. Finishing a step cannot change the order. Ordinals are
-   the plan's order, never the timing observer's order. */
+function stepKey(step) { return step.node_id; }
+function stepDisplay(step) { return step.display_name || step.step || step.node_id; }
+/* Argo node identity keeps retries, fan-out and recursive invocations separate.
+   The server's native observation order is independent of display names. */
 function orderSteps(steps) {
-  const keys = new Set((steps || []).map(step => `${step.burn}/${step.step}`));
-  const burns = new Map();
-  const rows = (steps || []).map((step, index) => {
-    const identity = stepIdentity(step, keys);
-    const parsed = Date.parse(step.started_at || "");
-    const started = Number.isFinite(parsed) ? parsed : Infinity;
-    if (!burns.has(identity.burn)) burns.set(identity.burn, { burnStart: Infinity, burnOrdinal: Infinity, index });
-    const burn = burns.get(identity.burn);
-    burn.burnStart = Math.min(burn.burnStart, started);
-    burn.burnOrdinal = Math.min(burn.burnOrdinal, step.ordinal);
-    return { step, index, identity, label: stepLabel(identity), key: `${identity.burn}/${identity.step}`, started, burn };
-  });
-  rows.sort((a, b) => {
-    if (a.burn !== b.burn) {
-      if (a.burn.burnStart !== b.burn.burnStart) return a.burn.burnStart - b.burn.burnStart;
-      return a.burn.burnOrdinal - b.burn.burnOrdinal || a.burn.index - b.burn.index;
-    }
-    if (a.started !== b.started) return a.started - b.started;
-    return a.identity.attempt - b.identity.attempt || a.step.ordinal - b.step.ordinal || a.index - b.index;
-  });
-  return rows;
+  return (steps || []).map((step, index) => ({step, index, label: stepDisplay(step), key: stepKey(step)}))
+    .sort((a, b) => a.step.ordinal - b.step.ordinal || String(a.key).localeCompare(String(b.key)));
 }
-/* Every step is the same row: icon, name, duration. The only variation is
-   the status icon, the duration column (a state word until the step starts),
-   and the small retry / secret markers. */
 function stepDuration(seconds) { return seconds < 1 ? "<1s" : fmtDur(seconds); }
 function stepRow(row, selectedKey) {
-  const { step, label, identity } = row;
+  const { step, label } = row;
   const key = stepKey(step), sk = statusKind(step.status);
   const seconds = spanSeconds(step.started_at, step.finished_at, sk === "run");
   // A row that ran shows its duration, never "--": a sub-second step is "<1s".
@@ -803,7 +766,7 @@ function stepRow(row, selectedKey) {
   const timed = validStart && (validFinish || sk === "run");
   const ticking = validStart && !validFinish && sk === "run";
   const column = timed ? stepDuration(seconds) : sk === "cancel" ? "skipped" : statusLabel(step.status);
-  return `<button class="v4row${key === selectedKey ? " sel" : ""}${sk === "pending" ? " pend" : ""}" data-select-step="${esc(key)}"><span class="ic ${sk === "pass" ? "g" : sk === "fail" ? "r" : sk === "run" ? "o" : "d"}">${sk === "pass" ? "✓" : sk === "fail" ? "✗" : sk === "run" ? "◠" : sk === "cancel" ? "⊘" : "◌"}</span><span class="nm">${esc(label)}</span>${identity.attempt ? `<span class="tag">retry ${esc(identity.attempt)}</span>` : ""}${step.secrets ? '<span class="tag">secret</span>' : ""}<span class="dur"${ticking ? ` data-started="${esc(step.started_at)}" data-timer-kind="step"` : ""}>${esc(column)}</span></button>`;
+  return `<button class="v4row${key === selectedKey ? " sel" : ""}${sk === "pending" ? " pend" : ""}" data-select-step="${esc(key)}"><span class="ic ${sk === "pass" ? "g" : sk === "fail" ? "r" : sk === "run" ? "o" : "d"}">${sk === "pass" ? "✓" : sk === "fail" ? "✗" : sk === "run" ? "◠" : sk === "cancel" ? "⊘" : "◌"}</span><span class="nm" title="${esc(step.node_id)}">${esc(label)}<small class="step-node">${esc([step.template, step.phase, step.pod_name].filter(Boolean).join(" · "))}</small>${step.message ? `<small class="step-message">${esc(step.message)}</small>` : ""}</span>${step.secrets ? '<span class="tag">secret</span>' : ""}<span class="dur"${ticking ? ` data-started="${esc(step.started_at)}" data-timer-kind="step"` : ""}>${esc(column)}</span></button>`;
 }
 function defaultStep(detail) {
   const steps = detail.steps || [];
@@ -1034,22 +997,22 @@ function summaryLines(detail) {
   if (run.reason && run.reason !== run.display_reason && run.reason !== run.error) lines.push("", `reason: ${run.reason}`);
   if (run.error) lines.push("", `error: ${run.error}`);
   const timed = steps.map(step => ({ step, seconds: spanSeconds(step.started_at, step.finished_at, false) })).filter(item => item.seconds > 0).sort((a, b) => b.seconds - a.seconds);
-  if (timed.length) lines.push("", `slowest: ${timed.slice(0, 2).map(item => `${stepKey(item.step)} ${fmtDur(item.seconds)}`).join(" · ")}`);
+  if (timed.length) lines.push("", `slowest: ${timed.slice(0, 2).map(item => `${stepDisplay(item.step)} ${fmtDur(item.seconds)}`).join(" · ")}`);
   lines.push("", "select a step for its retained log");
   return lines;
 }
 async function stepLogContent(runID, step, active) {
-  if (step.status === "pending") return renderLogLines([`step: ${stepKey(step)} · pending`, "", "step is declared by the pipeline and has not been reached yet"]);
-  if (statusKind(step.status) === "pending") return renderLogLines([`step: ${stepKey(step)} · queued`, "", "step is waiting for its turn"]);
-  const cacheKey = `${runID}|${step.burn}|${step.step}|${step.finished_at || ""}`;
+  if (step.status === "pending") return renderLogLines([`step: ${stepDisplay(step)} · pending`, "", "step is declared by the pipeline and has not been reached yet"]);
+  if (statusKind(step.status) === "pending") return renderLogLines([`step: ${stepDisplay(step)} · queued`, "", "step is waiting for its turn"]);
+  const cacheKey = `${runID}|${step.node_id}|${step.burn}|${step.step}|${step.finished_at || ""}`;
   if (!active && state.logCache.has(cacheKey)) return state.logCache.get(cacheKey);
   let html;
   try {
     const payload = await api(`/api/runs/${enc(runID)}/logs?burn=${enc(step.burn)}&step=${enc(step.step)}`);
     const lines = stripStepPrefix(splitAttributedLogText(payload.output), step.burn, step.step);
-    html = renderLogLines([`step: ${stepKey(step)} · ${statusLabel(step.status)}${step.exit_code ? ` · exit ${step.exit_code}` : ""}`, ""].concat(lines.length ? lines : ["no retained step output"]));
+    html = renderLogLines([`step: ${stepDisplay(step)} · ${statusLabel(step.status)}${step.exit_code ? ` · exit ${step.exit_code}` : ""}`, ""].concat(lines.length ? lines : ["no retained step output"]));
   } catch (err) {
-    html = renderLogLines([`step: ${stepKey(step)} · ${statusLabel(step.status)}`, "", `step log unavailable: ${err.message || err}`]);
+    html = renderLogLines([`step: ${stepDisplay(step)} · ${statusLabel(step.status)}`, "", `step log unavailable: ${err.message || err}`]);
   }
   if (state.logCache.size > 32) state.logCache.clear();
   if (!active) state.logCache.set(cacheKey, html);
@@ -1386,8 +1349,8 @@ async function renderRunDetailView(detail, seq) {
         ${orderSteps(steps).map(row => stepRow(row, selected ? selectedKey : "")).join("") || `<div class="empty">${run.phase === "preflight" ? "Retired execution preflight; see the run result for upgrade details." : "No step results recorded yet."}</div>`}
       </div>
       <div class="logp">
-        <div class="log-h" id="logHead">${selected ? `${statusIcon(selected.status)}<span class="nm">${esc(stepKey(selected))}</span><span class="v4b ${statusKind(selected.status) === "pass" ? "pass" : statusKind(selected.status) === "fail" ? "fail" : statusKind(selected.status) === "run" ? "run" : "dim"}">${esc(statusLabel(selected.status).toUpperCase())}</span>` : `<span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)} · ${esc(fmtDur(seconds))}</span>`}</div>
-        <div class="terminal"><div class="term-bar"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><span class="term-title">${esc(repository)} / ${esc(run.ref)} — ${live ? "live output" : selected ? esc(stepKey(selected)) : "summary"}</span>${live ? `<span class="term-live">${state.live?.error ? "RECONNECTING" : state.live?.done ? "COMPLETE" : state.live?.fallback ? "POLLING" : "LIVE"}</span>` : ""}</div>${live ? `<div id="liveDelivery" class="log-delivery" role="status">${esc(liveDeliverySummary(state.live, selected?.burn, selected?.step))}</div>` : ""}<div id="termBody" class="term-body${state.showExec ? " show-exec" : ""}">${terminal}</div></div>
+        <div class="log-h" id="logHead">${selected ? `${statusIcon(selected.status)}<span class="nm">${esc(stepDisplay(selected))}</span><span class="v4b ${statusKind(selected.status) === "pass" ? "pass" : statusKind(selected.status) === "fail" ? "fail" : statusKind(selected.status) === "run" ? "run" : "dim"}">${esc(statusLabel(selected.status).toUpperCase())}</span>` : `<span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)} · ${esc(fmtDur(seconds))}</span>`}</div>
+        <div class="terminal"><div class="term-bar"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><span class="term-title">${esc(repository)} / ${esc(run.ref)} — ${live ? "live output" : selected ? esc(stepDisplay(selected)) : "summary"}</span>${live ? `<span class="term-live">${state.live?.error ? "RECONNECTING" : state.live?.done ? "COMPLETE" : state.live?.fallback ? "POLLING" : "LIVE"}</span>` : ""}</div>${live ? `<div id="liveDelivery" class="log-delivery" role="status">${esc(liveDeliverySummary(state.live, selected?.burn, selected?.step))}</div>` : ""}<div id="termBody" class="term-body${state.showExec ? " show-exec" : ""}">${terminal}</div></div>
       </div>
     </div>
   </section>`;

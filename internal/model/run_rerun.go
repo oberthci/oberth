@@ -25,6 +25,7 @@ func IsStartupDeadlineReason(message string) bool {
 // RunTerminalObservation is a complete terminal Workflow snapshot, never a
 // synthesized scheduler result. It retains every step attempt, not just latest.
 type RunTerminalObservation struct {
+	NodeIDs      []string          `json:"node_ids"`
 	Version      int               `json:"version"`
 	WorkflowName string            `json:"job_name"`
 	Nodes        int               `json:"nodes"`

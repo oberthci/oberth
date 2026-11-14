@@ -22,15 +22,23 @@ type RunDetailResponse struct {
 
 // Shadow only unused diagnostic fields on the HTTP projection. The embedded
 // response and step values remain intact for MCP and other readers.
+type dashboardStepFields model.StepResult
+
 type dashboardStep struct {
-	model.StepResult
-	Termination any `json:"Termination,omitempty"`
+	dashboardStepFields
+	ExitCode    *int `json:"ExitCode,omitempty"`
+	Termination any  `json:"Termination,omitempty"`
 }
 
 func dashboardRunDetail(value RunDetailResponse) any {
 	steps := make([]dashboardStep, len(value.Steps))
 	for i, step := range value.Steps {
-		steps[i].StepResult = step
+		step.Message = model.SanitizeNodeMessage(step.Message)
+		steps[i].dashboardStepFields = dashboardStepFields(step)
+		if !step.ExitCodeUnknown {
+			code := step.ExitCode
+			steps[i].ExitCode = &code
+		}
 	}
 	return struct {
 		RunDetailResponse

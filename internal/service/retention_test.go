@@ -84,7 +84,7 @@ func (f *retentionFixture) run(t *testing.T, ref, trigger string, terminal bool)
 		if _, err := f.retention.Database.ClaimNextRun(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.retention.Database.PutStepResult(ctx, model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
+		if _, err := f.retention.Database.PutStepResult(ctx, model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
 			t.Fatal(err)
 		}
 		run, err = f.retention.Database.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, TestedSHA: run.SHA})

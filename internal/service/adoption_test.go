@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
@@ -124,15 +125,15 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			event := runprogress.Event{Version: runprogress.Version, Stage: "test", Step: "unit", Status: runprogress.StepPassed, StartedAt: &now, FinishedAt: &now}
 			// v0.17.44 retained DAG-attempt burns beside the planned key.
 			// A colliding orphan must not stop scheduler startup/adoption.
-			if err := scheduler.logs.WriteStepPlan(run.ID, []runprogress.PlannedStep{{Stage: "test", Step: "unit", Ordinal: 0}}); err != nil {
+			if err := scheduler.logs.(*runlog.Store).WriteStepPlan(run.ID, []runprogress.PlannedStep{{Stage: "test", Step: "unit", Ordinal: 0}}); err != nil {
 				t.Fatal(err)
 			}
 			orphan := event
 			orphan.Stage = "test(0)"
-			if err := scheduler.logs.AppendStepProgress(run.ID, orphan); err != nil {
+			if err := scheduler.logs.(*runlog.Store).AppendStepProgress(run.ID, orphan); err != nil {
 				t.Fatal(err)
 			}
-			if err := scheduler.logs.AppendStepProgress(run.ID, event); err != nil {
+			if err := scheduler.logs.(*runlog.Store).AppendStepProgress(run.ID, event); err != nil {
 				t.Fatal(err)
 			}
 			// Reopen as a new owner, exercising the durable recovery transition.

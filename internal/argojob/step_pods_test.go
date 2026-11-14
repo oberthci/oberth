@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -128,14 +129,14 @@ func TestStepLogsAndDiagnosticsUseObservedOpaquePodName(t *testing.T) {
 		}
 		return io.NopCloser(strings.NewReader("native step output\n")), nil
 	}}
-	if err := controller.publishLogs(t.Context(), workflow, newProgressReporter(&output), &output, nil); err != nil {
+	if err := controller.publishLogs(t.Context(), workflow, controller.observedStepAttempts(t.Context(), workflow), newProgressReporter(&output), &output, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "native step output") {
 		t.Fatal(output.String())
 	}
 	completion := completionFor(workflow)
-	controller.collectStepDiagnostics(t.Context(), workflow, &completion)
+	controller.collectRestartStepDiagnostics(t.Context(), workflow, &completion, time.Time{})
 	if len(completion.Steps) != 1 || completion.Steps[0].PodName != pod.Name || !completion.Steps[0].Termination.Available {
 		t.Fatalf("diagnostic did not bind observed Pod: %+v", completion.Steps)
 	}
@@ -183,7 +184,7 @@ func TestTerminalStepLogDiscoveryRetriesIncompleteLists(t *testing.T) {
 				}}
 				reporter := newProgressReporter(&output)
 				for range 2 {
-					if err := controller.publishLogs(t.Context(), workflow, reporter, &output, nil); err != nil {
+					if err := controller.publishLogs(t.Context(), workflow, controller.observedStepAttempts(t.Context(), workflow), reporter, &output, nil); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -213,14 +214,14 @@ func TestStepLogReadStaysEligibleAfterTerminalEvent(t *testing.T) {
 		return io.NopCloser(strings.NewReader("delayed output\n")), nil
 	}}
 	reporter := newProgressReporter(&output)
-	if err := controller.publishLogs(t.Context(), workflow, reporter, &output, nil); err != nil {
+	if err := controller.publishLogs(t.Context(), workflow, controller.observedStepAttempts(t.Context(), workflow), reporter, &output, nil); err != nil {
 		t.Fatal(err)
 	}
 	if reads != 0 || reporter.replayed[node.ID] {
 		t.Fatal("unread log was marked replayed")
 	}
 	workflow.Status.Phase = wfv1.WorkflowSucceeded
-	if err := controller.publishLogs(t.Context(), workflow, reporter, &output, nil); err != nil {
+	if err := controller.publishLogs(t.Context(), workflow, controller.observedStepAttempts(t.Context(), workflow), reporter, &output, nil); err != nil {
 		t.Fatal(err)
 	}
 	if reads != 1 || !reporter.replayed[node.ID] || !strings.Contains(output.String(), "delayed output") {
@@ -265,7 +266,7 @@ func TestUnboundTerminalStepLogsAreExplicitlyUnavailable(t *testing.T) {
 					followers.steps = controller.observedStepAttempts
 					defer followers.close()
 				}
-				if err := controller.publishLogs(t.Context(), workflow, reporter, &output, followers); err != nil {
+				if err := controller.publishLogs(t.Context(), workflow, controller.observedStepAttempts(t.Context(), workflow), reporter, &output, followers); err != nil {
 					t.Fatal(err)
 				}
 				if followers != nil {
@@ -307,7 +308,7 @@ func TestLiveTerminalDrainRecoversDiscoveryWithoutDuplicatePublishList(t *testin
 		}, &output, nil)
 		followers.steps = controller.observedStepAttempts
 		defer followers.close()
-		if err := controller.publishLogs(t.Context(), workflow, newProgressReporter(&output), &output, followers); err != nil {
+		if err := controller.publishLogs(t.Context(), workflow, controller.observedStepAttempts(t.Context(), workflow), newProgressReporter(&output), &output, followers); err != nil {
 			t.Fatal(err)
 		}
 		if lists != 1 {

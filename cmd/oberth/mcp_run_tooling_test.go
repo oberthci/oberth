@@ -17,7 +17,6 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
-	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
@@ -63,7 +62,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	if err := logs.AppendStepProgress(run.ID, runprogress.Event{Version: runprogress.Version, Stage: "release-build-variants", Step: "release-build-variants", Status: runprogress.StepRunning, StartedAt: &started}); err != nil {
+	if err := database.PutStepResults(ctx, run.ID, []model.StepResult{{NodeID: "release-build-variants.release-build-variants", Stage: "release-build-variants", Step: "release-build-variants", Status: model.StepRunning, StartedAt: &started}}); err != nil {
 		t.Fatal(err)
 	}
 	control, err := service.NewAPI(service.APIConfig{Runs: database, History: database, Repositories: database, Logs: logs})
@@ -150,7 +149,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	// A workflow failure can leave a failed step that never had a pod or log
 	// marker. Exercise both wire formats with no file, an empty file, and a
 	// finalized index containing only another step's output.
-	if _, err := storetest.PutHistoricalStepResult(database, ctx, model.StepResult{
+	if _, err := storetest.PutHistoricalStepResult(database, ctx, model.StepResult{NodeID: "release-build-variants.release-build-variants",
 		RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
 		Status: model.StepFailed, Termination: model.UnavailableStepDiagnostic("not-executed"),
 	}); err != nil {
@@ -225,22 +224,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 		}
 	}
 
-	// Unexpected missing output is still a storage error. Neither a zero
-	// range alone nor a not-executed diagnostic with a real range qualifies.
-	for _, step := range []model.StepResult{
-		{Termination: model.UnavailableStepDiagnostic("not-recorded")},
-		{Termination: model.UnavailableStepDiagnostic("not-executed"), LogEnd: 1},
-	} {
-		step.RunID, step.Stage, step.Step = run.ID, want.Stage, want.Step
-		step.Status = model.StepFailed
-		if _, err := storetest.PutHistoricalStepResult(database, ctx, step); err != nil {
-			t.Fatal(err)
-		}
-		isError, text := call("run_logs", fmt.Sprintf(`{"id":%q,"step":%q}`, run.ID, want.Step))
-		if !isError || !strings.Contains(text, "internal error") {
-			t.Fatalf("unexpected missing log was hidden: isError=%t text=%q", isError, text)
-		}
-	}
+	assertHistoricalStepLogEvidence(t, server.Handler(), database, logs, root, run.ID, want, call)
 }
 
 func TestMCPBothLogRoutesBoundActualFilteredTailLines(t *testing.T) {
@@ -266,7 +250,7 @@ func TestMCPBothLogRoutesBoundActualFilteredTailLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := logs.WriteStepPlan(run.ID, []runprogress.PlannedStep{{Stage: "test", Step: "test"}}); err != nil {
+	if err := db.PutStepResults(t.Context(), run.ID, []model.StepResult{{NodeID: "log-node", Stage: "test", Step: "test", Status: model.StepRunning}}); err != nil {
 		t.Fatal(err)
 	}
 	f, err := logs.Create(run.ID)
@@ -354,6 +338,51 @@ func TestRunCursorHTTPErrorExplainsHowToResume(t *testing.T) {
 		server.Handler().ServeHTTP(response, request)
 		if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "cursor run no longer retained; restart from the first page") || strings.Contains(response.Body.String(), cursor) {
 			t.Fatalf("cursor %s: %d %s", cursor, response.Code, response.Body)
+		}
+	}
+}
+
+func assertHistoricalStepLogEvidence(t *testing.T, handler http.Handler, database *store.Store, logs *runlog.Store, root string, runID string, want service.LogResponse, call func(string, string) (bool, string)) {
+	t.Helper()
+	// Retained history remains readable even when an old diagnostic disagrees.
+	path := filepath.Join(root, "logs", runID+".log")
+	previous, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retained := "[" + want.Stage + "/" + want.Step + "] retained historical output\n"
+	if err := os.WriteFile(path, []byte(retained), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := logs.BuildIndex(runID); err != nil {
+		t.Fatal(err)
+	}
+	retainedRequest := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"run_logs","arguments":{"id":%q,"step":%q}}}`, runID, want.Step)))
+	retainedRequest.Header.Set("Authorization", "Bearer test-token")
+	retainedReply := httptest.NewRecorder()
+	handler.ServeHTTP(retainedReply, retainedRequest)
+	if retainedReply.Code != http.StatusOK || !strings.Contains(retainedReply.Body.String(), "retained historical output") || strings.Contains(retainedReply.Body.String(), `"isError":true`) {
+		t.Fatal("stored bytes hidden by diagnostic", retainedReply.Code, retainedReply.Body.String())
+	}
+	if err := os.WriteFile(path, previous, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := logs.BuildIndex(runID); err != nil {
+		t.Fatal(err)
+	}
+
+	// A missing range without a not-executed diagnostic remains a storage error.
+	for _, step := range []model.StepResult{
+		{Termination: model.UnavailableStepDiagnostic("not-recorded")},
+	} {
+		step.RunID, step.NodeID, step.Stage, step.Step = runID, "release-build-variants.release-build-variants", want.Stage, want.Step
+		step.Status = model.StepFailed
+		if _, err := storetest.PutHistoricalStepResult(database, t.Context(), step); err != nil {
+			t.Fatal(err)
+		}
+		isError, text := call("run_logs", fmt.Sprintf(`{"id":%q,"step":%q}`, runID, want.Step))
+		if !isError || !strings.Contains(text, "internal error") {
+			t.Fatalf("unexpected missing log was hidden: isError=%t text=%q", isError, text)
 		}
 	}
 }

@@ -59,7 +59,7 @@ func TestActiveRunLogsWithoutRetainedOutputArePending(t *testing.T) {
 				t.Fatal(err)
 			}
 			started := time.Now().UTC()
-			if err := fixture.logs.AppendStepProgress(run.ID, runprogress.Event{
+			if err := fixtureNodeProgress(fixture.store, run.ID, runprogress.Event{
 				Version: runprogress.Version, Stage: "release-build-variants", Step: "release-build-variants",
 				Status: runprogress.StepRunning, StartedAt: &started,
 			}); err != nil {
@@ -98,7 +98,7 @@ func TestActiveRunLogsWithoutRetainedOutputArePending(t *testing.T) {
 			if _, err := fixture.logs.BuildIndex(run.ID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := fixture.store.PutStepResult(ctx, model.StepResult{RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants", Status: model.StepPassed}); err != nil {
+			if _, err := fixture.store.PutStepResult(ctx, model.StepResult{NodeID: "release-build-variants.release-build-variants", RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants", Status: model.StepPassed}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := fixture.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed}); err != nil {

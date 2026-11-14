@@ -297,11 +297,8 @@ type ReceiveEventSpec struct {
 type StepStatus string
 
 const (
-	// StepPending is a step the reviewed pipeline declares that execution has
-	// not reached. It is a projection state only: it is produced by merging a
-	// run's durable plan over its results, and it is never a durable result --
-	// PutStepResult refuses it, and the step_results CHECK constraint does not
-	// admit it. A plan must never be able to record an outcome.
+	// StepPending is a declaration-only state; native Argo Pending nodes map
+	// to StepQueued. A declaration cannot be written as an observed node.
 	StepPending StepStatus = "pending"
 	StepQueued  StepStatus = "queued"
 	StepRunning StepStatus = "running"
@@ -327,45 +324,47 @@ func (s StepStatus) Terminal() bool {
 	return s.Valid() && s != StepPending && s != StepQueued && s != StepRunning
 }
 
-// Progress orders the step lifecycle so two observations of the same step can
-// be reconciled without knowing which produced them: a seeded plan entry, a
-// live progress marker, or a durable result. Higher is later; an unknown
-// status is behind every real one, so it can never displace one.
-//
-// The order exists because a run's step list is assembled from three sources
-// that each know a different amount. The plan knows the step exists. The
-// progress journal knows it started. The durable result knows how it ended.
-func (s StepStatus) Progress() int {
-	switch s {
-	case StepPending:
-		return 0
-	case StepQueued:
-		return 1
-	case StepRunning:
-		return 2
-	case StepPassed, StepFailed, StepSkipped, StepTimedOut:
-		return 3
-	default:
-		return -1
-	}
+// StepCredentialEvidence is the admitted template's frozen credential scope.
+// Grant names/paths are locators, never credential values.
+type StepCredentialEvidence struct {
+	Known        bool     `json:"known"`
+	Complete     bool     `json:"complete"`
+	Template     string   `json:"template"`
+	Credentialed bool     `json:"credentialed"`
+	Grants       []string `json:"grants"`
 }
 
+// StepResult is one observed Argo status node, keyed by RunID and NodeID.
+// Display and template names never establish step identity.
 type StepResult struct {
-	Termination *StepDiagnostic
-	RunID       string
-	Stage       string `json:"Burn"`
-	Step        string
-	Ordinal     int
-	Status      StepStatus
-	ExitCode    int
-	LogStart    int64
-	LogEnd      int64
-	StartedAt   *time.Time
-	FinishedAt  *time.Time
-	RecordedAt  time.Time
-	// Secrets marks a step whose template runs a credential chain and so
-	// received the secret store login token. It is a projection from the
-	// run's plan, never a durable result: the store does not record it.
+	ReplayEvidenceComplete bool `json:"-"`
+	// LocalTemplate binds the observed node to a template in this admitted
+	// Workflow. Referenced/external templates cannot borrow a same-name
+	// inline template's credential-free evidence.
+	LocalTemplate           bool     `json:"-"`
+	CredentialEvidenceKnown bool     `json:"-"`
+	Credentialed            bool     `json:"-"`
+	GrantEvidence           []string `json:"-"`
+	NodeID                  string
+	DisplayName             string
+	Template                string
+	NodeType                string
+	BoundaryID              string
+	Phase                   string
+	Message                 string
+	PodName                 string
+	Termination             *StepDiagnostic
+	RunID                   string
+	Stage                   string `json:"Burn"`
+	Step                    string
+	Ordinal                 int
+	Status                  StepStatus
+	ExitCode                int
+	ExitCodeUnknown         bool `json:"-"`
+	StartedAt               *time.Time
+	FinishedAt              *time.Time
+	RecordedAt              time.Time
+	// Secrets is a display projection from the retained grant evidence.
 	Secrets bool
 }
 

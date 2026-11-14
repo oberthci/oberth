@@ -673,11 +673,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 			return nil, err
 		}
 	}
-	// The durable result model needs unique normalized step keys until its
-	// planner is replaced. Validate before creating the Workflow.
-	if _, err := argoworkflow.PlannedSteps(workflow); err != nil {
-		return nil, &argoworkflow.AdmissionError{Cause: err}
-	}
 	// A granted step without Vault coordinates would proceed through the
 	// entire build and die at the first secretstore exec login — a worse signal than
 	// failing at admission. Require both non-empty before any build work. The

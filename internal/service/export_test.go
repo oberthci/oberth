@@ -8,6 +8,7 @@ import (
 	"github.com/oberthci/oberth/internal/identityname"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
+	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
 )
@@ -68,10 +69,25 @@ type historicalStepStore struct {
 	database *store.Store
 }
 
-func (s historicalStepStore) PutStepResult(ctx context.Context, result model.StepResult) (model.StepResult, error) {
-	return storetest.PutHistoricalStepResult(s.database, ctx, result)
+func (s historicalStepStore) PutStepResults(ctx context.Context, runID string, results []model.StepResult) error {
+	for _, result := range results {
+		result.RunID = runID
+		if _, err := storetest.PutHistoricalStepResult(s.database, ctx, result); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (scheduler *Scheduler) seedHistoricalSteps(ctx context.Context, database *store.Store, runID string, steps []model.StepResult, index runlog.Index) error {
 	fixture := &Scheduler{store: historicalStepStore{scheduler.store, database}, logs: scheduler.logs}
 	return fixture.persistSteps(ctx, runID, steps, index)
+}
+
+// fixtureNodeProgress supplies native row observations to API/log-selection tests.
+func fixtureNodeProgress(database *store.Store, runID string, event runprogress.Event) error {
+	return database.PutStepResults(context.Background(), runID, []model.StepResult{{
+		NodeID: event.Stage + "." + event.Step, Stage: event.Stage, Step: event.Step, DisplayName: event.Step,
+		Template: event.Stage + "." + event.Step, NodeType: "Pod", Ordinal: event.Ordinal,
+		Status: model.StepStatus(event.Status), StartedAt: event.StartedAt, FinishedAt: event.FinishedAt,
+	}})
 }

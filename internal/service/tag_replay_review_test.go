@@ -25,7 +25,7 @@ func requireTagForce(t *testing.T, h *rerunHarness, id string) {
 }
 
 func TestTagReplayReviewWIFStartedRequiresForce(t *testing.T) {
-	result := observedTagResult(infraFailure)
+	result := observedTagResult(JobResult{Status: model.RunFailed, Phase: "infrastructure", Steps: []model.StepResult{{NodeID: "publisher-node", Stage: "publish", Step: "push", Status: model.StepFailed}}})
 	result.TerminalObservation.Nodes = 1
 	result.TerminalObservation.Steps = []model.RunObservedStep{{Stage: "publish", Step: "push", Status: model.StepFailed, Started: true}}
 	h := newRerunHarness(t, result)
@@ -118,7 +118,7 @@ func TestTagReplayReviewWholeChainAndNewest(t *testing.T) {
 		t.Run(map[bool]string{false: "older-safe-source", true: "newest-safe-source-unsafe-history"}[unsafe], func(t *testing.T) {
 			first := observedTestFailure()
 			if unsafe {
-				first = observedTagResult(infraFailure)
+				first = observedTagResult(JobResult{Status: model.RunFailed, Phase: "infrastructure", Steps: []model.StepResult{{NodeID: "publisher-node", Stage: "publish", Step: "push", Status: model.StepFailed}}})
 				first.TerminalObservation.Nodes = 1
 				first.TerminalObservation.Steps = []model.RunObservedStep{{Stage: "publish", Step: "push", Status: model.StepFailed, Started: true}}
 			}
@@ -141,7 +141,7 @@ func TestTagReplayReviewWholeChainAndNewest(t *testing.T) {
 			} else {
 				h.rerun(t, rerunAdmin, map[string]any{"id": current.ID})
 				audit, err := h.fixture.store.LatestAuditActionByType(t.Context(), "run.rerun", "run")
-				if err != nil || !strings.Contains(audit.Details, `"replay_runs_checked":2`) || !strings.Contains(audit.Details, `"replay_steps_checked":4`) {
+				if err != nil || !strings.Contains(audit.Details, `"replay_runs_checked":2`) || !strings.Contains(audit.Details, `"replay_steps_checked":2`) {
 					t.Fatalf("whole-chain audit incomplete: %+v %v", audit, err)
 				}
 			}
@@ -150,7 +150,7 @@ func TestTagReplayReviewWholeChainAndNewest(t *testing.T) {
 }
 
 func TestTagReplayReviewSafeAncestorCannotHideNewPublisher(t *testing.T) {
-	publisher := observedTagResult(infraFailure)
+	publisher := observedTagResult(JobResult{Status: model.RunFailed, Phase: "infrastructure", Steps: []model.StepResult{{NodeID: "publisher-node", Stage: "publish", Step: "push", Status: model.StepFailed}}})
 	publisher.TerminalObservation.Nodes = 1
 	publisher.TerminalObservation.Steps = []model.RunObservedStep{{Stage: "publish", Step: "push", Status: model.StepFailed, Started: true}}
 	h := newRerunHarness(t, observedTestFailure(), publisher)
@@ -193,7 +193,7 @@ func TestTagReplayReviewMovedOrMissingTagRequiresForce(t *testing.T) {
 	}
 }
 
-func TestTagReplayReviewLegacyPlanAndMissingJournalRequireForce(t *testing.T) {
+func TestTagReplayReviewNativeRowsIgnoreLegacyPlanAndMissingJournal(t *testing.T) {
 	for _, kind := range []string{"legacy-plan", "missing-journal"} {
 		t.Run(kind, func(t *testing.T) {
 			h := newRerunHarness(t, observedTestFailure())
@@ -208,7 +208,7 @@ func TestTagReplayReviewLegacyPlanAndMissingJournalRequireForce(t *testing.T) {
 			} else if err := os.Remove(filepath.Join(h.fixture.root, "logs", source.ID+".progress.jsonl")); err != nil {
 				t.Fatal(err)
 			}
-			requireTagForce(t, h, source.ID)
+			h.rerun(t, rerunAdmin, map[string]any{"id": source.ID})
 		})
 	}
 }
@@ -223,7 +223,7 @@ func TestTagReplayReviewAuditBasis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, part := range []string{`"release":true`, `"replay_basis":"observed-terminal-no-credential-start"`, `"replay_runs_checked":1`, `"replay_steps_checked":2`, `"publication_started":false`} {
+	for _, part := range []string{`"release":true`, `"replay_basis":"observed-terminal-no-credential-start"`, `"replay_runs_checked":1`, `"replay_steps_checked":1`, `"publication_started":false`} {
 		if !strings.Contains(audit.Details, part) {
 			t.Fatalf("audit missing %s: %s", part, audit.Details)
 		}

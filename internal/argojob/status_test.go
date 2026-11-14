@@ -747,8 +747,7 @@ func TestProgressReporterEmitsAMonotonicStream(t *testing.T) {
 	}
 }
 
-// TestProgressReporterSynthesizesRunningForAFastStep proves a step that
-// finishes between two polls still reads as a sequence in the run log.
+// A fast terminal step remains eligible for log replay without log control bytes.
 func TestProgressReporterSynthesizesRunningForAFastStep(t *testing.T) {
 	destination := &recordingWriter{}
 	reporter := newProgressReporter(destination)
@@ -761,40 +760,9 @@ func TestProgressReporterSynthesizesRunningForAFastStep(t *testing.T) {
 	}) {
 		t.Fatal("a first-seen terminal step did not ask for its log")
 	}
-	body := destination.String()
-	running, passed := 0, 0
-	for _, line := range splitLines(body) {
-		event, found, err := runprogress.ParseMarker([]byte(line + "\n"))
-		if !found || err != nil {
-			continue
-		}
-		switch event.Status {
-		case runprogress.StepRunning:
-			running++
-		case runprogress.StepPassed:
-			passed++
-		}
+	if destination.String() != "" {
+		t.Fatal("step observation emitted log control bytes")
 	}
-	if running != 1 || passed != 1 {
-		t.Fatalf("emitted %d running and %d passed events, want 1 and 1:\n%s", running, passed, body)
-	}
-}
-
-func splitLines(body string) []string {
-	var lines []string
-	current := ""
-	for _, character := range body {
-		if character == '\n' {
-			lines = append(lines, current)
-			current = ""
-			continue
-		}
-		current += string(character)
-	}
-	if current != "" {
-		lines = append(lines, current)
-	}
-	return lines
 }
 
 // TestCopyPrefixedAttributesEveryLine proves the run log index can attribute
@@ -866,24 +834,8 @@ func TestProgressReporterRetryAttemptResetsFrozenStatus(t *testing.T) {
 		t.Fatal("retry terminal (passed) should request log replay")
 	}
 
-	body := destination.String()
-	var statuses []runprogress.Status
-	for _, line := range splitLines(body) {
-		event, found, err := runprogress.ParseMarker([]byte(line + "\n"))
-		if !found || err != nil {
-			continue
-		}
-		statuses = append(statuses, event.Status)
-	}
-	// Expect: running, failed, running (retry), passed.
-	if len(statuses) != 4 {
-		t.Fatalf("expected 4 status transitions, got %d: %v\n%s", len(statuses), statuses, body)
-	}
-	if statuses[0] != runprogress.StepRunning ||
-		statuses[1] != runprogress.StepFailed ||
-		statuses[2] != runprogress.StepRunning ||
-		statuses[3] != runprogress.StepPassed {
-		t.Fatalf("status sequence = %v, want [running, failed, running, passed]", statuses)
+	if destination.String() != "" {
+		t.Fatal("step observation emitted log control bytes")
 	}
 }
 

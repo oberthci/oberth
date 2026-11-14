@@ -12,6 +12,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -69,6 +70,34 @@ func newRerunHarness(t *testing.T, results ...JobResult) *rerunHarness {
 func newRerunHarnessWithOptions(t *testing.T, options store.Options, results ...JobResult) *rerunHarness {
 	t.Helper()
 	fixture := newControlFixtureWithOptions(t, options, results...)
+	// The fake engine freezes its configured template/grant facts at admission,
+	// matching ArgoJobs' pre-create binding receipt. Replay never reads its plan.
+	fixture.jobs.nativeAdmission = func(ctx context.Context, request WorkflowRequest) error {
+		fixture.jobs.mu.Lock()
+		plan := append([]runprogress.PlannedStep(nil), fixture.jobs.plan...)
+		fixture.jobs.mu.Unlock()
+		if len(plan) == 0 {
+			return nil
+		}
+		evidence := make([]model.StepCredentialEvidence, 0, len(plan))
+		for _, step := range plan {
+			grants := []string{}
+			if step.Secrets || step.Credentialed {
+				grants = []string{"secret:fixture-grant"}
+			}
+			evidence = append(evidence, model.StepCredentialEvidence{Known: true, Complete: true, Template: step.Stage + "." + step.Step, Credentialed: step.Secrets || step.Credentialed, Grants: grants})
+		}
+		body, err := json.Marshal(map[string]any{"engine": "argo", "workflow": request.WorkflowName, "step_credentials": evidence})
+		if err != nil {
+			return err
+		}
+		trigger := "ci"
+		if request.Run.Release {
+			trigger = "release"
+		}
+		_, err = fixture.store.AppendAuditAction(ctx, model.AuditActionSpec{Actor: request.Run.Actor, Action: trigger + ".argo.submit.binding", ResourceType: "run", ResourceID: request.Run.ID, Details: string(body)})
+		return err
+	}
 	harness := &rerunHarness{fixture: fixture, git: &tagPushGit{controlGit: fixture.git},
 		refs: stubRefResolver{branches: map[string]map[string]string{"codeberg/acme/oberth": {rerunBranch: rerunSHA, "refs/tags/" + rerunTag: rerunTagObject}}}}
 	var err error

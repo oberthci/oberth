@@ -64,7 +64,7 @@ func TestStepMeasurementRemovalDeletesHistoryAndPreservesResults(t *testing.T) {
 		t.Fatal(got, err)
 	}
 	step := got[0]
-	if step.Status != model.StepFailed || step.ExitCode != 137 || step.LogStart != 11 || step.LogEnd != 42 || step.Ordinal != 2 || step.StartedAt.UnixNano() != 100 || step.FinishedAt.UnixNano() != 200 || step.RecordedAt.UnixNano() != 300 || step.Termination.Unavailable != "not-recorded" {
+	if step.Status != model.StepFailed || step.ExitCode != 137 || step.Ordinal != 2 || step.StartedAt.UnixNano() != 100 || step.FinishedAt.UnixNano() != 200 || step.RecordedAt.UnixNano() != 300 || step.Termination.Unavailable != "not-recorded" {
 		t.Fatal("result changed", step)
 	}
 	after, err := s.VerifyAuditChain(ctx)
@@ -78,7 +78,7 @@ func TestStepMeasurementRemovalDeletesHistoryAndPreservesResults(t *testing.T) {
 		}
 	}
 	now := time.Now().UTC()
-	result := model.StepResult{RunID: run.ID, Stage: "test", Step: "next", Ordinal: 3, Status: model.StepPassed, StartedAt: &now, FinishedAt: &now}
+	result := model.StepResult{NodeID: "test.next", RunID: run.ID, Stage: "test", Step: "next", Ordinal: 3, Status: model.StepPassed, StartedAt: &now, FinishedAt: &now}
 	if _, err = s.PutStepResult(ctx, result); err != nil {
 		t.Fatal("active result write failed", err)
 	}

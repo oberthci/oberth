@@ -33,8 +33,7 @@ func TestAPIReadIndexesUpgradePreservesHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	step := model.StepResult{RunID: enqueued.ID, Stage: "build", Step: "test", Status: model.StepPassed}
-	if _, err := s.PutStepResult(ctx, step); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO step_results(run_id,burn,step,ordinal,status,exit_code,log_start,log_end,recorded_at) VALUES(?,'build','test',0,'passed',0,0,0,1)`, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	head, err := s.VerifyAuditChain(ctx)
@@ -45,10 +44,7 @@ func TestAPIReadIndexesUpgradePreservesHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	steps, err := s.StepResults(ctx, enqueued.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+
 	existing := make(map[string]bool, len(before))
 	for _, migration := range before {
 		existing[migration.id] = true
@@ -89,7 +85,7 @@ func TestAPIReadIndexesUpgradePreservesHistory(t *testing.T) {
 		t.Fatal("run changed", err)
 	}
 	gotSteps, err := s.StepResults(ctx, enqueued.ID)
-	if err != nil || !reflect.DeepEqual(steps, gotSteps) {
+	if err != nil || len(gotSteps) != 1 || gotSteps[0].Stage != "build" || gotSteps[0].Step != "test" || gotSteps[0].Status != model.StepPassed || gotSteps[0].RecordedAt.UnixNano() != 1 || gotSteps[0].NodeID == "" {
 		t.Fatal("steps changed", err)
 	}
 	if ledger() != oldLedger {

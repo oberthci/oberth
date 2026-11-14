@@ -11,7 +11,7 @@ import (
 // reveals that previous ones did not. It returns an error when the aggregate
 // run log budget is breached during step log replay, naming the offending step.
 func (controller *Controller) publish(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, destination io.Writer) error {
-	return controller.publishLogs(ctx, workflow, reporter, destination, nil)
+	return controller.publishLogs(ctx, workflow, controller.observedStepAttempts(ctx, workflow), reporter, destination, nil)
 }
 
 // NewIdentityStore creates a store seeded with the given maps.

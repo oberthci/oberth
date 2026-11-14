@@ -144,7 +144,7 @@ func TestTagReplayEvidenceAndPublicationGuardAreTransactional(t *testing.T) {
 	if _, err := s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.PutStepResult(ctx, model.StepResult{RunID: source.ID, Stage: "build", Step: "build", Status: model.StepPassed}); err != nil {
+	if _, err := s.PutStepResult(ctx, model.StepResult{NodeID: "build.build", RunID: source.ID, Stage: "build", Step: "build", Status: model.StepPassed}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.BeginPublication(ctx, model.PublicationSpec{RepoID: repo.ID, RunID: source.ID, RefKind: model.RefTag, Ref: source.Ref, ResultSHA: source.SHA, Actor: source.Actor}); err != nil {

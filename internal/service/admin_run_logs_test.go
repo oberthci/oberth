@@ -21,7 +21,7 @@ func TestAdminRunLogsResolvesUniqueStepBeforeFailedBurnDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, step := range []model.StepResult{{RunID: run.ID, Stage: "build", Step: "compile", Status: model.StepPassed}, {RunID: run.ID, Stage: "unit", Step: "check", Status: model.StepFailed}, {RunID: run.ID, Stage: "integration", Step: "check", Status: model.StepFailed}} {
+	for _, step := range []model.StepResult{{NodeID: "build.compile", RunID: run.ID, Stage: "build", Step: "compile", Status: model.StepPassed}, {NodeID: "unit.check", RunID: run.ID, Stage: "unit", Step: "check", Status: model.StepFailed}, {NodeID: "integration.check", RunID: run.ID, Stage: "integration", Step: "check", Status: model.StepFailed}} {
 		if _, err = storetest.PutHistoricalStepResult(f.store, t.Context(), step); err != nil {
 			t.Fatal(err)
 		}
@@ -63,7 +63,7 @@ func TestAdminRunLogsStepInferenceUsesActiveProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	if err = f.logs.AppendStepProgress(run.ID, runprogress.Event{Version: runprogress.Version, Stage: "build", Step: "compile", Status: runprogress.StepRunning, StartedAt: &started}); err != nil {
+	if err = fixtureNodeProgress(f.store, run.ID, runprogress.Event{Version: runprogress.Version, Stage: "build", Step: "compile", Status: runprogress.StepRunning, StartedAt: &started}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = f.api(t).CallTool(t.Context(), api.Actor{Identity: "reader"}, "run_logs", json.RawMessage(fmt.Sprintf(`{"id":%q,"step":"compile"}`, run.ID)))
@@ -80,7 +80,7 @@ func TestRunLogsPassedDefaultsToFirstStepAndListsAvailablePairs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			steps := []model.StepResult{{RunID: run.ID, Stage: "z-build", Step: "compile", Ordinal: 0, Status: model.StepPassed}, {RunID: run.ID, Stage: "a-test", Step: "unit", Ordinal: 1, Status: model.StepPassed}}
+			steps := []model.StepResult{{NodeID: ("z-build") + "." + ("compile"), RunID: run.ID, Stage: "z-build", Step: "compile", Ordinal: 0, Status: model.StepPassed}, {NodeID: ("a-test") + "." + ("unit"), RunID: run.ID, Stage: "a-test", Step: "unit", Ordinal: 1, Status: model.StepPassed}}
 			for _, step := range steps[:count] {
 				if _, err = storetest.PutHistoricalStepResult(f.store, t.Context(), step); err != nil {
 					t.Fatal(err)
@@ -120,7 +120,7 @@ func TestRunLogsPassedDefaultErrorIncludesAvailablePairs(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, pair := range []struct{ burn, step string }{{"build", "compile"}, {"test", "unit"}} {
-		if _, err = storetest.PutHistoricalStepResult(f.store, t.Context(), model.StepResult{RunID: run.ID, Stage: pair.burn, Step: pair.step, Ordinal: i, Status: model.StepPassed}); err != nil {
+		if _, err = storetest.PutHistoricalStepResult(f.store, t.Context(), model.StepResult{NodeID: pair.burn + "." + pair.step, RunID: run.ID, Stage: pair.burn, Step: pair.step, Ordinal: i, Status: model.StepPassed}); err != nil {
 			t.Fatal(err)
 		}
 	}

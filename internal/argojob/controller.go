@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -61,6 +62,7 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
+	stepResults  StepResultWriter
 	capabilities func(context.Context, int64) (*argoworkflow.Capability, error)
 	restartedAt  time.Time
 	timings      TimingRecorder
@@ -357,12 +359,8 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 	return nil
 }
 
-// Wait supervises a submitted Workflow to its terminal phase, writing step
-// progress markers and each step's pod log into destination as the run
-// proceeds.
-//
-// The server derives progress events from the Workflow node tree and writes
-// the retained marker protocol consumed by the scheduler, index and dashboard.
+// Wait supervises native Workflow watch observations, retaining node history
+// and plain container output as the run proceeds.
 func (controller *Controller) Wait(ctx context.Context, name, runID string, destination io.Writer) (Completion, error) {
 	return controller.wait(ctx, name, runID, destination, nil, 0, Adoption{})
 }
@@ -417,6 +415,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	confirmPending := false
 	observationPaused := false
 	nodeBoots := map[string]*corev1.Node{}
+	recordedNodes := map[string]model.StepResult{}
 	for {
 		for {
 			if ctx.Err() != nil {
@@ -456,8 +455,9 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				}
 				workflow = current
 			}
-			pods := make([]corev1.Pod, 0)
-			for _, pod := range controller.hub.PodsOf(name) {
+			podSnapshot := controller.hub.PodsOf(name)
+			pods := make([]corev1.Pod, 0, len(podSnapshot))
+			for _, pod := range podSnapshot {
 				pods = append(pods, *pod)
 			}
 			if err := controller.verifyOwnership(workflow, runID); err != nil {
@@ -465,6 +465,11 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			}
 			if binding.UID != "" && !binding.matches(workflow) {
 				return Completion{}, errors.New("argojob: adopted Workflow identity changed")
+			}
+			// History failures remain retryable on the next wake. The scheduler
+			// persists final rows before FinishRun; observation never changes Argo's verdict.
+			if eventDriven {
+				_ = controller.RecordNodeSteps(ctx, workflow, podSnapshot, recordedNodes)
 			}
 			// Observe already-created Pods before identity delivery can block on a
 			// later Pod: early step output must not wait behind that setup RPC.
@@ -505,48 +510,50 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				// node transitions and the workflow phase are not written
 				// atomically, so a status read that races the final update can
 				// miss a step's terminal event.
-				settleCtx, cancelSettle := context.WithTimeout(ctx, 10*time.Second)
-				settled, settleErr := controller.workflows.Get(settleCtx, name, metav1.GetOptions{})
-				cancelSettle()
-				if apierrors.IsNotFound(settleErr) {
-					return Completion{}, fmt.Errorf("argojob: Workflow %s disappeared before completing", name)
-				}
+				settled, completeRead, settleErr := controller.confirmWatchedCompletion(ctx, workflow, runID, binding)
 				if settleErr != nil {
+					return Completion{}, settleErr
+				}
+				if settled == nil {
 					confirmPending = true
 					break
 				}
-				if err := controller.verifyOwnership(settled, runID); err != nil {
-					return Completion{}, err
+				_ = controller.RecordNodeSteps(ctx, settled, podSnapshot, recordedNodes)
+				controller.retainWorkflowTiming(ctx, settled)
+				completion := completionFor(settled)
+				completion.ObservationComplete = completion.ObservationComplete && completeRead
+				completion.Steps = reporter.order(completion.Steps)
+				preserveObservedExitCodes(&completion, workflow)
+				preserveRecordedExitCodes(&completion, events)
+				controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
+				if publishErr := controller.publishLogs(ctx, settled, completion.ReplayAttempts, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
+					budgetBreachErr = publishErr
 				}
-				if workflow.UID != "" && settled.UID != workflow.UID {
-					return Completion{}, errors.New("argojob: Workflow identity changed at completion")
-				}
-				if !settled.Status.Phase.Completed() {
-					confirmPending = true
-					break
-				}
-				return controller.finishWatchedWorkflow(ctx, workflow, settled, binding, events, reporter, budget, live, budgetBreachErr)
-			}
-			if controller.timings != nil && eventDriven {
-				if !boundTiming {
-					controller.retainWorkflowTiming(ctx, workflow)
-					boundTiming = true
-				}
-				observation := Completion{}
-				for _, step := range reporter.order(StepResults(workflow)) {
-					if terminal(step.Status) && !timed[step.NodeID] {
-						observation.Steps = append(observation.Steps, step)
+				if live != nil {
+					live.drain(settled)
+					live.applyDiagnostics(&completion)
+					if err := live.failure(); err != nil && budgetBreachErr == nil {
+						budgetBreachErr = err
 					}
 				}
-				if len(observation.Steps) > 0 {
-					controller.collectWatchedStepDiagnostics(ctx, workflow, &observation, time.Time{})
-					for _, step := range observation.Steps {
-						timed[step.NodeID] = true
-					}
+				completion.classifyRestartCut()
+				reporter.finish(budget)
+				if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
+					return completion, fmt.Errorf("retire executor identity: %w", err)
 				}
+				if budgetBreachErr != nil {
+					return completion, budgetBreachErr
+				}
+				if progressErr := reporter.failure(); progressErr != nil {
+					return completion, fmt.Errorf("argojob: run progress markers degraded: %w", progressErr)
+				}
+				return completion, nil
 			}
 			if eventDriven {
-				if publishErr := controller.publishLogs(ctx, workflow, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
+				controller.recordWatchedTimings(ctx, workflow, reporter, timed, &boundTiming)
+			}
+			if eventDriven {
+				if publishErr := controller.publishLogs(ctx, workflow, controller.observedStepAttempts(ctx, workflow), reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
 					budgetBreachErr = publishErr
 				}
 			}
@@ -563,54 +570,59 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	}
 }
 
-func (controller *Controller) finishWatchedWorkflow(
-	ctx context.Context,
-	workflow, settled *wfv1.Workflow,
-	binding Adoption,
-	events []runprogress.Event,
-	reporter *progressReporter,
-	budget *runBudgetWriter,
-	live *stepLogFollowers,
-	budgetBreachErr error,
-) (Completion, error) {
-	completeRead := len(settled.Status.Nodes) >= len(workflow.Status.Nodes)
+// confirmWatchedCompletion uses a live read for the verdict and preserves the
+// watched node set when the final status write has not caught up yet.
+func (controller *Controller) confirmWatchedCompletion(ctx context.Context, observed *wfv1.Workflow, runID string, binding Adoption) (*wfv1.Workflow, bool, error) {
+	settleCtx, cancelSettle := context.WithTimeout(ctx, 10*time.Second)
+	settled, settleErr := controller.workflows.Get(settleCtx, observed.Name, metav1.GetOptions{})
+	cancelSettle()
+	if apierrors.IsNotFound(settleErr) {
+		return nil, false, fmt.Errorf("argojob: Workflow %s disappeared before completing", observed.Name)
+	}
+	if settleErr != nil {
+		return nil, false, nil
+	}
+	if err := controller.verifyOwnership(settled, runID); err != nil {
+		return nil, false, err
+	}
+	if observed.UID != "" && settled.UID != observed.UID {
+		return nil, false, errors.New("argojob: Workflow identity changed at completion")
+	}
+	if !settled.Status.Phase.Completed() {
+		return nil, false, nil
+	}
+	completeRead := len(settled.Status.Nodes) >= len(observed.Status.Nodes)
 	if !completeRead {
 		copy := settled.DeepCopy()
-		copy.Status.Nodes = workflow.DeepCopy().Status.Nodes
+		copy.Status.Nodes = observed.DeepCopy().Status.Nodes
 		settled = copy
 	}
 	if binding.UID != "" && !binding.matches(settled) {
-		return Completion{}, errors.New("argojob: adopted Workflow identity changed at completion")
+		return nil, false, errors.New("argojob: adopted Workflow identity changed at completion")
 	}
-	controller.retainWorkflowTiming(ctx, settled)
-	completion := completionFor(settled)
-	completion.ObservationComplete = completion.ObservationComplete && completeRead
-	completion.Steps = reporter.order(completion.Steps)
-	preserveObservedExitCodes(&completion, workflow)
-	preserveRecordedExitCodes(&completion, events)
-	controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
-	if publishErr := controller.publishLogs(ctx, settled, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
-		budgetBreachErr = publishErr
+	return settled, completeRead, nil
+}
+
+func (controller *Controller) recordWatchedTimings(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, timed map[string]bool, boundTiming *bool) {
+	if controller.timings == nil {
+		return
 	}
-	if live != nil {
-		live.drain(settled)
-		live.applyDiagnostics(&completion)
-		if err := live.failure(); err != nil && budgetBreachErr == nil {
-			budgetBreachErr = err
+	if !*boundTiming {
+		controller.retainWorkflowTiming(ctx, workflow)
+		*boundTiming = true
+	}
+	observation := Completion{}
+	for _, step := range reporter.order(StepResults(workflow)) {
+		if terminal(step.Status) && !timed[step.NodeID] {
+			observation.Steps = append(observation.Steps, step)
 		}
 	}
-	completion.classifyRestartCut()
-	reporter.finish(budget)
-	if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
-		return completion, fmt.Errorf("retire executor identity: %w", err)
+	if len(observation.Steps) > 0 {
+		controller.collectWatchedStepDiagnostics(ctx, workflow, &observation, time.Time{})
+		for _, step := range observation.Steps {
+			timed[step.NodeID] = true
+		}
 	}
-	if budgetBreachErr != nil {
-		return completion, budgetBreachErr
-	}
-	if progressErr := reporter.failure(); progressErr != nil {
-		return completion, fmt.Errorf("argojob: run progress markers degraded: %w", progressErr)
-	}
-	return completion, nil
 }
 
 // settle re-reads the Workflow once after it reports completion, preferring
@@ -641,7 +653,7 @@ func (controller *Controller) verifyOwnership(workflow *wfv1.Workflow, runID str
 	return nil
 }
 
-func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, destination io.Writer, live *stepLogFollowers) error {
+func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Workflow, observed []StepResult, reporter *progressReporter, destination io.Writer, live *stepLogFollowers) error {
 	if workflow == nil {
 		return nil
 	}
@@ -649,7 +661,6 @@ func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Wo
 	// replaced them, and their failure and log are the evidence of why the
 	// step was retried. They are reported once and never decide a verdict.
 	// An attempt still non-terminal when superseded has nothing to report.
-	observed := controller.observedStepAttempts(ctx, workflow)
 	steps := make([]StepResult, 0, len(observed))
 	for _, step := range observed {
 		if step.Superseded && terminal(step.Status) {
@@ -941,15 +952,6 @@ func (reporter *progressReporter) observe(destination io.Writer, step StepResult
 			return false
 		}
 	}
-	if !seen && terminal(step.Status) && step.Status != runprogress.StepSkipped {
-		// A step observed for the first time already finished (a fast step
-		// between two polls). Emit its running event first so the log reads
-		// as a sequence rather than a jump.
-		reporter.emit(destination, StepResult{
-			Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal,
-			Status: runprogress.StepRunning, StartedAt: step.StartedAt,
-		})
-	}
 	reporter.reported[key] = step.Status
 	if step.NodeID != "" {
 		reporter.node[key] = step.NodeID
@@ -957,7 +959,6 @@ func (reporter *progressReporter) observe(destination io.Writer, step StepResult
 			reporter.done[step.NodeID] = true
 		}
 	}
-	reporter.emit(destination, step)
 	return terminal(step.Status)
 }
 
@@ -976,54 +977,11 @@ func rank(status runprogress.Status) int {
 	}
 }
 
-func (reporter *progressReporter) emit(destination io.Writer, step StepResult) {
-	event := runprogress.Event{
-		Version: runprogress.Version,
-		Stage:   step.Stage, Step: step.Step, Ordinal: step.Ordinal,
-		Status: step.Status, ExitCode: step.ExitCode,
-		StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
-	}
-	// Unknown Argo exits use a display-only synthetic 1. Omit that exit from
-	// durable progress so a second restart cannot promote it to real evidence.
-	if !step.ExitCodeKnown {
-		event.ExitCode = 0
-	}
-	// The progress contract requires timestamps consistent with the status.
-	// Argo can report a terminal node before its timestamps settle, so fill
-	// what is missing rather than dropping the transition.
-	now := time.Now().UTC()
-	if event.Status != runprogress.StepQueued && event.StartedAt == nil {
-		event.StartedAt = &now
-	}
-	if terminal(event.Status) && event.FinishedAt == nil {
-		event.FinishedAt = &now
-	}
-	if event.Status == runprogress.StepQueued {
-		event.StartedAt, event.FinishedAt = nil, nil
-	}
-	if event.Status == runprogress.StepRunning {
-		event.FinishedAt = nil
-	}
-	if event.FinishedAt != nil && event.StartedAt != nil && event.FinishedAt.Before(*event.StartedAt) {
-		event.FinishedAt = event.StartedAt
-	}
-	marker, err := runprogress.MarshalMarker(event)
-	if err != nil {
-		reporter.failed = errors.Join(reporter.failed, err)
-		return
-	}
-	if _, err := destination.Write(marker); err != nil {
-		reporter.failed = errors.Join(reporter.failed, err)
-	}
-}
-
 func (reporter *progressReporter) finish(destination io.Writer) {
 	_ = destination
 }
 
-// failure returns the accumulated write/marshal errors from progress marker
-// emission. A non-nil value means the run's durable progress record is
-// degraded and the run must not report green.
+// failure is retained for the log follower until its observation loop is replaced.
 func (reporter *progressReporter) failure() error {
 	reporter.mu.Lock()
 	defer reporter.mu.Unlock()

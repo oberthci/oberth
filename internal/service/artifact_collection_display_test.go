@@ -29,7 +29,7 @@ func TestArtifactDeadlineReasonPreservesWorkflowVerdict(t *testing.T) {
 func TestArtifactDeadlineSurvivesResourceGuidance(t *testing.T) {
 	runID := strings.Repeat("a", 32)
 	original := JobResult{Status: model.RunFailed, Phase: "job", FailedStep: "unit", Error: "Workflow deadline exceeded\n" + model.ArtifactCollectionDeadlineReason,
-		Steps: []model.StepResult{{RunID: runID, Stage: "test", Step: "unit", Status: model.StepFailed}}}
+		Steps: []model.StepResult{{NodeID: "test.unit", RunID: runID, Stage: "test", Step: "unit", Status: model.StepFailed}}}
 	result := (&Scheduler{}).withResourceFailure(t.Context(), runID, original)
 	if result.Status != model.RunFailed || !strings.HasPrefix(result.Error, model.ExecutionDeadlineMessage+" Step ") || !strings.HasSuffix(result.Error, "\n"+model.ArtifactCollectionDeadlineReason) {
 		t.Fatal(result)

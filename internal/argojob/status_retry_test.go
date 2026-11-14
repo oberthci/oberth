@@ -400,32 +400,6 @@ func TestNestedRetryInsideDAG(t *testing.T) {
 	})
 }
 
-// progressStatuses returns the status sequence the run log carries for one key.
-func progressStatuses(body, key string) []runprogress.Status {
-	var statuses []runprogress.Status
-	for _, line := range splitLines(body) {
-		event, found, err := runprogress.ParseMarker([]byte(line + "\n"))
-		if !found || err != nil || event.Stage+"/"+event.Step != key {
-			continue
-		}
-		statuses = append(statuses, event.Status)
-	}
-	return statuses
-}
-
-func joinStatuses(statuses []runprogress.Status) string {
-	parts := make([]string, 0, len(statuses))
-	for _, status := range statuses {
-		parts = append(parts, string(status))
-	}
-	return strings.Join(parts, ",")
-}
-
-// TestPublishReportsSupersededAttemptOnceThenFinalVerdict drives the run log
-// through successive observations of a retried DAG. The failed attempt is
-// reported and its log replayed exactly once, under the planned step name,
-// even when the retry was already running by the time it was first seen; the
-// final attempt is reported after it and ends the step passed.
 func TestPublishReportsSupersededAttemptOnceThenFinalVerdict(t *testing.T) {
 	replayed := map[string]int{}
 	controller := &Controller{logs: func(_ context.Context, _, pod, _ string) (io.ReadCloser, error) {
@@ -447,11 +421,8 @@ func TestPublishReportsSupersededAttemptOnceThenFinalVerdict(t *testing.T) {
 			t.Fatalf("publish: %v", err)
 		}
 	}
-	if got := joinStatuses(progressStatuses(output.String(), "address/check")); got != "running,failed,running,passed" {
-		t.Fatalf("address/check progress = %s, want the failed attempt then the passing retry", got)
-	}
-	if got := joinStatuses(progressStatuses(output.String(), "address/get")); got != "running,passed,running,passed" {
-		t.Fatalf("address/get progress = %s, want both attempts", got)
+	if strings.Contains(output.String(), "@@oberth-step-progress@@") {
+		t.Fatal("step marker emitted")
 	}
 	for _, id := range []string{"address-0-check", "address-1-check", "address-0-get", "address-1-get"} {
 		pod := fixturePodName(final, final.Status.Nodes[id])
@@ -480,10 +451,8 @@ func TestPublishReportsSupersededAttemptOnceThenFinalVerdict(t *testing.T) {
 			t.Fatalf("resumed publish: %v", err)
 		}
 	}
-	for _, key := range []string{"address/get", "address/check"} {
-		if got := joinStatuses(progressStatuses(after.String(), key)); got != "running,passed" {
-			t.Fatalf("resumed %s progress = %s, want only the final attempt", key, got)
-		}
+	if strings.Contains(after.String(), "@@oberth-step-progress@@") {
+		t.Fatal("step marker emitted")
 	}
 	for _, id := range []string{"address-0-check", "address-1-check", "address-0-get", "address-1-get"} {
 		want := 1
@@ -520,8 +489,8 @@ func TestWaitResumedRetriedDAGIsGreen(t *testing.T) {
 	if got := strings.Join(stepKeys(completion.Steps), " "); got != "address/check address/get create/create install/install" {
 		t.Fatalf("durable steps = %q", got)
 	}
-	if got := joinStatuses(progressStatuses(output.String(), "address/check")); got != "running,passed" {
-		t.Fatalf("address/check progress after resume = %s, want only the passing retry", got)
+	if strings.Contains(output.String(), "@@oberth-step-progress@@") {
+		t.Fatal("step marker emitted")
 	}
 }
 

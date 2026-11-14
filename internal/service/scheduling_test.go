@@ -240,7 +240,7 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = fixture.store.PutStepResult(ctx, model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
+	if _, err = fixture.store.PutStepResult(ctx, model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
 		t.Fatal(err)
 	}
 	service := fixture.api(t)

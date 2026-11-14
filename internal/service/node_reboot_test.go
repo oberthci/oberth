@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runprogress"
 )
 
 func TestTagSkippedPublicationTimestampsNeedNoForce(t *testing.T) {
@@ -28,6 +27,16 @@ func TestTagSkippedPublicationTimestampsNeedNoForce(t *testing.T) {
 				if kind == "skipped with synthesized start" {
 					result.TerminalObservation.Steps[1].Started = true
 				}
+				if kind == "earlier failed publication" {
+					earlier := publish
+					earlier.NodeID = "earlier-native-node"
+					earlier.NodeType = "Pod"
+					earlier.Phase = "Failed"
+					earlier.Status = model.StepFailed
+					earlier.Ordinal = 2
+					earlier.Termination = nil
+					result = observedTagResult(JobResult{Status: model.RunFailed, Phase: "infrastructure", Steps: append(steps, earlier)})
+				}
 				if kind == "earlier publication attempt" {
 					result.TerminalObservation.Nodes++
 					result.TerminalObservation.Steps = append(result.TerminalObservation.Steps, model.RunObservedStep{Stage: "publish", Step: "push", Status: model.StepFailed, Started: true})
@@ -37,21 +46,6 @@ func TestTagSkippedPublicationTimestampsNeedNoForce(t *testing.T) {
 				h.fixture.jobs.plan = tagReplayPlan()
 				failed := admitRerunTag(t, h)
 				ensureTagJournal(t, h, failed)
-				if kind == "skipped with synthesized start" {
-					if err := h.fixture.logs.AppendStepProgress(failed.ID, runprogress.Event{Version: 1, Stage: "publish", Step: "push", Ordinal: 1, Status: runprogress.StepRunning, StartedAt: &at}); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if kind != "pending" {
-					if err := h.fixture.logs.AppendStepProgress(failed.ID, runprogress.Event{Version: 1, Stage: "publish", Step: "push", Ordinal: 1, Status: runprogress.StepSkipped, StartedAt: &at, FinishedAt: &at}); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if kind == "earlier failed publication" {
-					if err := h.fixture.logs.AppendStepProgress(failed.ID, runprogress.Event{Version: 1, Stage: "publish", Step: "push", Ordinal: 1, Status: runprogress.StepFailed, ExitCode: 1, StartedAt: &at, FinishedAt: &at}); err != nil {
-						t.Fatal(err)
-					}
-				}
 				_, err := h.call(rerunAdmin, tool, map[string]any{"id": failed.ID})
 				if strings.HasPrefix(kind, "earlier") {
 					if err == nil {

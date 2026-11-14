@@ -98,7 +98,7 @@ type RunQueueStore interface {
 	CompleteRunCancellation(context.Context, string, string) error
 	CompleteObservedRunCancellation(context.Context, model.RunCancellation) error
 	FinishRun(context.Context, string, model.RunResult) (model.Run, error)
-	PutStepResult(context.Context, model.StepResult) (model.StepResult, error)
+	PutStepResults(context.Context, string, []model.StepResult) error
 	RunningRunsWithJobs(context.Context) ([]model.Run, error)
 }
 
@@ -335,16 +335,6 @@ type LogStore interface {
 	// from offset (negative means tail), the next poll offset, and the
 	// current size of the append-only run log.
 	ReadFrom(string, int64, int64) ([]byte, int64, int64, error)
-	AppendStepProgress(string, runprogress.Event) error
-	StepProgress(string) ([]runprogress.Event, error)
-	StepProgressHistory(string) ([]runprogress.Event, error)
-	// WriteStepPlan records the run's declared step list once, at submission,
-	// and StepPlan reads it back. A run with no plan returns an error wrapping
-	// os.ErrNotExist, which readers treat as "this run predates its plan" and
-	// not as a failure.
-	WriteStepPlan(string, []runprogress.PlannedStep) error
-	StepPlan(string) ([]runprogress.PlannedStep, error)
-	StepPlanRecord(string) (runprogress.Plan, error)
 }
 
 type WorkflowRequest struct {
@@ -436,17 +426,6 @@ type JobCreateSettler interface {
 
 type ReleaseJobController interface {
 	CreateRelease(context.Context, WorkflowRequest) error
-}
-
-// PipelinePlanner enumerates the steps the immutable checked-out pipeline
-// declares: the server reads the
-// reviewed document, never evaluates it.
-//
-// It is optional. An engine that cannot enumerate
-// its own format simply has no plan, and its runs behave as they always have:
-// steps appear as execution reaches them.
-type PipelinePlanner interface {
-	PlannedSteps(context.Context, WorkflowRequest) ([]runprogress.PlannedStep, error)
 }
 
 type Health interface {

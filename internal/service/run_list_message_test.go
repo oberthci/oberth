@@ -75,7 +75,7 @@ func TestStructuredFailureCauseUsesBoundDiagnostics(t *testing.T) {
 	if err := diagnostic.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	step := model.StepResult{RunID: runID, Stage: "test", Step: "unit-tests", Status: model.StepFailed, Termination: diagnostic}
+	step := model.StepResult{NodeID: "test.unit-tests", RunID: runID, Stage: "test", Step: "unit-tests", Status: model.StepFailed, Termination: diagnostic}
 	result := JobResult{Status: model.RunFailed, Steps: []model.StepResult{step}}
 	if got := structuredFailureCause(runID, result); got != "test/unit-tests failed · OOM (limit 2 GiB)" {
 		t.Fatal(got)
@@ -112,7 +112,7 @@ func TestStructuredFailureCauseUsesBoundDiagnostics(t *testing.T) {
 			d := *diagnostic
 			d.Container = &c
 			name := strings.Repeat("a", tc.size)
-			cause := structuredFailureCause(runID, JobResult{Status: model.RunFailed, Steps: []model.StepResult{{RunID: runID, Stage: "compile", Step: name, Status: status, Termination: &d}}})
+			cause := structuredFailureCause(runID, JobResult{Status: model.RunFailed, Steps: []model.StepResult{{NodeID: ("compile") + "." + (name), RunID: runID, Stage: "compile", Step: name, Status: status, Termination: &d}}})
 			if len([]rune(cause)) != 60 || !strings.HasSuffix(cause, "…") {
 				t.Fatalf("fixture did not clip: %q", cause)
 			}

@@ -42,7 +42,7 @@ func (j *deadlineJobs) Wait(context.Context, string, io.Writer) (JobResult, erro
 	if j.passed {
 		return JobResult{Status: model.RunPassed, Phase: "job"}, nil
 	}
-	return JobResult{Status: model.RunFailed, Phase: "job", Error: "test failed", Steps: []model.StepResult{{Stage: "build", Step: "test", Status: model.StepFailed}}}, nil
+	return JobResult{Status: model.RunFailed, Phase: "job", Error: "test failed", Steps: []model.StepResult{{NodeID: "build.test", Stage: "build", Step: "test", Status: model.StepFailed}}}, nil
 }
 
 func deadlineScope(ctx context.Context, scheduler *Scheduler) context.Context {
@@ -101,7 +101,7 @@ func awaitDeadlineRun(t *testing.T, fixture *recoveryFixture, id string, done <-
 // Exercise actual Run startup, dispatch, submitted background task and finalization;
 // checking only adapter returns would miss a fatal completion-channel escape.
 func TestDatabaseDeadlineSchedulerConverges(t *testing.T) {
-	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunWorkflowName", "MarkRunSubmissionStarted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "RunWorkspaceCleanupEligible"}
+	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunWorkflowName", "MarkRunSubmissionStarted", "MarkRunSubmitted", "PutStepResults", "FinishRun", "RunWorkspaceCleanupEligible"}
 	for _, operation := range operations {
 		for _, fault := range []struct {
 			name string

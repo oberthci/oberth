@@ -487,3 +487,17 @@ Step Pod names belong to Argo. Oberth discovers Pods through their
 `workflows.argoproj.io/node-id` annotation and Workflow controller UID,
 without pinning a naming format. A document may set the native
 `spec.workflowMetadata.annotations.workflows.argoproj.io/pod-name-format`.
+
+## Step history
+
+Oberth stores Argo node status under each native node ID. The step list retains
+every retry attempt, fan-out branch and recursive invocation, even when they
+share a display name or template. It shows the native template, phase, message,
+timestamps and observed Pod name. Skipped and Omitted nodes remain visible.
+The log is plain text and does not determine step status.
+
+Native status has no display row cap; large snapshots are written in transactions
+of at most 128 rows. Historical step rows and retained logs remain readable after
+the forward migration. Historical missing node/grant facts are not reconstructed
+from old markers. Tag/release replay keeps its existing authorization and force
+checks and refuses automatic replay when stored safety evidence is incomplete.

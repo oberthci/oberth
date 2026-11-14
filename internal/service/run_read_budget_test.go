@@ -114,7 +114,7 @@ func TestRunLogsEmptyActiveWindowHasMCPContinuation(t *testing.T) {
 	if _, err := f.retention.Database.ClaimNextRun(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.retention.Database.PutStepResult(t.Context(), model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
+	if _, err := f.retention.Database.PutStepResult(t.Context(), model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
 		t.Fatal(err)
 	}
 	wanted := "[test/unit] actual error\n"
@@ -174,7 +174,7 @@ func TestRunLogsRunningIndexFindsLateStepWithIdenticalRequest(t *testing.T) {
 	if _, err := f.retention.Database.ClaimNextRun(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.retention.Database.PutStepResult(t.Context(), model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
+	if _, err := f.retention.Database.PutStepResult(t.Context(), model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
 		t.Fatal(err)
 	}
 	wanted := "[test/unit] late failure\n"
@@ -218,9 +218,9 @@ func TestRunLogsTerminalUnexecutedStepDropsActiveIndex(t *testing.T) {
 	run := f.run(t, "feature/unexecuted", "branch", true)
 	logs := &forgettingLogStore{LogStore: f.retention.Logs}
 	f.api.logs = logs
-	steps := []model.StepResult{{Stage: "test", Step: "unit", Termination: &model.StepDiagnostic{Unavailable: "not-executed"}}}
+	steps := []model.StepResult{{NodeID: "test.unit", Stage: "test", Step: "unit", Termination: &model.StepDiagnostic{Unavailable: "not-executed"}}}
 	response, err := f.api.stepLogResponse(t.Context(), run, steps, "test", "unit", runlog.Filter{})
-	if err != nil || response.Note != "step was not executed; no log recorded" || len(logs.forgotten) != 1 || logs.forgotten[0] != run.ID {
+	if err != nil || response.Note != "" || !strings.Contains(response.Output, "retained output") || len(logs.forgotten) != 1 || logs.forgotten[0] != run.ID {
 		t.Fatalf("terminal early return retained cache: %+v forgotten=%v err=%v", response, logs.forgotten, err)
 	}
 }

@@ -204,37 +204,6 @@ func (jobs *ArgoJobs) CreateRelease(ctx context.Context, request service.Workflo
 	return jobs.create(ctx, request, pipeline.TriggerRelease)
 }
 
-// PlannedSteps enumerates the run's declared step list from the checked-out
-// document, without evaluating anything and without a second trust surface:
-// the same Decode the submission path uses, then a read-only walk of the
-// template graph it already validated.
-//
-// The plan is what makes a run's step list describe the pipeline rather than
-// its own history so far. Argo's node tree, which every other step projection
-// derives from, gains a node only once the controller creates that node's Pod
-// -- so a run that has not reached a burn does not report it as pending, it
-// omits it, and an agent reading `status` on a failed run sees a plausible
-// complete pipeline that is missing exactly the work that never ran.
-func (jobs *ArgoJobs) PlannedSteps(ctx context.Context, request service.WorkflowRequest) ([]runprogress.PlannedStep, error) {
-	source, err := jobs.readRunSource(request)
-	if err != nil {
-		return nil, jobs.noRunPipelineError(err, request)
-	}
-	workflow, err := argoworkflow.Decode(source)
-	if err != nil {
-		return nil, fmt.Errorf("app: read repository pipeline document: %w", err)
-	}
-	planned, err := argoworkflow.PlannedSteps(workflow)
-	if err != nil {
-		return nil, fmt.Errorf("app: enumerate pipeline steps: %w", err)
-	}
-	steps := make([]runprogress.PlannedStep, 0, len(planned))
-	for _, step := range planned {
-		steps = append(steps, runprogress.PlannedStep{Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Secrets: step.Secrets, Credentialed: step.Credentialed})
-	}
-	return steps, nil
-}
-
 func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowRequest, trigger pipeline.Trigger) error {
 	if strings.TrimSpace(request.WorkflowName) == "" || strings.TrimSpace(request.Run.ID) == "" || request.Repository.Name == "" {
 		return errors.New("app: deterministic Workflow name, run, and repository are required")
@@ -432,7 +401,8 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.Workf
 	}
 	automount := workflow.Spec.AutomountServiceAccountToken != nil && *workflow.Spec.AutomountServiceAccountToken
 	details := map[string]any{
-		"repo": request.Repository.Name, "upstream_org": request.UpstreamOrg,
+		"step_credentials": argojob.StepCredentialEvidence(workflow, submission),
+		"repo":             request.Repository.Name, "upstream_org": request.UpstreamOrg,
 		"ref": request.Run.Ref,
 		// "sha" is the commit the Workflow actually executes (submission.SHA,
 		// derived from TestedSHA). "object_sha" preserves the original pushed
@@ -806,7 +776,7 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 		}
 	}
 	if completion.ObservationComplete {
-		observation := &model.RunTerminalObservation{Version: 1, WorkflowName: completion.Name, Nodes: completion.ObservedNodes}
+		observation := &model.RunTerminalObservation{Version: 1, WorkflowName: completion.Name, Nodes: completion.ObservedNodes, NodeIDs: completion.ObservedNodeIDs}
 		for _, step := range completion.ReplayAttempts {
 			started := step.Status == runprogress.StepRunning || step.Status == runprogress.StepPassed || step.Status == runprogress.StepFailed || step.Status == runprogress.StepTimedOut
 			observation.Steps = append(observation.Steps, model.RunObservedStep{Stage: step.Stage, Step: step.Step, Status: model.StepStatus(step.Status), Started: started,
@@ -825,20 +795,20 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 			result.Error = "Workflow " + completion.Phase
 		}
 	}
-	result.Steps = make([]model.StepResult, 0, len(completion.Steps))
+	result.Steps = append([]model.StepResult(nil), completion.NodeSteps...)
+	// Retained diagnostics enrich the same node; they do not select a retry
+	// winner or merge separate nodes with the same display name.
+	byNode := make(map[string]argojob.StepResult, len(completion.Steps))
 	for _, step := range completion.Steps {
-		// A terminal Workflow can still carry unfinished child nodes (for
-		// example after a controller error or stop). Their progress remains
-		// in the journal; the result store accepts only observed outcomes.
-		if step.Status == runprogress.StepQueued || step.Status == runprogress.StepRunning {
-
-			continue
+		byNode[step.NodeID] = step
+	}
+	for i := range result.Steps {
+		if diagnostic, ok := byNode[result.Steps[i].NodeID]; ok {
+			result.Steps[i].Termination = diagnostic.Termination
+			if diagnostic.PodName != "" {
+				result.Steps[i].PodName = diagnostic.PodName
+			}
 		}
-		result.Steps = append(result.Steps, model.StepResult{
-			Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Termination: step.Termination,
-			Status: model.StepStatus(step.Status), ExitCode: step.ExitCode,
-			StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
-		})
 	}
 	if !completion.Succeeded && completion.FailedStep != "" {
 		result.FailedStage, result.FailedStep = completion.FailedStage, completion.FailedStep
@@ -873,7 +843,6 @@ var (
 	_ service.JobCreateSettler     = (*ArgoJobs)(nil)
 	_ service.JobAdopter           = (*ArgoJobs)(nil)
 	_ service.ReleaseJobController = (*ArgoJobs)(nil)
-	_ service.PipelinePlanner      = (*ArgoJobs)(nil)
 	_                              = time.Second
 )
 

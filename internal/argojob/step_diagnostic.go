@@ -39,6 +39,7 @@ func (controller *Controller) collectWatchedStepDiagnostics(ctx context.Context,
 
 func (controller *Controller) projectRestartStepDiagnostics(ctx, readCtx context.Context, workflow *wfv1.Workflow, completion *Completion, restartedAt time.Time, pods map[string]*corev1.Pod, snapshotReason string) {
 	adopted := !restartedAt.IsZero() && !workflowDeadlineExceeded(workflow)
+	reboots := controller.nodeRebootReasons(readCtx, workflow, pods, restartedAt, nil)
 	observedPodNodes := make(map[string]bool)
 	for _, pod := range pods {
 		if pod != nil {
@@ -47,8 +48,11 @@ func (controller *Controller) projectRestartStepDiagnostics(ctx, readCtx context
 	}
 	bindStepPodNames(workflow, completion.Steps, pods)
 	bindStepPodNames(workflow, completion.ReplayAttempts, pods)
-	reboots := controller.nodeRebootReasons(readCtx, workflow, pods, restartedAt, nil)
-
+	nativePods := make([]*corev1.Pod, 0, len(pods))
+	for _, pod := range pods {
+		nativePods = append(nativePods, pod)
+	}
+	completion.NodeSteps = NodeStepResults(workflow, nativePods)
 	for i := range completion.Steps {
 		step := &completion.Steps[i]
 		node, ok := workflow.Status.Nodes[step.NodeID]

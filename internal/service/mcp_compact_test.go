@@ -226,7 +226,7 @@ func TestRunGetSummary(t *testing.T) {
 		if i == 1 {
 			status = model.StepFailed
 		}
-		_, err := fixture.store.PutStepResult(ctx, model.StepResult{
+		_, err := fixture.store.PutStepResult(ctx, model.StepResult{NodeID: ("test") + "." + (name),
 			RunID: run.ID, Stage: "test", Step: name, Ordinal: i, Status: status,
 			StartedAt: &started, FinishedAt: &ended,
 		})
@@ -265,8 +265,8 @@ func TestRunGetSummary(t *testing.T) {
 		if got.Repo != qualified || got.Ref != run.Ref || got.SHA != run.SHA {
 			t.Fatalf("summary identity or unknown admission context: %#v", got)
 		}
-		// retry_hint (class, cause, action) is the thirteenth field of a red run.
-		if len(fields) != 13 || fields["retry_hint"] == nil || len(fields["steps"].([]any)[0].(map[string]any)) != 5 || len(encoded) > 1024 {
+		// retry_hint (class, cause, action) is the fourteenth field of a red run.
+		if len(fields) != 14 || fields["retry_hint"] == nil || len(fields["steps"].([]any)[0].(map[string]any)) != 10 || len(encoded) > 1536 {
 			t.Fatalf("summary includes extra data: %s", encoded)
 		}
 	}

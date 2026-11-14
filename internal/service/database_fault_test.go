@@ -117,12 +117,11 @@ func (s *deadlineFaultStore) FinishRun(a0 context.Context, a1 string, a2 model.R
 	return s.Store.FinishRun(a0, a1, a2)
 }
 
-func (s *deadlineFaultStore) PutStepResult(a0 context.Context, a1 model.StepResult) (model.StepResult, error) {
-	if err := s.fault("PutStepResult"); err != nil {
-		var zero model.StepResult
-		return zero, err
+func (s *deadlineFaultStore) PutStepResults(ctx context.Context, runID string, steps []model.StepResult) error {
+	if err := s.fault("PutStepResults"); err != nil {
+		return err
 	}
-	return s.Store.PutStepResult(a0, a1)
+	return s.Store.PutStepResults(ctx, runID, steps)
 }
 
 func (s *deadlineFaultStore) RunningRunsWithJobs(a0 context.Context) ([]model.Run, error) {

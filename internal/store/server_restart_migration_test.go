@@ -15,6 +15,9 @@ const stopRestartMigrationID = "20261113153226-stop-restart-resubmission-c9820cd
 func TestStopRestartMigrationPreservesWorkflowsAndUncertainCreates(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
+	if _, err := s.db.Exec(testdb.PostNativeNodeStepsDowngrade); err != nil {
+		t.Fatal(err)
+	}
 	repo := createRepo(t, s)
 	ctx := context.Background()
 	claim := func(ref string) model.Run {
