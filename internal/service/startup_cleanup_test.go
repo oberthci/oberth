@@ -168,7 +168,7 @@ func TestSteadyCancellationDeleteFailureRetriesWithoutExit(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- scheduler.runAcceptedFixtures(ctx) }()
+	go func() { done <- scheduler.Run(ctx) }()
 	defer func() { cancel(); <-done }()
 	select {
 	case err := <-recovered:
