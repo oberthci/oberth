@@ -78,7 +78,7 @@ func TestNativeSlowCaptureDoesNotDelayObservationOrRetirement(t *testing.T) {
 		return reader, nil
 	}, func(context.Context, string, string) (*corev1.Pod, error) { return pod.DeepCopy(), nil })
 	c.config.ExecutorServiceAccount = "executor"
-	identity := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: c.identityPodName(wf.UID, "executor"), Namespace: wf.Namespace, Annotations: map[string]string{runIDAnnotation: "run"}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}}}
+	identity := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: c.identityPodName(wf, "executor"), Namespace: wf.Namespace, UID: "identity-uid", Labels: map[string]string{"oberth.ci/role": "executor-identity"}, Annotations: map[string]string{runIDAnnotation: "run"}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}}, Spec: holderSpec("")}
 	c.kube = fake.NewClientset(identity)
 	retired := make(chan struct{}, 1)
 	c.kube.(*fake.Clientset).PrependReactor("delete", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {

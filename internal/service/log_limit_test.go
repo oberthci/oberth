@@ -15,7 +15,7 @@ type overflowingJobs struct{}
 func (overflowingJobs) CreateWorkflow(context.Context, WorkflowRequest) error { return nil }
 func (overflowingJobs) Stop(context.Context, string, string) error            { return nil }
 func (overflowingJobs) TerminalResult(context.Context, string) (JobResult, error) {
-	return JobResult{Status: model.RunFailed, Phase: "job", Error: errRunLogLimit.Error()}, nil
+	return JobResult{Status: model.RunPassed, Phase: "passed"}, nil
 }
 func (overflowingJobs) Wait(_ context.Context, _ string, destination io.Writer) (JobResult, error) {
 	_, err := io.WriteString(destination, "[test/unit] "+strings.Repeat("x", 128)+"\n")
