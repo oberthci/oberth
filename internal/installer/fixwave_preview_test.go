@@ -148,6 +148,10 @@ func TestInstallDryRunFreshRealHelm(t *testing.T) {
 							i++
 						}
 					}
+					raw, err := exec.CommandContext(ctx, "helm", render...).CombinedOutput()
+					if err != nil {
+						return nil, fmt.Errorf("local Helm template: %w: %s", err, raw)
+					}
 					if store {
 						if !slices.Contains(args, "secretstore.caCert="+previewOpenBaoCA) || !slices.Contains(args, "argo.vault.caCert="+previewOpenBaoCA) {
 							t.Fatal("fresh preview omitted planned CA")
@@ -160,10 +164,6 @@ func TestInstallDryRunFreshRealHelm(t *testing.T) {
 						if err != nil || !cert.IsCA {
 							t.Fatal("preview CA must parse", err)
 						}
-					}
-					raw, err := exec.CommandContext(ctx, "helm", render...).CombinedOutput()
-					if err != nil {
-						return nil, fmt.Errorf("local Helm template: %w: %s", err, raw)
 					}
 					return []byte(`{"config":{}}`), nil
 				default:
