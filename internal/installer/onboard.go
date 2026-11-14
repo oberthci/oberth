@@ -56,31 +56,14 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 			return err
 		}
 	}
-	if cfg.uplinkOnboarded {
-		if err := reuseInstallerEnrollment(&cfg, deps); err != nil {
-			return err
-		}
-	} else {
-		if err := reusePendingInstallerEnrollment(&cfg, deps); err != nil {
-			return err
-		}
-		var err error
-		if cfg.enrollment == nil {
-			cfg.enrollment, err = newInstallerEnrollment()
-		}
-		if err != nil {
-			return err
-		}
+	if cfg.enrollment == nil {
+		cfg.enrollment = &installerEnrollment{}
 	}
-	if cfg.enrollment != nil {
-		defer func() { clear(cfg.enrollment.key) }()
-	}
-	if !cfg.existingRelease && !cfg.uplinkOnboarded && cfg.AdminSSHPublicKeyPath == "" {
-		if err := defaultOnboardingIdentity(&cfg, deps, tw); err != nil {
-			return err
+	defer func() {
+		if cfg.enrollment != nil {
+			clear(cfg.enrollment.key)
 		}
-		cfg.AdminSSHPublicKeyPath = cfg.SSHPublicKeyPath
-	}
+	}()
 
 	var endpointErr error
 	deps, endpointErr = configureClientEndpoint(ctx, cfg.Namespace, cfg.ServiceType, deps)
@@ -99,12 +82,27 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		deps.StepProgressSink("rollout ready", "done")
 	}
 
-	if cfg.existingRelease && !cfg.uplinkOnboarded {
-		var current any
-		if err := CallAdmin(ctx, cfg, deps, "version", nil, &current); err == nil {
-			cfg.uplinkOnboarded = true
+	var current any
+	cfg.uplinkOnboarded = CallAdmin(ctx, cfg, deps, "version", nil, &current) == nil
+	if !cfg.uplinkOnboarded {
+		if err := reusePendingInstallerEnrollment(&cfg, deps); err != nil {
+			return err
+		}
+		if cfg.enrollment == nil || len(cfg.enrollment.key) == 0 {
+			var err error
+			cfg.enrollment, err = newInstallerEnrollment()
+			if err != nil {
+				return err
+			}
 		}
 	}
+	if !cfg.uplinkOnboarded && cfg.AdminSSHPublicKeyPath == "" {
+		if err := defaultOnboardingIdentity(&cfg, deps, tw); err != nil {
+			return err
+		}
+		cfg.AdminSSHPublicKeyPath = cfg.SSHPublicKeyPath
+	}
+
 	// The admin identity is independent of forge registration. Save its token
 	// immediately, including when subsequent onboarding is partial.
 	if cfg.AdminSSHPublicKeyPath != "" && !cfg.uplinkOnboarded {
@@ -1105,15 +1103,7 @@ func onboardUplink(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) 
 		erasePromptLines(w, color, 1)
 	}
 
-	var result api.FirstAdminResult
-	var createErr error
-	if cfg.existingRelease {
-		var enrolled api.UplinkAddResult
-		createErr = CallAdmin(ctx, cfg, deps, "uplink-add", api.UplinkAddRequest{Identity: identity, SSHPublicKey: string(publicKey), CSR: string(cfg.adminCSR), Admin: true, Bearer: cfg.AdminBearer}, &enrolled)
-		result.Token, result.Certificate = enrolled.Token, enrolled.Certificate
-	} else {
-		result, createErr = createFirstAdmin(ctx, cfg, deps, publicKey, identity)
-	}
+	result, createErr := createFirstAdmin(ctx, cfg, deps, publicKey, identity)
 	if createErr != nil {
 		return "", "", "", "", createErr
 	}

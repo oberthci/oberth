@@ -121,3 +121,12 @@ A non-empty conflicting file is refused. Existing recovery input is never
 overwritten; use `--resume-secrets-file` for input and a separate output path.
 While the live NetworkPolicy probe runs, install prints its start and a progress
 heartbeat every ten seconds, including owned cleanup.
+
+
+A Helm release left by an interrupted install does not establish an administrator.
+The installer probes the authenticated admin API first. If it cannot authenticate,
+it resumes the guarded first-admin enrollment with the saved pending key and CSR,
+or saves a new enrollment if the earlier attempt never reached that step. A lost
+exec response does not require uninstalling the release. A starting daemon socket
+gets a short bounded retry; a credential refusal or interrupted response does not
+trigger automatic repeated issuance. The server's active-admin guard still applies.

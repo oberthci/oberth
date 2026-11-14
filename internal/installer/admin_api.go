@@ -198,7 +198,7 @@ func createFirstAdmin(ctx context.Context, cfg Config, deps Deps, publicKey []by
 		ns = DefaultNamespace
 	}
 	args := []string{"--context", deps.ContextName, "-n", ns, "exec", "-i", "deploy/oberth", "-c", serverContainerName, "--", "/usr/local/bin/oberth", "admin", "create-first-admin"}
-	raw, err := deps.RunCommand(ctx, body, "kubectl", args...)
+	raw, err := runFirstAdminExec(ctx, deps, body, args)
 	defer clear(raw)
 	if err != nil {
 		return api.FirstAdminResult{}, errors.New("create first admin failed")
