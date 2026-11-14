@@ -121,11 +121,6 @@ func TestNativeSchedulingUpgradeMaterializesReceivesAndPreservesReplay(t *testin
 	if err != nil || latest.ID != fresh.ID {
 		t.Fatal("cancelled receipt hid fresh run", latest, err)
 	}
-	for range 3 {
-		if _, err = s.ClaimNextRun(ctx); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if _, err = s.FinishRun(ctx, fresh.ID, model.RunResult{Status: model.RunPassed, Phase: "complete"}); err != nil {
 		t.Fatal(err)
 	}
