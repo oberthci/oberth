@@ -75,6 +75,9 @@ func prepareArgoSecurity(ctx context.Context, deps Deps, ns string, consent, fre
 			return nil, argoSecurityConfigMapRemedy(ns, liveErr, stored)
 		}
 	}
+	if err := validatePlannedArgoWorkflowSecurity(ns, stored, review); err != nil {
+		return nil, err
+	}
 	version := chartVersionFromRelease(release.Chart, "argo-workflows")
 	if exists && (canonicalChartVersion(version) == "" || release.Status != "deployed") {
 		return nil, argoSecurityUpgradeRemedy(ns, fmt.Errorf("the Argo release must have a known chart version and deployed status"))
@@ -99,6 +102,13 @@ func prepareArgoSecurity(ctx context.Context, deps Deps, ns string, consent, fre
 }
 
 func validateArgoSecurityReview(ns string, stored map[string]any, review []ArgoSecurityReview) error {
+	workflowPod, err := argoWorkflowPodSecurity(stored)
+	if err != nil {
+		return argoSecurityUpgradeRemedy(ns, err)
+	}
+	if err := validateArgoWorkflowPodSecurity("controller.workflowDefaults.spec.securityContext", workflowPod); err != nil {
+		return argoSecurityUpgradeRemedy(ns, err)
+	}
 	// Explicit unsafe settings cannot be overwritten by this absent-only fill.
 	// Refuse before either release changes rather than deploy a policy that
 	// immediately strands ordinary Workflows or the controller itself.
@@ -112,11 +122,15 @@ func validateArgoSecurityReview(ns string, stored map[string]any, review []ArgoS
 		}
 		switch s := entry.Planned.(type) {
 		case *corev1.PodSecurityContext:
-			if s != nil && ((s.SeccompProfile != nil && (s.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault && s.SeccompProfile.Type != corev1.SeccompProfileTypeLocalhost)) || (s.WindowsOptions != nil && s.WindowsOptions.HostProcess != nil && *s.WindowsOptions.HostProcess)) {
+			if !argoPodSecurityContextMeetsFloor(s) {
 				return argoSecurityUpgradeRemedy(ns, fmt.Errorf("operator-set %s.%s cannot pass the Pod policy", entry.Component, entry.Field))
 			}
 		case *corev1.SecurityContext:
-			if !argoSecurityContextMeetsFloor(s, entry.Component == "mainContainer" || entry.Component == "executor") {
+			valid := argoSecurityContextMeetsFloor(s, false)
+			if (entry.Component == "mainContainer" || entry.Component == "executor") && workflowPod != nil && workflowPod.SeccompProfile != nil {
+				valid = argoWorkflowSecurityContextMeetsFloor(s, workflowPod)
+			}
+			if !valid {
 				return argoSecurityUpgradeRemedy(ns, fmt.Errorf("operator-set %s.%s cannot pass the Pod policy", entry.Component, entry.Field))
 			}
 		}

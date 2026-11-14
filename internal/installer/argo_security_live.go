@@ -9,6 +9,7 @@ import (
 
 	argoconfig "github.com/argoproj/argo-workflows/v4/config"
 	"github.com/argoproj/argo-workflows/v4/workflow/common"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -79,16 +80,31 @@ func checkLiveArgoSecurity(ctx context.Context, deps Deps, namespace string) err
 			if err != nil {
 				return fmt.Errorf("cannot read or parse live Argo controller ConfigMap %s/%s", namespace, name)
 			}
-			if config.MainContainer == nil || !argoSecurityContextMeetsFloor(config.MainContainer.SecurityContext, true) {
-				return &argoSecurityDefaultsMissing{fmt.Sprintf("live Argo controller ConfigMap %s/%s lacks required mainContainer.securityContext defaults", namespace, name)}
-			}
-			if config.Executor == nil || !argoSecurityContextMeetsFloor(config.Executor.SecurityContext, true) {
-				return &argoSecurityDefaultsMissing{fmt.Sprintf("live Argo controller ConfigMap %s/%s lacks required executor.securityContext defaults", namespace, name)}
+			if err := checkLiveArgoWorkflowSecurity(config, namespace, name); err != nil {
+				return err
 			}
 		}
 	}
 	if !found {
 		return fmt.Errorf("no live Argo controller Deployment found in namespace %s", namespace)
+	}
+	return nil
+}
+
+func checkLiveArgoWorkflowSecurity(config *argoconfig.Config, namespace, name string) error {
+	var pod *corev1.PodSecurityContext
+	if config.WorkflowDefaults != nil {
+		pod = config.WorkflowDefaults.Spec.SecurityContext
+	}
+	location := fmt.Sprintf("live Argo controller ConfigMap %s/%s", namespace, name)
+	if err := validateArgoWorkflowPodSecurity(location+" workflowDefaults.spec.securityContext", pod); err != nil {
+		return err
+	}
+	if config.MainContainer == nil || !argoWorkflowSecurityContextMeetsFloor(config.MainContainer.SecurityContext, pod) {
+		return &argoSecurityDefaultsMissing{location + " lacks required mainContainer.securityContext defaults"}
+	}
+	if config.Executor == nil || !argoWorkflowSecurityContextMeetsFloor(config.Executor.SecurityContext, pod) {
+		return &argoSecurityDefaultsMissing{location + " lacks required executor.securityContext defaults"}
 	}
 	return nil
 }

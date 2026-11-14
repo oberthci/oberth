@@ -43,6 +43,10 @@
   controller ConfigMap for `mainContainer.securityContext` and
   `executor.securityContext`: no privilege escalation, drop ALL capabilities,
   only NET_BIND_SERVICE added back, and RuntimeDefault or Localhost seccomp.
+  Seccomp may be inherited from `workflowDefaults.spec.securityContext`; valid
+  Pod defaults remain unchanged without adding container overrides. Explicit
+  Pod-level Unconfined in stored values or live defaults refuses deployment,
+  even when the containers select safe profiles.
   Fresh managed installs supply missing defaults. Existing Argo releases require
   approval in interactive security review or `--argo-security-defaults` to fill
   absent native Helm values; operator values are preserved. Without consent the
