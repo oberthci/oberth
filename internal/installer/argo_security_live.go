@@ -2,6 +2,7 @@ package installer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -9,6 +10,7 @@ import (
 
 	argoconfig "github.com/argoproj/argo-workflows/v4/config"
 	"github.com/argoproj/argo-workflows/v4/workflow/common"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -18,6 +20,10 @@ func argoExternalControllerConfigMap(values map[string]any) bool {
 }
 
 func argoSecurityConfigMapRemedy(namespace string, cause error, stored map[string]any) error {
+	var invalid *argoWorkflowDefaultsInvalid
+	if errors.As(cause, &invalid) {
+		return fmt.Errorf("cannot reconcile Argo security defaults: %w. Correct the named native key on the live controller ConfigMap in namespace %s, under data.config (or equivalent split data entries); preserve unrelated configuration", cause, namespace)
+	}
 	args, _, _ := argoSecurityDefaults(nil)
 	keys := []string{}
 	for i := 0; i+1 < len(args); i += 2 {
@@ -29,7 +35,7 @@ func argoSecurityConfigMapRemedy(namespace string, cause error, stored map[strin
 	if argoExternalControllerConfigMap(stored) {
 		hint = fmt.Sprintf("\nWith controller.configMap.create=false, native Helm values do not reach this ConfigMap. If this release used the old controller profile, complete the v0.22.5 migration in docs/releases/v0.22.5.md: export the complete user values with helm get values argo-workflows -n %s -o yaml; record the old ConfigMap name; remove controller.configMap.create and controller.configMap.name, only the oberth-controller-profile volume and mount, and only the old named profile ConfigMap from extraObjects. Review controller.image.tag and executor.image.tag as documented. Preserve unrelated values and apply the complete reviewed file with helm upgrade argo-workflows argo/argo-workflows -n %s --version 1.0.24 --reset-values --values <reviewed-values.yaml>; --reuse-values does not remove omitted keys", namespace, namespace)
 	}
-	return fmt.Errorf("cannot deploy the Pod policy: %w. Configure these exact native keys on the live controller ConfigMap referenced by the Deployment in namespace %s, under data.config (or equivalent split data entries); preserve unrelated configuration:\n%s%s", cause, namespace, strings.Join(keys, "\n"), hint)
+	return fmt.Errorf("cannot reconcile Argo security defaults: %w. Configure these exact native keys on the live controller ConfigMap referenced by the Deployment in namespace %s, under data.config (or equivalent split data entries); preserve unrelated configuration:\n%s%s", cause, namespace, strings.Join(keys, "\n"), hint)
 }
 
 // Follow the live controller's ConfigMap reference rather than trusting Helm's
@@ -79,16 +85,32 @@ func checkLiveArgoSecurity(ctx context.Context, deps Deps, namespace string) err
 			if err != nil {
 				return fmt.Errorf("cannot read or parse live Argo controller ConfigMap %s/%s", namespace, name)
 			}
-			if config.MainContainer == nil || !argoSecurityContextMeetsFloor(config.MainContainer.SecurityContext, true) {
-				return &argoSecurityDefaultsMissing{fmt.Sprintf("live Argo controller ConfigMap %s/%s lacks required mainContainer.securityContext defaults", namespace, name)}
-			}
-			if config.Executor == nil || !argoSecurityContextMeetsFloor(config.Executor.SecurityContext, true) {
-				return &argoSecurityDefaultsMissing{fmt.Sprintf("live Argo controller ConfigMap %s/%s lacks required executor.securityContext defaults", namespace, name)}
+			if err := checkLiveArgoWorkflowSecurity(config, namespace, name); err != nil {
+				return err
 			}
 		}
 	}
 	if !found {
 		return fmt.Errorf("no live Argo controller Deployment found in namespace %s", namespace)
+	}
+	return nil
+}
+
+func checkLiveArgoWorkflowSecurity(config *argoconfig.Config, namespace, name string) error {
+	var pod *corev1.PodSecurityContext
+	location := fmt.Sprintf("live Argo controller ConfigMap %s/%s", namespace, name)
+	if config.WorkflowDefaults != nil {
+		spec := &config.WorkflowDefaults.Spec
+		if err := validateArgoWorkflowDefaults(location+" workflowDefaults.spec", spec); err != nil {
+			return err
+		}
+		pod, _ = effectiveArgoWorkflowPodSecurity(spec)
+	}
+	if config.MainContainer == nil || !argoWorkflowSecurityContextMeetsFloor(config.MainContainer.SecurityContext, pod) {
+		return &argoSecurityDefaultsMissing{location + " lacks required mainContainer.securityContext defaults"}
+	}
+	if config.Executor == nil || !argoWorkflowSecurityContextMeetsFloor(config.Executor.SecurityContext, pod) {
+		return &argoSecurityDefaultsMissing{location + " lacks required executor.securityContext defaults"}
 	}
 	return nil
 }

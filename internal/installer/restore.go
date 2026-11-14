@@ -329,6 +329,9 @@ func runRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps) (result
 	}
 	printRestorePlan(w, cfg, deps, archive, target, parts)
 	if cfg.DryRun {
+		if _, err := previewRestoreHelm(ctx, cfg, deps, target, work); err != nil {
+			return err
+		}
 		_, _ = fmt.Fprintln(w, "\nNo changes were made (--dry-run).")
 		return nil
 	}
@@ -511,12 +514,9 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	_, _ = fmt.Fprintln(w)
 	// Resolve the chart before changing anything, so a missing chart cannot
 	// leave secrets replaced or the server scaled down.
-	var helmArgs []string
-	if len(target.Overlay) > 0 {
-		var err error
-		if helmArgs, err = restoreHelmArgs(ctx, cfg, deps, target, work); err != nil {
-			return err
-		}
+	helmArgs, err := previewRestoreHelm(ctx, cfg, deps, target, work)
+	if err != nil {
+		return err
 	}
 	if parts.History {
 		// A stopped server's schema is known only once the restore pod
@@ -689,14 +689,29 @@ func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, ta
 		return nil, fmt.Errorf("chart %s is not available (pass --chart with the chart release oberth was installed from): %w", args[2], err)
 	}
 	args = append(args, "-n", cfg.Namespace, "--reuse-values", "-f", valuesFile)
-	retainsTransit, err := targetChartRetainsTransit(ctx, deps.Deps, chart)
+	targetDefaults, err := targetChartInstallerDefaults(ctx, deps.Deps, chart)
 	if err != nil {
 		return nil, err
 	}
-	if retainsTransit {
-		return args, nil
+	return prepareRetiredInstallerReuse(ctx, deps.Deps, cfg.Namespace, work, args, targetDefaults)
+}
+
+// Preview the exact restore upgrade before either secrets or the database change.
+func previewRestoreHelm(ctx context.Context, cfg RestoreConfig, deps backupDeps, target restoreTarget, work string) ([]string, error) {
+	if len(target.Overlay) == 0 {
+		return nil, nil
 	}
-	return prepareRetiredInstallerReuse(ctx, deps.Deps, cfg.Namespace, work, args)
+	args, err := restoreHelmArgs(ctx, cfg, deps, target, work)
+	if err != nil {
+		return nil, err
+	}
+	preview := append(append([]string(nil), args...), "--dry-run=server", "--no-hooks", "--output=json")
+	raw, err := deps.RunHelm(ctx, preview)
+	clear(raw)
+	if err != nil {
+		return nil, fmt.Errorf("preview restore before writes: %w", err)
+	}
+	return args, nil
 }
 
 // scaleServer scales through the scale subresource. A merge patch of the

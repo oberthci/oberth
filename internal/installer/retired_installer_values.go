@@ -12,22 +12,30 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// Only these leaves were written by the installer for the removed Plan
-// feature. Keep every live setting and every other unknown key for validation.
-func dropRetiredInstallerValues(values map[string]any, output io.Writer) bool {
+// Only these leaves were written by the installer for removed features.
+// Keep every live setting and every other unknown key for validation.
+func dropRetiredInstallerValues(values, target map[string]any, output io.Writer) bool {
 	store, _ := values["secretstore"].(map[string]any)
 	transit, _ := store["transit"].(map[string]any)
 	var removed []string
 	for _, key := range []string{"enabled", "mount", "key"} {
-		if _, exists := transit[key]; exists {
+		if _, exists := transit[key]; exists && !chartOwnsInstallerValue(target, "secretstore", "transit", key) {
 			delete(transit, key)
 			removed = append(removed, "secretstore.transit."+key)
+		}
+	}
+	transitRemoved := len(removed) > 0
+	argo, _ := values["argo"].(map[string]any)
+	for _, key := range []string{"controllerProfile", "controllerProfileConfigMap", "executionPlacementConfigMap", "executionTargetConfigMap", "executionTargetCredentialsSecret"} {
+		if _, exists := argo[key]; exists && !chartOwnsInstallerValue(target, "argo", key) {
+			delete(argo, key)
+			removed = append(removed, "argo."+key)
 		}
 	}
 	if len(removed) == 0 {
 		return false
 	}
-	if len(transit) == 0 {
+	if transitRemoved && len(transit) == 0 {
 		delete(store, "transit")
 	}
 	if output != nil {
@@ -62,7 +70,7 @@ func storedSnapshotHelmArgs(args []string, path string) []string {
 	return result
 }
 
-func prepareRetiredInstallerReuse(ctx context.Context, deps Deps, namespace, work string, args []string) ([]string, error) {
+func prepareRetiredInstallerReuse(ctx context.Context, deps Deps, namespace, work string, args []string, target map[string]any) ([]string, error) {
 	// Reuse only USER values. Coalesced defaults would become permanent
 	// operator overrides after Helm stores this snapshot in release.Config.
 	raw, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", namespace, "-o", "json"})
@@ -76,7 +84,7 @@ func prepareRetiredInstallerReuse(ctx context.Context, deps Deps, namespace, wor
 	if !json.Valid(raw) || decoder.Decode(&values) != nil {
 		return nil, fmt.Errorf("cannot decode stored Helm user values")
 	}
-	if !dropRetiredInstallerValues(values, deps.Output) {
+	if !dropRetiredInstallerValues(values, target, deps.Output) {
 		// --reuse-values also loads old defaults, even when no Transit leaf
 		// was stored by the operator. Inspect them only to decide on reset;
 		// none of these coalesced values may enter the user snapshot.
@@ -84,7 +92,7 @@ func prepareRetiredInstallerReuse(ctx context.Context, deps Deps, namespace, wor
 		if err != nil {
 			return nil, err
 		}
-		if !dropRetiredInstallerValues(installed, deps.Output) {
+		if !dropRetiredInstallerValues(installed, target, deps.Output) {
 			return args, nil
 		}
 	}
@@ -112,18 +120,30 @@ func prepareRetiredInstallerReuse(ctx context.Context, deps Deps, namespace, wor
 	return storedSnapshotHelmArgs(args, path), nil
 }
 
-// Restore targets the installed chart, which can still own Transit flags.
-// Removing its values would reactivate that chart's disabled Transit default.
-func targetChartRetainsTransit(ctx context.Context, deps Deps, chart string) (bool, error) {
+// Only target-declared leaves survive cleanup. Presence matters, including
+// empty and null defaults; a different retired leaf may already be rejected.
+func chartOwnsInstallerValue(target map[string]any, path ...string) bool {
+	for i, key := range path {
+		value, exists := target[key]
+		if !exists {
+			return false
+		}
+		if i == len(path)-1 {
+			return true
+		}
+		target, _ = value.(map[string]any)
+	}
+	return false
+}
+
+func targetChartInstallerDefaults(ctx context.Context, deps Deps, chart string) (map[string]any, error) {
 	raw, err := deps.RunHelm(ctx, []string{"show", "values", chart})
 	if err != nil {
-		return false, fmt.Errorf("read restore chart defaults: %w", err)
+		return nil, fmt.Errorf("read restore chart defaults: %w", err)
 	}
 	var values map[string]any
 	if err := yaml.Unmarshal(raw, &values); err != nil {
-		return false, fmt.Errorf("decode restore chart defaults: %w", err)
+		return nil, fmt.Errorf("decode restore chart defaults: %w", err)
 	}
-	store, _ := values["secretstore"].(map[string]any)
-	_, exists := store["transit"]
-	return exists, nil
+	return values, nil
 }

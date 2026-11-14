@@ -136,6 +136,7 @@ func TestRunUpgradeSameVersionValuesDryRunPlansReapply(t *testing.T) {
 		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
+	withValidatedDryRunRelease(t, &deps, "0.12.35")
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
 		BinaryVersion: "0.12.35", Namespace: "oberth", DryRun: true, UserValues: []string{valuesFile},
 	}, deps)
@@ -165,6 +166,7 @@ func TestRunUpgradeFailedSameVersionDryRunPlansRepair(t *testing.T) {
 		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
+	withValidatedDryRunRelease(t, &deps, "0.16.6")
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
 		BinaryVersion: "0.16.6", Namespace: "oberth", DryRun: true,
 	}, deps)
@@ -529,7 +531,7 @@ func TestRunUpgradeDryRun(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
-	withSignedRelease(t, &deps, "0.12.35", fakeChartImageRef)
+	withValidatedDryRunRelease(t, &deps, "0.12.35")
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
 		NoBackup:      true,
 		BinaryVersion: "0.12.35",
@@ -1749,7 +1751,7 @@ func TestDryRunOmitsRetiredGoProxyPins(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
-	withSignedRelease(t, &deps, "0.12.35", fakeChartImageRef)
+	withValidatedDryRunRelease(t, &deps, "0.12.35")
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
 		NoBackup:      true,
 		BinaryVersion: "0.12.35",
@@ -1788,6 +1790,7 @@ func TestDryRunIncludesUserValues(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
+	withValidatedDryRunRelease(t, &deps, "0.16.19")
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
 		BinaryVersion: "0.16.19",
 		Namespace:     "oberth",
@@ -1897,6 +1900,7 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
+	withValidatedDryRunRelease(t, &deps, "0.16.19")
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
 		BinaryVersion:       "0.16.19",
 		Namespace:           "oberth",
@@ -1944,6 +1948,7 @@ func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
+	withValidatedDryRunRelease(t, &deps, "0.16.19")
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
 		BinaryVersion:       "0.16.19",
 		Namespace:           "oberth",

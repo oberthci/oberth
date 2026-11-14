@@ -39,18 +39,29 @@
   still needs proof under the actual runtime; no capabilities, unconfined
   seccomp or sandbox-disabling flags are granted by this mode.
 
-- Before deploying the Argo Pod policy, install and upgrade check the live
+- Install and upgrade require Argo security defaults even when
+  `argo.podPolicy.enabled=false`. They check the live
   controller ConfigMap for `mainContainer.securityContext` and
   `executor.securityContext`: no privilege escalation, drop ALL capabilities,
   only NET_BIND_SERVICE added back, and RuntimeDefault or Localhost seccomp.
+  Seccomp may be inherited from `workflowDefaults.spec.securityContext`.
+  A non-null `workflowDefaults.spec.templateDefaults.securityContext` replaces
+  that Pod context, including when it has no seccomp profile. Valid Pod defaults
+  remain unchanged without adding container overrides. Explicit effective
+  Pod-level Unconfined or Unconfined in template default container contexts
+  refuses the operation, even when other containers select safe profiles.
+  A `workflowDefaults.spec.podSpecPatch` (or template default patch) that can
+  change security contexts is refused with the native key named; configure
+  those defaults directly. Resource-only patches remain allowed.
   Fresh managed installs supply missing defaults. Existing Argo releases require
   approval in interactive security review or `--argo-security-defaults` to fill
   absent native Helm values; operator values are preserved. Without consent the
   command refuses and prints the exact values to set. An external controller
   passes once its live configuration complies, including when installation uses
   `--skip-argo-workflows`. Unreadable live configuration refuses before policy
-  deployment. A stored `controller.configMap.create=false` is accepted when the live defaults
-  comply. Otherwise the error names the exact ConfigMap keys to configure and
+  deployment. With `controller.configMap.create=false`, only the live external
+  ConfigMap decides compliance; unused stored Helm contexts are ignored.
+  Otherwise the error names the exact ConfigMap keys to configure and
   links the [v0.22.5 migration](releases/v0.22.5.md) for old-profile releases.
 
 - SSH accepts only registered uplink public keys and exactly the two Git smart

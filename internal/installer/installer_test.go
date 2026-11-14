@@ -224,7 +224,7 @@ func TestRemoteContextIsAValidTarget(t *testing.T) {
 
 func TestDryRunZeroWrites(t *testing.T) {
 	t.Parallel()
-	helmCalls := 0
+	helmCalls, previews := 0, 0
 	var buf bytes.Buffer
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "kind-control-plane"},
@@ -233,6 +233,16 @@ func TestDryRunZeroWrites(t *testing.T) {
 	deps := Deps{
 		Output: &buf,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if args[0] == "show" {
+				return []byte("image:\n  ref: " + fakeChartImageRef + "\n"), nil
+			}
+			if args[0] == "get" {
+				return []byte(`{}`), nil
+			}
+			if args[0] == "upgrade" && slices.Contains(args, "--dry-run=server") && slices.Contains(args, "--no-hooks") {
+				previews++
+				return []byte(`{"config":{}}`), nil
+			}
 			if args[0] != "list" {
 				t.Fatalf("dry-run attempted mutation: %v", args)
 			}
@@ -243,12 +253,13 @@ func TestDryRunZeroWrites(t *testing.T) {
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "kind-test",
 	}
-	cfg := Config{DryRun: true}
+	withSignedRelease(t, &deps, "0.22.7", fakeChartImageRef)
+	cfg := Config{ChartVersion: "0.22.7", DryRun: true}
 	if err := Run(context.Background(), cfg, deps); err != nil {
 		t.Fatal(err)
 	}
-	if helmCalls != 2 {
-		t.Fatalf("dry-run called helm %d times, want read-only Oberth and Argo release lookups", helmCalls)
+	if helmCalls < 2 || previews != 1 {
+		t.Fatalf("dry-run needs release lookups and one chart preview: lookups=%d previews=%d", helmCalls, previews)
 	}
 	output := buf.String()
 	if strings.Contains(output, "all secret approvals are cleared; re-approve.") {
@@ -680,10 +691,20 @@ func TestDryRunFullPlanRendersAllPhases(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "kind-control-plane"},
 		Spec:       corev1.NodeSpec{ProviderID: "kind://docker/kind/kind-control-plane"},
 	}
-	helmCalls := 0
+	helmCalls, previews := 0, 0
 	deps := Deps{
 		Output: &buf,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if args[0] == "show" {
+				return []byte("image:\n  ref: " + fakeChartImageRef + "\n"), nil
+			}
+			if args[0] == "get" {
+				return []byte(`{}`), nil
+			}
+			if args[0] == "upgrade" && slices.Contains(args, "--dry-run=server") && slices.Contains(args, "--no-hooks") {
+				previews++
+				return []byte(`{"config":{}}`), nil
+			}
 			if args[0] != "list" {
 				t.Fatalf("dry-run attempted mutation: %v", args)
 			}
@@ -694,12 +715,13 @@ func TestDryRunFullPlanRendersAllPhases(t *testing.T) {
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "kind-test",
 	}
-	cfg := Config{DryRun: true, InstallSecretStore: true, InstallRekor: true}
+	withSignedRelease(t, &deps, "0.22.7", fakeChartImageRef)
+	cfg := Config{ChartVersion: "0.22.7", DryRun: true, InstallSecretStore: true, InstallRekor: true}
 	if err := Run(context.Background(), cfg, deps); err != nil {
 		t.Fatal(err)
 	}
-	if helmCalls != 2 {
-		t.Fatalf("dry-run called helm %d times, want read-only Oberth and Argo release lookups", helmCalls)
+	if helmCalls < 2 || previews != 1 {
+		t.Fatalf("dry-run needs release lookups and one chart preview: lookups=%d previews=%d", helmCalls, previews)
 	}
 	output := buf.String()
 	for _, want := range []string{
@@ -743,7 +765,9 @@ func TestDryRunDevSecretStorePlan(t *testing.T) {
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "kind-test",
 	}
-	if err := Run(context.Background(), Config{DryRun: true, InstallSecretStoreDev: true}, deps); err != nil {
+	cfg := Config{DryRun: true, InstallSecretStoreDev: true}
+	withInstallDryRunRelease(t, &deps, &cfg)
+	if err := Run(context.Background(), cfg, deps); err != nil {
 		t.Fatal(err)
 	}
 	output := buf.String()
@@ -778,7 +802,9 @@ func TestDryRunPlainPlanOmitsOptionalPhases(t *testing.T) {
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "default",
 	}
-	if err := Run(context.Background(), Config{DryRun: true}, deps); err != nil {
+	cfg := Config{DryRun: true}
+	withInstallDryRunRelease(t, &deps, &cfg)
+	if err := Run(context.Background(), cfg, deps); err != nil {
 		t.Fatal(err)
 	}
 	output := buf.String()
@@ -3426,6 +3452,7 @@ func TestK3sAutoNetworkPolicySetsFlag(t *testing.T) {
 		ContextName: "default",
 	}
 	cfg := Config{DryRun: true}
+	withInstallDryRunRelease(t, &deps, &cfg)
 	if err := Run(context.Background(), cfg, deps); err != nil {
 		t.Fatal(err)
 	}

@@ -515,6 +515,9 @@ func (c *fakeBackupCluster) helm(_ context.Context, args []string) ([]byte, erro
 		}
 		return []byte("name: oberth\n"), nil
 	case args[0] == "upgrade":
+		if slices.Contains(args, "--dry-run=server") {
+			return []byte(`{}`), nil
+		}
 		c.helmUpgrade = args
 		if c.helmConflictOnce {
 			c.helmConflictOnce = false

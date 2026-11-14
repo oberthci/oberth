@@ -41,6 +41,10 @@ commit and a review like any other change.
 when: "'{{workflow.parameters.oberth-schedule}}' == 'weekly-deps'"
 ```
 
+Entry names must start with a letter or digit, use only letters, digits and
+`. _ / + @ = , -`, and contain at most 64 bytes. Schedule parsing and stored-run
+compilation both enforce this alphabet before setting the workflow parameter.
+
 This is a reserved, server-owned workflow parameter. Reference it directly;
 do not declare it in `spec.arguments.parameters`, including a default or
 `valueFrom`. Such declarations are rejected at admission. Cron fires and

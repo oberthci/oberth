@@ -872,10 +872,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 
 	if cfg.DryRun {
-		if deps.installResolved != nil {
-			deps.installResolved(cfg)
-		}
-		return printDryRunPlan(cfg, deps.Output, cluster)
+		return runInstallDryRun(ctx, cfg, deps, cluster)
 	}
 	cleanupRelease, err := preflightInstallRelease(ctx, &cfg, deps)
 	if err != nil {
@@ -1100,6 +1097,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	// reconciles produces a run that never starts and never fails.
 	quietArgoDeps := deps
 	quietArgoDeps.Output = io.Discard
+	quietArgoDeps.Input, quietArgoDeps.IsTerminal = nil, nil
 	argo, err := InstallArgoWorkflows(ctx, cfg, quietArgoDeps)
 	if err != nil {
 		tw.WriteFooter()
@@ -1647,7 +1645,7 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 			return result, err
 		}
 		defer func() { _ = os.RemoveAll(work) }()
-		args, err = prepareRetiredInstallerReuse(ctx, deps, ns, work, args)
+		args, err = prepareRetiredInstallerReuse(ctx, deps, ns, work, args, nil)
 		if err != nil {
 			return result, err
 		}

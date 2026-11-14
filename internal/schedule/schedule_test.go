@@ -1,12 +1,25 @@
 package schedule
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/oberthci/oberth/internal/cron"
 )
+
+func TestParseScheduleNameAlphabet(t *testing.T) {
+	for _, name := range []string{"night ly", "night'ly", "{{workflow.name}}", "$(id)", "night;ly", "night\nly", "夜間", "-nightly"} {
+		raw, err := json.Marshal(map[string]any{"schedules": []map[string]string{{"name": name, "cron": "0 3 * * *"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Parse(raw, testLimits(), at(t, "2026-08-24T00:00:00Z")); err == nil || !strings.Contains(err.Error(), "schedule name is invalid") {
+			t.Fatalf("unsafe schedule name admitted: %q %v", name, err)
+		}
+	}
+}
 
 func testLimits() Limits {
 	return Limits{MinInterval: 15 * time.Minute, MaxEntries: 4}

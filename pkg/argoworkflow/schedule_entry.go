@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // ScheduleParameter identifies the resolved schedule entry of the durable run.
@@ -16,6 +18,9 @@ const ScheduleParameter = "oberth-schedule"
 func ValidateScheduleEntry(trigger RunTrigger, entry string) error {
 	if !trigger.Valid() || len(entry) > 64 || strings.TrimSpace(entry) != entry || (entry != "" && trigger != RunTriggerSchedule) {
 		return errors.New("argoworkflow: schedule entry requires a schedule run and at most 64 bytes")
+	}
+	if entry != "" {
+		return model.ValidateScheduleName(entry)
 	}
 	return nil
 }
