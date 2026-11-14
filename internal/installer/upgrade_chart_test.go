@@ -361,7 +361,7 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T) {
 				}
 			}
 			if mode == "install" {
-				args, err = prepareRetiredInstallerReuse(t.Context(), deps, "oberth", t.TempDir(), args)
+				args, err = prepareRetiredInstallerReuse(t.Context(), deps, "oberth", t.TempDir(), args, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -390,7 +390,7 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T) {
 			if err := json.Unmarshal(stored, &want); err != nil {
 				t.Fatal(err)
 			}
-			dropRetiredInstallerValues(want, nil)
+			dropRetiredInstallerValues(want, nil, nil)
 			want["compatibility"] = identities
 			if mode == "install" {
 				want["image"].(map[string]any)["ref"] = image
