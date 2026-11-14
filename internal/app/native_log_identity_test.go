@@ -306,7 +306,7 @@ func TestNativeGreenRetryClearsFailureIdentity(t *testing.T) {
 	flat.Phase = wfv1.NodeSucceeded
 	wf.Status.Nodes["flat-node"] = flat
 	wf.Status.Phase = wfv1.WorkflowSucceeded
-	completion := argojob.Completion{Name: wf.Name, Terminal: true, Succeeded: true, Phase: string(wf.Status.Phase), Steps: argojob.StepResults(wf), NodeSteps: argojob.NodeStepResults(wf, pods), FailedStage: "compile", FailedStep: "compile"}
+	completion := argojob.Completion{Name: wf.Name, Terminal: true, Succeeded: true, Phase: string(wf.Status.Phase), Steps: argojob.StepResults(wf), NodeSteps: argojob.NodeStepResults(wf, pods), FailedStage: "compile", FailedStep: "compile", FailedNodeID: "attempt-0"}
 	result := (&ArgoJobs{}).result(completion)
 	if result.Status != model.RunPassed || result.FailedStep != "" || result.FailedStage != "" {
 		t.Fatal("green retry retained failure identity", result)

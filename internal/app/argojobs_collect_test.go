@@ -66,7 +66,7 @@ func TestArgoCollectPreservesNativeVerdictAndUnfinishedNodes(t *testing.T) {
 				}
 				completion := argojob.Completion{Name: wf.Name, Terminal: true, Succeeded: succeeded, Phase: string(wf.Status.Phase), Reason: "original workflow failure", Steps: argojob.StepResults(wf), NodeSteps: argojob.NodeStepResults(wf, nil)}
 				if !succeeded {
-					completion.FailedStage, completion.FailedStep = "verify", "verify"
+					completion.FailedStage, completion.FailedStep, completion.FailedNodeID = "verify", "verify", "failed"
 				}
 				control := &configuredController{waitResult: completion}
 				adapter := &ArgoJobs{controller: control, intents: map[string]argoIntent{}}
