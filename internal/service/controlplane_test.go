@@ -2548,6 +2548,20 @@ func TestFastForwardPublicationDoesNotDelaySameRefWorkflowCreation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	until := time.Now().Add(testStartTimeout(5 * time.Second))
+	for {
+		run, err := fixture.store.Run(t.Context(), blocked.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.WorkflowName != "" {
+			break
+		}
+		if time.Now().After(until) {
+			t.Fatal("Workflow submission did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	queued, err := fixture.store.Run(context.Background(), blocked.ID)
 	if err != nil || queued.Status != model.RunRunning || queued.WorkflowName == "" {
 		t.Fatalf("same-ref run during fast-forward publication = %#v, %v", queued, err)

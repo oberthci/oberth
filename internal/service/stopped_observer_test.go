@@ -100,7 +100,7 @@ func TestStopRacedSucceededPromotionUsesNormalPublication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := storetest.ClaimNextRun(f.store, t.Context())
+	claimed, err := f.store.StartRun(t.Context(), run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

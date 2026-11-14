@@ -46,7 +46,7 @@ func annotatedWaitTag(t *testing.T) (string, string) {
 
 func finishWaitFixtureRun(t *testing.T, fixture *controlFixture, runID string) {
 	t.Helper()
-	claimed, err := storetest.ClaimNextRun(fixture.store, context.Background())
+	claimed, err := fixture.store.StartRun(context.Background(), runID)
 	if err != nil || claimed.ID != runID {
 		t.Fatalf("claim = %s, %v; want %s", claimed.ID, err, runID)
 	}

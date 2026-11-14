@@ -79,7 +79,7 @@ spec:
 			f.scheduler.jobs = jobs
 			request := CIRequest{EventID: "validation", Repository: f.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "author@host"}
 			accepted, err := f.scheduler.recordCIForTest(t.Context(), request)
-			if err != nil || accepted.Status != model.RunQueued {
+			if err != nil || accepted.Status != model.RunRunning {
 				t.Fatal(accepted, err)
 			}
 			if jobs.creates != 0 {

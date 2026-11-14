@@ -12,7 +12,6 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type promotionRetryLog struct {
@@ -36,7 +35,7 @@ func TestStartupSkipsPromotionAlreadyDeliveredByAnotherPromotion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = storetest.ClaimNextRun(f.store, t.Context()); err != nil {
+	if _, err = f.store.StartRun(t.Context(), original.RunID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = f.store.MarkRunSubmissionStarted(t.Context(), original.RunID); err != nil {

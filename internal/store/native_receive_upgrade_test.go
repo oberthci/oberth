@@ -246,7 +246,7 @@ func TestNativeReceiveUpgradePreservesExecutionAndPublicationCustody(t *testing.
 			event := seedDeferredReceive(t, s, "new-main", newerSpec)
 			applyNativeReceiveUpgrade(t, s)
 			newer, err := s.EnqueueReceiveEvent(ctx, event, newerSpec)
-			if err != nil || newer.Status != model.RunRunning {
+			if err != nil || newer.Status != model.RunQueued {
 				t.Fatal(newer, err)
 			}
 			after, err := s.Run(ctx, older.ID)

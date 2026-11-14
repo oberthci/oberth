@@ -149,7 +149,11 @@ func TestPromoteRetryReusesExactTransientPushCandidate(t *testing.T) {
 			actor := api.Actor{Identity: "admin@host", Admin: true}
 			id := promoteForRetry(t, control, actor)
 			// Simulate an exhausted push-only failure after the recorded CI passed.
-			pending, err := storetest.ClaimNextRun(s.store, t.Context())
+			acceptedPromotion, err := f.store.Promotion(t.Context(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending, err := s.store.StartRun(t.Context(), acceptedPromotion.RunID)
 			if err != nil {
 				t.Fatal(err)
 			}

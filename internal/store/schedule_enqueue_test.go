@@ -35,7 +35,7 @@ func TestScheduleOccurrenceCreatesIndependentOverlappingRuns(t *testing.T) {
 				t.Fatalf("first = %+v, %v", first, err)
 			}
 			if claimed {
-				if _, err := s.ClaimNextRun(t.Context()); err != nil {
+				if _, err := s.MarkRunSubmissionStarted(t.Context(), first.Enqueued.ID); err != nil {
 					t.Fatal(err)
 				}
 			}

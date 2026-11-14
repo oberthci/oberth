@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -95,10 +96,14 @@ DELETE FROM schema_migrations WHERE version >= (SELECT version FROM schema_migra
 			t.Fatal("restart deletion survived migration", c)
 		}
 	}
-	next, err := s.ClaimNextRun(ctx)
-	if err != nil || next.ID != fresh.ID {
-		t.Fatal("migration re-submitted old work", next, err)
+	next, err := s.Run(ctx, fresh.ID)
+	if err != nil || next.Status != model.RunFailed || next.Error != model.ServerRestartReason {
+		t.Fatal("unsubmitted history survived restart", next, err)
 	}
+	if next, err := s.ClaimNextRun(ctx); !errors.Is(err, ErrNotFound) {
+		t.Fatal("restart resubmitted old work", next, err)
+	}
+
 	if count, err := s.CountRuns(ctx); err != nil || count.Total != 5 {
 		t.Fatal(count, err)
 	}

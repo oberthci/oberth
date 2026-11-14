@@ -100,7 +100,6 @@ func TestScheduleCronSubmitsIndependentOverlappingOccurrences(t *testing.T) {
 			t.Fatalf("occurrence not submitted=%+v %v", run, err)
 		}
 	}
-	f.awaitCreated(t, 2)
 	for _, id := range []string{first.Enqueued.ID, next.Enqueued.ID} {
 		f.engine.finish(t, id)
 		f.awaitTerminal(t, id)

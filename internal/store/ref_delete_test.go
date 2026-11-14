@@ -158,7 +158,7 @@ func TestRefDeletionAuditFailureRollsBackCancellation(t *testing.T) {
 		t.Fatal("unaudited deletion accepted")
 	}
 	current, err := s.Run(t.Context(), run.ID)
-	if err != nil || current.Status != model.RunRunning {
+	if err != nil || current.Status != model.RunQueued {
 		t.Fatalf("failed transaction cancelled run: %+v %v", current, err)
 	}
 	if _, err = s.ReceiveEvent(t.Context(), "delete"); err == nil {

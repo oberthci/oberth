@@ -178,7 +178,7 @@ func TestGreenPromotionTrainClosesTrailerIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = storetest.ClaimNextRun(f.store, ctx); err != nil {
+	if _, err = f.store.StartRun(ctx, queued.ID); err != nil {
 		t.Fatal(err)
 	}
 	pub, err := f.store.BeginPublication(ctx, model.PublicationSpec{RepoID: f.repo.ID, RunID: queued.ID, PromotionID: promotion.ID, RefKind: model.RefBranch, Ref: "main", PreviousSHA: previous, PreviousKnown: true, ResultSHA: merged, Actor: "owner"})

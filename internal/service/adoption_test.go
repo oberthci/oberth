@@ -408,7 +408,7 @@ func TestUnreadableNonAdoptingWorkflowKeepsRunForObservation(t *testing.T) {
 			t.Fatal(err)
 		}
 		run := enqueued.Run
-		if _, err := storetest.ClaimNextRun(fixture.store, context.Background()); err != nil {
+		if _, err := fixture.store.StartRun(context.Background(), run.ID); err != nil {
 			t.Fatal(err)
 		}
 		fixture.setWorkflowName(t, run.ID, "oberth-legacy")

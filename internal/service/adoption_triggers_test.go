@@ -45,7 +45,7 @@ func slice2ClaimedRun(t *testing.T, kind string) (*recoveryFixture, model.Run, m
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := storetest.ClaimNextRun(fixture.store, ctx)
+	run, err := fixture.store.StartRun(ctx, enqueued.ID)
 	if err != nil || run.ID != enqueued.ID {
 		t.Fatalf("claim: %+v %v", run, err)
 	}

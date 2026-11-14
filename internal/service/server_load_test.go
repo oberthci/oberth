@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // TestMCPUnderQueueLoad runs the real scheduler, SQLite event recorder and HTTPS
@@ -169,11 +168,12 @@ func queueLoadFixture(t *testing.T) (*groupFixture, *API) {
 			t.Error(err)
 		}
 	})
+	var accepted []model.Run
 	for index := range 10 {
-		f.branch(t, f.terraform, fmt.Sprintf("feature/running-%d", index), "a")
+		accepted = append(accepted, f.branch(t, f.terraform, fmt.Sprintf("feature/running-%d", index), "a"))
 	}
-	for range 10 {
-		run, err := storetest.ClaimNextRun(f.store, t.Context())
+	for _, candidate := range accepted {
+		run, err := f.store.StartRun(t.Context(), candidate.ID)
 		if err != nil {
 			t.Fatal(err)
 		}

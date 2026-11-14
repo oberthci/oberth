@@ -75,7 +75,7 @@ func TestDeletedReceiveReplayMustNotHideRecreatedRun(t *testing.T) {
 	checkStatus("new run passed", "delivered")
 	push.EventID = "deferred"
 	replay, err := ingestor.Branch(ctx, push)
-	if err != nil || !replay.Duplicate || replay.Run == nil || replay.Run.ID != deferred.Run.ID || replay.Run.Status != model.RunInterrupted {
+	if err != nil || !replay.Duplicate || replay.Run == nil || replay.Run.ID != deferred.Run.ID || !replay.Run.Cancelled() {
 		t.Fatalf("cancelled receipt lost replay identity: %+v %v", replay, err)
 	}
 	checkStatus("after old receive replay", "delivered")
