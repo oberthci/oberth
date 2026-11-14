@@ -12,16 +12,18 @@ spec:
     resourceRules:
       - apiGroups: ["argoproj.io"]
         apiVersions: ["v1alpha1"]
-        operations: ["CREATE", "UPDATE"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
         resources: ["workflowtaskresults"]
   matchConditions:
     - name: pipeline-serviceaccounts
       expression: {{ printf "request.namespace == %s && request.userInfo.username.startsWith(%s)" (.Values.argo.namespace | toJson) ((printf "system:serviceaccount:%s:" .Values.argo.namespace) | toJson) | quote }}
   variables:
+    - name: result
+      expression: "request.operation == 'DELETE' ? oldObject : object"
     - name: ownerUID
-      expression: "has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 ? string(object.metadata.ownerReferences[0].uid) : ''"
+      expression: "has(variables.result.metadata.ownerReferences) && size(variables.result.metadata.ownerReferences) == 1 ? string(variables.result.metadata.ownerReferences[0].uid) : ''"
     - name: ownerName
-      expression: "has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 ? object.metadata.ownerReferences[0].name : ''"
+      expression: "has(variables.result.metadata.ownerReferences) && size(variables.result.metadata.ownerReferences) == 1 ? variables.result.metadata.ownerReferences[0].name : ''"
     - name: podName
       expression: "has(request.userInfo.extra) && 'authentication.kubernetes.io/pod-name' in request.userInfo.extra && size(request.userInfo.extra['authentication.kubernetes.io/pod-name']) == 1 ? request.userInfo.extra['authentication.kubernetes.io/pod-name'][0] : ''"
     - name: holderPrefix
@@ -31,11 +33,11 @@ spec:
   validations:
     - expression: "variables.podName != '' && has(request.userInfo.extra) && 'authentication.kubernetes.io/pod-uid' in request.userInfo.extra && size(request.userInfo.extra['authentication.kubernetes.io/pod-uid']) == 1 && request.userInfo.extra['authentication.kubernetes.io/pod-uid'][0] != ''"
       message: "task results require a Pod-bound executor identity"
-    - expression: "has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 && object.metadata.ownerReferences[0].apiVersion == 'argoproj.io/v1alpha1' && object.metadata.ownerReferences[0].kind == 'Workflow' && variables.ownerUID != '' && !variables.ownerUID.contains('.') && variables.ownerName != ''"
+    - expression: "has(variables.result.metadata.ownerReferences) && size(variables.result.metadata.ownerReferences) == 1 && variables.result.metadata.ownerReferences[0].apiVersion == 'argoproj.io/v1alpha1' && variables.result.metadata.ownerReferences[0].kind == 'Workflow' && variables.ownerUID != '' && !variables.ownerUID.contains('.') && variables.ownerName != ''"
       message: "task results require exactly one Workflow owner"
     - expression: "variables.holderRole == 'executor' || variables.holderRole.matches('^[a-f0-9]{24}$')"
       message: "task result Workflow name and UID differ from the authenticated bound identity Pod"
-    - expression: "has(object.metadata.labels) && 'workflows.argoproj.io/workflow' in object.metadata.labels && object.metadata.labels['workflows.argoproj.io/workflow'] == variables.ownerName && (object.metadata.name == variables.ownerName || (object.metadata.name.startsWith(variables.ownerName + '-') && object.metadata.name.substring(size(variables.ownerName) + 1).matches('^[0-9]{1,10}$')))"
+    - expression: "has(variables.result.metadata.labels) && 'workflows.argoproj.io/workflow' in variables.result.metadata.labels && variables.result.metadata.labels['workflows.argoproj.io/workflow'] == variables.ownerName && (variables.result.metadata.name == variables.ownerName || (variables.result.metadata.name.startsWith(variables.ownerName + '-') && variables.result.metadata.name.substring(size(variables.ownerName) + 1).matches('^[0-9]{1,10}$')))"
       message: "task result name and workflow label must belong to its bound Workflow"
     - expression: "request.operation != 'UPDATE' || (has(oldObject.metadata.ownerReferences) && size(oldObject.metadata.ownerReferences) == 1 && oldObject.metadata.ownerReferences[0].apiVersion == 'argoproj.io/v1alpha1' && oldObject.metadata.ownerReferences[0].kind == 'Workflow' && string(oldObject.metadata.ownerReferences[0].uid) == variables.ownerUID && oldObject.metadata.ownerReferences[0].name == variables.ownerName && has(oldObject.metadata.labels) && 'workflows.argoproj.io/workflow' in oldObject.metadata.labels && oldObject.metadata.labels['workflows.argoproj.io/workflow'] == variables.ownerName)"
       message: "task results cannot be reassigned from another Workflow"
