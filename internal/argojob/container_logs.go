@@ -138,6 +138,9 @@ func (controller *Controller) observeContainerLogs(ctx context.Context, workflow
 		if !claimed {
 			continue
 		}
+		if err := ctx.Err(); err != nil {
+			return errors.Join(result, err, controller.containerLogs.ReleaseContainerLog(runID, entry))
+		}
 		if readCtx.Err() != nil {
 			entry.Reason = "oberth: log unavailable: container copy observation deadline ended"
 			result = errors.Join(result, controller.containerLogs.StoreContainerLog(runID, entry, controller.config.MaxRunLogBytes))
@@ -150,7 +153,7 @@ func (controller *Controller) observeContainerLogs(ctx context.Context, workflow
 				}
 			}
 		}
-		result = errors.Join(result, controller.storeContainerCopy(readCtx, workflow, runID, entry))
+		result = errors.Join(result, controller.storeContainerCopy(readCtx, ctx, workflow, runID, entry))
 	}
 	if err := ctx.Err(); err != nil {
 		return errors.Join(result, err)
@@ -180,13 +183,16 @@ func (controller *Controller) recordMissingPodLogs(runID string, workflow *wfv1.
 	return result
 }
 
-func (controller *Controller) storeContainerCopy(ctx context.Context, workflow *wfv1.Workflow, runID string, entry runlog.ContainerLog) error {
+func (controller *Controller) storeContainerCopy(ctx, observerCtx context.Context, workflow *wfv1.Workflow, runID string, entry runlog.ContainerLog) error {
 	for attempt := 0; attempt < 2; attempt++ {
-		reader, err := controller.openBoundContainerLog(ctx, workflow, entry, false)
+		reader, opened, err := controller.openBoundContainerLog(ctx, workflow, entry, false)
 		if err == nil {
 			entry.Reader = reader
 			defer func() { _ = reader.Close() }()
 			return controller.containerLogs.StoreContainerLog(runID, entry, controller.config.MaxRunLogBytes)
+		}
+		if !opened && observerCtx.Err() != nil {
+			return errors.Join(observerCtx.Err(), controller.containerLogs.ReleaseContainerLog(runID, entry))
 		}
 		if apierrors.IsNotFound(err) {
 			entry.Reason = "oberth: log unavailable: Pod or container log no longer exists"
@@ -217,22 +223,28 @@ func (controller *Controller) verifyContainerLogPod(ctx context.Context, workflo
 	return errors.New("argojob: container log identity changed")
 }
 
-func (controller *Controller) openBoundContainerLog(ctx context.Context, workflow *wfv1.Workflow, entry runlog.ContainerLog, follow bool) (io.ReadCloser, error) {
+func (controller *Controller) openBoundContainerLog(ctx context.Context, workflow *wfv1.Workflow, entry runlog.ContainerLog, follow bool) (io.ReadCloser, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
 	if controller.containerLogSource == nil {
-		return nil, errors.New("argojob: native container logs are unavailable")
+		return nil, false, errors.New("argojob: native container logs are unavailable")
 	}
 	if err := controller.verifyContainerLogPod(ctx, workflow, entry); err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
 	}
 	reader, err := controller.containerLogSource(ctx, entry.Namespace, entry.PodName, corev1.PodLogOptions{Container: entry.ContainerName, Follow: follow})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := controller.verifyContainerLogPod(ctx, workflow, entry); err != nil {
 		_ = reader.Close()
-		return nil, err
+		return nil, true, err
 	}
-	return closeContainerLogWithContext(ctx, reader), nil
+	return closeContainerLogWithContext(ctx, reader), true, nil
 }
 
 func (controller *Controller) ContainerLogTargets(ctx context.Context, name, runID string) ([]StepContainer, error) {
@@ -274,7 +286,8 @@ func (controller *Controller) OpenContainerLog(ctx context.Context, name, runID,
 	}
 	for _, target := range StepContainers(workflow, controller.hub.PodsOf(name)) {
 		if target.NodeID == nodeID && target.ContainerName == container {
-			return controller.openBoundContainerLog(ctx, workflow, containerLogEntry(target), follow)
+			reader, _, err := controller.openBoundContainerLog(ctx, workflow, containerLogEntry(target), follow)
+			return reader, err
 		}
 	}
 	return nil, fmt.Errorf("argojob: native container log binding is unavailable: %w", apierrors.NewNotFound(corev1.Resource("pods"), nodeID))

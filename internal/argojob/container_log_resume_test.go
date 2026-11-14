@@ -172,10 +172,10 @@ func TestContainerLogCancelledFinalPassLeavesUnstartedCopiesEligible(t *testing.
 		t.Fatal("final snapshot ignored observer cancellation", err)
 	}
 	entries, err := store.ContainerLogs(t.Context(), "run")
-	if err != nil || len(entries) != 3 || calls != 1 || !entries[0].Captured {
+	if err != nil || len(entries) != 3 || calls != 1 {
 		t.Fatal(entries, calls, err)
 	}
-	for _, entry := range entries[1:] {
+	for _, entry := range entries {
 		if entry.Captured || entry.Pending || entry.Reason != "" {
 			t.Fatal("cancelled final pass sealed an unstarted copy", entry)
 		}
@@ -185,10 +185,10 @@ func TestContainerLogCancelledFinalPassLeavesUnstartedCopiesEligible(t *testing.
 			t.Fatal(err)
 		}
 	}
-	if calls != 3 {
+	if calls != 4 {
 		t.Fatal("adoption lost or repeated a physical copy", calls)
 	}
-	for _, entry := range entries[1:] {
+	for _, entry := range entries {
 		body, _, saved, err := store.ReadContainerLog(t.Context(), "run", "node", entry.ContainerName, runlog.Filter{})
 		if err != nil || !saved.Captured || string(body) != "remaining output\n" {
 			t.Fatal(string(body), saved, err)
