@@ -4,12 +4,12 @@ Read the operator section before changing the server, then apply the repository
 changes for that release after deployment. Examples are YAML excerpts; retain
 the surrounding Workflow and substitute installation-specific values and images.
 
-This guide uses the v0.22.7 documentation base. Two v0.22.7 integration items,
-SEC-A and S8, are verified in separate slice code but absent from that base.
-Their sections say **integration prerequisite**. All v0.22.8, v0.23.0 and
-v0.23.1 sections are **DRAFT**, including every recipe and quoted future
-refusal. They describe intended changes under review, not an available upgrade.
-Do not apply a later recipe to an older server.
+This guide uses the merged v0.22.7 documentation base, including authored
+security contexts and credential-output guards. The administration API cutover
+and executor-token follow-up still await merge; their blocks carry pending
+comments. All v0.22.8, v0.23.0 and v0.23.1 sections are **DRAFT**, including
+every recipe and quoted future refusal. They describe intended changes under
+review, not an available upgrade. Do not apply a later recipe to an older server.
 
 ## Operators
 
@@ -22,40 +22,57 @@ distinct. Read-only planning does not establish current NetworkPolicy
 enforcement; installation measures it after approval.
 
 Keep both native task-result and executor-holder admission policies and their
-Deny bindings. Both are present in the documentation base; the reviewed executor
-follow-up adds DELETE protection and a one-second wait-container start margin,
-which are not in that base. The margin
-reduces a shared-template startup race without closing it. Every container of a
-step receiving credentials shares that step's trust. Neither output guards nor
-the margin create an isolation boundary within that Pod.
-The executor report notes that runtime does not check these policies still
-exist; removing either policy or its binding removes the corresponding protection.
+Deny bindings. Both are present in the documentation base. Runtime does not check
+that they still exist; removing either policy or its binding removes the
+corresponding protection.
+
+<!-- PENDING MERGE -->
+
+The executor-token follow-up adds task-result DELETE protection against the
+stored object's Workflow and retires every Workflow-owned identity holder,
+including old names and capability accounts. It also requires wait's native
+`lifecycle.postStart.sleep.seconds: 1`. Each step Pod's main container and
+sidecars start about one second later, adding about one second per step. The
+report proves admission on Kubernetes 1.33.1. Use normal cascading Workflow
+deletion or Argo TTL; orphan deletion can hang on a holder owner update.
+
+<!-- PENDING: confirm the exact native sleep lifecycle feature-gate requirement;
+the token-hardening report proves admission on 1.33.1 but states no gate fact. -->
+
+The margin reduces a shared-template startup race without closing it. Every
+container of a step receiving credentials shares that step's trust. Neither
+output guards nor the margin create an isolation boundary within that Pod.
 
 Before each upgrade, keep the history archive and its decryption key, operator
 values, and any separate OpenBao or server-volume data backups needed for
 recovery. A history-only backup excludes secret values and log/artifact bytes.
 Forward migrations do not provide a schema downgrade. Inspect a backup before
-restore and review `oberth restore --dry-run`; across chart generations, run
-`oberth upgrade` first when instructed. Do not infer cross-generation restore
-support from the ability to read an archive.
+restore and review `oberth restore --dry-run`. Across chart generations, run
+`oberth upgrade` first; reading an archive does not establish cross-generation
+restore support.
 
 ### v0.22.7: before and after upgrade
 
-**One-time S8 integration prerequisite:** a v0.22.6 or older server has no
+<!-- PENDING MERGE -->
+
+**One-time administration API cutover:** a v0.22.6 or older server has no
 administration API. Before deploying the API-based CLI/server, use the verified
 CLI matching the running version, then use the new CLI:
 
 ```sh
 ./oberth-v0.22.6 backup --history-only --context CONTEXT --namespace oberth
-oberth upgrade --no-backup --context CONTEXT --namespace oberth --wait-idle
+oberth upgrade --no-backup --context CONTEXT --namespace oberth --wait-idle --argo-security-defaults
 ```
 
 Use the actual running version and selected cluster, not necessarily the example
 version. Keep that archive for manual recovery: `--no-backup` does not record it
 as the upgrade's automatic backup. Stop new submissions while draining.
-`--wait-idle` does not freeze admission. S8 can observe native Workflows through
-Kubernetes on older servers; if that observation is unavailable, independently
-confirm idle before deliberately omitting wait flags.
+v0.22.7 does not drain by default: pass `--wait-idle` (or `--wait-for=all`).
+This wait does not freeze admission. The API cutover observes native Workflows
+through Kubernetes on older servers; if that observation is unavailable,
+independently confirm idle before deliberately omitting wait flags. The consent
+flag fills absent Argo security defaults; interactive review approval is the
+alternative. From v0.22.8 a version-changing upgrade waits for idle by default.
 
 The exact S8 message for the example version/context/namespace, without wait
 flags, is below. It is verified in the slice, absent from the documentation base:
@@ -71,7 +88,8 @@ If Kubernetes Workflow observation is unavailable, confirm no runs are active be
 
 The command printer retains selected idle/security flags when supplied. S8 also
 moves later admin operations to authenticated APIs; first-admin enrollment keeps
-one install-time exec, recoverable using the saved enrollment identity.
+one install-time exec, recoverable using the saved enrollment identity. This
+cutover and interrupted-install resume await the administration API merge.
 
 Before upgrade:
 
@@ -91,6 +109,24 @@ Before upgrade:
 5. Inventory unsupported refs using the read-only command in
    [run facts](run-facts.md). Rename them upstream before refresh; an unsupported
    default branch also prevents refresh and runs.
+
+Before upgrading, record the count of interrupted runs with an outstanding
+cancellation that the native Stop migration will resume observing. Run this
+read-only query against a pre-upgrade database copy; it makes no changes:
+
+```sql
+SELECT COUNT(*) AS interrupted_with_pending_cancellation
+FROM runs AS r
+JOIN run_cancellations AS c ON c.run_id = r.id
+WHERE r.status = 'interrupted'
+  AND c.completed_at IS NULL
+  AND c.job_name != ''
+  AND c.reason != 'owner_restart'
+  AND (r.trigger != 'promotion' OR NOT EXISTS (
+    SELECT 1 FROM promotions AS p
+    WHERE p.run_id = r.id AND p.status != 'pending'
+  ));
+```
 
 For managed Argo, the safe native defaults have this shape (Argo values, not
 repository Workflow YAML). Preserve unrelated operator fields:
@@ -116,17 +152,26 @@ Check the effective merged Pod/template settings, not just this values excerpt.
 The pipeline namespace remains privileged while hostPath caches exist; do not
 raise it to baseline yet.
 
-After upgrade, apply run-fact mappings before the next release run. Apply SEC-A
-security/scratch YAML only after that integration prerequisite lands. Check a
-plain run, a granted run and ordinary Stop cancellation. If coming from before
-v0.22.5, **all secret approvals are cleared; re-approve**, then run
+After deploying v0.22.7, update pipelines that used
+`oberth.ci/nonroot-templates`: remove the annotation, author security contexts
+and scratch volumes, and validate with the new CLI before the next run. Apply
+run-fact mappings too. Re-approve exact grants when workflow files change. A
+shared pipeline repository must also update its own affected workflows after
+deployment. Check a plain run, a granted run and ordinary Stop cancellation. If
+coming from before v0.22.5, **all secret approvals are cleared; re-approve**, then run
 `oberth secretstore sync` and provision scoped identities. That is the earlier
 v0.22.5 migration, not a fresh clearing on every upgrade.
-SEC-A also retires `argo.executorScratchSizeLimit` and its CLI flag. Its reported
-install/upgrade/restore cleanup drops that exact stored leaf, including old
+The release also retires `argo.executorScratchSizeLimit` and its CLI flag.
+Install/upgrade/restore cleanup drops that exact stored leaf, including old
 coalesced defaults, while preserving operator settings. Argo owns executor scratch.
 
 ### DRAFT v0.22.8: watch, history and cleanup cutover
+
+From v0.22.8, a version-changing `oberth upgrade` waits for idle by default,
+with a visible countdown and a bounded timeout that refuses rather than
+proceeding. `--no-wait-idle` skips that wait. This is an owner-decided DRAFT
+change, not v0.22.7 behavior. Stop submissions while draining; the wait does not
+freeze admission.
 
 Before upgrade, back up history and establish the Argo native cleanup default
 before the server stops injecting per-Workflow TTLs. The reported installer
@@ -154,16 +199,28 @@ retirement. Watch for missing-log reason lines rather than assuming every Pod
 survives cleanup. Grants become database-only authority; no ConfigMap mirror
 should be used to restore permissions.
 
+The promotion FIFO queue is removed: promotions are planned immediately, and a
+moved target follows the existing re-prepare/re-test path. The client plugin adds
+`/oberth:runs` and `/oberth:watch` in v0.22.8. A failed CLI call displays its
+sanitised first error line; a watch stops after three consecutive failures and
+can be cleared with `/oberth:watch --off`. These remain DRAFT pending integration
+and client qualification; no server behavior change is required by the plugin.
+
 ### DRAFT v0.23.0: source, credentials, PVCs and Pod Security
 
 Before upgrade:
 
 1. Stop new submissions and drain every pre-upgrade Workflow, including exit
-   handlers; `--wait-idle` is advisory. Back up history and required external data.
+   handlers. Since the v0.22.8 draft, version-changing upgrades wait by default,
+   show a countdown and refuse at the bounded timeout; `--no-wait-idle` skips
+   the wait. It remains advisory and does not freeze admission. Back up history
+   and required external data.
 2. Register the native source plugin through the installer. Review its image,
    public TLS trust, source listener on port 8445, NetworkPolicy and TokenReview
    permission. Validate the complete source authorization/lease/executor assembly;
-   separate slice readiness is insufficient.
+   separate slice readiness is insufficient. With `--skip-argo-workflows`, the
+   installer verifies the controller ConfigMap and never takes it over; takeover
+   is limited to the Argo release installed by Oberth.
 3. Review native Argo executor/controller env. Managed installation fills absent
    required settings with consent and refuses conflicts. External controllers
    must supply these native values themselves:
@@ -350,9 +407,9 @@ Future missing-template, shared-grant and cluster-scope messages have no verifie
 implementation. Exact new wording is pending; do not invent it or enable this
 recipe until admission and the WorkflowTemplate identity policy land.
 
-### v0.22.7 integration prerequisite: authored security and scratch
+### v0.22.7: authored security and scratch
 
-Before SEC-A, the annotation selects nonroot leaves and the server supplies
+Before v0.22.7, the annotation selects nonroot leaves and the server supplies
 security contexts and `/tmp`:
 
 ```yaml
@@ -365,8 +422,8 @@ spec:
       container: {image: BUILD_IMAGE, command: [check]}
 ```
 
-After SEC-A, remove the annotation, author desired identity/filesystem settings
-and provide scratch explicitly. Example for a read-only main filesystem:
+After deploying v0.22.7, remove the annotation, author desired identity and
+filesystem settings, and provide scratch explicitly. Example for a read-only main filesystem:
 
 ```yaml
 spec:
@@ -390,16 +447,9 @@ spec:
 
 Add compliant contexts to authored init containers, sidecars and containerSet
 members too. Argo main/executor defaults do not cover every authored helper.
-Root and writable root filesystems are permitted by the floor. SEC-A does not
-rewrite an authored context. On the documentation base this after-example still
-gets the old refusal:
-
-```text
-argoworkflow: spec.templates["check"].container.securityContext is assigned by Oberth and must be omitted; step containers run with a forced baseline (no privilege escalation, read-only root filesystem)
-```
-
-That is an integration prerequisite, not a reason to weaken the final YAML.
-Once SEC-A lands, Kubernetes enforces the floor. Policy messages include exactly:
+Root and writable root filesystems are permitted by the floor. Oberth preserves
+an authored context; Argo supplies native defaults and Kubernetes enforces the
+floor. Policy messages include exactly:
 
 ```text
 Argo containers must set allowPrivilegeEscalation to false
@@ -410,7 +460,7 @@ Argo step containers require effective RuntimeDefault or Localhost seccomp; othe
 
 Set those fields on the offending container or an effective native default.
 Do not leave Pod-level Unconfined even when all containers override it.
-Leaving the retired nonroot annotation after SEC-A gets:
+Leaving the retired nonroot annotation in v0.22.7 gets:
 
 ```text
 argoworkflow: metadata.annotations["oberth.ci/nonroot-templates"] is refused: keys under oberth.ci/ are assigned by Oberth and record which run owns the Workflow; remove the key or rename it outside oberth.ci/
@@ -418,10 +468,13 @@ argoworkflow: metadata.annotations["oberth.ci/nonroot-templates"] is refused: ke
 
 Remove that annotation and use the authored security/scratch example above.
 
-### v0.22.7 integration prerequisite: outputs on granted steps
+### v0.22.7: outputs on granted steps
 
-These rules apply to secret-store and cloud-identity steps after SEC-A, including
-effective outputs inherited by name from `templateDefaults`. Before:
+These rules apply to secret-store and cloud-identity steps in v0.22.7, including
+effective outputs inherited by name from `templateDefaults`. Even a relative
+path on an unmounted working directory is refused. Override an inherited unsafe
+output using the same output name and a safe absolute `valueFrom.path`; setting
+only `value` or `default` leaves that inherited path in place. Before:
 
 ```yaml
 outputs:
@@ -441,13 +494,12 @@ outputs:
 
 This example needs a writable `/tmp` on the container filesystem, with no
 volume mounted there. With a read-only filesystem and only mounted scratch,
-there is no admissible output file path; use an unreferenced stdout result,
-or move output production to a suitable separate step. For a single-container
-step, a referenced `outputs.result` can replace a file read. With sidecars or
-multiple containerSet members, remove file-read outputs and result references
+there is no admissible output file path. For a single-container step, use
+`outputs.result` or move output production to a step with a writable non-mounted
+path. With sidecars or multiple containerSet members, remove file-read outputs and result references
 or move the work to a step without those other containers.
 
-Exact slice messages, with `publish`/`digest` as example names:
+Exact messages, with `publish`/`digest` as example names:
 
 | Refusal | Fix |
 | --- | --- |
@@ -470,10 +522,17 @@ arguments:
   parameters: [{name: digest, value: '{{steps.describe.outputs.result}}'}]
 ```
 
-Argo's loose capture matcher also sees result-like suffixes, references in
-parent metadata/defaults and dynamically named invocations. Remove those
-references too. These guards are not a boundary between containers of one step;
-Argo's trusted helpers retain native credential mirrors and the shared-template
+Argo's loose capture matcher also sees `steps.publish.outputs.resultSuffix`,
+references in any field of the invoking parent (including labels), workflow
+`spec.podMetadata`, applicable `templateDefaults`, and any substituted step/task
+template name in a result-referencing parent even if it resolves elsewhere.
+These get the referenced-result refusal above. Remove the capture-triggering
+text, use literal invocations or move the output to a separate suitable step.
+Sidecars remain allowed without these reads; init-only helpers do not alone
+trigger this shared-container rule. ContainerSet members are covered by the
+conditional rule, but credential delivery currently accepts Container/Script
+leaves and does not enable credentialed containerSet templates. These guards are
+not a boundary between containers of one step; Argo's trusted helpers retain native credential mirrors and the shared-template
 startup race remains a documented residual.
 
 ### v0.22.7: new metadata refusal; native fields now admitted
@@ -1014,12 +1073,13 @@ collector or output-slot mechanism replaces them.
 
 ### DRAFT v0.23.1: schedules become CronWorkflows
 
-Before and after, the repository declaration can remain:
+Keep the existing repository declaration, without adding a timezone key before
+the cutover:
 
 ```yaml
 # Before: .oberth/schedule.yaml
 schedules:
-  - {name: nightly, cron: '0 3 * * *', branch: main, timezone: UTC}
+  - {name: nightly, cron: '0 3 * * *', branch: main}
 ```
 
 ```yaml
@@ -1027,6 +1087,10 @@ schedules:
 schedules:
   - {name: nightly, cron: '0 3 * * *', branch: main, timezone: UTC}
 ```
+
+The DRAFT after-example adds optional `timezone: UTC`; the old strict parser
+accepts only `name`, `cron` and `branch`. Omit timezone after the cutover too if
+you want an unchanged declaration. Keep the generated native timezone separate.
 
 The target generated native object, shown only to explain execution semantics:
 
