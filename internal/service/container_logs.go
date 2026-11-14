@@ -223,6 +223,3 @@ func (service *API) rawRunLog(ctx context.Context, actor api.Actor, id string, f
 func helperLogContainer(name string) bool {
 	return name == "init" || name == "wait" || name == "oberth-executor-token" || strings.HasPrefix(name, "init-artifact-")
 }
-
-// Finished runs have no observer left to attempt an uncaptured physical copy.
-// Explain that at read time without changing the stored capture receipt.
