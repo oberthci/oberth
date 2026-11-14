@@ -80,7 +80,7 @@ func testReleasedServerUpgrade(t *testing.T, version string, noBackup bool) {
 	if json.Unmarshal(stored, &values) != nil {
 		t.Fatal("invalid stored-values fixture")
 	}
-	values["compatibility"] = testUpgradeCompatibility
+	values["compatibility"] = map[string]string{"schemaIdentity": testUpgradeCompatibility.SchemaIdentity, "auditDomain": testUpgradeCompatibility.AuditDomain, "witnessKeyInfo": testUpgradeCompatibility.WitnessKeyInfo}
 	fixture.deps.RunHelm = func(ctx context.Context, args []string) ([]byte, error) {
 		if len(args) > 2 && args[0] == "get" && args[1] == "values" && args[2] == "oberth" {
 			return json.Marshal(values)

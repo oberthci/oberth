@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,6 +23,7 @@ import (
 )
 
 type fixtureAdmin struct {
+	authenticated      func() bool
 	existing           func() bool
 	run                CommandRunner
 	namespace, context string
@@ -146,6 +148,9 @@ func (f fixtureAdmin) Admin(ctx context.Context, action string, args, into any) 
 		}
 		return recordjson.Unmarshal(raw, into)
 	case "version":
+		if f.authenticated != nil && !f.authenticated() {
+			return &client.AdminError{StatusCode: http.StatusUnauthorized, Cause: errors.New("fixture has no admin enrollment yet")}
+		}
 		raw, err := f.command(ctx, nil, "version", "--schema")
 		if err != nil {
 			return err

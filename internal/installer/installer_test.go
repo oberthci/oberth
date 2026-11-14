@@ -2615,6 +2615,7 @@ func onboardingDeps(t *testing.T, host *fakeOberthHost, buf *bytes.Buffer, input
 	})
 	if f, ok := deps.Admin.(fixtureAdmin); ok {
 		f.existing = func() bool { return len(host.upstreamRows) > 0 }
+		f.authenticated = func() bool { return len(host.uplinkArgv) > 0 || len(host.upstreamRows) > 0 }
 		deps.Admin = f
 	}
 	if interactive {

@@ -316,8 +316,7 @@ Old preflight execution is terminalized rather than reattached. Native
 execution keeps exact source, UID, target and operator identity custody;
 historical execution journals do not authorize new work.
 
-Upgrade idle-probe retries: `TestAdminIdleObservation` drives the
-installer's authenticated API wait path through transient failures, busy/idle
+`TestAdminIdleObservation` drives the authenticated API wait path through transient failures, busy/idle
 samples, critical selection, authorization refusal, deadline and cancellation.
 `TestWaitIdleTransientFailuresBackOffAndRecover` checks transport, 503 and
 truncated-body recovery and backoff reset on a valid busy sample; protocol-error
@@ -594,3 +593,11 @@ creates no objects and reports `not-retested`; explicit verification with
 `--probe` invokes the live measurement. CLI tests refuse `--probe` outside
 verification and alongside `--plan` or `--dry-run`. Existing install refusal
 and real probe cleanup tests remain in place.
+
+
+Upgrade from a released server without admin routes is covered by
+`TestUpgradeReleasedServerWithoutAdminAPI`: the default backup refuses before
+changes with exact matching-version commands, while the explicit no-backup path
+completes using the stored-values fixture and native Workflow observation.
+`TestUpgradeNativeWorkflowObservation` checks active and terminal phases, the
+selected pipeline namespace, and refusal when observation is unavailable.
