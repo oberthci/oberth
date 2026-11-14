@@ -39,8 +39,8 @@ func TestUpgradeConfiguredAdminRepairsWithoutRunningPod(t *testing.T) {
 		t.Fatal(err)
 	}
 	kube.ClearActions()
-	if err := checkUpgradeVerificationConnection(t.Context(), UpgradeConfig{Namespace: DefaultNamespace}, f.deps); err != nil || len(kube.Actions()) != 0 {
-		t.Error("credential preflight contacted Kubernetes", err, kube.Actions())
+	if err := checkUpgradeVerificationConnection(t.Context(), UpgradeConfig{Namespace: DefaultNamespace}, f.deps); err != nil || len(kube.Actions()) != 1 || !kube.Actions()[0].Matches("list", "pods") {
+		t.Error("credential preflight did more than observe Pods", err, kube.Actions())
 	}
 	writes := 0
 	stop := errors.New("stop at Helm write")
@@ -183,6 +183,20 @@ func TestUpgradeMissingCurrentAdminAPIGivesRetryCommand(t *testing.T) {
 	err = checkUpgradeBackupAPI(t.Context(), UpgradeConfig{Namespace: DefaultNamespace, DryRun: true}, deps, "0.22.7")
 	if err == nil || !strings.Contains(err.Error(), "oberth upgrade --no-backup --context selected --namespace oberth") || !strings.Contains(err.Error(), "older Pods") {
 		t.Fatal("failed-release guidance missing", err)
+	}
+	f := newUpgradeFixture(t, "0.22.7", "0.22.8", "99")
+	f.deps.Admin = remote
+	if _, err := f.deps.KubeClient.CoreV1().Pods(DefaultNamespace).Create(t.Context(), upgradePreflightPod("server", corev1.PodRunning), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	writes, stop := stopUpgradeAtHelmWrite(&f.deps)
+	cfg := UpgradeConfig{BinaryVersion: "0.22.8", BinarySchemaVersion: 99, Namespace: DefaultNamespace, RecordDir: t.TempDir()}
+	if _, err := RunUpgrade(t.Context(), cfg, f.deps); err == nil || !strings.Contains(err.Error(), "older Pods") || *writes != 0 {
+		t.Fatal("missing API did not refuse backup before Helm write", *writes, err)
+	}
+	cfg.NoBackup = true
+	if _, err := RunUpgrade(t.Context(), cfg, f.deps); !errors.Is(err, stop) || *writes != 1 {
+		t.Fatal("printed failed-release retry did not reach Helm write", *writes, err)
 	}
 	var output bytes.Buffer
 	_, err = printUpgradeDryRun(&output, UpgradeConfig{WaitTimeout: time.Minute}, UpgradeResult{PreviousVersion: "0.22.7", TargetVersion: "0.22.8"}, false)

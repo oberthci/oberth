@@ -2,13 +2,17 @@ package installer
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"golang.org/x/mod/semver"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/internal/client"
 )
@@ -65,15 +69,69 @@ func checkUpgradeVerificationConnection(ctx context.Context, cfg UpgradeConfig, 
 			return err
 		}
 	}
-	if deps.Admin != nil {
+	var configured client.Config
+	if deps.Admin == nil {
+		var err error
+		configured, err = checkUpgradeClientConfiguration(ctx, cfg, deps)
+		if err != nil {
+			return err
+		}
+	}
+	if deps.KubeClient != nil {
+		pod, err := runningAdminPod(ctx, Config{Namespace: cfg.Namespace}, deps)
+		if err != nil {
+			return err
+		}
+		// A failed release with no Ready Running Pod must remain repairable.
+		if pod == nil || !slices.ContainsFunc(pod.Status.Conditions, func(condition corev1.PodCondition) bool {
+			return condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue
+		}) {
+			return nil
+		}
+	}
+	_, _, err := adminVersion(ctx, Config{Namespace: cfg.Namespace}, deps)
+	var status *client.AdminError
+	if errors.As(err, &status) && status.StatusCode == http.StatusNotFound {
+		if deps.Output != nil {
+			_, _ = fmt.Fprintln(deps.Output, "running server has no administration API; admin role is verified after rollout")
+		}
 		return nil
 	}
+	if errors.As(err, &status) && status.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("this client is not an unscoped admin of this server (nothing changed): %w (locally configured identity: %s)", err, upgradeAdminClientIdentity(configured))
+	}
+	return err
+}
+
+func checkUpgradeClientConfiguration(ctx context.Context, cfg UpgradeConfig, deps Deps) (client.Config, error) {
 	configured, err := resolveAdminClientConfig(Config{Namespace: cfg.Namespace}, deps)
 	if err == nil {
 		_, err = client.New(ctx, configured)
 	}
 	if err != nil {
-		return fmt.Errorf("upgrade requires this machine's client connected to this server as an unscoped admin; configure it with `export OBERTH_BASE_URL='https://<server>:<port>' OBERTH_TOKEN='<admin-token>' OBERTH_CA_CERT='/path/server-ca.crt'` or `export OBERTH_BASE_URL='https://<server>:<port>' OBERTH_CLIENT_CERT='/path/admin.crt' OBERTH_CLIENT_KEY='/path/admin.key' OBERTH_CA_CERT='/path/server-ca.crt'`, then retry (nothing changed): %w", err)
+		return client.Config{}, fmt.Errorf("upgrade requires this machine's client connected to this server as an unscoped admin; configure it with `export OBERTH_BASE_URL='https://<server>:<port>' OBERTH_TOKEN='<admin-token>' OBERTH_CA_CERT='/path/server-ca.crt'` or `export OBERTH_BASE_URL='https://<server>:<port>' OBERTH_CLIENT_CERT='/path/admin.crt' OBERTH_CLIENT_KEY='/path/admin.key' OBERTH_CA_CERT='/path/server-ca.crt'`, then retry (nothing changed): %w", err)
 	}
-	return nil
+	return configured, nil
+}
+
+func upgradeAdminClientIdentity(configured client.Config) string {
+	if configured.Token != "" || configured.TokenCommand != "" {
+		return "bearer token"
+	}
+	var pair tls.Certificate
+	var err error
+	switch {
+	case configured.ClientCert != "":
+		pair, err = client.LoadClientCertificate(configured.ClientCert, configured.ClientKey)
+	case len(configured.ClientCertificatePEM) > 0:
+		pair, err = tls.X509KeyPair(configured.ClientCertificatePEM, configured.ClientKeyPEM)
+	default:
+		return "bearer token"
+	}
+	if err == nil && len(pair.Certificate) > 0 {
+		if certificate, err := x509.ParseCertificate(pair.Certificate[0]); err == nil {
+			return certificate.Subject.String()
+		}
+	}
+	return "client certificate"
 }

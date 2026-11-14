@@ -269,8 +269,9 @@ func testAdminHostCachedEnrollmentStaysWithTarget(t *testing.T) {
 	if _, err := createFirstAdmin(t.Context(), Config{enrollment: enrollment}, deps, []byte("public"), "admin@host"); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkUpgradeVerificationConnection(t.Context(), UpgradeConfig{}, deps); err != nil || len(deps.KubeClient.(*fake.Clientset).Actions()) != 0 {
-		t.Fatal("cached installer credential requires a running Pod", err)
+	kube := deps.KubeClient.(*fake.Clientset)
+	if err := checkUpgradeVerificationConnection(t.Context(), UpgradeConfig{}, deps); err != nil || len(kube.Actions()) != 1 || !kube.Actions()[0].Matches("list", "pods") {
+		t.Fatal("cached installer credential did more than observe Pods", err, kube.Actions())
 	}
 	var cfg Config
 	if err := reuseInstallerEnrollment(&cfg, deps); err != nil || cfg.enrollment.result.InstallerCertificate == "" {
