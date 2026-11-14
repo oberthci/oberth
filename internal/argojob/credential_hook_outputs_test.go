@@ -253,3 +253,53 @@ func TestCredentialHookUnmatchedAliasCaptured(t *testing.T) {
 		})
 	}
 }
+
+func TestCredentialHookExitPrecedence(t *testing.T) {
+	for _, dag := range []bool{false, true} {
+		for _, tc := range []struct {
+			name, onExit, hook string
+			refused            bool
+		}{
+			{name: "ordinary-onExit-shadows-credentialed-hook", onExit: "ordinary", hook: "credentialed"},
+			{name: "ordinary-onExit-shadows-dynamic-hook", onExit: "ordinary", hook: "{{workflow.parameters.exit}}"},
+			{name: "credentialed-onExit-shadows-ordinary-hook", onExit: "credentialed", hook: "ordinary", refused: true},
+			{name: "credentialed-exit-hook", hook: "credentialed", refused: true},
+			{name: "dynamic-onExit-shadows-ordinary-hook", onExit: "{{workflow.parameters.exit}}", hook: "ordinary", refused: true},
+			{name: "ordinary-onExit-without-hook", onExit: "ordinary"},
+		} {
+			t.Run(fmt.Sprintf("dag=%t/%s", dag, tc.name), func(t *testing.T) {
+				config, request := credentialHookOutputRequest(t, dag, false, true, "exit", "onExit")
+				request = changeCredentialOutputRequest(t, request, func(wf *wfv1.Workflow) {
+					resolve := func(name string) string {
+						if name == "credentialed" {
+							return wf.Spec.Templates[0].Name
+						}
+						return name
+					}
+					var hooks wfv1.LifecycleHooks
+					if tc.hook != "" {
+						hooks = wfv1.LifecycleHooks{wfv1.ExitLifecycleEvent: {Template: resolve(tc.hook)}}
+					}
+					for i := range wf.Spec.Templates {
+						parent := &wf.Spec.Templates[i]
+						if parent.Name == "parent" {
+							if dag {
+								parent.DAG.Tasks[1].OnExit, parent.DAG.Tasks[1].Hooks = resolve(tc.onExit), hooks
+							} else {
+								parent.Steps[0].Steps[1].OnExit, parent.Steps[0].Steps[1].Hooks = resolve(tc.onExit), hooks
+							}
+						}
+					}
+				})
+				_, err := Build(config, request)
+				if tc.refused {
+					if err == nil || !strings.Contains(err.Error(), "referenced outputs.result") || !strings.Contains(err.Error(), "another container of the Pod") {
+						t.Fatalf("active credentialed exit was admitted or returned an unexpected error: %v", err)
+					}
+				} else if err != nil {
+					t.Fatalf("ordinary effective exit was refused: %v", err)
+				}
+			})
+		}
+	}
+}

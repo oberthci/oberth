@@ -204,22 +204,27 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 			nativeIndexed, _ := regexp.Match(prefix+`\[['"]`+name+`['"]\]\.outputs.result`, body)
 			found = found || native || nativeIndexed || reference.MatchString(text)
 		}
+		checkHooks := func(hooks wfv1.LifecycleHooks, exit *wfv1.LifecycleHook) {
+			for name, hook := range hooks {
+				// Argo runs only the effective exit invocation separately.
+				if name != wfv1.ExitLifecycleEvent {
+					check(credentialHookResultAlias(name), hook.Template, nil)
+				}
+			}
+			if exit != nil {
+				check("onExit", exit.Template, nil)
+			}
+		}
 		for _, group := range parent.Steps {
 			for _, step := range group.Steps {
 				check(step.Name, step.Template, step.Inline)
-				for name, hook := range step.Hooks {
-					check(credentialHookResultAlias(name), hook.Template, nil)
-				}
-				check("onExit", step.OnExit, nil)
+				checkHooks(step.Hooks, step.GetExitHook(wfv1.Arguments{}))
 			}
 		}
 		if parent.DAG != nil {
 			for _, task := range parent.DAG.Tasks {
 				check(task.Name, task.Template, task.Inline)
-				for name, hook := range task.Hooks {
-					check(credentialHookResultAlias(name), hook.Template, nil)
-				}
-				check("onExit", task.OnExit, nil)
+				checkHooks(task.Hooks, task.GetExitHook(wfv1.Arguments{}))
 			}
 		}
 	})
