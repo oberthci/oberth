@@ -261,7 +261,8 @@ func TestExecutorIdentityWaitSurvivesTransientDelivery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		controller, wf, _, _ := executorRetryFixture(t)
 		wf.Status.Phase = wfv1.WorkflowRunning
-		controller.workflows = &staticWorkflowClient{workflow: wf}
+		client := &countedWaitWorkflowClient{workflow: wf}
+		controller.workflows = client
 		controller.idleInterval = time.Millisecond
 		attempts := 0
 		controller.seeder.exec = func(context.Context, string, string, string, []string, io.Reader, io.Writer, io.Writer) error {
@@ -269,7 +270,9 @@ func TestExecutorIdentityWaitSurvivesTransientDelivery(t *testing.T) {
 			if attempts == 1 {
 				return io.ErrUnexpectedEOF
 			}
-			wf.Status.Phase = wfv1.WorkflowSucceeded
+			completed := wf.DeepCopy()
+			completed.Status.Phase = wfv1.WorkflowSucceeded
+			client.set(completed, nil)
 			return nil
 		}
 		result, err := withWaitTestHub(t, controller).Wait(t.Context(), wf.Name, "identity-run", io.Discard)
