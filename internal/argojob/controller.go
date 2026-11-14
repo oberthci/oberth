@@ -424,7 +424,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, bind
 			if binding.UID != "" && !binding.matches(workflow) {
 				return Completion{}, errors.New("argojob: adopted Workflow identity changed")
 			}
-			expanded, err := nativeNodeWorkflow(ctx, workflow)
+			expanded, err := observedNodeWorkflow(ctx, workflow)
 			if err != nil {
 				return Completion{}, err
 			}
@@ -515,7 +515,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, bind
 // watched node set when the final status write has not caught up yet.
 func (controller *Controller) confirmWatchedCompletion(ctx context.Context, observed *wfv1.Workflow, runID string, binding Adoption) (*wfv1.Workflow, bool, error) {
 	var err error
-	observed, err = nativeNodeWorkflow(ctx, observed)
+	observed, err = observedNodeWorkflow(ctx, observed)
 	if err != nil {
 		return nil, false, err
 	}
@@ -537,12 +537,12 @@ func (controller *Controller) confirmWatchedCompletion(ctx context.Context, obse
 	if !settled.Status.Phase.Completed() {
 		return nil, false, nil
 	}
-	settled, err = nativeNodeWorkflow(ctx, settled)
+	settled, err = observedNodeWorkflow(ctx, settled)
 	if err != nil {
 		return nil, false, err
 	}
-	completeRead := len(settled.Status.Nodes) >= len(observed.Status.Nodes)
-	if !completeRead {
+	completeRead := settled.Status.OffloadNodeStatusVersion == "" && len(settled.Status.Nodes) >= len(observed.Status.Nodes)
+	if !completeRead && settled.Status.OffloadNodeStatusVersion == "" {
 		copy := settled.DeepCopy()
 		copy.Status.Nodes = observed.DeepCopy().Status.Nodes
 		settled = copy
@@ -584,9 +584,12 @@ func (controller *Controller) settle(ctx context.Context, name, runID string, ob
 	if err != nil || controller.verifyOwnership(final, runID) != nil {
 		return observed, false
 	}
-	final, err = nativeNodeWorkflow(settleCtx, final)
+	final, err = observedNodeWorkflow(settleCtx, final)
 	if err != nil {
 		return observed, false
+	}
+	if final.Status.OffloadNodeStatusVersion != "" {
+		return final, false
 	}
 	if len(final.Status.Nodes) < len(observed.Status.Nodes) {
 		return observed, false
@@ -641,7 +644,7 @@ func (controller *Controller) terminalState(ctx context.Context, name, wantedRun
 	if !workflow.Status.Phase.Completed() {
 		return nil, ErrNotTerminal
 	}
-	workflow, err = nativeNodeWorkflow(ctx, workflow)
+	workflow, err = observedNodeWorkflow(ctx, workflow)
 	if err != nil {
 		return nil, err
 	}
