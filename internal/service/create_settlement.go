@@ -252,7 +252,6 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx, observerCtx context.Context
 		}
 		if !stillPending {
 			scheduler.submissions.releaseTerminalRun(run.ID)
-			scheduler.pruneDeferredPodJournal(ctx, run.ID)
 			if err := scheduler.workspaces.cleanupRun(ctx, run.ID); err != nil {
 				return false, err
 			}
@@ -394,7 +393,6 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx, observerCtx context.Context
 		}
 	}
 	scheduler.submissions.releaseTerminalRun(run.ID)
-	scheduler.pruneDeferredPodJournal(ctx, run.ID)
 	// External settlement and the durable verdict are established. Scratch
 	// cleanup can retry independently.
 	cleanupCtx, cancel := context.WithTimeout(ctx, workspaceCleanupTimeout)
