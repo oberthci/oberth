@@ -62,6 +62,11 @@ type liveCluster struct {
 }
 
 func requireLiveCluster(t *testing.T) liveCluster {
+	cluster, _, _ := startLiveWatchSession(t, t.Context(), liveClusterClients(t))
+	return cluster
+}
+
+func liveClusterClients(t *testing.T) liveCluster {
 	t.Helper()
 	kubeconfig := strings.TrimSpace(os.Getenv(liveKubeconfigEnvironment))
 	if kubeconfig == "" {
@@ -84,21 +89,7 @@ func requireLiveCluster(t *testing.T) liveCluster {
 	if err != nil {
 		t.Fatalf("argo client: %v", err)
 	}
-	hub, err := argowatch.New(kube, argo, namespace, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	watchCtx, stopWatch := context.WithCancel(t.Context())
-	watchDone := make(chan struct{})
-	go func() { defer close(watchDone); hub.Run(watchCtx) }()
-	t.Cleanup(func() { stopWatch(); <-watchDone })
-	syncCtx, stopSync := context.WithTimeout(watchCtx, 30*time.Second)
-	defer stopSync()
-	if err := hub.WaitForSync(syncCtx); err != nil {
-		t.Fatal(err)
-	}
 	return liveCluster{
-		hub:        hub,
 		workflows:  argo.ArgoprojV1alpha1().Workflows(namespace),
 		kube:       kube,
 		restConfig: config,
