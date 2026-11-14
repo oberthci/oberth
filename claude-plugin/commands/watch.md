@@ -1,6 +1,6 @@
 ---
 description: Watch an Oberth run above the prompt (read-only; requires function hooks)
-argument-hint: "[id]"
+argument-hint: "[id | --off]"
 ---
 
 The Oberth function hooks module handles /oberth:watch locally. If this
