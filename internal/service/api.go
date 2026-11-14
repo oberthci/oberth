@@ -135,7 +135,6 @@ type API struct {
 	issueActiveStaleAfter  time.Duration
 	issueObservedAt        time.Time
 	workflowCapabilities   WorkflowCapabilityStore
-	promotionProgress      *sync.Map
 	releasePreflight       ReleasePreflighter
 	clientCertificates     *ClientCertIssuer
 	uplinkLifecycle        UplinkLifecycle
@@ -274,8 +273,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		assistHolds: config.AssistHolds, runAssists: config.RunAssists, assistGate: newAssistGate(maxConcurrentHoldActions),
 		releaseWIFOverrides: config.ReleaseWIFOverrides, releaseWIF: config.ReleaseWIF, releaseWIFMu: &sync.Mutex{},
 
-		promotionProgress: &sync.Map{},
-		lifetime:          lifetime, stopLifetime: stopLifetime, closing: &backgroundClosing{},
+		lifetime: lifetime, stopLifetime: stopLifetime, closing: &backgroundClosing{},
 	}
 	created.agentEvents = newAgentEventRecorder(created, config.AgentEvents, config.AgentEventPolicy)
 	return created, nil
@@ -2395,7 +2393,7 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	if err != nil {
 		return model.Promotion{}, err
 	}
-	return service.planOrQueuePromotion(ctx, actor, repository, candidate, target, promotion)
+	return service.planAdmittedPromotion(ctx, actor, repository, candidate, target, promotion)
 }
 
 // validatePromotionTarget accepts a branch name only. A full ref was admitted

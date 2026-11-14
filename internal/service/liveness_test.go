@@ -8,58 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/liveness"
 	"github.com/oberthci/oberth/internal/model"
 )
-
-type queuedLivenessPromotions struct {
-	PromotionRepository
-	calls    int // used by the initial call and then its sole queue background task
-	entered  chan struct{}
-	external bool
-}
-
-func (store *queuedLivenessPromotions) ListPromotions(ctx context.Context, _ model.PromotionListFilter) (model.PromotionPage, error) {
-	store.calls++
-	if store.calls == 1 {
-		return model.PromotionPage{Promotions: []model.Promotion{{ID: "ahead", Sequence: 1, TargetRef: "main", Status: model.PromotionPending}}}, nil
-	}
-	if store.external {
-		return model.PromotionPage{}, nil
-	}
-	close(store.entered)
-	<-ctx.Done()
-	return model.PromotionPage{}, ctx.Err()
-}
-
-func TestPromotionLivenessTracksEachWorkerAndShutdownRemovesIt(t *testing.T) {
-	fixture := newControlFixture(t)
-	control := fixture.api(t)
-	stalled := &queuedLivenessPromotions{PromotionRepository: control.promotions, entered: make(chan struct{})}
-	control.promotions = stalled
-	_, err := control.planOrQueuePromotion(t.Context(), api.Actor{}, fixture.repo, model.Run{}, "main", model.Promotion{ID: "queued", Sequence: 2, TargetRef: "main"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	awaitLivenessSignal(t, stalled.entered)
-	// Other queues can remain healthy (e.g. waiting on external witnesses)
-	// without hiding this background task's lack of local progress.
-	other := &liveness.Heartbeat{}
-	other.Suspend()
-	control.promotionProgress.Store("other", other)
-	if err := control.liveAt(time.Now().Add(liveness.MaxStall + time.Second)); !errors.Is(err, liveness.ErrStalled) {
-		t.Fatalf("stalled promotion: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), testStartTimeout(5*time.Second))
-	defer cancel()
-	if err := control.Shutdown(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, found := control.promotionProgress.Load("queued"); found {
-		t.Fatal("shutdown left a monitored promotion behind")
-	}
-}
 
 func TestExternalAdmissionAndWitnessWaitsDoNotFailLiveness(t *testing.T) {
 	fixture := newRecoveryFixture(t)
@@ -83,27 +34,6 @@ func TestExternalAdmissionAndWitnessWaitsDoNotFailLiveness(t *testing.T) {
 		t.Fatal("external wait did not stop")
 	}
 
-}
-
-func TestPromotionWitnessWaitDoesNotFailLiveness(t *testing.T) {
-	fixture := newControlFixture(t)
-	control := fixture.api(t)
-	control.promotions = &queuedLivenessPromotions{PromotionRepository: control.promotions, external: true}
-	entered := make(chan struct{})
-	control.mutationGate = func(ctx context.Context) error { close(entered); <-ctx.Done(); return ctx.Err() }
-	_, err := control.planOrQueuePromotion(t.Context(), api.Actor{}, fixture.repo, model.Run{}, "main", model.Promotion{ID: "queued", Sequence: 2, TargetRef: "main"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	awaitLivenessSignal(t, entered)
-	if err := control.liveAt(time.Now().Add(24 * time.Hour)); err != nil {
-		t.Fatal("external promotion gate determined liveness", err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), testStartTimeout(5*time.Second))
-	defer cancel()
-	if err := control.Shutdown(ctx); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func awaitLivenessSignal(t *testing.T, signal <-chan struct{}) {
