@@ -45,6 +45,7 @@ func TestUpgradeAnnouncesItsOwnBackup(t *testing.T) {
 				},
 				RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) { return []byte(tc.live), nil },
 			}
+			withUpgradeDryRunRelease(t, &deps, "0.16.19")
 			_, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.16.19", BinarySchemaVersion: 17, Namespace: "chosen", Yes: true, DryRun: true, NoBackup: tc.noBackup}, deps)
 			if err != nil {
 				t.Fatal(err)
