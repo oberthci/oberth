@@ -757,7 +757,11 @@ publish_images() {
 	"$release_image_tool" publish "$tag" "$sha" "$created" "$release_dir" "$gar_key"
 	published_server_ref=$(sed -n '1p' "$release_dir/server-image.txt")
 	published_helper_ref=$(sed -n '1p' "$release_dir/helper-image.txt")
-	[ -n "$published_server_ref" ] && [ -n "$published_helper_ref" ] || fail "release image helper produced an empty reference"
+	if [ -n "$published_server_ref" ] && [ -n "$published_helper_ref" ]; then
+		:
+	else
+		fail "release image helper produced an empty reference"
+	fi
 	# Bind the static C SBOM to every published Git byte before scanning/signing.
 	"$release_image_tool" verify "$tag" "$sha" "$created" "$release_dir" "$gar_key"
 	for architecture in amd64 arm64; do

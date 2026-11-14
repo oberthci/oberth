@@ -65,7 +65,7 @@ func TestCapabilityResourceExecutorUsesLiveOperatorAuthority(t *testing.T) {
 	if err := c.retireExecutorIdentity(t.Context(), wf); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.kube.CoreV1().Pods(wf.Namespace).Get(t.Context(), c.identityPodName(wf.UID, "operator-task-runner"), metav1.GetOptions{}); err == nil {
+	if _, err := c.kube.CoreV1().Pods(wf.Namespace).Get(t.Context(), c.identityPodName(wf, "operator-task-runner"), metav1.GetOptions{}); err == nil {
 		t.Fatal("operator identity lifetime pod survived cleanup after revocation")
 	}
 }

@@ -26,4 +26,4 @@ tests:
           content:
             apiGroups: [""]
             resources: [pods]
-            verbs: [create, get, list, watch, delete]
+            verbs: [create, get, list, watch, delete, patch]
