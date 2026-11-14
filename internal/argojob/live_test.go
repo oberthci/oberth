@@ -15,6 +15,7 @@ import (
 	"time"
 
 	wfclientset "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned"
+	wftyped "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned/typed/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -47,7 +48,7 @@ const (
 )
 
 type liveCluster struct {
-	workflows  WorkflowClient
+	workflows  wftyped.WorkflowInterface
 	kube       kubernetes.Interface
 	restConfig *rest.Config
 	namespace  string
