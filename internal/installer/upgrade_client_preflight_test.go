@@ -183,6 +183,20 @@ func TestUpgradeMissingCurrentAdminAPIGivesRetryCommand(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "oberth upgrade --no-backup --context selected --namespace oberth") || !strings.Contains(err.Error(), "older Pods") {
 		t.Fatal("failed-release guidance missing", err)
 	}
+	f := newUpgradeFixture(t, "0.22.7", "0.22.8", "99")
+	f.deps.Admin = remote
+	if _, err := f.deps.KubeClient.CoreV1().Pods(DefaultNamespace).Create(t.Context(), upgradePreflightPod("server", corev1.PodRunning), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	writes, stop := stopUpgradeAtHelmWrite(&f.deps)
+	cfg := UpgradeConfig{BinaryVersion: "0.22.8", BinarySchemaVersion: 99, Namespace: DefaultNamespace, RecordDir: t.TempDir()}
+	if _, err := RunUpgrade(t.Context(), cfg, f.deps); err == nil || !strings.Contains(err.Error(), "older Pods") || *writes != 0 {
+		t.Fatal("missing API did not refuse backup before Helm write", *writes, err)
+	}
+	cfg.NoBackup = true
+	if _, err := RunUpgrade(t.Context(), cfg, f.deps); !errors.Is(err, stop) || *writes != 1 {
+		t.Fatal("printed failed-release retry did not reach Helm write", *writes, err)
+	}
 	var output bytes.Buffer
 	_, err = printUpgradeDryRun(&output, UpgradeConfig{WaitIdle: true, WaitFor: "critical"}, UpgradeResult{}, false)
 	if err != nil || !strings.Contains(output.String(), "active Kubernetes Workflows") || strings.Contains(output.String(), "live daemon queue") {

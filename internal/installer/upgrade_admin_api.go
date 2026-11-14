@@ -86,6 +86,12 @@ func checkUpgradeVerificationConnection(ctx context.Context, cfg UpgradeConfig, 
 	}
 	_, _, err := adminVersion(ctx, Config{Namespace: cfg.Namespace}, deps)
 	var status *client.AdminError
+	if errors.As(err, &status) && status.StatusCode == http.StatusNotFound {
+		if deps.Output != nil {
+			_, _ = fmt.Fprintln(deps.Output, "running server has no administration API; admin role is verified after rollout")
+		}
+		return nil
+	}
 	if errors.As(err, &status) && status.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("this client is not an unscoped admin of this server (nothing changed): %w", err)
 	}

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 
 	"github.com/oberthci/oberth/internal/client"
@@ -30,6 +32,9 @@ func TestUpgradeReleasedServerWithoutAdminAPI(t *testing.T) {
 
 func testReleasedServerUpgrade(t *testing.T, version string, noBackup bool) {
 	fixture := newUpgradeFixture(t, version, "0.22.7", "99")
+	if _, err := fixture.deps.KubeClient.CoreV1().Pods(DefaultNamespace).Create(t.Context(), upgradePreflightPod("server", corev1.PodRunning), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	var applied atomic.Bool
 	var nativeReads atomic.Int32
 	var oldAPIReads atomic.Int32
@@ -119,6 +124,9 @@ func testReleasedServerUpgrade(t *testing.T, version string, noBackup bool) {
 	}
 	if err != nil || !result.Upgraded || !applied.Load() || backupCalls != 0 || nativeReads.Load() < 2 || oldAPIReads.Load() == 0 {
 		t.Fatal("old-server no-backup upgrade failed", result, err, backupCalls, nativeReads.Load(), oldAPIReads.Load())
+	}
+	if strings.Count(fixture.output.String(), "running server has no administration API; admin role is verified after rollout\n") != 1 {
+		t.Fatal("missing single preflight fallback notice", fixture.output.String())
 	}
 }
 

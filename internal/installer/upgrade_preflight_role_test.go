@@ -70,7 +70,8 @@ func testUpgradeAdminRolePreflight(t *testing.T, status int, detail string) {
 	}
 	kube.ClearActions()
 	err = checkUpgradeVerificationConnection(t.Context(), UpgradeConfig{Namespace: DefaultNamespace}, f.deps)
-	if status == http.StatusOK && err != nil || status != http.StatusOK && err == nil {
+	allowed := status == http.StatusOK || status == http.StatusNotFound
+	if allowed && err != nil || !allowed && err == nil {
 		t.Fatal("unexpected preflight result", err)
 	}
 	if status != 0 && requests.Load() != 1 {
@@ -86,9 +87,9 @@ func testUpgradeAdminRolePreflight(t *testing.T, status int, detail string) {
 	writes, stop := stopUpgradeAtHelmWrite(&f.deps)
 	dir := t.TempDir()
 	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.8", BinarySchemaVersion: 99, Namespace: DefaultNamespace, NoBackup: true, RecordDir: dir}, f.deps)
-	if status == http.StatusOK {
+	if allowed {
 		if *writes != 1 || !errors.Is(err, stop) {
-			t.Fatal("unscoped admin did not reach Helm write", *writes, err)
+			t.Fatal("permitted preflight did not reach Helm write", *writes, err)
 		}
 		return
 	}
@@ -122,7 +123,9 @@ func stopUpgradeAtHelmWrite(deps *Deps) (*int, error) {
 func upgradePreflightPod(name string, phase corev1.PodPhase) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: DefaultNamespace, Labels: map[string]string{"app.kubernetes.io/instance": "oberth"}},
-		Status:     corev1.PodStatus{Phase: phase},
+		Status: corev1.PodStatus{Phase: phase, Conditions: []corev1.PodCondition{
+			{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+		}},
 	}
 }
 
