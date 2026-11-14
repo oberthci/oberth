@@ -18,11 +18,12 @@ func TestStoppedCompletedWorkflowResumesLogsAndRetiresExecutorIdentity(t *testin
 	workflow, request := adoptionWorkflow()
 	workflow.Spec.Shutdown = wfv1.ShutdownStrategyStop
 	workflow.Status.Phase = wfv1.WorkflowFailed
-	controller := &Controller{kube: fixtureKube(workflow), workflows: &staticWorkflowClient{workflow: workflow}, config: Config{Namespace: workflow.Namespace, ExecutorServiceAccount: "executor", MaxRunLogBytes: 4096}, interval: time.Millisecond,
+	controller := &Controller{kube: fixtureKube(workflow), workflows: &staticWorkflowClient{workflow: workflow}, config: Config{Namespace: workflow.Namespace, ExecutorServiceAccount: "executor", MaxRunLogBytes: 4096}, idleInterval: time.Millisecond,
 		logs: func(context.Context, string, string, string) (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader("final exit log\n")), nil
 		},
 	}
+	withTestObservationCache(t, controller)
 	holder := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: controller.identityPodName(workflow, "executor"), Namespace: workflow.Namespace, UID: "identity-uid", OwnerReferences: []metav1.OwnerReference{{UID: workflow.UID}}}}
 	if _, err := controller.kube.CoreV1().Pods(workflow.Namespace).Create(t.Context(), holder, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)

@@ -2,11 +2,12 @@ package service
 
 import (
 	"context"
-	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/store"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 type blockedStartStore struct {

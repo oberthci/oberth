@@ -2,10 +2,11 @@ package argojob
 
 import (
 	"fmt"
-	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-	corev1 "k8s.io/api/core/v1"
 	"strings"
 	"testing"
+
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestCredentialHookResultCaptureRefused(t *testing.T) {

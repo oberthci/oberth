@@ -3,10 +3,11 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/store"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 type submissionRereadStore struct {

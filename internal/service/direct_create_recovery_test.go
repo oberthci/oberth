@@ -200,7 +200,8 @@ type liveFailedCreateJobs struct {
 func (j *liveFailedCreateJobs) ActiveWorkflowRuns() []WorkflowRunRef { return j.refs }
 
 func TestFailedCreateRearmIncludesOldLiveWorkflowWithoutHistoryScan(t *testing.T) {
-	f := newControlFixture(t)
+	old := time.Now().Add(-time.Hour)
+	f := newControlFixtureWithOptions(t, store.Options{Now: func() time.Time { return old }})
 	accepted, err := f.scheduler.recordCIForTest(t.Context(), CIRequest{EventID: "old-live", Repository: f.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "owner"})
 	if err != nil {
 		t.Fatal(err)

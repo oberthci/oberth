@@ -77,7 +77,7 @@ func TestDirectAcceptanceRestartRearmsFailedAndCancelledCreates(t *testing.T) {
 			want[accepted.ID] = true
 		}
 	}
-	runs, err := s.FailedWorkflowCreates(t.Context())
+	runs, err := s.FailedWorkflowCreates(t.Context(), now.Add(-time.Minute))
 	if err != nil || len(runs) != len(want) {
 		t.Fatal(runs, err)
 	}
