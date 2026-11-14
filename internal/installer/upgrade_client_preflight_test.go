@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,10 +11,84 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 
 	"github.com/oberthci/oberth/internal/client"
 )
+
+func TestUpgradeConfiguredAdminRepairsWithoutRunningPod(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	for _, name := range []string{"OBERTH_MCP_URL", "OBERTH_TOKEN_COMMAND", "OBERTH_CLIENT_CERT", "OBERTH_CLIENT_KEY", "OBERTH_CA_CERT"} {
+		t.Setenv(name, "")
+	}
+	t.Setenv("OBERTH_BASE_URL", "https://server.example.test:8443")
+	t.Setenv("OBERTH_TOKEN", "fixture")
+	f := newUpgradeFixture(t, "0.22.7", "0.22.7", "99")
+	f.deps.Admin = nil
+	f.deps.ClientConfigRoot = func() (string, error) { return t.TempDir(), nil }
+	kube := f.deps.KubeClient.(*fake.Clientset)
+	_, err := kube.CoreV1().Pods(DefaultNamespace).Create(t.Context(), &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "oberth-pending", Namespace: DefaultNamespace, Labels: map[string]string{"app.kubernetes.io/instance": "oberth"}},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kube.ClearActions()
+	if err := checkUpgradeVerificationConnection(t.Context(), UpgradeConfig{Namespace: DefaultNamespace}, f.deps); err != nil || len(kube.Actions()) != 0 {
+		t.Error("credential preflight contacted Kubernetes", err, kube.Actions())
+	}
+	writes := 0
+	stop := errors.New("stop at Helm write")
+	helm := f.deps.RunHelm
+	f.deps.RunHelm = func(ctx context.Context, args []string) ([]byte, error) {
+		if args[0] == "list" && slices.Contains(args, DefaultNamespace) {
+			return []byte(`[{"name":"oberth","namespace":"oberth","revision":"7","status":"failed","chart":"oberth-0.22.7"}]`), nil
+		}
+		if args[0] == "upgrade" && !slices.Contains(args, "--dry-run=server") {
+			writes++
+			return nil, stop
+		}
+		return helm(ctx, args)
+	}
+	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.7", BinarySchemaVersion: 99, Namespace: DefaultNamespace, NoBackup: true, RecordDir: t.TempDir()}, f.deps)
+	if writes != 1 || !errors.Is(err, stop) {
+		t.Fatal("configured failed-release repair did not reach Helm write", writes, err)
+	}
+}
+
+func TestUpgradePreflightValidatesClientConfiguration(t *testing.T) {
+	for _, tc := range []struct{ name, variable, value, want string }{
+		{"token command", "OBERTH_TOKEN_COMMAND", "exit 1", "OBERTH_TOKEN_COMMAND failed"},
+		{"CA", "OBERTH_CA_CERT", "/missing/oberth-ca.crt", "OBERTH_CA_CERT"},
+		{"certificate", "OBERTH_CLIENT_CERT", "/missing/oberth-admin.crt", "both client certificate and key"},
+		{"certificate files", "OBERTH_CLIENT_CERT", "/missing/oberth-admin.crt", "cannot inspect client private key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			for _, name := range []string{"OBERTH_MCP_URL", "OBERTH_TOKEN", "OBERTH_TOKEN_COMMAND", "OBERTH_CLIENT_CERT", "OBERTH_CLIENT_KEY", "OBERTH_CA_CERT"} {
+				t.Setenv(name, "")
+			}
+			t.Setenv("OBERTH_BASE_URL", "https://server.example.test:8443")
+			if tc.variable != "OBERTH_TOKEN_COMMAND" {
+				t.Setenv("OBERTH_TOKEN", "fixture")
+			}
+			t.Setenv(tc.variable, tc.value)
+			if tc.name == "certificate files" {
+				t.Setenv("OBERTH_CLIENT_KEY", "/missing/oberth-admin.key")
+			}
+			kube := fake.NewClientset()
+			deps := Deps{KubeClient: kube, RestConfig: &rest.Config{Host: "https://api.example.test"}, ClientConfigRoot: func() (string, error) { return t.TempDir(), nil }}
+			err := checkUpgradeVerificationConnection(t.Context(), UpgradeConfig{}, deps)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "nothing changed") || len(kube.Actions()) != 0 {
+				t.Fatal("invalid client configuration escaped preflight", err, kube.Actions())
+			}
+		})
+	}
+}
 
 func TestUpgradeUnconfiguredAdminRefusesBeforeMutation(t *testing.T) {
 	for _, version := range []string{"0.22.4", "0.22.6", "0.22.7"} {
@@ -56,17 +131,42 @@ func testUpgradeUnconfiguredAdmin(t *testing.T, version string, noBackup, dry bo
 		t.Fatal("unconfigured client reached a write", writes, commands, err)
 	}
 	if !noBackup && version != "0.22.7" {
-		for _, want := range []string{"./oberth-v" + version + " backup --history-only --context fixture --namespace oberth", "oberth upgrade --no-backup", "not copied"} {
+		for _, want := range []string{"./oberth-v" + version + " backup --history-only --context fixture --namespace oberth", "oberth upgrade --no-backup", "not copied", "The retry requires this machine's client connected to this server as an unscoped admin.\n"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatal("missing exact backup guidance", want, err)
 			}
 		}
 	} else {
-		for _, want := range []string{"unscoped admin", "export OBERTH_BASE_URL=", "OBERTH_CLIENT_CERT=", "OBERTH_CLIENT_KEY=", "OBERTH_CA_CERT=", "nothing changed"} {
+		for _, want := range []string{"unscoped admin", "export OBERTH_BASE_URL=", "OBERTH_TOKEN=", "OBERTH_CLIENT_CERT=", "OBERTH_CLIENT_KEY=", "OBERTH_CA_CERT=", "nothing changed"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatal("missing client prerequisite", want, err)
 			}
 		}
+	}
+}
+
+func TestUpgradePrereleaseHasAdminAPI(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/api/admin/version" {
+			t.Error("unexpected admin route", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"v0.22.7-rc.1","schema":99}`))
+	}))
+	defer server.Close()
+	remote, err := client.New(t.Context(), client.Config{BaseURL: server.URL, Token: "fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"0.22.7-0", "0.22.7-alpha.1", "0.22.7-rc.1", "0.22.7"} {
+		if err := checkUpgradeBackupAPI(t.Context(), UpgradeConfig{}, Deps{Admin: remote}, version); err != nil {
+			t.Fatal("API-capable release refused", version, err)
+		}
+	}
+	if requests != 4 {
+		t.Fatal("API-capable releases did not probe admin API", requests)
 	}
 }
 

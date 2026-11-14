@@ -74,24 +74,34 @@ func newInstallerEnrollment() (*installerEnrollment, error) {
 	return &installerEnrollment{key: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), csr: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csr})}, nil
 }
 
+// resolveAdminClientConfig loads credentials without contacting Kubernetes or the server.
+func resolveAdminClientConfig(cfg Config, deps Deps) (client.Config, error) {
+	if cfg.enrollment == nil || cfg.enrollment.result.InstallerCertificate == "" {
+		if err := reuseInstallerEnrollment(&cfg, deps); err != nil {
+			return client.Config{}, err
+		}
+	}
+	if cfg.enrollment != nil && cfg.enrollment.result.InstallerCertificate != "" {
+		ns := cfg.Namespace
+		if ns == "" {
+			ns = DefaultNamespace
+		}
+		return client.Config{BaseURL: "https://oberth." + ns + ".svc:8443", ClientCertificatePEM: []byte(cfg.enrollment.result.InstallerCertificate), ClientKeyPEM: cfg.enrollment.key, CACert: cfg.enrollment.result.ServerCA}, nil
+	}
+	connection, err := client.ResolveConnection(client.ConnectionFlags{})
+	if err != nil {
+		return client.Config{}, err
+	}
+	return connection.Config(), nil
+}
+
 func adminAPI(ctx context.Context, cfg Config, deps Deps) (AdminAPI, func(), error) {
 	if deps.Admin != nil {
 		return deps.Admin, func() {}, nil
 	}
-	if cfg.enrollment == nil || cfg.enrollment.result.InstallerCertificate == "" {
-		if err := reuseInstallerEnrollment(&cfg, deps); err != nil {
-			return nil, func() {}, err
-		}
-	}
-	var configured client.Config
-	if cfg.enrollment != nil && cfg.enrollment.result.InstallerCertificate != "" {
-		configured = client.Config{ClientCertificatePEM: []byte(cfg.enrollment.result.InstallerCertificate), ClientKeyPEM: cfg.enrollment.key, CACert: cfg.enrollment.result.ServerCA}
-	} else {
-		connection, err := client.ResolveConnection(client.ConnectionFlags{})
-		if err != nil {
-			return nil, func() {}, err
-		}
-		configured = connection.Config()
+	configured, err := resolveAdminClientConfig(cfg, deps)
+	if err != nil {
+		return nil, func() {}, err
 	}
 	closeConnection := func() {}
 	if deps.KubeClient != nil && deps.RestConfig != nil {

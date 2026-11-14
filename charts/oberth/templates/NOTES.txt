@@ -22,8 +22,6 @@ installer connects through the explicitly selected Kubernetes context.
 Secret store: {{ .Values.secretstore.address }}. If the store side is not set
 up yet, run scripts/setup-secretstore.sh next to your OpenBao/Vault, then:
 oberth mcp call secretstore_verify '{}'
-Trusted-plan Transit is available when secretstore.transit.enabled is set and
-requires a verified HTTPS secret store address.
 
 {{- end }}
 
@@ -36,5 +34,5 @@ secrets: https://github.com/oberthci/oberth#documentation (docs/mcp-setup.md)
 
 Enabling the Rekor witness on an existing deployment? Read the current audit
 chain head first:
-oberth audit --limit 1 --json
+oberth audit head
 Then set auditAnchor.acceptWitnessGenesis to that exact value for one restart.
