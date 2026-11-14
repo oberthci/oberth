@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/storetest"
 )
@@ -89,7 +90,7 @@ func TestStoppedSettlementResumesNormalObserverForExitToken(t *testing.T) {
 	if err != nil || len(steps) != 1 || steps[0].Step != "cleanup" || steps[0].Status != model.StepPassed {
 		t.Fatalf("onExit step evidence lost: %+v %v", steps, err)
 	}
-	body, _, _, err := f.logs.ReadFrom(run.ID, 0, 1<<20)
+	body, _, err := f.logs.ReadRunLog(t.Context(), run.ID, runlog.Filter{})
 	if err != nil || !strings.Contains(string(body), "exit handler received its executor token") {
 		t.Fatalf("onExit output lost: %q %v", body, err)
 	}

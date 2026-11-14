@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 )
 
 func TestStoppedCompletionStillObserves(t *testing.T) {
@@ -44,7 +45,7 @@ func TestStoppedCompletionStillObserves(t *testing.T) {
 			default:
 				t.Error("completed Workflow bypassed normal resumed observer")
 			}
-			body, _, _, err := f.logs.ReadFrom(run.ID, 0, 1<<20)
+			body, _, err := f.logs.ReadRunLog(t.Context(), run.ID, runlog.Filter{})
 			if err != nil || !strings.Contains(string(body), "exit handler received its executor token") {
 				t.Errorf("final exit logs were not collected: %q %v", body, err)
 			}

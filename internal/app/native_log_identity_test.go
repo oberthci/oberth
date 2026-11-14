@@ -108,7 +108,7 @@ func TestNativeNodeIdentityFlowsThroughRunAndLogs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = database.ClaimNextRun(ctx); err != nil {
+			if _, err = database.StartRun(ctx, run.ID); err != nil {
 				t.Fatal(err)
 			}
 			wf, pods := nativeLogIdentityTree(wanted)
