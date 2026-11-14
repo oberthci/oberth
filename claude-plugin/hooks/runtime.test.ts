@@ -140,7 +140,7 @@ test('a failing watched run stops after three consecutive failures with its diag
   await ui.unmount()
 })
 
-test('slow CLI refreshes never overlap and session end discards their results', async ($, on) => {
+test('slow CLI refreshes never overlap and clear discards old watch results while status resumes', async ($, on) => {
   const { clock, state } = fixture(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await clock.settle()
@@ -153,7 +153,8 @@ test('slow CLI refreshes never overlap and session end discards their results', 
   const lists = state.lists
   await clock.advance(120000)
   expect(state.inFlight).toBe(0)
-  expect(state.lists).toBe(lists)
+  expect(state.lists).toBe(lists + 2)
+  expect(state.statuses[state.statuses.length - 1]).toContain('1 running')
   expect(state.toasts.length).toBe(0)
   const ui = await $.ui.mount({ ...band, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /12345678/ })).toBeUndefined()
@@ -189,7 +190,7 @@ test('command and tool tables honor the limit and both surfaces draw every row',
 })
 
 
-test('clear clears status and stops timers until an explicit watch in the new conversation', async ($, on) => {
+test('clear drops the watch and refreshes status without needing a new watch', async ($, on) => {
   const { clock, state } = fixture(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await clock.settle()
@@ -198,10 +199,16 @@ test('clear clears status and stops timers until an explicit watch in the new co
   const gets = state.gets
   const lists = state.lists
   expect(state.statuses[state.statuses.length - 1]).toBe('')
-  await clock.advance(30000)
-  expect(state.statuses[state.statuses.length - 1]).toBe('')
+  await clock.settle()
+  expect(state.statuses[state.statuses.length - 1]).toContain('1 running')
+  expect(state.lists).toBe(lists + 1)
+  await clock.advance(60000)
+  expect(state.statuses[state.statuses.length - 1]).toContain('1 running')
   expect(state.gets).toBe(gets)
-  expect(state.lists).toBe(lists)
+  expect(state.lists).toBe(lists + 2)
+  const ui = await $.ui.mount({ ...band, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /12345678/ })).toBeUndefined()
+  await ui.unmount()
   const result = REGISTER_MODEL_TOOLS ? await $.tool.call({ tool: 'mcp__oberth__watch' })
     : { result: (await $.command.run(command('watch'))).text }
   expect(result.result).toContain('Watching 12345678')

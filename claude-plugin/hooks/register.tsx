@@ -127,12 +127,18 @@ export const register: Register = on => {
   })
 
   on('session.end', async ($, e, next) => {
-    active = false
+    active = e.reason === 'clear'
     generation++
-    stop?.cancel()
-    stop = undefined
+    if (!active) {
+      stop?.cancel()
+      stop = undefined
+    }
     await $.ui.status(undefined)
     await update($, watched, () => null)
+    if (active) {
+      startTimer($)
+      void refresh($, true)
+    }
     return next(e)
   })
   on('command.run', { command: 'oberth:runs' }, async ($, e) => {

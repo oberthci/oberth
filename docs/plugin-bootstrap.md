@@ -307,9 +307,10 @@ id to select a run outside that page. The line refreshes every 15 seconds,
 shows the sanitised first CLI error line on an outage, and reports completion
 with a toast. It retries failures every 15 seconds and stops after three
 consecutive failures, retaining that diagnostic line; a successful refresh
-resets the failure count. Polling also stops on completion or session end.
+resets the failure count. Watch polling also stops on completion or session end.
 `/oberth:watch --off` removes the pinned line, including a finished run.
-`/clear` removes both the watch and status; an explicit watch restarts polling.
+`/clear` removes the watch and refreshes the status; status polling continues
+without starting another watch.
 
 The status line refreshes every 60 seconds and reads
 `Oberth ▸ N running · last ✓ ref`, counting all active rows in the response.
