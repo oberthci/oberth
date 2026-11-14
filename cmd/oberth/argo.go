@@ -25,7 +25,6 @@ import (
 	"github.com/oberthci/oberth/internal/argowatch"
 	"github.com/oberthci/oberth/internal/artifacts"
 	"github.com/oberthci/oberth/internal/installer"
-	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
