@@ -758,7 +758,7 @@ func (scheduler *Scheduler) submitWorkflow(ctx context.Context, run model.Run, r
 	}
 	current, err := scheduler.database().Run(ctx, run.ID)
 	if err != nil {
-		return err
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
 	if current.Cancelled() || current.Status.Terminal() {
 		return nil
