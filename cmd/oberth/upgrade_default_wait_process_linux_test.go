@@ -89,10 +89,9 @@ case "$*" in
 esac
 `
 			kubectl := `#!/bin/sh
-case "$*" in
- *"version --schema"*) echo 31 ;;
- *) echo 'unexpected fixture kubectl command' >&2; exit 91 ;;
-esac
+printf refused > "$(dirname "$0")/unexpected-kubectl"
+echo 'unexpected fixture kubectl command' >&2
+exit 91
 `
 			for name, body := range map[string]string{"helm": helm, "kubectl": kubectl} {
 				if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0700); err != nil {
@@ -108,6 +107,9 @@ esac
 			command.Env = []string{"OBERTH_BASE_URL=" + adminURL, "OBERTH_TOKEN=fixture-admin", "PATH=" + root + ":/usr/bin:/bin", "HOME=" + root, "KUBECONFIG=" + kubeconfig, "OBERTH_TEST_WAIT_ROLE=cli-" + mode, "OBERTH_TEST_UPGRADE_MARKER=" + marker, "OBERTH_TEST_ALREADY=" + already}
 			raw, err := command.CombinedOutput()
 			output := string(raw)
+			if _, err := os.Stat(filepath.Join(root, "unexpected-kubectl")); !os.IsNotExist(err) {
+				t.Fatal("upgrade invoked kubectl instead of the native observer")
+			}
 			_, statErr := os.Stat(marker)
 			changed := statErr == nil
 			switch mode {
