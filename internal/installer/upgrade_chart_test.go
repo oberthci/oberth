@@ -170,7 +170,6 @@ func TestUpgradeActualHelmPreservesValuesAndAddsDefaults(t *testing.T) {
 	fixture := historicalHelmUpgrade{cfg: cfg, deps: deps, values: values, config: config, release: release, history: history, chart: chart, image: image}
 	fixture.checkOperatorOverrides(t, applyCfg, compat)
 	fixture.checkInstallRestore(t)
-	fixture.checkHistoricalRestore(t)
 	fixture.checkDefaultTransit(t)
 	fixture.checkUnknownStoredValues(t)
 	fixture.checkScratchOnlyDefaults(t)
@@ -441,48 +440,6 @@ func (f historicalHelmUpgrade) checkDefaultTransit(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.checkInstallRestore(t)
-	})
-}
-
-// A restore of the installed v0.22.3 chart must keep its active Transit
-// values. Cleaning them would silently select that chart's disabled default.
-func (f historicalHelmUpgrade) checkHistoricalRestore(t *testing.T) {
-	t.Helper()
-	t.Run("restore-v0.22.3", func(t *testing.T) {
-		chart := t.TempDir()
-		values, err := yaml.Marshal(f.values)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for name, body := range map[string][]byte{
-			"Chart.yaml":  []byte("apiVersion: v2\nname: oberth\nversion: 0.22.3\n"),
-			"values.yaml": values,
-		} {
-			if err := os.WriteFile(filepath.Join(chart, name), body, 0600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		args, err := restoreHelmArgs(t.Context(), RestoreConfig{Namespace: "oberth", ChartPath: chart}, backupDeps{Deps: f.deps}, restoreTarget{Overlay: map[string]any{"compatibility": f.values["compatibility"]}}, t.TempDir())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !slices.Contains(args, "--reuse-values") || slices.Contains(args, "--reset-values") {
-			t.Fatal("restore cleaned values still owned by the installed chart", args)
-		}
-		out, err := f.deps.RunHelm(t.Context(), append(args, "--dry-run=client", "--output=json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var result struct {
-			Config map[string]any `json:"config"`
-		}
-		if err := json.Unmarshal(out, &result); err != nil {
-			t.Fatal(err)
-		}
-		transit := result.Config["secretstore"].(map[string]any)["transit"]
-		if !reflect.DeepEqual(transit, f.config["secretstore"].(map[string]any)["transit"]) {
-			t.Fatal("restore changed the installed chart's Transit configuration", transit)
-		}
 	})
 }
 

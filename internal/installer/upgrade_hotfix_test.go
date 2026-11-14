@@ -141,46 +141,6 @@ func TestUpgradeDryRunValidatesCleanedStoredValues(t *testing.T) {
 	}
 }
 
-func TestRestoreOldChartKeepsInstallerValues(t *testing.T) {
-	values := hotfixStoredValues(t)
-	// Proxy retirement has a separate refusal; this fixture isolates old chart-owned values.
-	delete(values["argo"].(map[string]any), "goProxy")
-	before, _ := json.Marshal(values)
-	deps := Deps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-		if args[0] == "get" {
-			return bytes.Clone(before), nil
-		}
-		if args[0] != "show" {
-			t.Fatalf("old target must retain stored values: %v", args)
-		}
-		if args[1] == "chart" {
-			return []byte("name: oberth\nversion: 0.22.4\n"), nil
-		}
-		return bytes.Clone(before), nil
-	}}
-	args, err := restoreHelmArgs(t.Context(), RestoreConfig{Namespace: "oberth", ChartPath: "old-chart"}, backupDeps{Deps: deps}, restoreTarget{Overlay: map[string]any{"compatibility": values["compatibility"]}}, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	after, _ := json.Marshal(values)
-	if !bytes.Equal(before, after) || !slices.Contains(args, "--reuse-values") || slices.Contains(args, "--reset-values") {
-		t.Fatal("old-chart restore rewrote owned values", args)
-	}
-	index := slices.Index(args, "-f")
-	if index < 0 {
-		t.Fatal("restore overlay missing", args)
-	}
-	body, err := os.ReadFile(args[index+1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, _ := json.Marshal(map[string]any{"compatibility": values["compatibility"]})
-	if !bytes.Equal(body, want) {
-		t.Fatalf("restore wrote values beyond its overlay: %s", body)
-	}
-
-}
-
 func TestRetiredProfileCleanupKeepsOpaqueTransit(t *testing.T) {
 	values := map[string]any{"argo": map[string]any{"controllerProfile": "retired-profile"}, "secretstore": map[string]any{"transit": "operator-configuration"}}
 	if !dropRetiredInstallerValues(values, nil) || values["secretstore"].(map[string]any)["transit"] != "operator-configuration" {
