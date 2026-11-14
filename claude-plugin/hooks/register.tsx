@@ -5,8 +5,8 @@ import type { OberthWatch } from '../types/index'
 import { getRun, listRuns, ReadError, UNAVAILABLE, VALID_ID } from './client'
 import { clip, finished, limit, status, statusLine, table, watchLine } from './format'
 
-// Flip this line to false if the coordinator's shared-namespace check fails.
-export const REGISTER_MODEL_TOOLS = true
+// The configured Oberth MCP server shadows module tools in the same namespace.
+export const REGISTER_MODEL_TOOLS = false
 
 const watched = atom({ plugin: 'oberth', key: 'watch' } as const, null as OberthWatch | null, { shape: 'watch-2' })
 const message = (err: unknown): string => err instanceof ReadError ? err.message : UNAVAILABLE
