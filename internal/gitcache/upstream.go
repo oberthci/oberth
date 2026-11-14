@@ -56,7 +56,7 @@ func (c *Cache) SyncBranch(ctx context.Context, input, branch, sha string, force
 	}
 	args = append(args, "upstream", sha+":"+ref)
 	if err := c.run(ctx, commandSpec{dir: path, args: args}); err != nil {
-		return fmt.Errorf("force-sync branch %s: %w", branch, err)
+		return fmt.Errorf("sync branch %s: %w", branch, err)
 	}
 	return c.verifyRemoteRef(ctx, path, "--heads", ref, sha)
 }

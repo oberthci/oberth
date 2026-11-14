@@ -103,11 +103,6 @@ func deliverPublication(
 	}
 	forceBranch := publication.PromotionID == "" && publication.RefKind == model.RefBranch && publication.Ref != repository.DefaultBranch
 	if forceBranch {
-		if deleted, err := mirrorBranchDeleted(ctx, git, repositoryInput, publication.Ref); err != nil {
-			return model.PublicationFinalization{}, err
-		} else if deleted {
-			return abandonDeletedBranchPublication(ctx, publications, publication)
-		}
 		return attemptPublicationMutation(ctx, publications, git, auditor, repository, repositoryInput, publication, ref, true)
 	}
 	if !publication.PreviousKnown {
