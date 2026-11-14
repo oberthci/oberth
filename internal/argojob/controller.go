@@ -493,7 +493,6 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			if deliveryErr == nil {
 				deliveryErr = admissionWatch.observeIdentityReads(identityReadUnavailable, time.Now())
 			}
-			confirmPending = identityReadUnavailable
 			if err := deliveryErr; err != nil {
 				// Preserve observed execution evidence; a delivery error on a later
 				// Pod must not make already executed steps look like a pre-step failure.
