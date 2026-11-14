@@ -1459,9 +1459,11 @@ trust assumptions and complete invalidation rules.
   An adopted run whose observation still fails settles like a submitted one:
   a terminal Workflow keeps its real result and artifacts (also after a log
   budget breach or executor identity retirement error), and an unobservable
-  Workflow is deleted and only that run fails with phase `infrastructure`;
-  the scheduler keeps running. If that deletion also fails, the run stays
-  owned for the next restart, exactly as for a submitted run.
+  Workflow is asked to stop through Argo's native shutdown (never deleted;
+  Argo's TTL owns deletion); the scheduler keeps running. The run stays owned
+  for settlement until the Workflow's completion is confirmed, and its result
+  is then the Workflow's native verdict from the final observation, exactly
+  as for a submitted run.
   A confirmed-absent Workflow, or a claimed run without a Workflow name,
   fails with `interrupted by server restart`. This applies to branch, tag,
   release, and promotion runs. Recovery never automatically requeues or

@@ -47,7 +47,7 @@ func TestStopPatchAppliesToStoredWorkflowMetadataNulls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"absent-shutdown", "concurrent-Terminate", "replaced-UID"} {
+	for _, mode := range []string{"absent-shutdown", "concurrent-Terminate", "concurrent-Stop", "replaced-UID"} {
 		t.Run(mode, func(t *testing.T) {
 			var stored map[string]any
 			if err := json.Unmarshal(encoded, &stored); err != nil {
@@ -59,6 +59,9 @@ func TestStopPatchAppliesToStoredWorkflowMetadataNulls(t *testing.T) {
 			claim["metadata"].(map[string]any)["creationTimestamp"] = nil
 			if mode == "concurrent-Terminate" {
 				spec["shutdown"] = "Terminate"
+			}
+			if mode == "concurrent-Stop" {
+				spec["shutdown"] = "Stop"
 			}
 			if mode == "replaced-UID" {
 				stored["metadata"].(map[string]any)["uid"] = "replacement"
