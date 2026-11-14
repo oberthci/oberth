@@ -36,6 +36,10 @@ func TestRestartCutR2RequiresPositivePodObservation(t *testing.T) {
 			switch mode {
 			case "list-error", "later-page-error", "changed-resource-version":
 				kube.PrependReactor("list", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
+					// Only step diagnostics are ambiguous here; holder retirement keeps its own fail-closed error.
+					if action.(ktesting.ListAction).GetListRestrictions().Labels.String() == "oberth.ci/role=executor-identity" {
+						return false, nil, nil
+					}
 					calls++
 					if mode == "list-error" {
 						return true, nil, errors.New("API unavailable")

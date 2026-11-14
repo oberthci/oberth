@@ -497,44 +497,28 @@ func (controller *Controller) retireExecutorIdentity(ctx context.Context, wf *wf
 	if controller.kube == nil || wf.UID == "" {
 		return nil
 	}
-	accounts := []string{controller.config.ExecutorServiceAccount}
-	if wf.Annotations[capabilityAnnotation] != "" {
-		// Read the persisted resource bindings so revocation cannot prevent
-		// cleanup of already-issued operator tokens.
-		for _, template := range wf.Spec.Templates {
-			if template.Resource != nil && template.Executor != nil {
-				accounts = append(accounts, template.Executor.ServiceAccountName)
-			}
-		}
-	}
-	for _, account := range accounts {
-		if account == "" {
-			continue
-		}
-		if err := controller.retireIdentityPod(ctx, wf, account); err != nil {
-			return err
-		}
-	}
-	return nil
+	return controller.retireIdentityPod(ctx, wf, "")
 }
 
 func (controller *Controller) retireIdentityPod(ctx context.Context, wf *wfv1.Workflow, serviceAccount string) error {
 	pods := controller.kube.CoreV1().Pods(wf.Namespace)
-	pod, err := pods.Get(ctx, controller.identityPodName(wf, serviceAccount), metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
+	holders, err := pods.List(ctx, metav1.ListOptions{LabelSelector: "oberth.ci/role=executor-identity"})
 	if err != nil {
 		return err
 	}
-	if len(pod.OwnerReferences) != 1 || pod.OwnerReferences[0].UID != wf.UID {
-		return errors.New("executor identity owner changed")
+	for _, pod := range holders.Items {
+		if len(pod.OwnerReferences) != 1 || pod.OwnerReferences[0].UID != wf.UID || pod.OwnerReferences[0].Kind != "Workflow" || pod.OwnerReferences[0].Controller == nil || !*pod.OwnerReferences[0].Controller {
+			continue
+		}
+		if serviceAccount != "" && pod.Spec.ServiceAccountName != serviceAccount {
+			continue
+		}
+		err = pods.Delete(ctx, pod.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pod.UID}, GracePeriodSeconds: ptr.To(int64(0))})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
 	}
-	err = pods.Delete(ctx, pod.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pod.UID}, GracePeriodSeconds: ptr.To(int64(0))})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	return err
+	return nil
 }
 
 // TokenRequest gets at most one re-request, only for explicit load/timeouts.
