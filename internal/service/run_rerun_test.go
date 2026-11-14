@@ -158,7 +158,7 @@ func TestRunRerunAfterTestFailurePassesAndStatusReportsNewestRun(t *testing.T) {
 		t.Fatalf("run_rerun = %#v", response)
 	}
 	rerun := harness.run(t, response.RunID)
-	if rerun.Status != model.RunQueued || rerun.SHA != failed.SHA || rerun.Ref != failed.Ref || rerun.Trigger != failed.Trigger || rerun.Actor != rerunUplink.Identity {
+	if rerun.Status != model.RunRunning || rerun.SHA != failed.SHA || rerun.Ref != failed.Ref || rerun.Trigger != failed.Trigger || rerun.Actor != rerunUplink.Identity {
 		t.Fatalf("queued rerun = %#v", rerun)
 	}
 	if _, err := harness.call(rerunUplink, "run_rerun", map[string]any{"id": failed.ID}); !errors.Is(err, store.ErrInvalidState) {

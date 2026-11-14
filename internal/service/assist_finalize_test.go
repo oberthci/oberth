@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // verdictUnreadableStore fails the run read that carries the assisted
@@ -34,7 +33,7 @@ func TestFinalizeReturnsUnreadableAssistedVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := storetest.ClaimNextRun(f.store, t.Context())
+	run, err := f.store.StartRun(t.Context(), source.ID)
 	if err != nil || run.ID != source.ID {
 		t.Fatalf("claim = %+v %v", run, err)
 	}

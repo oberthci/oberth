@@ -72,6 +72,17 @@ RETURNING `+runColumns,
 	return model.EnqueueRunResult{Run: value}, nil
 }
 
+// enqueueStartedRunTx commits acceptance and ownership together. No durable
+// queue state is exposed between the history insert and submission ownership.
+func (s *Store) enqueueStartedRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec, id string, now int64) (model.EnqueueRunResult, error) {
+	result, err := s.enqueueRunTx(ctx, tx, spec, id, now)
+	if err != nil {
+		return result, err
+	}
+	result.Run, err = scanRun(tx.QueryRowContext(ctx, `UPDATE runs SET status='running', phase='waiting' WHERE id=? RETURNING `+runColumns, id))
+	return result, err
+}
+
 // StartRun records the accepting handler's ownership of one history row.
 // It never selects another run or waits for execution capacity/publication.
 func (s *Store) StartRun(ctx context.Context, id string) (model.Run, error) {
@@ -80,7 +91,7 @@ func (s *Store) StartRun(ctx context.Context, id string) (model.Run, error) {
 	}
 	value, err := scanRun(s.db.QueryRowContext(ctx, `
 UPDATE runs SET status='running', phase='waiting', updated_at=?
-WHERE id=? AND status='queued'
+WHERE id=? AND (status='queued' OR (status='running' AND phase='waiting' AND started_at IS NULL))
 RETURNING `+runColumns, unixNano(s.now()), id))
 	if err != nil {
 		return model.Run{}, translateNotFound("accepted run", err)
@@ -1066,4 +1077,24 @@ func isHexPrefix(value string) bool {
 		}
 	}
 	return true
+}
+
+// FailedWorkflowCreates supplies terminal create failures and interruptions.
+// Cancellation may replace a create error with its own reason before restart.
+// It never authorizes resubmission; immutable identity still guards shutdown.
+func (s *Store) FailedWorkflowCreates(ctx context.Context) ([]model.Run, error) {
+	rows, err := s.reader().QueryContext(ctx, `SELECT `+runColumns+` FROM runs WHERE job_name!='' AND ((status='failed' AND error LIKE 'create Workflow:%') OR status='interrupted')`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var runs []model.Run
+	for rows.Next() {
+		run, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	return runs, rows.Err()
 }

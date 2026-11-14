@@ -50,7 +50,7 @@ func TestWorkflowCreateExhaustionIsInfrastructureAndRunRetryApplies(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retried.Status != model.RunQueued || retried.ID == source.ID || retried.SHA != source.SHA || retried.Ref != source.Ref {
+	if retried.Status != model.RunRunning || retried.ID == source.ID || retried.SHA != source.SHA || retried.Ref != source.Ref {
 		t.Fatalf("retry lost source identity: %+v", retried)
 	}
 	if len(fixture.jobs.createdCI) != 0 || len(fixture.jobs.deleted) != 0 {
@@ -61,4 +61,4 @@ func TestWorkflowCreateExhaustionIsInfrastructureAndRunRetryApplies(t *testing.T
 type uncertainWorkflowCreateError struct{}
 
 func (*uncertainWorkflowCreateError) Error() string         { return "Workflow create outcome uncertain" }
-func (*uncertainWorkflowCreateError) AmbiguousCreate() bool { return true }
+func (*uncertainWorkflowCreateError) UncertainCreate() bool { return true }

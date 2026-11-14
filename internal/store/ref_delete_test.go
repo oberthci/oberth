@@ -134,7 +134,7 @@ func TestRefDeletionReplayCannotCancelRecreatedBranchAtSameSHA(t *testing.T) {
 		t.Fatalf("delete replay: %v %v", duplicate, err)
 	}
 	current, err := s.Run(t.Context(), newer.ID)
-	if err != nil || current.Status != model.RunQueued || current.Reason == "ref deleted" {
+	if err != nil || current.Status != model.RunRunning || current.Reason == "ref deleted" {
 		t.Fatalf("new push cancelled: %+v %v", current, err)
 	}
 	before, err := s.Run(t.Context(), old.ID)
@@ -158,7 +158,7 @@ func TestRefDeletionAuditFailureRollsBackCancellation(t *testing.T) {
 		t.Fatal("unaudited deletion accepted")
 	}
 	current, err := s.Run(t.Context(), run.ID)
-	if err != nil || current.Status != model.RunQueued {
+	if err != nil || current.Status != model.RunRunning {
 		t.Fatalf("failed transaction cancelled run: %+v %v", current, err)
 	}
 	if _, err = s.ReceiveEvent(t.Context(), "delete"); err == nil {

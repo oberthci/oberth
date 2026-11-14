@@ -75,7 +75,7 @@ func TestRerunRunRefusesWithoutQueueingAndRecordsLineage(t *testing.T) {
 		t.Fatal(err)
 	}
 	rerun := result.Enqueued.Run
-	if rerun.Status != model.RunQueued || rerun.SHA != sha || rerun.Ref != failed.Ref || rerun.Actor != "other@host" {
+	if rerun.Status != model.RunRunning || rerun.SHA != sha || rerun.Ref != failed.Ref || rerun.Actor != "other@host" {
 		t.Fatalf("rerun = %#v", rerun)
 	}
 	if source, err := s.RunRerunOf(ctx, rerun.ID); err != nil || source != failed.ID {

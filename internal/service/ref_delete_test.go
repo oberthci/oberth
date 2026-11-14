@@ -128,7 +128,7 @@ func TestPromotionSourcePruneLeavesPendingPromotionCIAlone(t *testing.T) {
 		t.Fatal("promotion prune stopped working", got)
 	}
 	current, err := f.store.Run(t.Context(), queued.ID)
-	if err != nil || current.Status != model.RunQueued || current.Cancelled() {
+	if err != nil || current.Status != model.RunRunning || current.Cancelled() {
 		t.Fatalf("source prune cancelled promotion: %+v %v", current, err)
 	}
 	if pending, err := f.store.PendingRunCancellations(t.Context()); err != nil || len(pending) != 0 {

@@ -83,12 +83,13 @@ func TestRunCancelQueuedRunIsNeverClaimed(t *testing.T) {
 	queued := fixture.branch(t, fixture.exampleService, "feature-q", "a")
 
 	response := mustRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": queued.ID[:8], "reason": "pushed by mistake"})
-	if response.RunID != queued.ID || response.PreviousState != "queued" || response.Workflow != "none" ||
-		response.Status != "interrupted" || response.Phase != "cancelled" || response.CancelledBy != cancelAgent.Identity ||
-		response.Reason != "cancelled by agent@host: pushed by mistake" || response.Warning != "" {
+	if response.RunID != queued.ID || response.PreviousState != "waiting" || response.Workflow != "none" ||
+		response.Status != "running" || response.Phase != "cancelled" || response.CancelledBy != cancelAgent.Identity ||
+		response.Reason != "cancelling by agent@host: pushed by mistake" || response.Warning != "" {
 		t.Fatalf("queued cancel response = %#v", response)
 	}
 	fixture.start(t)
+	fixture.awaitTerminal(t, queued.ID)
 	fixture.assertNothingCreated(t)
 	assertCancelled(t, fixture.run(t, queued.ID), cancelAgent.Identity, "pushed by mistake")
 	fixture.assertNoCIIssue(t, fixture.exampleService, "feature-q")
@@ -213,7 +214,7 @@ func TestRunCancelReleaseRunRequiresAdminAndForce(t *testing.T) {
 		!strings.Contains(err.Error(), "force") {
 		t.Fatalf("admin release cancel without force = %v", err)
 	}
-	if run := fixture.run(t, release.ID); run.Status != model.RunQueued {
+	if run := fixture.run(t, release.ID); run.Status != model.RunRunning {
 		t.Fatalf("refused cancels changed the release run: %#v", run)
 	}
 	response := mustRunCancel(t, fixture.control, cancelAdmin, map[string]any{"id": release.ID, "force": true, "reason": "bad tag"})

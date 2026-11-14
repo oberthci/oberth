@@ -62,7 +62,7 @@ func TestStartupReconciliationDoesNotReexecuteRestoredRuns(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	database, err = storetest.Open(ctx, dbPath, store.Options{})
+	database, err = storetest.OpenAdminClient(ctx, dbPath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -111,7 +111,7 @@ func (s *Store) enqueueReceiveEventTx(ctx context.Context, tx *sql.Tx, event mod
 		return model.EnqueueRunResult{}, fmt.Errorf("generate receive run id: %w", err)
 	}
 	now := unixNano(s.now())
-	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now)
+	enqueued, err := s.enqueueStartedRunTx(ctx, tx, validatedRun, runID, now)
 	if err != nil {
 		return model.EnqueueRunResult{}, err
 	}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1087,6 +1088,17 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 		}
 		storeFilter.RepoID = repository.ID
 	}
+	// Active display status comes from Argo after the durable history read.
+	// Read both active states so native Pending can be filtered accurately.
+	if slices.Contains(filter.Status, model.DisplayQueued) || slices.Contains(filter.Status, model.DisplayRunning) {
+		storeFilter.Status = append(model.RunStatusFilter(nil), filter.Status...)
+		if !slices.Contains(storeFilter.Status, model.DisplayQueued) {
+			storeFilter.Status = append(storeFilter.Status, model.DisplayQueued)
+		}
+		if !slices.Contains(storeFilter.Status, model.DisplayRunning) {
+			storeFilter.Status = append(storeFilter.Status, model.DisplayRunning)
+		}
+	}
 	runs, err := service.history.ListRecentRuns(ctx, storeFilter)
 	if err != nil {
 		return nil, err
@@ -1106,11 +1118,10 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 			if runs[i].DisplayReason == "" && (runs[i].Scheduling == nil || runs[i].Scheduling.Execution == nil || runs[i].Scheduling.Execution.State == "unavailable" || runs[i].Scheduling.Execution.State == "not_observed") {
 				runs[i].DisplayReason = "awaiting Argo state"
 			}
-		case model.DisplayQueued:
-			var reason string
-			runs[i].Scheduling, reason = service.observeScheduling(ctx, runs[i], nil, false)
-			applyQueuedDisplay(&runs[i], runs[i].Scheduling, reason)
 		}
+	}
+	if len(filter.Status) != 0 {
+		runs = slices.DeleteFunc(runs, func(run model.Run) bool { return !slices.Contains(filter.Status, run.DisplayStatus) })
 	}
 	return service.stripScopedSequences(runs), nil
 }
@@ -1692,9 +1703,8 @@ func wireRunStatus(status model.RunStatus) string {
 	return string(status)
 }
 
-// visibleRun keeps the legacy wire projection: a claimed run that has not
-// started reports Status waiting. Its display_status is queued, from
-// model.DisplayRunStatus, the one raw-to-display mapping.
+// visibleRun projects preparation as the wire status waiting. Its display
+// status remains running; only native Argo Pending projects queued.
 func visibleRun(run model.Run) model.Run {
 	if run.ClaimedUnstarted() {
 		run.Status = model.RunWaiting
@@ -1712,8 +1722,8 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	run.Error, collectionDeadline = model.SplitArtifactCollectionDeadline(run.Error)
 	visible.DisplayStatus = model.DisplayRunStatus(run)
 	visible.DisplayReason = runDisplayReason(run)
-	if visible.DisplayStatus == model.DisplayQueued {
-		visible.DisplayReason = queuedDisplayReason(nil)
+	if run.Status == model.RunQueued || run.Status == model.RunWaiting || run.ClaimedUnstarted() {
+		visible.DisplayReason = "starting"
 	}
 	if run.Status == model.RunRunning && isPendingCreate(run) {
 		visible.DisplayReason = "workflow create uncertain, cleanup pending"

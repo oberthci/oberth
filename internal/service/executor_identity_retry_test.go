@@ -58,7 +58,7 @@ func TestExecutorIdentityFailureStopsAsCancelledAndRunRetryApplies(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retried.Status != model.RunQueued || retried.ID == source.ID || retried.SHA != source.SHA || retried.Ref != source.Ref {
+	if retried.Status != model.RunRunning || retried.ID == source.ID || retried.SHA != source.SHA || retried.Ref != source.Ref {
 		t.Fatalf("retry lost source identity: %+v", retried)
 	}
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -164,7 +163,7 @@ spec:
 			if err != nil {
 				t.Fatal(err)
 			}
-			run, err := storetest.ClaimNextRun(f.store, t.Context())
+			run, err := f.store.StartRun(t.Context(), accepted.ID)
 			if err != nil || run.ID != accepted.ID {
 				t.Fatal(run, err)
 			}

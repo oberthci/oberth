@@ -120,7 +120,7 @@ func (s *Store) RerunRun(ctx context.Context, request model.RunRerunRequest) (mo
 		return model.RunRerunResult{}, fmt.Errorf("generate rerun run ID: %w", err)
 	}
 	now := unixNano(s.now())
-	enqueued, err := s.enqueueRunTx(ctx, tx, spec, id, now)
+	enqueued, err := s.enqueueStartedRunTx(ctx, tx, spec, id, now)
 	if err != nil {
 		return model.RunRerunResult{}, fmt.Errorf("enqueue rerun: %w", err)
 	}

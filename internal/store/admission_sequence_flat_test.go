@@ -35,7 +35,7 @@ func TestFailedRestartLeavesFlatClaimOrders(t *testing.T) {
 		if r.ID == a.ID && (r.Status != model.RunFailed) {
 			t.Fatal(r)
 		}
-		if r.ID == b.ID && (r.Status != model.RunQueued) {
+		if r.ID == b.ID && (r.Status != model.RunFailed) {
 			t.Fatal(r)
 		}
 	}

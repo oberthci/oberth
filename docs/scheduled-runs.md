@@ -130,7 +130,8 @@ Friday, not only on Fridays that fall on the 1st.
 ## Overlap, downtime and attribution
 
 **Each due occurrence submits its own Workflow.** The accepting handler records
-the occurrence and run history, then creates the Workflow directly. Argo
+the occurrence and started run history, then starts submission immediately on
+the server lifetime. The request returns before preparation or cluster work. Argo
 parallelism and native Argo synchronization decide when it executes. `fired`
 means the occurrence was accepted; the run records a create failure with its
 reason if the cluster API is unavailable. Another execution requires an

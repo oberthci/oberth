@@ -8,7 +8,6 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // Cancelled receipts remain replayable without hiding a recreated branch.
@@ -63,9 +62,9 @@ func TestDeletedReceiveReplayMustNotHideRecreatedRun(t *testing.T) {
 			}
 		}
 	}
-	checkStatus("new run queued", "queued")
+	checkStatus("new run preparing", "waiting")
 	for _, id := range []string{occupant.ID, fresh.Run.ID} {
-		claimed, err := storetest.ClaimNextRun(f.store, ctx)
+		claimed, err := f.store.StartRun(ctx, id)
 		if err != nil || claimed.ID != id {
 			t.Fatalf("claim: %+v %v", claimed, err)
 		}

@@ -187,7 +187,7 @@ func TestNativeReceiveUpgradeArchivedReceiptsStayTerminalAfterUnarchive(t *testi
 				t.Fatal("unarchive resurrected receipt", again, err)
 			}
 			rerun, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: replay.ID, Actor: "admin", Reason: "repository restored"})
-			if err != nil || rerun.Enqueued.Status != model.RunQueued || rerun.Enqueued.SHA != spec.SHA || rerun.Enqueued.ID == replay.ID {
+			if err != nil || rerun.Enqueued.Status != model.RunRunning || rerun.Enqueued.SHA != spec.SHA || rerun.Enqueued.ID == replay.ID {
 				t.Fatal("manual rerun after unarchive", rerun, err)
 			}
 			claimed, err := s.ClaimNextRun(ctx)
@@ -203,7 +203,7 @@ func TestNativeReceiveUpgradeArchivedReceiptsStayTerminalAfterUnarchive(t *testi
 			}
 			event.ID = "new-push"
 			fresh, err := s.EnqueueReceiveEvent(ctx, event, spec)
-			if err != nil || fresh.Status != model.RunQueued || fresh.ID == replay.ID {
+			if err != nil || fresh.Status != model.RunRunning || fresh.ID == replay.ID {
 				t.Fatal("fresh push hidden", fresh, err)
 			}
 		})
@@ -246,7 +246,7 @@ func TestNativeReceiveUpgradePreservesExecutionAndPublicationCustody(t *testing.
 			event := seedDeferredReceive(t, s, "new-main", newerSpec)
 			applyNativeReceiveUpgrade(t, s)
 			newer, err := s.EnqueueReceiveEvent(ctx, event, newerSpec)
-			if err != nil || newer.Status != model.RunQueued {
+			if err != nil || newer.Status != model.RunRunning {
 				t.Fatal(newer, err)
 			}
 			after, err := s.Run(ctx, older.ID)

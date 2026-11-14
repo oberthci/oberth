@@ -10,7 +10,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type changingPromotionPage struct {
@@ -139,7 +138,7 @@ func failedPublicationForStatus(t *testing.T) (*controlFixture, model.Run, model
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := storetest.ClaimNextRun(f.store, t.Context())
+	run, err := f.store.StartRun(t.Context(), queued.ID)
 	if err != nil || run.ID != queued.ID {
 		t.Fatal(err)
 	}
@@ -320,7 +319,7 @@ func TestAdmittedRerunErrorDoesNotClaimNothingStarted(t *testing.T) {
 	}
 	response := value.(api.RunRerunResponse)
 	run, readErr := h.fixture.store.Run(t.Context(), response.RunID)
-	if readErr != nil || run.Status != model.RunQueued || response.Action != "rerun" {
+	if readErr != nil || run.Status != model.RunRunning || response.Action != "rerun" {
 		t.Fatalf("admitted work lost: %+v %v", response, readErr)
 	}
 }

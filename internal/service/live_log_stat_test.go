@@ -7,7 +7,6 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type countedLiveLogStore struct {
@@ -30,7 +29,7 @@ func TestRunLogLiveUnchangedLogSkipsReadAndStillReportsCompletion(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storetest.ClaimNextRun(fixture.store, t.Context()); err != nil {
+	if _, err := fixture.store.StartRun(t.Context(), run.ID); err != nil {
 		t.Fatal(err)
 	}
 	file, err := fixture.logs.Create(run.ID)

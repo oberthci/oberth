@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -110,7 +109,7 @@ func TestScheduleEntryMigrationPreservesLegacyIdentityAcrossReopen(t *testing.T)
 	}
 	defer s.Close()
 	got, err := s.Run(ctx, legacy.ID)
-	if err != nil || !reflect.DeepEqual(got, legacy.Run) {
+	if err != nil || got.ID != legacy.ID || got.ScheduleEntry != legacy.ScheduleEntry || got.Trigger != legacy.Trigger || got.Status != model.RunFailed || got.Error != model.ServerRestartReason {
 		t.Fatalf("legacy run changed: %+v vs %+v (%v)", got, legacy.Run, err)
 	}
 	// Unknown old entries stay unknown; a current schedule file cannot

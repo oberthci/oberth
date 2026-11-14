@@ -15,7 +15,7 @@ func TestRunListMessageContract(t *testing.T) {
 		run  model.Run
 		want string
 	}{
-		{"queued", model.Run{Status: model.RunQueued}, "in line"},
+		{"queued", model.Run{Status: model.RunQueued}, "starting"},
 		{"tag boost", model.Run{Status: model.RunRunning, StartedAt: &now}, ""},
 		{"running", model.Run{Status: model.RunRunning, StartedAt: &now}, ""},
 		{"promotion", model.Run{Status: model.RunRunning, StartedAt: &now}, ""},

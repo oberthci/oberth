@@ -104,14 +104,14 @@ func TestAdminPapercutRunListCLIAndREST(t *testing.T) {
 	if _, err := f.db.FinishRun(t.Context(), finished.ID, model.RunResult{Status: model.RunFailed}); err != nil {
 		t.Fatal(err)
 	}
-	for _, status := range []any{"queued", []string{"queued"}} {
+	for _, status := range []any{"running", []string{"running"}} {
 		output, err := papercutCall(t, "run_list", map[string]any{"status": status, "repo": f.repo.Name, "ref": queued.Ref, "limit": 1})
 		if err != nil || !strings.Contains(output, queued.ID) || strings.Contains(output, finished.ID) {
 			t.Fatalf("list CLI=%s %v", output, err)
 		}
 	}
 	for _, view := range []string{"all", "history"} {
-		reply := f.rest("/api/runs?status=queued&repo=project&ref=feature%2Fqueue&view=" + view)
+		reply := f.rest("/api/runs?status=running&repo=project&ref=feature%2Fqueue&view=" + view)
 		var page struct {
 			Runs []model.Run `json:"runs"`
 		}
@@ -127,11 +127,11 @@ func TestAdminPapercutRunListCLIAndREST(t *testing.T) {
 			t.Fatalf("list REST %s=%d %s", view, reply.Code, reply.Body)
 		}
 	}
-	reply := f.rest("/api/runs?status=queued&status=failed&limit=1")
+	reply := f.rest("/api/runs?status=running&status=failed&limit=1")
 	if reply.Code != http.StatusOK || !strings.Contains(reply.Body.String(), queued.ID) || !strings.Contains(reply.Body.String(), finished.ID) || reply.Header().Get("X-Oberth-Next-Before") == "" {
 		t.Fatalf("mixed REST page=%d %s headers=%v", reply.Code, reply.Body, reply.Header())
 	}
-	for _, status := range []any{"interrupted", "unknown", []string{}, []any{"queued", 7}} {
+	for _, status := range []any{"interrupted", "unknown", []string{}, []any{"running", 7}} {
 		if _, err := papercutCall(t, "run_list", map[string]any{"status": status}); err == nil {
 			t.Fatalf("invalid CLI status accepted: %v", status)
 		}

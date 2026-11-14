@@ -162,7 +162,7 @@ func TestPublicationCompletionOrdersExplicitlyPreparedHistory(t *testing.T) {
 	if ownerErr != nil || owner.Status != model.RunRunning || owner.Phase != "publishing" {
 		t.Fatalf("publication owner during newer enqueue = %#v, %v", owner, ownerErr)
 	}
-	if queuedErr != nil || queued.Status != model.RunQueued {
+	if queuedErr != nil || queued.Status != model.RunRunning {
 		t.Fatalf("newer run while publication pending = %#v, %v", queued, queuedErr)
 	}
 	if pendingErr != nil || len(pending) != 1 || pending[0].RunID != first.ID {
@@ -205,7 +205,9 @@ func TestDirectCreateIgnoresPendingPublicationOnTheSameRef(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accepted.WorkflowName == "" || accepted.Status != model.RunRunning {
+	f.awaitCreated(t, 1)
+	current := f.run(t, accepted.ID)
+	if current.WorkflowName == "" || current.Status != model.RunRunning {
 		t.Fatalf("publication gated create: %+v", accepted)
 	}
 	f.engine.mu.Lock()
@@ -716,8 +718,12 @@ func TestDirectAcceptanceRefusesAnAuditGateThatClosedAfterRecording(t *testing.T
 	f.scheduler.store = observed
 	f.scheduler.mutationGate = gate.check
 	row, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "gate-closes", Repository: f.repo, Branch: "feature/gate", SHA: strings.Repeat("a", 40), Actor: "owner"})
-	if !errors.Is(err, errMutationBlocked) || row.ID == "" {
+	if err != nil || row.ID == "" {
 		t.Fatalf("closed audit gate accepted: %+v %v", row, err)
+	}
+	failed := waitForFixtureRunStatus(t, f, row.ID, model.RunFailed)
+	if !strings.Contains(failed.Error, errMutationBlocked.Error()) {
+		t.Fatal(failed)
 	}
 	if len(f.jobs.createdCI) != 0 {
 		t.Fatal("Workflow created without audit integrity")
@@ -1556,7 +1562,7 @@ func TestActiveRunDetailAndStatusExposePersistedStepProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, err := storetest.ClaimNextRun(fixture.store, ctx)
+	running, err := fixture.store.StartRun(ctx, enqueued.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1602,7 +1608,7 @@ func TestActiveMCPAndDashboardLogsReadCurrentStepRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
+	if _, err := fixture.store.StartRun(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	logFile, err := fixture.logs.Create(enqueued.ID)
@@ -2330,7 +2336,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if run.Status != model.RunQueued || run.Trigger != "promotion" || run.SHA != baseSHA || run.TestedSHA != baseSHA || run.BaseSHA != baseSHA {
+		if run.Status != model.RunRunning || run.Trigger != "promotion" || run.SHA != baseSHA || run.TestedSHA != baseSHA || run.BaseSHA != baseSHA {
 			t.Fatalf("already-contained promotion run = %#v", run)
 		}
 	})

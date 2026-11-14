@@ -14,7 +14,6 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestTerminalDeclaredRowsKeepOrdinalsAndRealOutcomes(t *testing.T) {
@@ -167,7 +166,7 @@ func TestSeededPlanIsVisibleBeforeAnyStepStarts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := storetest.ClaimNextRun(fixture.store, ctx)
+	run, err := fixture.store.StartRun(ctx, enqueued.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +261,7 @@ func TestObservedStepsUpdateSeededRowsInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
+	if _, err := fixture.store.StartRun(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.logs.WriteStepPlan(enqueued.ID, oberthLikePlan()); err != nil {
@@ -304,7 +303,7 @@ func TestInterruptedRunRetainsItsPlanAndTheProgressItMade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
+	if _, err := fixture.store.StartRun(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.logs.WriteStepPlan(enqueued.ID, oberthLikePlan()); err != nil {

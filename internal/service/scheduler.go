@@ -201,14 +201,6 @@ func (scheduler *Scheduler) enqueueCI(ctx context.Context, request CIRequest, fi
 	result, err := scheduler.recordCI(ctx, request, fire)
 	if err == nil && result.Enqueued.ID != "" {
 		err = scheduler.AcceptEnqueue(ctx, result.Enqueued)
-		if err == nil {
-			current, readErr := scheduler.database().Run(ctx, result.Enqueued.ID)
-			if readErr != nil {
-				err = readErr
-			} else {
-				result.Enqueued.Run = current
-			}
-		}
 	}
 	return result, err
 }
@@ -262,14 +254,6 @@ func (scheduler *Scheduler) AdmitRelease(ctx context.Context, request ReleaseReq
 	enqueued, err := scheduler.recordRelease(ctx, request)
 	if err == nil {
 		err = scheduler.AcceptEnqueue(ctx, enqueued)
-		if err == nil {
-			current, readErr := scheduler.database().Run(ctx, enqueued.ID)
-			if readErr != nil {
-				err = readErr
-			} else {
-				enqueued.Run = current
-			}
-		}
 	}
 	return enqueued, err
 }
@@ -294,62 +278,50 @@ func (scheduler *Scheduler) recordRelease(ctx context.Context, request ReleaseRe
 	return enqueued, nil
 }
 
-// AcceptEnqueue submits this accepted run before returning. Observation belongs
-// to the server lifetime, independently of the accepting request.
-func (scheduler *Scheduler) AcceptEnqueue(ctx context.Context, enqueued model.EnqueueRunResult) error {
-	ctx, cancel := context.WithCancel(ctx)
-	stop := context.AfterFunc(scheduler.observationCtx, cancel)
-	defer func() { stop(); cancel() }()
+// AcceptEnqueue starts submission immediately on the server lifetime. Returning
+// acceptance releases the receive lock before checkout, policy or cluster work.
+func (scheduler *Scheduler) AcceptEnqueue(_ context.Context, enqueued model.EnqueueRunResult) error {
 	if enqueued.Duplicate || enqueued.ID == "" {
 		return nil
 	}
-	if err := scheduler.requireMutation(ctx); err != nil {
-		return err
-	}
+	scheduler.observationMu.Lock()
+	defer scheduler.observationMu.Unlock()
+	if scheduler.observationsClosed {
+		return nil
+	} // Startup recovery owns an interrupted acceptance.
+	ctx := scheduler.observationCtx
 	run, err := scheduler.database().StartRun(ctx, enqueued.ID)
 	if err != nil {
-		if scheduler.observationCtx.Err() == nil {
+		current, readErr := scheduler.database().Run(ctx, enqueued.ID)
+		if readErr == nil && current.Status.Terminal() {
+			return nil
+		}
+		if readErr == nil && current.Cancelled() {
+			return scheduler.cleanupExecution(ctx, current, nil)
+		}
+		if ctx.Err() == nil {
 			scheduler.failAccept(ctx, enqueued.Run, err)
 		}
 		return err
 	}
 	owner := scheduler.submissions.trackRun(run)
 	finishEvidence := scheduler.beginEvidenceExecution(run.ID)
-	observing := false
-	defer func() {
-		if !observing {
-			owner.cancel()
-			finishEvidence()
+	scheduler.observers.Add(1)
+	go func() {
+		defer scheduler.observers.Done()
+		defer owner.cancel()
+		defer finishEvidence()
+		err := scheduler.submitWorkflow(ctx, run, scheduler.requireMutation, owner, func(run model.Run, repository model.Repository, observation runObservation) error {
+			return scheduler.observeRun(ctx, run, repository, scheduler.awaitMutation, owner, observation)
+		})
+		if errors.Is(err, errMutationBlocked) && ctx.Err() == nil && !scheduler.ownsCreateCleanup(run.ID) {
+			scheduler.failAccept(ctx, run, err)
+		}
+		if err := scheduler.cleanupExecution(ctx, run, err); err != nil && ctx.Err() == nil {
+			log.Printf("WARN: submit or observe Workflow run=%s: %v", run.ID, err)
 		}
 	}()
-	err = scheduler.submitWorkflow(ctx, run, scheduler.requireMutation, owner, func(run model.Run, repository model.Repository, observation runObservation) error {
-		scheduler.observationMu.Lock()
-		defer scheduler.observationMu.Unlock()
-		if scheduler.observationsClosed {
-			_ = observation.file.Close()
-			return context.Canceled
-		}
-		scheduler.observers.Add(1)
-		observing = true
-		go func() {
-			defer scheduler.observers.Done()
-			defer owner.cancel()
-			defer finishEvidence()
-			ctx := scheduler.observationCtx
-			err := scheduler.observeRun(ctx, run, repository, scheduler.awaitMutation, owner, observation)
-			if err := scheduler.cleanupExecution(ctx, run, err); err != nil && ctx.Err() == nil {
-				log.Printf("WARN: observe Workflow run=%s: %v", run.ID, err)
-			}
-		}()
-		return nil
-	})
-	if !observing {
-		if ctx.Err() != nil && scheduler.observationCtx.Err() == nil && !scheduler.ownsCreateCleanup(run.ID) {
-			scheduler.failAccept(ctx, run, ctx.Err())
-		}
-		return scheduler.cleanupExecution(ctx, run, err)
-	}
-	return err
+	return nil
 }
 
 // AcceptCancellations executes the obligations an explicit run cancel
@@ -541,6 +513,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		return err
+	}
+	if err := scheduler.rearmFailedCreates(workerCtx); err != nil {
 		return err
 	}
 	var adopted []adoptedRun
@@ -785,6 +760,13 @@ func (scheduler *Scheduler) submitWorkflow(ctx context.Context, run model.Run, r
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
+	current, err := scheduler.database().Run(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	if current.Cancelled() || current.Status.Terminal() {
+		return nil
+	}
 	logFile, err := scheduler.logs.Create(run.ID)
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("create run log: %w", err))
@@ -794,7 +776,7 @@ func (scheduler *Scheduler) submitWorkflow(ctx context.Context, run model.Run, r
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
-	current, err := scheduler.database().SetRunWorkflowName(ctx, run.ID, workflowName)
+	current, err = scheduler.database().SetRunWorkflowName(ctx, run.ID, workflowName)
 	if err != nil {
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("persist deterministic Job intent: %w", err))
@@ -896,18 +878,11 @@ func (scheduler *Scheduler) createRunWorkflow(ctx context.Context, jobRequest Wo
 	}
 	cancelCreation()
 	if err != nil {
-		var uncertain interface{ AmbiguousCreate() bool }
-		if errors.As(err, &uncertain) && uncertain.AmbiguousCreate() {
-			_ = logFile.Close()
-			scheduler.deferCreateCleanup(ctx, run, workflowName, err)
-			return nil // The reconciler settles the uncertain create.
-		}
 		if _, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) && scheduler.observationCtx.Err() != nil {
 			return logFile.Close()
 		}
 		_ = logFile.Close()
-		// Definite rejection never deletes a foreign name. Ambiguous POSTs stay
-		// owned by the settlement task above until absence is confirmed.
+		// A rejected create never deletes or replaces the named Workflow.
 		finishCtx, cancelFinish := boundedWorkspaceCleanupContext(ctx)
 		failureErr := scheduler.finishInfrastructureFailure(finishCtx, run, repository, fmt.Errorf("create Workflow: %w", err))
 		cancelFinish()
@@ -1517,6 +1492,9 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 	handled := make(map[string]bool, len(runs))
 	for _, run := range runs {
 		handled[run.ID] = true
+		if scheduler.submissions.ownsLiveRun(run) {
+			continue
+		}
 		if run.Cancelled() {
 			continue // The durable cancellation pass owns Stop and terminal observation.
 		}

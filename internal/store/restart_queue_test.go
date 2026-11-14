@@ -66,9 +66,7 @@ func TestOwnerRestartPreservesWaitingQueue(t *testing.T) {
 				current, err := s.Run(ctx, original.ID)
 				requireRestartNoError(t, err)
 				want := model.RunFailed
-				if original.ID == later.ID {
-					want = model.RunQueued
-				} else if named {
+				if original.ID != later.ID && named {
 					want = model.RunRunning
 				}
 				if current.Status != want || current.ID != original.ID || current.QueueSequence != original.QueueSequence || current.AdmissionSequence != original.AdmissionSequence || !current.QueuedAt.Equal(original.QueuedAt) {
@@ -98,8 +96,8 @@ func TestOwnerRestartPreservesWaitingQueue(t *testing.T) {
 				t.Errorf("unsubmitted waiting work needs no Workflow deletion: %+v", pending)
 			}
 			claimed, err := s.ClaimNextRun(ctx)
-			if err != nil || claimed.ID != later.ID {
-				t.Fatal("claimed run was resubmitted", claimed, err)
+			if !errors.Is(err, ErrNotFound) {
+				t.Fatal("interrupted history was resubmitted", claimed, err)
 			}
 
 		})
@@ -214,7 +212,7 @@ func TestServerRestartRunSupportsExplicitRerun(t *testing.T) {
 			}})
 			requireRestartNoError(t, err)
 			next := result.Enqueued.Run
-			if next.ID == source.ID || next.Status != model.RunQueued || next.RefKind != kind || next.Ref != source.Ref || next.SHA != source.SHA || next.TestedSHA != source.TestedSHA || next.Actor != "operator" || next.Error != "" {
+			if next.ID == source.ID || next.Status != model.RunRunning || next.RefKind != kind || next.Ref != source.Ref || next.SHA != source.SHA || next.TestedSHA != source.TestedSHA || next.Actor != "operator" || next.Error != "" {
 				t.Fatal(next)
 			}
 			unchanged, err := s.Run(t.Context(), source.ID)

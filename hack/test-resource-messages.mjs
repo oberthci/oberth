@@ -23,7 +23,7 @@ context.row=base;
 assert.ok(evaluate('summaryLines({run:row,steps:[]})').includes(notice));
 console.log('Resource advice remains detail-only.');
 
-context.row={...base,status:'queued',started_at:null,display_reason:'next in line',reason:'full operator provenance'};
+context.row={...base,status:'queued',started_at:null,display_reason:'waiting for Argo',reason:'full operator provenance'};
 assert.ok(evaluate(`summaryLines({run:row,steps:[],scheduling:{message:'full scheduling observation'}})`).includes('[scheduling] full scheduling observation'));
 assert.ok(evaluate(`summaryLines({run:row,steps:[]})`).includes('reason: full operator provenance'));
 context.row={...base,status:'failed',display_reason:'unit-tests failed',error:'full unabridged controller evidence'};

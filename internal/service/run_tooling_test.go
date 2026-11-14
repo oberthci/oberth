@@ -15,7 +15,6 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // #1213: the 8-character ID printed by push feedback must be directly usable.
@@ -56,7 +55,7 @@ func TestActiveRunLogsWithoutRetainedOutputArePending(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := storetest.ClaimNextRun(fixture.store, ctx); err != nil {
+			if _, err := fixture.store.StartRun(ctx, run.ID); err != nil {
 				t.Fatal(err)
 			}
 			started := time.Now().UTC()

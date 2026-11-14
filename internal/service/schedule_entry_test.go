@@ -28,7 +28,7 @@ func TestScheduleEntryEnqueuePersistsTheResolvedName(t *testing.T) {
 		}
 	}
 	runs, err := f.store.ListRecentRuns(context.Background(), model.RunListFilter{RepoID: f.repo.ID, Limit: 10})
-	if err != nil || len(runs) != 2 || runs[0].Status != model.RunQueued || runs[1].Status != model.RunQueued {
+	if err != nil || len(runs) != 2 || runs[0].Status != model.RunRunning || runs[1].Status != model.RunRunning {
 		t.Fatalf("schedule entries superseded: %+v %v", runs, err)
 	}
 }
@@ -93,12 +93,14 @@ func TestScheduleCronSubmitsIndependentOverlappingOccurrences(t *testing.T) {
 	if err != nil || next.Outcome != "fired" || next.Enqueued.ID == first.Enqueued.ID {
 		t.Fatalf("next cron=%+v %v", next, err)
 	}
+	f.awaitCreated(t, 2)
 	for _, id := range []string{first.Enqueued.ID, next.Enqueued.ID} {
 		run, err := f.store.Run(t.Context(), id)
 		if err != nil || run.Status != model.RunRunning || run.WorkflowName == "" {
 			t.Fatalf("occurrence not submitted=%+v %v", run, err)
 		}
 	}
+	f.awaitCreated(t, 2)
 	for _, id := range []string{first.Enqueued.ID, next.Enqueued.ID} {
 		f.engine.finish(t, id)
 		f.awaitTerminal(t, id)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -117,6 +118,8 @@ func retryableWorkflowPreparation(err error) bool {
 // WatchFailedCreate stops an owned Workflow if a timed-out POST appears later.
 // It consumes the existing hub's events; it never polls, creates, or deletes.
 func (controller *Controller) WatchFailedCreate(ctx context.Context, request Request) error {
+	ctx, stop := context.WithTimeout(ctx, time.Minute)
+	defer stop()
 	hub, ok := controller.hub.(interface {
 		WorkflowsForRun(string) []*wfv1.Workflow
 		Subscribe(string) (<-chan struct{}, func())
@@ -137,7 +140,7 @@ func (controller *Controller) WatchFailedCreate(ctx context.Context, request Req
 			if wf.Status.Phase.Completed() {
 				return nil
 			}
-			if _, err := requestWorkflowShutdown(ctx, controller.workflows, wf, wfv1.ShutdownStrategyStop); err == nil {
+			if _, err := requestWorkflowShutdown(ctx, controller.workflows, wf, failedCreateShutdown(request)); err == nil {
 				return nil
 			}
 		}
@@ -161,4 +164,11 @@ func (controller *Controller) sameCreateOwner(workflow *wfv1.Workflow, request R
 		return &workflowCreateFailure{name: request.Name, stage: "source-binding", cause: err, uncertain: true}
 	}
 	return nil
+}
+
+func failedCreateShutdown(request Request) wfv1.ShutdownStrategy {
+	if request.Trigger == pipeline.TriggerRelease || request.RunTrigger == "tag" || request.RunTrigger == "promotion" || request.RunTrigger == "release" || request.RunTrigger == "apply" {
+		return wfv1.ShutdownStrategyTerminate
+	}
+	return wfv1.ShutdownStrategyStop
 }

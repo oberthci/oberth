@@ -20,7 +20,7 @@ func NextQueuedRun(database runStarter, ctx context.Context) (model.Run, error) 
 	if !ok {
 		return model.Run{}, store.ErrNotFound
 	}
-	runs, err := history.ListRecentRuns(ctx, model.RunListFilter{Status: model.RunStatusFilter{"queued"}, Limit: 500})
+	runs, err := history.ListRecentRuns(ctx, model.RunListFilter{Limit: 500})
 	if err != nil {
 		return model.Run{}, err
 	}

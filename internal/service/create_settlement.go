@@ -416,11 +416,7 @@ func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Ru
 			reason = store.ExecutorIdentityPendingMessage
 			run.Error = reason
 		}
-		var mismatch interface{ WorkflowSpecMismatch() bool }
-		if errors.As(failure, &mismatch) && mismatch.WorkflowSpecMismatch() {
-			reason = store.WorkflowSpecMismatchPendingMessage
-			run.Error = reason
-		}
+
 	}
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	err := scheduler.database().MarkRunCreatePending(persistCtx, run.ID, name, reason)

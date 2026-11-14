@@ -11,7 +11,7 @@ import (
 func TestSchedulingQueuedIgnoresStalePolicyWait(t *testing.T) {
 	run := model.Run{ID: "recovered", Status: model.RunQueued, Reason: "retried after restart; " + store.PolicyRefreshWaitingReason}
 	got, _ := (&API{}).observeScheduling(t.Context(), run, nil, false)
-	if got.State != "queued" {
+	if got.State != "unavailable" {
 		t.Fatalf("recovered queue retains obsolete policy wait: %#v", got)
 	}
 }
@@ -24,7 +24,7 @@ func TestPolicyWaitKeepsSharedDisplayStatusAndReason(t *testing.T) {
 		startedAt *time.Time
 		status    string
 	}{
-		{"before admission", "waiting", nil, model.DisplayQueued},
+		{"before admission", "waiting", nil, model.DisplayRunning},
 		{"publication", "publishing", &started, model.DisplayRunning},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -32,7 +32,7 @@ func TestPolicyWaitKeepsSharedDisplayStatusAndReason(t *testing.T) {
 			observation, reason := (&API{}).observeScheduling(t.Context(), run, nil, false)
 			view := presentationRun(run)
 			applyQueuedDisplay(&view, observation, reason)
-			if view.DisplayStatus != tc.status || view.DisplayReason != map[string]string{"queued": "waiting for upstream policy", "running": "publishing to upstream"}[tc.status] {
+			if view.DisplayStatus != tc.status || view.DisplayReason != map[string]string{"waiting": "starting", "publishing": "publishing to upstream"}[tc.phase] {
 				t.Fatalf("policy wait lost shared status or cause: %#v", view)
 			}
 			if observation.State != "waiting" || observation.Message != store.PolicyRefreshWaitingReason+": waiting for upstream trusted test policy; no publication is allowed." {

@@ -31,9 +31,6 @@ func (s *API) observeScheduling(ctx context.Context, run model.Run, steps []mode
 	result = &model.RunScheduling{ObservedAt: observed, State: "preparing", Message: "Preparing Workflow submission."}
 	defer func() {
 		result.AgeSeconds = int64(c.Since(observed) / time.Second)
-		if model.DisplayRunStatus(run) == model.DisplayQueued && reason == "" {
-			reason = queuedDisplayReason(result)
-		}
 	}()
 	if run.Status == model.RunRunning && (run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason)) {
 		result.State = "waiting"
@@ -48,19 +45,7 @@ func (s *API) observeScheduling(ctx context.Context, run model.Run, steps []mode
 		}
 		return result, "workflow create uncertain, cleanup pending"
 	}
-	if run.Status == model.RunQueued {
-		result.State = "queued"
-		result.Message = "Accepted; preparing Workflow submission."
-		if s.repositories != nil {
-			repository, err := s.repositories.Repository(ctx, run.RepoID)
-			if err == nil && repository.ArchivedAt != nil {
-				result.Message = "Repository is archived; Workflow submission is paused until an operator unarchives it."
-				return result, "repository archived"
-			}
-		}
-		return result, "in line"
-	}
-	if run.ClaimedUnstarted() {
+	if run.ClaimedUnstarted() || run.Status == model.RunWaiting {
 		result.State = "waiting"
 		result.Message = "Waiting for Workflow submission."
 		return result, "starting"
@@ -99,7 +84,7 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 	if run.Phase == "publishing" || scheduling == nil || scheduling.Execution == nil {
 		return
 	}
-	if scheduling.Execution.Phase == "Pending" || scheduling.Execution.Message == model.ParallelismWaitMessage {
+	if scheduling.Execution.Phase == "Pending" {
 		run.DisplayStatus = model.DisplayQueued
 		run.DisplayReason = queuedDisplayReason(scheduling)
 	}

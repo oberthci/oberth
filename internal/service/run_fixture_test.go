@@ -22,13 +22,13 @@ func (scheduler *Scheduler) ProcessNext(ctx context.Context) error {
 	if !ok {
 		return store.ErrNotFound
 	}
-	runs, err := history.ListRecentRuns(ctx, model.RunListFilter{Status: model.RunStatusFilter{"queued"}, Limit: 500})
+	runs, err := history.ListRecentRuns(ctx, model.RunListFilter{Status: model.RunStatusFilter{"queued", "running"}, Limit: 500})
 	if err != nil {
 		return err
 	}
 	var chosen model.Run
 	for _, r := range runs {
-		if r.Status == model.RunQueued && (chosen.ID == "" || r.QueueSequence < chosen.QueueSequence) {
+		if (r.Status == model.RunQueued || (r.Status == model.RunRunning && r.WorkflowName == "" && r.Phase == "waiting")) && (chosen.ID == "" || r.QueueSequence < chosen.QueueSequence) {
 			chosen = r
 		}
 	}
@@ -156,7 +156,7 @@ func (scheduler *Scheduler) runAcceptedFixtures(parent context.Context) error {
 		requests.Wait()
 	}()
 	if history, ok := fixtureHistory(scheduler); ok {
-		runs, err := history.ListRecentRuns(ctx, model.RunListFilter{Status: model.RunStatusFilter{"queued"}, Limit: 500})
+		runs, err := history.ListRecentRuns(ctx, model.RunListFilter{Status: model.RunStatusFilter{"queued", "running"}, Limit: 500})
 		if err != nil {
 			cancel()
 			stopped := <-done
@@ -166,7 +166,7 @@ func (scheduler *Scheduler) runAcceptedFixtures(parent context.Context) error {
 			return err
 		}
 		for i := len(runs) - 1; i >= 0; i-- {
-			if runs[i].Status != model.RunQueued {
+			if runs[i].Status != model.RunQueued && (runs[i].Status != model.RunRunning || runs[i].WorkflowName != "" || (runs[i].Phase != "waiting" && !runs[i].Cancelled())) {
 				continue
 			}
 			submit(model.EnqueueRunResult{Run: runs[i]})

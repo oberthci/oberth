@@ -33,8 +33,8 @@ func applyWorkflowStopTestPatch(workflow *wfv1.Workflow, kind types.PatchType, d
 	if patch.Metadata.UID != workflow.UID || patch.Metadata.ResourceVersion != "" && patch.Metadata.ResourceVersion != workflow.ResourceVersion {
 		return nil, apierrors.NewConflict(workflowTestResource, workflow.Name, errors.New("UID/resourceVersion changed"))
 	}
-	if patch.Spec.Shutdown != wfv1.ShutdownStrategyStop {
-		return nil, errors.New("expected native Stop")
+	if patch.Spec.Shutdown != wfv1.ShutdownStrategyStop && patch.Spec.Shutdown != wfv1.ShutdownStrategyTerminate {
+		return nil, errors.New("expected native shutdown")
 	}
 	next := workflow.DeepCopy()
 	next.Spec.Shutdown = patch.Spec.Shutdown

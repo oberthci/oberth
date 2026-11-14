@@ -173,7 +173,7 @@ func TestScheduleOccurrenceCommitSurvivesRestartAndRejectsStaleSnapshot(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.FinishRun(ctx, first.Enqueued.ID, model.RunResult{Status: model.RunFailed}); err != nil {
+	if run, err := s.Run(ctx, first.Enqueued.ID); err != nil || run.Status != model.RunFailed || run.Error != model.ServerRestartReason {
 		t.Fatal(err)
 	}
 	event.ID = "stale-retry-after-completion"

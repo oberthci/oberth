@@ -98,7 +98,7 @@ func TestWaitResolvesAnnotatedTagAndPeeledCommit(t *testing.T) {
 	control := fixture.api(t)
 	for _, sha := range []string{objectSHA, commitSHA} {
 		response, err := callWaitFixture(t, control, fixture.repo.Name, sha, "release")
-		if err != nil || response.Run.ID != release.ID || !response.StillRunning || response.Run.Status != model.RunQueued {
+		if err != nil || response.Run.ID != release.ID || !response.StillRunning || response.Run.Status != model.RunWaiting {
 			t.Fatalf("pending release via %s = %#v, %v", sha, response, err)
 		}
 	}

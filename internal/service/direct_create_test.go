@@ -3,8 +3,9 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,12 +26,6 @@ func TestDirectCreateTwoPushesDoNotWaitForAnEarlierWorkflow(t *testing.T) {
 	second, err := f.scheduler.EnqueueCI(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
-	}
-	for _, id := range []string{first.ID, second.ID} {
-		run, err := f.store.Run(t.Context(), id)
-		if err != nil || run.WorkflowName == "" || run.Phase != "running" {
-			t.Fatalf("handler returned before submission: %+v %v", run, err)
-		}
 	}
 	created := f.awaitCreated(t, 2)
 	if !created[first.ID] || !created[second.ID] {
@@ -53,11 +48,11 @@ func TestDirectCreateTwoPushesDoNotWaitForAnEarlierWorkflow(t *testing.T) {
 
 type unavailableCreateJobs struct {
 	*fakeJobs
-	attempts int
+	attempts atomic.Int32
 }
 
 func (j *unavailableCreateJobs) CreateWorkflow(context.Context, WorkflowRequest) error {
-	j.attempts++
+	j.attempts.Add(1)
 	return errors.New("cluster API unavailable; request another attempt explicitly")
 }
 
@@ -69,7 +64,8 @@ func TestDirectCreateAPIFailureRecordsReasonAndNeverResubmits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := f.store.Run(t.Context(), accepted.ID)
+	current := waitForFixtureRunStatus(t, f, accepted.ID, model.RunFailed)
+	_, err = f.store.Run(t.Context(), accepted.ID)
 	if err != nil || current.Status != model.RunFailed || !strings.Contains(current.Error, "cluster API unavailable") {
 		t.Fatalf("missing create failure: %+v %v", current, err)
 	}
@@ -87,50 +83,65 @@ func TestDirectCreateAPIFailureRecordsReasonAndNeverResubmits(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if jobs.attempts != 1 {
-		t.Fatalf("create attempts=%d", jobs.attempts)
+	if jobs.attempts.Load() != 1 {
+		t.Fatalf("create attempts=%d", jobs.attempts.Load())
 	}
 }
 
-type cutCreateJobs struct {
-	*pendingCreateJobs
-	entered  chan struct{}
-	accepted bool
+type blockedPreparationGit struct {
+	WorkspaceGit
+	entered chan string
+	release chan struct{}
 }
 
-func (j *cutCreateJobs) CreateWorkflow(ctx context.Context, request WorkflowRequest) error {
-	close(j.entered)
-	<-ctx.Done()
-	if j.accepted {
-		return j.fakeJobs.CreateWorkflow(context.WithoutCancel(ctx), request)
+func (git *blockedPreparationGit) Checkout(ctx context.Context, repo, sha, dir string) error {
+	select {
+	case git.entered <- sha:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return ctx.Err()
+	select {
+	case <-git.release:
+		return git.WorkspaceGit.Checkout(ctx, repo, sha, dir)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func TestDirectCreateRequestCancellationDoesNotStrandHistory(t *testing.T) {
-	for _, accepted := range []bool{false, true} {
-		t.Run(fmt.Sprint(accepted), func(t *testing.T) {
-			f := newControlFixture(t, JobResult{Status: model.RunFailed, Phase: "job", Error: "real Workflow result"})
-			jobs := &cutCreateJobs{pendingCreateJobs: &pendingCreateJobs{fakeJobs: f.jobs}, entered: make(chan struct{}), accepted: accepted}
-			f.scheduler.jobs = jobs
-			ctx, cancel := context.WithCancel(t.Context())
-			done := make(chan model.EnqueueRunResult, 1)
-			go func() {
-				row, _ := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "request-cut", Repository: f.repo, Branch: "feature/cut", SHA: strings.Repeat("a", 40), Actor: "owner"})
-				done <- row
-			}()
-			<-jobs.entered
-			cancel()
-			row := <-done
-			finished := waitForFixtureRunStatus(t, f, row.ID, model.RunFailed)
-			if accepted {
-				if finished.Error != "real Workflow result" {
-					t.Fatalf("accepted Workflow lost its observer: %+v", finished)
-				}
-			} else if !strings.Contains(finished.Error, context.Canceled.Error()) {
-				t.Fatalf("request failure reason missing: %+v", finished)
-			}
-		})
+	f := newGroupFixture(t, 0)
+	git := &blockedPreparationGit{WorkspaceGit: f.scheduler.git, entered: make(chan string, 2), release: make(chan struct{})}
+	f.scheduler.git = git
+	release := sync.OnceFunc(func() { close(git.release) })
+	defer release()
+	ctx, cancel := context.WithCancel(t.Context())
+	first, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "cut-after-accept", Repository: f.terraform, Branch: "feature/cut", SHA: strings.Repeat("a", 40), Actor: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	second, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "beside-blocked-prepare", Repository: f.terraform, Branch: "feature/cut", SHA: strings.Repeat("b", 40), Actor: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		select {
+		case <-git.entered:
+		case <-time.After(testStartTimeout(5 * time.Second)):
+			t.Fatal("preparation serialized accepting requests")
+		}
+	}
+	for _, id := range []string{first.ID, second.ID} {
+		run, err := f.store.Run(t.Context(), id)
+		if err != nil || run.Status != model.RunRunning || run.WorkflowName != "" {
+			t.Fatalf("accepted preparation=%+v %v", run, err)
+		}
+	}
+	release()
+	f.awaitCreated(t, 2)
+	for _, id := range []string{first.ID, second.ID} {
+		f.engine.finish(t, id)
+		f.awaitTerminal(t, id)
 	}
 }
 
@@ -153,6 +164,7 @@ func TestDirectCreateStoreFailureLeavesAnotherWorkflowObserved(t *testing.T) {
 	if err != nil || failed.Status != model.RunFailed || failed.WorkflowName != "" {
 		t.Fatalf("invalid request created work: %+v %v", failed, err)
 	}
+	f.awaitCreated(t, 1)
 	f.engine.finish(t, first.ID)
 	f.awaitTerminal(t, first.ID)
 }

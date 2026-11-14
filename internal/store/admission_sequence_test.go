@@ -86,8 +86,9 @@ func TestRestartFailureKeepsOriginalAdmissionOrder(t *testing.T) {
 	if err != nil || failed.Status != model.RunFailed || failed.QueueSequence != a.QueueSequence || failed.AdmissionSequence != a.AdmissionSequence {
 		t.Fatal(failed, err)
 	}
-	next, err := s.ClaimNextRun(ctx)
-	if err != nil || next.ID != b.ID {
-		t.Fatal("restarted run was resubmitted", next, err)
+	next, err := s.Run(ctx, b.ID)
+	if err != nil || next.Status != model.RunFailed || next.Error != model.ServerRestartReason || next.QueueSequence != b.QueueSequence {
+		t.Fatal("old queued history not ended", next, err)
 	}
+
 }

@@ -88,6 +88,7 @@ type RunHistory interface {
 type RunSubmissionStore interface {
 	EnqueueReceiveEvent(context.Context, model.ReceiveEventSpec, model.RunSpec) (model.EnqueueRunResult, error)
 	StartRun(context.Context, string) (model.Run, error)
+	FailedWorkflowCreates(context.Context) ([]model.Run, error)
 	MarkRunCreatePending(context.Context, string, string, ...string) error
 	MarkRunSubmitted(context.Context, string) (model.Run, error)
 	MarkRunSubmissionStarted(context.Context, string) (model.Run, error)

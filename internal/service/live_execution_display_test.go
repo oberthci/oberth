@@ -10,7 +10,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func submittedDisplayRun(t *testing.T, f *controlFixture, ref string) model.Run {
@@ -19,7 +18,7 @@ func submittedDisplayRun(t *testing.T, f *controlFixture, ref string) model.Run 
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := storetest.ClaimNextRun(f.store, t.Context())
+	run, err := f.store.StartRun(t.Context(), enqueued.ID)
 	if err != nil || run.ID != enqueued.ID {
 		t.Fatal(run, err)
 	}

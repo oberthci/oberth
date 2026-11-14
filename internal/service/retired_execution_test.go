@@ -8,7 +8,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -37,7 +36,7 @@ func TestRetiredUnsubmittedRunFailsWithoutExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storetest.ClaimNextRun(f.store, t.Context()); err != nil {
+	if _, err := f.store.StartRun(t.Context(), run.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.store.MarkRunSubmissionStarted(t.Context(), run.ID); err != nil {

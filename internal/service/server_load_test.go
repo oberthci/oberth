@@ -213,7 +213,7 @@ func assertQueueLoad(t *testing.T, f *groupFixture) {
 	for _, run := range runs {
 		counts[run.Status]++
 	}
-	if counts[model.RunQueued] != 64 || counts[model.RunRunning] != 10 {
+	if counts[model.RunQueued] != 0 || counts[model.RunRunning] != 74 {
 		t.Fatalf("load changed: %v", counts)
 	}
 }

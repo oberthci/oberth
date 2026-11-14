@@ -6,6 +6,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/service"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -29,5 +30,6 @@ func (jobs *ArgoJobs) WatchFailedCreate(ctx context.Context, request service.Wor
 	return watcher.WatchFailedCreate(ctx, argojob.Request{
 		RunID: request.Run.ID, RepositoryID: request.Repository.ID, Name: request.WorkflowName,
 		Repo: request.Repository.Name, Ref: request.Run.Ref, SHA: sha, Trigger: trigger,
+		RunTrigger: argoworkflow.RunTrigger(request.Run.Trigger),
 	})
 }

@@ -14,7 +14,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type schedulingObserverFunc func(context.Context, model.Run) (*model.ExecutionObservation, error)
@@ -86,10 +85,10 @@ func TestSchedulingAvailableInMCPStatusRunGetAndAPIRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if queued.Scheduling.State != "queued" {
+	if queued.Scheduling.State != "waiting" {
 		t.Fatalf("queued=%#v", queued.Scheduling)
 	}
-	running, err := storetest.ClaimNextRun(fixture.store, t.Context())
+	running, err := fixture.store.StartRun(t.Context(), run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +230,7 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = storetest.ClaimNextRun(fixture.store, ctx); err != nil {
+	if _, err = fixture.store.StartRun(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = fixture.store.SetRunWorkflowName(ctx, enqueued.ID, "wf"); err != nil {
