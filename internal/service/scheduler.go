@@ -1454,8 +1454,6 @@ func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run
 	return nil
 }
 
-// Reconcile existing Workflows before deciding that a claimed run is stranded.
-// A failed read is not absence and never authorizes restart deletion or execution.
 // finalizeReconciledRun records the durable result of a K8s Job that completed
 // while the scheduler was not observing it. Passing runs are routed through
 // the publication path so promotion runs finalize correctly.

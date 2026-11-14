@@ -560,15 +560,9 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (bool, error) {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	if current, exists := jobs.intents[run.WorkflowName]; exists {
-		if current.runID != run.ID || current.cancelled || current.adoption == nil {
+		if current.runID != run.ID || current.cancelled || current.adoption == nil || !reflect.DeepEqual(*current.adoption, binding) {
 			return false, fmt.Errorf("%w: app: conflicting Workflow adoption intent", service.ErrAdoptionRefused)
 		}
-		previous, next := *current.adoption, binding
-		if !reflect.DeepEqual(previous, next) {
-			return false, fmt.Errorf("%w: app: conflicting Workflow adoption intent", service.ErrAdoptionRefused)
-		}
-		current.adoption = &binding
-		jobs.intents[run.WorkflowName] = current
 		return true, nil
 	}
 	jobs.intents[run.WorkflowName] = argoIntent{runID: run.ID, trigger: trigger, created: true, adoption: &binding, sources: run.SourceBindings}

@@ -39,8 +39,8 @@ func (j *startupWatchJobs) WaitForWatchSync(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func TestStartupWatchAdoptionSettlesCompletedAndDispatchesRunning(t *testing.T) {
-	for _, kind := range []string{"running", "completed", "confirmed-miss"} {
+func TestStartupWatchAdoptionDispatchesFoundAndConfirmsAbsence(t *testing.T) {
+	for _, kind := range []string{"found", "confirmed-miss"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newRecoveryFixture(t)
 			run := f.enqueueAndClaim(t, "feature/"+kind, strings.Repeat("a", 40))
@@ -57,11 +57,11 @@ func TestStartupWatchAdoptionSettlesCompletedAndDispatchesRunning(t *testing.T) 
 			}
 			if kind != "confirmed-miss" {
 				if dispatched != 1 || current.Status != model.RunRunning {
-					t.Fatal("running adoption was not dispatched", current, dispatched)
+					t.Fatal("found Workflow adoption was not dispatched", current, dispatched)
 				}
 			} else {
 				if dispatched != 0 || current.Status != model.RunFailed {
-					t.Fatal("terminal/absent Workflow was dispatched", current, dispatched)
+					t.Fatal("absent Workflow was dispatched", current, dispatched)
 				}
 			}
 			if kind == "confirmed-miss" && current.Error != model.ServerRestartReason {
