@@ -165,7 +165,7 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 			for _, step := range group.Steps {
 				check(step.Name, step.Template, step.Inline)
 				for name, hook := range step.Hooks {
-					check(string(name), hook.Template, nil)
+					check(credentialHookResultAlias(name), hook.Template, nil)
 				}
 				check("onExit", step.OnExit, nil)
 			}
@@ -174,13 +174,44 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 			for _, task := range parent.DAG.Tasks {
 				check(task.Name, task.Template, task.Inline)
 				for name, hook := range task.Hooks {
-					check(string(name), hook.Template, nil)
+					check(credentialHookResultAlias(name), hook.Template, nil)
 				}
 				check("onExit", task.OnExit, nil)
 			}
 		}
 	})
 	return found
+}
+
+// Match Argo v4.0.8: workflow/controller/hooks.go:114 names lifecycle nodes,
+// workflow/common/util.go:313 names exit nodes, and
+// workflow/controller/operator.go:3383-3418 extracts the result-capture alias.
+func credentialHookResultAlias(event wfv1.LifecycleEvent) string {
+	if event == wfv1.ExitLifecycleEvent {
+		return "onExit"
+	}
+	nodeName := "hooks." + string(event)
+	opener := ""
+loop:
+	for i := len(nodeName) - 1; i >= 0; i-- {
+		char := string(nodeName[i])
+		switch {
+		case char == opener:
+			opener = ""
+		case opener != "":
+		case char == ")":
+			opener = "("
+		case char == "]":
+			opener = "["
+		default:
+			nodeName = nodeName[:i+1]
+			break loop
+		}
+	}
+	if lastDotIndex := strings.LastIndex(nodeName, "."); lastDotIndex >= 0 {
+		nodeName = nodeName[lastDotIndex+1:]
+	}
+	return nodeName
 }
 
 // Resolve workflow Pod metadata as Argo does for named templates, and include
