@@ -142,7 +142,7 @@ func (config Config) validateCapability(c *argoworkflow.Capability) error {
 	}
 	for _, accounts := range []map[string]PerRepoIdentityConfig{config.PerRepoIdentities, config.PerRepoCIIdentities, config.PerStepIdentities} {
 		for _, account := range accounts {
-			if c.ServiceAccount == account.ServiceAccountName {
+			if c.ServiceAccount == account.ServiceAccountName || c.ServiceAccount == account.CIServiceAccountName {
 				return errors.New("argojob: operator capability cannot select a secret-bound identity")
 			}
 		}

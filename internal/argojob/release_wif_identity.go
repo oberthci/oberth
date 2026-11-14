@@ -29,14 +29,14 @@ func (config Config) validateReleaseWIFStepAccounts() error {
 			}
 			for _, identities := range []map[string]PerRepoIdentityConfig{config.PerRepoIdentities, config.PerRepoCIIdentities} {
 				for _, identity := range identities {
-					if identity.ServiceAccountName == sa {
+					if identity.ServiceAccountName == sa || identity.CIServiceAccountName == sa {
 						return fmt.Errorf("argojob: release WIF step %q cannot reuse a repository ServiceAccount", leaf)
 					}
 				}
 			}
 			for key, identity := range config.PerStepIdentities {
-				if key != repo+"/"+leaf && identity.ServiceAccountName == sa {
-					return fmt.Errorf("argojob: release WIF step %q cannot reuse another step's ServiceAccount", leaf)
+				if identity.CIServiceAccountName == sa || key != repo+"/"+leaf && identity.ServiceAccountName == sa {
+					return fmt.Errorf("argojob: release WIF step %q cannot reuse a secret-bound CI or another step's ServiceAccount", leaf)
 				}
 			}
 		}
