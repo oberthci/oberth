@@ -339,21 +339,8 @@ func renderActiveRuns(output io.Writer, runs []remoteActiveRun, now time.Time) e
 	return nil
 }
 
-// displayRunStatus accepts the server's read-side label and derives it from
-// legacy fields when talking to an older server. The wire status is unchanged.
-func displayRunStatus(run remoteRun) string {
-	if run.DisplayStatus != "" {
-		return run.DisplayStatus
-	}
-	if run.Status == string(model.RunInterrupted) {
-		return model.PhaseCancelled
-	}
-	if run.Status == string(model.RunWaiting) || run.Status == string(model.RunQueued) ||
-		run.Status == string(model.RunRunning) && run.StartedAt == nil {
-		return string(model.RunQueued)
-	}
-	return run.Status
-}
+// displayRunStatus uses the server's canonical display classification.
+func displayRunStatus(run remoteRun) string { return run.DisplayStatus }
 
 // resolveRemoteRunID leaves lookup and ambiguity detection to the server.
 func resolveRemoteRunID(_ context.Context, _ *client.Client, given string) (string, error) {

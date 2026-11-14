@@ -13,11 +13,11 @@ func TestCLIDisplayRunStatusCombinesCancelledCauses(t *testing.T) {
 		run  remoteRun
 		want string
 	}{
-		{remoteRun{Status: "waiting"}, "queued"},
-		{remoteRun{Status: "running"}, "queued"},
-		{remoteRun{Status: "running", StartedAt: ptrTime(time.Now())}, "running"},
-		{remoteRun{Status: "interrupted", Phase: model.PhaseCancelled}, "cancelled"},
-		{remoteRun{Status: "interrupted", Reason: "oberth restarted"}, "cancelled"},
+		{remoteRun{Status: "waiting"}, ""},
+		{remoteRun{Status: "running", DisplayStatus: "running"}, "running"},
+		{remoteRun{Status: "running", DisplayStatus: "running", StartedAt: ptrTime(time.Now())}, "running"},
+		{remoteRun{Status: "interrupted", DisplayStatus: "cancelled", Phase: model.PhaseCancelled}, "cancelled"},
+		{remoteRun{Status: "interrupted", DisplayStatus: "cancelled", Reason: "oberth restarted"}, "cancelled"},
 		{remoteRun{Status: "waiting", DisplayStatus: "queued"}, "queued"},
 	} {
 		if got := displayRunStatus(tc.run); got != tc.want {
@@ -25,7 +25,7 @@ func TestCLIDisplayRunStatusCombinesCancelledCauses(t *testing.T) {
 		}
 	}
 	var output strings.Builder
-	if err := renderActiveRuns(&output, []remoteActiveRun{{remoteRun: remoteRun{ID: "run-id", Ref: "main", Status: "waiting", DisplayReason: "waiting for the Argo controller"},
+	if err := renderActiveRuns(&output, []remoteActiveRun{{remoteRun: remoteRun{ID: "run-id", Ref: "main", Status: "waiting", DisplayStatus: "queued", DisplayReason: "waiting for the Argo controller"},
 		Scheduling: &model.RunScheduling{Message: "Waiting for the Argo controller."}}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}

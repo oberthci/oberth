@@ -199,16 +199,8 @@ function bigIcon(status) {
   const glyph = { pass: "✓", fail: "✗", cancel: "⊘", run: "◠", pending: "◌", warn: "↻", unknown: "?" }[kind] || "?";
   return `<span class="ic ${cls}">${glyph}</span>`;
 }
-/* display_status is the server's one raw-to-display mapping (six values:
-   queued, running, passed, failed, cancelled).
-   The fallback mirrors it for rows that carry only raw fields; the raw wire
-   status "waiting" (claimed, not started) is one of the queued rows. */
-function displayRunStatus(run) {
-  if (run.display_status) return run.display_status;
-  if (run.status === "interrupted") return "cancelled";
-  if (run.status === "waiting" || run.status === "queued" || (run.status === "running" && !run.started_at)) return "queued";
-  return run.status;
-}
+/* The server supplies the canonical five-state display classification. */
+function displayRunStatus(run) { return run.display_status; }
 function scheduleBadge(run) { return run.trigger === "schedule" && run.schedule_entry ? `<span class="v4b dim" title="schedule entry">${esc(run.schedule_entry)}</span>` : ""; }
 function releaseBadge(run) { return (run.release ? '<span class="v4b release">⏏ RELEASE</span>' : ""); }
 function runDuration(run) {
@@ -220,7 +212,7 @@ function runMessage(run) {
   if (run.error) return run.error;
   if (run.failed_step) return `failed at ${run.failed_burn ? run.failed_burn + " / " : ""}${run.failed_step}`;
   if (run.reason) return run.reason;
-  if (displayRunStatus(run) === "queued") return run.scheduling?.message || "awaiting scheduler";
+  if (displayRunStatus(run) === "queued") return run.scheduling?.message || "waiting for Argo";
   return "";
 }
 /* Repository names repeat across upstreams (a "terraform" under github,
@@ -980,11 +972,11 @@ function summaryLines(detail) {
   else if (kind === "run") lines.push(`[running] running in phase ${run.phase || "ci"} — ${reached} of ${steps.length} step${steps.length === 1 ? "" : "s"} started, ${passed} passed`);
   else if (status === "queued") {
     const scheduling = detail.scheduling || {};
-    lines.push(`[queued] ${run.display_reason || scheduling.message || "awaiting scheduler"}`);
+    lines.push(`[queued] ${run.display_reason || scheduling.message || "waiting for Argo"}`);
     if (scheduling.message && scheduling.message !== run.display_reason) lines.push(`[scheduling] ${scheduling.message}`);
   }
   else if (kind === "cancel") lines.push(`[${status}] ${runMessage(run)}`);
-  else lines.push(`[queued] queued behind earlier work for this repository`);
+  else lines.push(`[${status || "unknown"}] ${runMessage(run)}`);
   const execution = detail.scheduling?.execution;
   if (execution) {
     if (["deadline_exceeded", "deadline_elapsed", "terminal_observed"].includes(execution.state)) lines.push(`[execution] ${detail.scheduling.message}`);

@@ -240,10 +240,10 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 }
 
 func TestDisplayRunStatusShowsCancelled(t *testing.T) {
-	if got := displayRunStatus(remoteRun{Status: "interrupted", Phase: "cancelled"}); got != "cancelled" {
+	if got := displayRunStatus(remoteRun{Status: "interrupted", DisplayStatus: "cancelled", Phase: "cancelled"}); got != "cancelled" {
 		t.Fatalf("cancelled run displays %q", got)
 	}
-	if got := displayRunStatus(remoteRun{Status: "interrupted", Phase: "interrupted"}); got != "cancelled" {
+	if got := displayRunStatus(remoteRun{Status: "interrupted", DisplayStatus: "cancelled", Phase: "interrupted"}); got != "cancelled" {
 		t.Fatalf("interrupted run displays %q", got)
 	}
 }
