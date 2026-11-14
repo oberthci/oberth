@@ -36,6 +36,7 @@ type ContainerLogStore interface {
 	ContainerLogs(context.Context, string) ([]ContainerLog, error)
 	TrackContainerLogs(string, []ContainerLog) error
 	ReserveContainerLog(string, ContainerLog) (bool, error)
+	ReleaseContainerLog(string, ContainerLog) error
 	StoreContainerLog(string, ContainerLog, int64) error
 }
 
@@ -177,6 +178,31 @@ func (store *Store) ReserveContainerLog(runID string, entry ContainerLog) (bool,
 		index.Containers = append(index.Containers, entry)
 	}
 	return true, store.writeIndex(runID, index)
+}
+
+// ReleaseContainerLog releases only a reservation whose source was never opened.
+// The serial observer owns it; attempted copies keep their immutable receipt.
+func (store *Store) ReleaseContainerLog(runID string, entry ContainerLog) error {
+	store.containerMu.Lock()
+	defer store.containerMu.Unlock()
+	index, err := store.loadIndexContext(context.Background(), runID)
+	if err != nil {
+		return err
+	}
+	position := containerLogPosition(index, entry)
+	if position < 0 {
+		return nil
+	}
+	saved := index.Containers[position]
+	if saved.Namespace != entry.Namespace || saved.PodName != entry.PodName {
+		return errors.New("native container physical binding changed")
+	}
+	if !saved.Pending || saved.Captured || saved.Start != saved.End {
+		return nil
+	}
+	saved.Pending, saved.Reason = false, ""
+	index.Containers[position] = saved
+	return store.writeIndex(runID, index)
 }
 
 // StoreContainerLog streams network bytes to an unlinked temporary file without

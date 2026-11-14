@@ -555,7 +555,7 @@ func completeTerminalTree(workflow *wfv1.Workflow) bool {
 func completionFor(workflow *wfv1.Workflow) Completion {
 	expanded, err := nativeNodeWorkflow(context.Background(), workflow)
 	if err != nil {
-		return Completion{Name: workflow.Name, Terminal: workflow.Status.Phase.Completed(), Succeeded: workflow.Status.Phase == wfv1.WorkflowSucceeded, Phase: string(workflow.Status.Phase), Reason: err.Error(), OperatorStopped: operatorShutdown(workflow)}
+		return Completion{Name: workflow.Name, Terminal: workflow.Status.Phase.Completed(), Succeeded: workflow.Status.Phase == wfv1.WorkflowSucceeded, Phase: string(workflow.Status.Phase), Reason: strings.TrimSpace(strings.TrimSpace(workflow.Status.Message) + "\n" + err.Error()), OperatorStopped: operatorShutdown(workflow)}
 	}
 	workflow = expanded
 	completion := Completion{

@@ -312,3 +312,24 @@ func TestNativeGreenRetryClearsFailureIdentity(t *testing.T) {
 		t.Fatal("green retry retained failure identity", result)
 	}
 }
+
+func TestNativeOffloadedResultRetainsVerdictAndReason(t *testing.T) {
+	for _, phase := range []wfv1.WorkflowPhase{wfv1.WorkflowSucceeded, wfv1.WorkflowFailed} {
+		for _, wait := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/wait=%t", phase, wait), func(t *testing.T) {
+				wf, _ := nativeLogIdentityTree("flat-node")
+				wf.Annotations = map[string]string{"oberth.ci/run-id": "run"}
+				wf.Status.Phase, wf.Status.Nodes, wf.Status.OffloadNodeStatusVersion = phase, nil, "offloaded"
+				completion := nativeReaderCompletion(t, wf, nil, nativeReaderCase{wait: wait})
+				result := (&ArgoJobs{}).result(completion)
+				want := model.RunFailed
+				if phase == wfv1.WorkflowSucceeded {
+					want = model.RunPassed
+				}
+				if result.Status != want || !strings.Contains(result.Error, "step rows are unavailable because Argo node status is offloaded") || result.TerminalObservation != nil || len(result.Steps) != 0 {
+					t.Fatal(result)
+				}
+			})
+		}
+	}
+}

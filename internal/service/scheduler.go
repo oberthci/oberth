@@ -1054,6 +1054,13 @@ func (scheduler *Scheduler) publicationGate(ctx context.Context, runID string, r
 }
 
 func (scheduler *Scheduler) beginRunPublication(ctx context.Context, repository model.Repository, run model.Run, promotion model.Promotion, result JobResult) (model.Publication, error) {
+	// Successful publication clears error text; keep native observation reasons
+	// in the retained log without changing the Workflow's successful verdict.
+	if result.Error != "" {
+		if _, err := scheduler.logs.AppendRunLog(run.ID, []byte(result.Error+"\n")); err != nil {
+			log.Printf("retain Workflow observation reason run=%s: %v", run.ID, err)
+		}
+	}
 	_, collectionDeadline := model.SplitArtifactCollectionDeadline(result.Error)
 	if promotion.ID != "" {
 		return scheduler.database().BeginPublication(ctx, model.PublicationSpec{
