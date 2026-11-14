@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildPreservesAuthoredWorkflowCleanup(t *testing.T) {
-	for _, authored := range []string{"", `  ttlStrategy:
+	for _, authored := range []string{"", "  ttlStrategy: {secondsAfterCompletion: 0}\n  podGC: {strategy: OnPodCompletion}\n", `  ttlStrategy:
     secondsAfterCompletion: 1
     secondsAfterSuccess: 2
     secondsAfterFailure: 3

@@ -10,7 +10,7 @@ import (
 )
 
 func testContainerLog(node, pod, name string, body []byte) ContainerLog {
-	return ContainerLog{NodeID: node, PodUID: pod, PodName: "pod-" + pod, Namespace: "pipeline", ContainerName: name, Body: body}
+	return ContainerLog{NodeID: node, PodUID: pod, PodName: "pod-" + pod, Namespace: "pipeline", ContainerName: name, Reader: bytes.NewReader(body)}
 }
 
 func TestContainerLogCopyIsOnceAndHasExactEmptyOffsets(t *testing.T) {
@@ -61,8 +61,8 @@ func TestContainerLogCopyIsOnceAndHasExactEmptyOffsets(t *testing.T) {
 	}
 }
 
-func TestContainerLogLimitIsPerContainerAndTruncationExplainsItself(t *testing.T) {
-	store, err := Open(t.TempDir())
+func TestContainerLogLimitIsAggregateAndTruncationExplainsItself(t *testing.T) {
+	store, err := Open(t.TempDir(), WithRunLimitBytes(128))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,12 +72,15 @@ func TestContainerLogLimitIsPerContainerAndTruncationExplainsItself(t *testing.T
 			t.Fatal(err)
 		}
 		body, _, saved, err := store.ReadContainerLog(t.Context(), "run", entry.NodeID, "main", Filter{})
-		if err != nil || len(body) > 128 || !bytes.Contains(body, []byte("container log limit reached")) || saved.Reason == "" {
+		if err != nil || len(body) > 128 || !bytes.Contains(body, []byte("run log limit reached")) || saved.Reason == "" {
 			t.Fatal(len(body), saved, err)
 		}
 	}
+	if _, err := store.AppendRunLog("run", bytes.Repeat([]byte("late observation"), 30)); err != nil {
+		t.Fatal(err)
+	}
 	index, err := store.BuildIndex("run")
-	if err != nil || index.Size != 256 {
+	if err != nil || index.Size != 128 {
 		t.Fatal(index, err)
 	}
 }
@@ -128,7 +131,7 @@ func TestContainerLogConcurrentAppendsKeepSpansAttributable(t *testing.T) {
 			if _, err := store.AppendRunLog("run", []byte("system\n")); err != nil {
 				t.Error(err)
 			}
-			if err := store.StoreContainerLog("run", entry, 128); err != nil {
+			if err := store.StoreContainerLog("run", entry, 4096); err != nil {
 				t.Error(err)
 			}
 		})

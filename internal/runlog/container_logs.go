@@ -7,22 +7,26 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 // ContainerLog binds one retained copy to a native Pod and container. Its
 // bytes occupy an immutable span in the ordinary run log, without markers.
 type ContainerLog struct {
-	NodeID        string `json:"node_id"`
-	PodUID        string `json:"pod_uid"`
-	PodName       string `json:"pod_name"`
-	Namespace     string `json:"namespace,omitempty"`
-	ContainerName string `json:"container_name"`
-	Start         int64  `json:"start"`
-	End           int64  `json:"end"`
-	Reason        string `json:"reason,omitempty"`
-	Pending       bool   `json:"pending,omitempty"`
-	Captured      bool   `json:"captured,omitempty"`
-	Body          []byte `json:"-"`
+	NodeID        string    `json:"node_id"`
+	PodUID        string    `json:"pod_uid"`
+	PodName       string    `json:"pod_name"`
+	Namespace     string    `json:"namespace,omitempty"`
+	ContainerName string    `json:"container_name"`
+	Start         int64     `json:"start"`
+	End           int64     `json:"end"`
+	Reason        string    `json:"reason,omitempty"`
+	Pending       bool      `json:"pending,omitempty"`
+	Captured      bool      `json:"captured,omitempty"`
+	Reader        io.Reader `json:"-"`
+	Stage         string    `json:"burn,omitempty"`
+	Step          string    `json:"step,omitempty"`
+	Main          bool      `json:"main,omitempty"`
 }
 
 type ContainerLogStore interface {
@@ -62,7 +66,25 @@ func (store *Store) AppendRunLog(runID string, body []byte) (int, error) {
 		return 0, err
 	}
 	defer func() { _ = file.Close() }()
-	return file.Write(body)
+	info, err := file.Stat()
+	if err != nil {
+		return 0, err
+	}
+	available := max(int64(0), store.limitBytes-info.Size())
+	if int64(len(body)) <= available {
+		return file.Write(body)
+	}
+	const reason = "\noberth: log incomplete: run log limit reached\n"
+	kept := min(int64(len(body)), max(int64(0), available-int64(len(reason))))
+	if _, err := file.Write(body[:kept]); err != nil {
+		return 0, err
+	}
+	if int64(len(reason)) <= available-kept {
+		if _, err := io.WriteString(file, reason); err != nil {
+			return 0, err
+		}
+	}
+	return len(body), nil
 }
 
 func containerLogPosition(index Index, entry ContainerLog) int {
@@ -91,7 +113,7 @@ func (store *Store) TrackContainerLogs(runID string, entries []ContainerLog) err
 		if containerLogPosition(index, entry) >= 0 {
 			continue
 		}
-		entry.Start, entry.End, entry.Body, entry.Pending, entry.Captured = index.Size, index.Size, nil, false, false
+		entry.Start, entry.End, entry.Reader, entry.Pending, entry.Captured = index.Size, index.Size, nil, false, false
 		index.Containers = append(index.Containers, entry)
 		changed = true
 	}
@@ -128,7 +150,7 @@ func (store *Store) ReserveContainerLog(runID string, entry ContainerLog) (bool,
 	if statErr != nil {
 		return false, statErr
 	}
-	entry.Start, entry.End, entry.Body = info.Size(), info.Size(), nil
+	entry.Start, entry.End, entry.Reader = info.Size(), info.Size(), nil
 	entry.Pending = true
 	entry.Reason = "oberth: log incomplete: container copy has not completed"
 	index.RunID, index.Format, index.Size = runID, "containers", info.Size()
@@ -140,32 +162,42 @@ func (store *Store) ReserveContainerLog(runID string, entry ContainerLog) (bool,
 	return true, store.writeIndex(runID, index)
 }
 
-func retainedContainerBody(entry *ContainerLog, limit int64) []byte {
-	body := bytes.Clone(entry.Body)
-	if int64(len(body)) > limit {
-		entry.Reason = "oberth: log incomplete: container log limit reached"
-	}
-	if entry.Reason == "" {
-		return body[:min(int64(len(body)), limit)]
-	}
-	reason := []byte(entry.Reason + "\n")
-	if int64(len(reason)) > limit {
-		return nil
-	}
-	body = body[:min(int64(len(body)), limit-int64(len(reason)))]
-	if len(body) > 0 && body[len(body)-1] != '\n' {
-		if int64(len(body)+len(reason)+1) > limit {
-			body = body[:len(body)-1]
-		}
-		body = append(body, '\n')
-	}
-	return append(body, reason...)
-}
-
+// StoreContainerLog streams network bytes to an unlinked temporary file without
+// holding append/index locks. Only the bounded disk-to-disk commit is serialized;
+// a slow kubelet cannot block progress writes, identity delivery or log readers.
 func (store *Store) StoreContainerLog(runID string, entry ContainerLog, limit int64) error {
-	if entry.NodeID == "" || limit <= 0 || (entry.Reason == "" && (entry.PodUID == "" || entry.ContainerName == "")) {
+	if !safeID(runID) || entry.NodeID == "" || limit <= 0 || (entry.Reason == "" && (entry.PodUID == "" || entry.ContainerName == "")) {
 		return errors.New("invalid retained container log identity or limit")
 	}
+	spool, err := os.CreateTemp(store.directory, ".container-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = spool.Close() }()
+	if err := os.Remove(spool.Name()); err != nil {
+		return err
+	}
+	var size int64
+	if entry.Reader != nil {
+		size, err = io.CopyBuffer(spool, io.LimitReader(entry.Reader, limit), make([]byte, 4096))
+		if err != nil {
+			entry.Reason = "oberth: log incomplete: container log read was interrupted"
+		}
+		if size == limit && err == nil {
+			var extra [1]byte
+			n, readErr := entry.Reader.Read(extra[:])
+			if n > 0 {
+				entry.Reason = "oberth: log incomplete: run log limit reached"
+			} else if readErr != nil && readErr != io.EOF {
+				entry.Reason = "oberth: log incomplete: container log read was interrupted"
+			}
+		}
+	}
+	entry.Reader = nil
+	return store.commitContainerLog(runID, entry, limit, spool, size)
+}
+
+func (store *Store) commitContainerLog(runID string, entry ContainerLog, limit int64, spool *os.File, size int64) error {
 	store.containerMu.Lock()
 	defer store.containerMu.Unlock()
 	index, err := store.loadIndexContext(context.Background(), runID)
@@ -185,18 +217,33 @@ func (store *Store) StoreContainerLog(runID string, entry ContainerLog, limit in
 	if err != nil {
 		return err
 	}
-	body := retainedContainerBody(&entry, limit)
-	n, err := file.Write(body)
+	available := max(int64(0), limit-info.Size())
+	if size > available {
+		entry.Reason = "oberth: log incomplete: run log limit reached"
+	}
+	reason := ""
+	if entry.Reason != "" {
+		reason = "\n" + entry.Reason + "\n"
+	}
+	bodySize := min(size, max(int64(0), available-int64(len(reason))))
+	if _, err := spool.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	n, err := io.CopyBuffer(file, io.LimitReader(spool, bodySize), make([]byte, 4096))
 	if err != nil {
 		return err
 	}
-	if n != len(body) {
-		return io.ErrShortWrite
+	if int64(len(reason)) <= available-n {
+		written, err := io.Copy(file, strings.NewReader(reason))
+		n += written
+		if err != nil {
+			return err
+		}
 	}
 	if err := file.Sync(); err != nil {
 		return err
 	}
-	entry.Start, entry.End, entry.Body, entry.Pending, entry.Captured = info.Size(), info.Size()+int64(n), nil, false, true
+	entry.Start, entry.End, entry.Pending, entry.Captured = info.Size(), info.Size()+n, false, true
 	index.RunID, index.Format, index.Size = runID, "containers", entry.End
 	if position >= 0 {
 		index.Containers[position] = entry
@@ -309,3 +356,41 @@ type storedContainerLog struct {
 }
 
 func (stream *storedContainerLog) Close() error { return stream.file.Close() }
+
+func (store *Store) readNativeStepLog(ctx context.Context, runID, stage, step string, index Index, filter Filter) ([]byte, Meta, error) {
+	var selected []Range
+	var total int64
+	var reason string
+	for _, entry := range index.Containers {
+		if entry.Stage != stage || (step != "" && entry.Step != step) || (!entry.Main && entry.ContainerName != "main" && entry.ContainerName != "") {
+			continue
+		}
+		if !entry.Captured && !entry.Pending {
+			continue
+		}
+		selected = append(selected, Range{Start: entry.Start, End: entry.End})
+		total += entry.End - entry.Start
+		if entry.Reason != "" {
+			reason = entry.Reason
+		}
+	}
+	if len(selected) == 0 {
+		return nil, Meta{}, fmt.Errorf("native log slice %s/%s: %w", stage, step, os.ErrNotExist)
+	}
+	if total == 0 {
+		return FilterBytes([]byte(reasonLine(reason)), filter.WithContext(ctx))
+	}
+	file, err := store.openRunLog(runID, os.O_RDONLY)
+	if err != nil {
+		return nil, Meta{}, err
+	}
+	defer func() { _ = file.Close() }()
+	return filterRanges(file, selected, total, filter.WithContext(ctx))
+}
+
+func reasonLine(reason string) string {
+	if reason == "" {
+		return ""
+	}
+	return reason + "\n"
+}

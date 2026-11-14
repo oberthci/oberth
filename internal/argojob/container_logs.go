@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,6 +51,9 @@ func containerFinished(pod *corev1.Pod, name string) bool {
 }
 
 func containerLogDone(workflow *wfv1.Workflow, entry runlog.ContainerLog, pods []*corev1.Pod) bool {
+	if workflow.Status.Phase.Completed() {
+		return true
+	}
 	for _, pod := range pods {
 		if pod != nil && string(pod.UID) == entry.PodUID {
 			return containerFinished(pod, entry.ContainerName)
@@ -59,8 +63,8 @@ func containerLogDone(workflow *wfv1.Workflow, entry runlog.ContainerLog, pods [
 	return workflow.Status.Phase.Completed() || (exists && node.Fulfilled())
 }
 
-// ObserveContainerLogs runs in the existing verified Workflow observation. It
-// opens no follower, timer or subscriber. Each terminal container is read once.
+// ObserveContainerLogs captures a verified snapshot outside status observation.
+// Each terminal container is read once; completion also captures running Pods.
 func (controller *Controller) ObserveContainerLogs(ctx context.Context, workflow *wfv1.Workflow, runID string, pods []*corev1.Pod) error {
 	if controller.containerLogs == nil {
 		return nil
@@ -79,9 +83,20 @@ func (controller *Controller) ObserveContainerLogs(ctx context.Context, workflow
 		return err
 	}
 	workflow = expanded
+	names := map[string]StepResult{}
+	for _, step := range stepAttempts(workflow) {
+		names[step.NodeID] = step
+	}
 	var known []runlog.ContainerLog
 	for _, target := range StepContainers(workflow, pods) {
-		known = append(known, containerLogEntry(target))
+		entry := containerLogEntry(target)
+		step := names[target.NodeID]
+		if step.Step == "" {
+			step = names[workflow.Status.Nodes[target.NodeID].BoundaryID]
+		}
+		entry.Stage, entry.Step = step.Stage, step.Step
+		entry.Main = target.ContainerName == "main" || workflow.Status.Nodes[target.NodeID].Type == wfv1.NodeTypeContainer
+		known = append(known, entry)
 	}
 	if err := controller.containerLogs.TrackContainerLogs(runID, known); err != nil {
 		return err
@@ -90,11 +105,10 @@ func (controller *Controller) ObserveContainerLogs(ctx context.Context, workflow
 	if err != nil {
 		return err
 	}
+	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	var result error
 	for _, entry := range entries {
-		if ctx.Err() != nil {
-			return errors.Join(result, ctx.Err())
-		}
 		if entry.Captured || entry.Pending || !containerLogDone(workflow, entry, pods) {
 			continue
 		}
@@ -105,13 +119,24 @@ func (controller *Controller) ObserveContainerLogs(ctx context.Context, workflow
 		if !claimed {
 			continue
 		}
-		entry.Body, entry.Reason = controller.readContainerCopy(ctx, workflow, entry)
-		result = errors.Join(result, controller.containerLogs.StoreContainerLog(runID, entry, controller.config.MaxRunLogBytes))
+		if readCtx.Err() != nil {
+			entry.Reason = "oberth: log unavailable: container copy observation deadline ended"
+			result = errors.Join(result, controller.containerLogs.StoreContainerLog(runID, entry, controller.config.MaxRunLogBytes))
+			continue
+		}
+		if workflow.Status.Phase.Completed() {
+			for _, pod := range pods {
+				if pod != nil && string(pod.UID) == entry.PodUID && !containerFinished(pod, entry.ContainerName) {
+					entry.Reason = "oberth: log incomplete: Workflow completed before container termination"
+				}
+			}
+		}
+		result = errors.Join(result, controller.storeContainerCopy(readCtx, workflow, runID, entry))
 	}
-	return errors.Join(result, controller.recordMissingPodLogs(runID, workflow, entries))
+	return errors.Join(result, controller.recordMissingPodLogs(runID, workflow, entries, names))
 }
 
-func (controller *Controller) recordMissingPodLogs(runID string, workflow *wfv1.Workflow, entries []runlog.ContainerLog) error {
+func (controller *Controller) recordMissingPodLogs(runID string, workflow *wfv1.Workflow, entries []runlog.ContainerLog, names map[string]StepResult) error {
 	if !workflow.Status.Phase.Completed() {
 		return nil
 	}
@@ -124,44 +149,36 @@ func (controller *Controller) recordMissingPodLogs(runID string, workflow *wfv1.
 	}
 	var result error
 	for id, node := range workflow.Status.Nodes {
-		if node.Type != wfv1.NodeTypePod || !node.Fulfilled() || observed[id] {
+		if node.Type != wfv1.NodeTypePod || observed[id] {
 			continue
 		}
-		entry := runlog.ContainerLog{NodeID: id, Reason: "oberth: log unavailable: Pod containers were not observed before Workflow completion"}
+		entry := runlog.ContainerLog{NodeID: id, Stage: names[id].Stage, Step: names[id].Step, Reason: "oberth: log unavailable: Pod containers were not observed before Workflow completion"}
 		result = errors.Join(result, controller.containerLogs.StoreContainerLog(runID, entry, controller.config.MaxRunLogBytes))
 	}
 	return result
 }
 
-func (controller *Controller) readContainerCopy(ctx context.Context, workflow *wfv1.Workflow, entry runlog.ContainerLog) ([]byte, string) {
+func (controller *Controller) storeContainerCopy(ctx context.Context, workflow *wfv1.Workflow, runID string, entry runlog.ContainerLog) error {
 	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	for attempt := 0; attempt < 2; attempt++ {
 		reader, err := controller.openBoundContainerLog(readCtx, workflow, entry, false)
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				return nil, "oberth: log unavailable: Pod or container log no longer exists"
-			}
-			if attempt == 0 && retryExecutorIdentityRead(err) && readCtx.Err() == nil {
-				continue
-			}
-			return nil, "oberth: log unavailable: container log could not be read"
+		if err == nil {
+			entry.Reader = reader
+			defer func() { _ = reader.Close() }()
+			return controller.containerLogs.StoreContainerLog(runID, entry, controller.config.MaxRunLogBytes)
 		}
-		readLimit := controller.config.MaxRunLogBytes
-		if readLimit < math.MaxInt64 {
-			readLimit++
+		if apierrors.IsNotFound(err) {
+			entry.Reason = "oberth: log unavailable: Pod or container log no longer exists"
+			break
 		}
-		body, readErr := io.ReadAll(io.LimitReader(reader, readLimit))
-		_ = reader.Close()
-		if readErr != nil {
-			if len(body) == 0 && attempt == 0 && retryExecutorIdentityRead(readErr) && readCtx.Err() == nil {
-				continue
-			}
-			return body, "oberth: log incomplete: container log read was interrupted"
+		if attempt == 0 && retryExecutorIdentityRead(err) && readCtx.Err() == nil {
+			continue
 		}
-		return body, ""
+		entry.Reason = "oberth: log unavailable: container log could not be read"
+		break
 	}
-	return nil, "oberth: log unavailable: container log could not be read"
+	return controller.containerLogs.StoreContainerLog(runID, entry, controller.config.MaxRunLogBytes)
 }
 
 func (controller *Controller) verifyContainerLogPod(ctx context.Context, workflow *wfv1.Workflow, entry runlog.ContainerLog) error {
@@ -257,11 +274,69 @@ func closeContainerLogWithContext(ctx context.Context, reader io.ReadCloser) io.
 	return &containerLogStream{Reader: reader, close: func() error { stop(); closeOnce(); return closeErr }}
 }
 
-func (controller *Controller) captureObservedContainerLogs(ctx context.Context, workflow *wfv1.Workflow, runID string) {
-	if controller.containerLogs == nil || controller.hub == nil || !controller.hub.Healthy() {
-		return
+type containerLogObservation struct {
+	workflow *wfv1.Workflow
+	pods     []*corev1.Pod
+}
+
+// containerLogCapture owns one serial copy task for Wait. Its one-slot mailbox
+// coalesces snapshots; no network reads or append locks run on the observation
+// goroutine. Joining happens only after terminal identity retirement.
+func (controller *Controller) containerLogCapture(ctx context.Context, runID string) (func(*wfv1.Workflow), func()) {
+	if controller.containerLogs == nil {
+		return func(*wfv1.Workflow) {}, func() {}
 	}
-	if err := controller.ObserveContainerLogs(ctx, workflow, runID, controller.hub.PodsOf(workflow.Name)); err != nil {
-		log.Printf("WARN: run=%s container log copy unavailable (class=%s)", strconv.Quote(runID), executorIdentityErrorClass(err))
+	snapshots := make(chan containerLogObservation, 1)
+	joined := make(chan struct{})
+	go func() {
+		defer close(joined)
+		previous := ""
+		for snapshot := range snapshots {
+			version := containerLogObservationVersion(snapshot)
+			if version != "" && version == previous && !snapshot.workflow.Status.Phase.Completed() {
+				continue
+			}
+			if err := controller.ObserveContainerLogs(ctx, snapshot.workflow, runID, snapshot.pods); err != nil {
+				log.Printf("WARN: run=%s container log copy unavailable (class=%s)", strconv.Quote(runID), executorIdentityErrorClass(err))
+			} else {
+				previous = version
+			}
+		}
+	}()
+	observe := func(workflow *wfv1.Workflow) {
+		snapshot := containerLogObservation{workflow: workflow.DeepCopy()}
+		if controller.hub != nil && controller.hub.Healthy() {
+			snapshot.pods = controller.hub.PodsOf(workflow.Name)
+		}
+		// A single producer owns this channel. Keep the most recent observation,
+		// especially the completed snapshot, while a previous copy is blocked.
+		select {
+		case snapshots <- snapshot:
+			return
+		default:
+		}
+		select {
+		case <-snapshots:
+		default:
+		}
+		snapshots <- snapshot
 	}
+	return observe, func() { close(snapshots); <-joined }
+}
+
+// Real watch objects always have resource versions. Fixtures without them are
+// deliberately not cached. A changed Pod state must trigger a new observation.
+func containerLogObservationVersion(snapshot containerLogObservation) string {
+	if snapshot.workflow.ResourceVersion == "" {
+		return ""
+	}
+	versions := []string{snapshot.workflow.ResourceVersion}
+	for _, pod := range snapshot.pods {
+		if pod == nil || pod.ResourceVersion == "" {
+			return ""
+		}
+		versions = append(versions, string(pod.UID)+"/"+pod.ResourceVersion)
+	}
+	sort.Strings(versions[1:])
+	return strings.Join(versions, "\x00")
 }

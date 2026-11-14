@@ -185,7 +185,7 @@ type Config struct {
 
 	ArtifactsLimitBytes int64
 
-	// MaxRunLogBytes bounds each retained container copy independently.
+	// MaxRunLogBytes bounds the aggregate retained container bytes per run.
 	// Default: 64 MiB. Truncation records a reason without changing the verdict.
 	MaxRunLogBytes int64
 

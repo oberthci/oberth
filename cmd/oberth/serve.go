@@ -210,7 +210,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Int64Var(&options.artifactsBudgetBytes, "artifacts-budget-bytes", defaultArtifactsBudgetBytes, "total artifact storage before the oldest runs are evicted")
 	flags.DurationVar(&options.logRetention, "log-retention", 0, "maximum age of terminal run logs (0 disables age retention)")
 	flags.DurationVar(&options.artifactRetention, "artifact-retention", 0, "maximum age of terminal run artifacts (0 disables age retention)")
-	flags.Int64Var(&options.runLogLimitBytes, "run-log-limit-bytes", runlog.DefaultRunLimitBytes, "maximum retained log bytes per container")
+	flags.Int64Var(&options.runLogLimitBytes, "run-log-limit-bytes", runlog.DefaultRunLimitBytes, "maximum retained log bytes per run")
 	flags.Int64Var(&options.logsBudgetBytes, "logs-budget-bytes", 0, "total retained log budget (0 disables size retention)")
 	flags.DurationVar(&options.retentionInterval, "retention-sweep-interval", 10*time.Minute, "interval between protected evidence retention sweeps")
 	flags.IntVar(&options.retentionKeepNewest, "retention-keep-newest", 1, "terminal runs retained per repository/ref during automatic sweeps")
@@ -720,7 +720,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err := git.MigrateToQualifiedLayout(qualifications); err != nil {
 		return fmt.Errorf("migrate git cache to qualified layout: %w", err)
 	}
-	logs, err := runlog.Open(filepath.Join(options.dataRoot, "logs"))
+	logs, err := runlog.Open(filepath.Join(options.dataRoot, "logs"), runlog.WithRunLimitBytes(options.runLogLimitBytes))
 	if err != nil {
 		return err
 	}

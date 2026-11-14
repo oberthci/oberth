@@ -345,7 +345,7 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 // copies are retained separately from the observation output.
 //
 // The server derives progress events from the Workflow node tree and writes
-// the retained marker protocol consumed by the scheduler, index and dashboard.
+// the status evidence still consumed by the scheduler replay guard.
 func (controller *Controller) Wait(ctx context.Context, name, runID string, destination io.Writer) (Completion, error) {
 	return controller.wait(ctx, name, runID, destination, nil, 0, Adoption{})
 }
@@ -362,6 +362,8 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	if retained < 0 {
 		return Completion{}, errors.New("argojob: invalid retained log size")
 	}
+	observeLogs, finishLogs := controller.containerLogCapture(ctx, runID)
+	defer finishLogs()
 	reporter := newProgressReporter(destination)
 	for _, event := range events {
 		if err := event.Validate(); err != nil {
@@ -384,24 +386,34 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		cancelRead()
 		if err != nil {
 			if apierrors.IsNotFound(err) {
-				return Completion{}, fmt.Errorf("argojob: Workflow %s disappeared before completing", name)
+				if controller.hub != nil {
+					if cached, ok := controller.hub.Workflow(name); ok && cached.Status.Phase.Completed() {
+						workflow, err = cached, nil
+					}
+				}
+				if err != nil {
+					return Completion{}, fmt.Errorf("argojob: Workflow %s disappeared before completing; authored cleanup may have removed its result before observation", name)
+				}
 			}
-			// One failed read must not end a run whose Workflow is still
-			// progressing: keep polling for a bounded grace and report only
-			// a persistent outage.
-			if readFailingSince.IsZero() {
-				readFailingSince = time.Now()
+			if err != nil {
+				// One failed read must not end a run whose Workflow is still
+				// progressing: keep polling for a bounded grace and report only
+				// a persistent outage.
+				if readFailingSince.IsZero() {
+					readFailingSince = time.Now()
+				}
+				if ctx.Err() != nil || time.Since(readFailingSince) >= controller.readGrace {
+					return Completion{}, fmt.Errorf("argojob: read Workflow %s: %w", name, err)
+				}
+				select {
+				case <-ctx.Done():
+					return Completion{}, ctx.Err()
+				case <-ticker.C:
+				}
+				continue
 			}
-			if ctx.Err() != nil || time.Since(readFailingSince) >= controller.readGrace {
-				return Completion{}, fmt.Errorf("argojob: read Workflow %s: %w", name, err)
-			}
-			select {
-			case <-ctx.Done():
-				return Completion{}, ctx.Err()
-			case <-ticker.C:
-			}
-			continue
 		}
+
 		readFailingSince = time.Time{}
 		if err := controller.verifyOwnership(workflow, runID); err != nil {
 			return Completion{}, err
@@ -450,7 +462,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			preserveRecordedExitCodes(&completion, events)
 			controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
 			controller.observeStepProgress(ctx, settled, reporter, destination)
-			controller.captureObservedContainerLogs(ctx, settled, runID)
+			observeLogs(settled)
 			completion.classifyRestartCut()
 			reporter.finish(destination)
 			if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
@@ -480,7 +492,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			}
 		}
 		controller.observeStepProgress(ctx, workflow, reporter, destination)
-		controller.captureObservedContainerLogs(ctx, workflow, runID)
+		observeLogs(workflow)
 
 		select {
 		case <-ctx.Done():

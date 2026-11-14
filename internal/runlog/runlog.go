@@ -102,6 +102,7 @@ type Meta struct {
 }
 
 type Store struct {
+	limitBytes     int64
 	containerMu    sync.Mutex
 	directory      string
 	progressMu     sync.RWMutex
@@ -112,14 +113,27 @@ type Store struct {
 	runningEntries int
 }
 
-func Open(directory string) (*Store, error) {
+// WithRunLimitBytes applies the existing server run-log bound to ordinary
+// observation writes as well as container copies. Set it only at construction.
+func WithRunLimitBytes(limit int64) func(*Store) {
+	return func(store *Store) { store.limitBytes = limit }
+}
+
+func Open(directory string, options ...func(*Store)) (*Store, error) {
 	if strings.TrimSpace(directory) == "" {
 		return nil, errors.New("log directory is required")
 	}
 	if err := os.MkdirAll(directory, 0o750); err != nil {
 		return nil, fmt.Errorf("create log directory: %w", err)
 	}
-	return &Store{directory: directory}, nil
+	store := &Store{directory: directory, limitBytes: DefaultRunLimitBytes}
+	for _, option := range options {
+		option(store)
+	}
+	if store.limitBytes <= 0 {
+		return nil, errors.New("run log limit must be positive")
+	}
+	return store, nil
 }
 
 func (store *Store) Create(runID string) (*os.File, error) {
@@ -204,6 +218,9 @@ func (store *Store) ReadFiltered(runID, stage, step string, filter Filter) ([]by
 	if err != nil {
 		return nil, Meta{}, err
 	}
+	if index.Format == "containers" {
+		return store.readNativeStepLog(filter.ctx(), runID, stage, step, index, filter)
+	}
 	var selected []Range
 	var total int64
 	for _, candidate := range index.Ranges {
@@ -239,6 +256,13 @@ func (store *Store) ReadActive(runID, stage, step string) ([]byte, error) {
 }
 
 func (store *Store) ReadActiveFiltered(runID, stage, step string, filter Filter) ([]byte, Meta, error) {
+	index, err := store.loadIndexContext(filter.ctx(), runID)
+	if err == nil && index.Format == "containers" {
+		return store.readNativeStepLog(filter.ctx(), runID, stage, step, index, filter)
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, Meta{}, err
+	}
 	return store.readActiveIndexed(runID, stage, step, filter)
 }
 
@@ -721,7 +745,7 @@ func (store *Store) loadIndexContext(ctx context.Context, runID string) (Index, 
 	}
 	defer func() { _ = file.Close() }()
 	var index Index
-	decoder := json.NewDecoder(contextReader{ctx, file})
+	decoder := json.NewDecoder(contextReader{ctx, io.LimitReader(file, 8<<20)})
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&index); err != nil {
 		return Index{}, fmt.Errorf("decode log index: %w", err)
