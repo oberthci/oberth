@@ -742,7 +742,7 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 		// Before execution starts, history is shown in acceptance order.
 		rows, err := tx.QueryContext(ctx, `
 SELECT `+runReadColumns+` FROM runs
-WHERE (`+queuedRunSQL+`) AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
+WHERE (`+preparingRunSQL+`) AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
 ORDER BY `+priorityOrder+` LIMIT ?`, append(scopeArgs, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
 		queued, err := collect("queued", rows, err)
 		if err != nil {
@@ -789,9 +789,9 @@ LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- fixed colu
 	return runs, nil
 }
 
-// queuedRunSQL selects the runs still waiting for admission: durable queued
-// runs and claimed runs whose Workflow has not started.
-const queuedRunSQL = `(status = 'queued' OR (status = 'running' AND started_at IS NULL))`
+// preparingRunSQL selects accepted work that has not started submission.
+// Raw queued rows may remain only in historical fixtures or restart recovery.
+const preparingRunSQL = `(status = 'queued' OR (status = 'running' AND started_at IS NULL))`
 
 // runEndTimeSQL orders terminal runs. Every terminal transition records
 // finished_at; the fallbacks keep the order total for any older row.
@@ -829,7 +829,7 @@ func (s *Store) runListCursor(ctx context.Context, tx *sql.Tx, filter model.RunL
 // CountRuns counts the retained runs, in total and per repository, so a
 // paged list can show how many runs exist beyond the page it holds.
 func (s *Store) CountRuns(ctx context.Context) (model.RunCounts, error) {
-	counts := model.RunCounts{ByRepo: map[int64]int{}, QueuedByRepo: map[int64]int{}, RunningByRepo: map[int64]int{}}
+	counts := model.RunCounts{ByRepo: map[int64]int{}, PreparingByRepo: map[int64]int{}, RunningByRepo: map[int64]int{}}
 	rows, err := s.reader().QueryContext(ctx, `SELECT repo_id, COUNT(*),
 SUM(status = 'queued' OR (status = 'running' AND started_at IS NULL)),
 SUM(status = 'running' AND started_at IS NOT NULL)
@@ -846,8 +846,8 @@ FROM runs GROUP BY repo_id`)
 		}
 		counts.ByRepo[repoID] = n
 		counts.Total += n
-		counts.QueuedByRepo[repoID], counts.RunningByRepo[repoID] = queued, running
-		counts.Queued += queued
+		counts.PreparingByRepo[repoID], counts.RunningByRepo[repoID] = queued, running
+		counts.Preparing += queued
 		counts.Running += running
 	}
 	if err := rows.Err(); err != nil {

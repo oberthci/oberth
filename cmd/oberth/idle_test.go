@@ -22,7 +22,7 @@ func TestWaitIdleObservesWholeLiveQueue(t *testing.T) {
 	admin := newAdminGateServer(nil, "unused", nil, func(context.Context) (model.IdleQueueStatus, error) {
 		switch calls.Add(1) {
 		case 1:
-			return model.IdleQueueStatus{Version: 1, Queued: 1, Branch: 1}, nil
+			return model.IdleQueueStatus{Version: 1, Preparing: 1, Branch: 1}, nil
 		case 2:
 			return model.IdleQueueStatus{Version: 1, Running: 1, Tag: 1}, nil
 		default:
@@ -69,7 +69,7 @@ func TestWaitIdleBusyPastTwoMinutesWithFakeClock(t *testing.T) {
 			if time.Since(start) >= 3*time.Minute {
 				status = http.StatusNoContent
 			}
-			return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"version":1,"queued":2,"running":1,"branch":1,"tag":1,"promotion":1}`))}, nil
+			return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"version":1,"preparing":2,"running":1,"branch":1,"tag":1,"promotion":1}`))}, nil
 		})}
 		var output bytes.Buffer
 		ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
@@ -77,7 +77,7 @@ func TestWaitIdleBusyPastTwoMinutesWithFakeClock(t *testing.T) {
 		if err := waitIdle(ctx, client, "http://fixture/v1/idle", time.Second, idleWaitOptions{mode: "all", output: &output}); err != nil {
 			t.Fatal(err)
 		}
-		if time.Since(start) != 3*time.Minute || calls != 181 || !strings.Contains(output.String(), "queued=2 running=1 branch=1 critical=2") || !strings.Contains(output.String(), "elapsed=2m0s") {
+		if time.Since(start) != 3*time.Minute || calls != 181 || !strings.Contains(output.String(), "preparing=2 running=1 branch=1 critical=2") || !strings.Contains(output.String(), "elapsed=2m0s") {
 			t.Fatalf("calls=%d elapsed=%s output=%s", calls, time.Since(start), &output)
 		}
 	})
@@ -90,11 +90,11 @@ func TestWaitIdleCriticalRequiresSnapshotCapability(t *testing.T) {
 		mode  string
 		code  int
 	}{
-		{"branch only all", model.IdleQueueStatus{Version: 1, Queued: 1, Branch: 1}, "all", 409},
-		{"branch only critical", model.IdleQueueStatus{Version: 1, Queued: 1, Branch: 1}, "critical", 204},
+		{"branch only all", model.IdleQueueStatus{Version: 1, Preparing: 1, Branch: 1}, "all", 409},
+		{"branch only critical", model.IdleQueueStatus{Version: 1, Preparing: 1, Branch: 1}, "critical", 204},
 		{"promotion", model.IdleQueueStatus{Version: 1, Running: 1, Promotion: 1}, "critical", 409},
-		{"apply", model.IdleQueueStatus{Version: 1, Queued: 1, Apply: 1}, "critical", 409},
-		{"invalid", model.IdleQueueStatus{Version: 1, Queued: 1}, "all", 503},
+		{"apply", model.IdleQueueStatus{Version: 1, Preparing: 1, Apply: 1}, "critical", 409},
+		{"invalid", model.IdleQueueStatus{Version: 1, Preparing: 1}, "all", 503},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := newAdminGateServer(nil, "unused", nil, func(context.Context) (model.IdleQueueStatus, error) { return test.state, nil })

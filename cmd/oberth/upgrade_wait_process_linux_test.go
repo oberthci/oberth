@@ -125,7 +125,7 @@ func TestUpgradeWaitProcessGraph(t *testing.T) {
 				if (mode == "shell" || mode == "setsid") && time.Since(time.Unix(0, firstProbe.Load())) >= busyFor {
 					return model.IdleQueueStatus{Version: 1}, nil
 				}
-				return model.IdleQueueStatus{Version: 1, Queued: 1, Branch: 1}, nil
+				return model.IdleQueueStatus{Version: 1, Preparing: 1, Branch: 1}, nil
 			})
 			server := httptest.NewServer(admin.Handler)
 			t.Cleanup(server.Close)

@@ -781,7 +781,7 @@ func TestRunWorkspaceCleanupEligible(t *testing.T) {
 		t.Fatalf("empty ID = %v, want ErrInvalid", err)
 	}
 
-	// Queued run: not eligible.
+	// Preparing run: not eligible.
 	enqueued, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/ws", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	if err != nil {
 		t.Fatal(err)
@@ -923,7 +923,7 @@ func TestRunWorkspaceCleanupCandidates(t *testing.T) {
 		t.Fatal("pages returned the same candidate")
 	}
 
-	// Queued run: not a candidate.
+	// Preparing run: not a candidate.
 	now = now.Add(time.Second)
 	if _, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/queued", "cccccccccccccccccccccccccccccccccccccccc")); err != nil {
 		t.Fatal(err)

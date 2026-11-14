@@ -55,7 +55,7 @@ func newAdminGateServerWithTokenPolicy(gate func(context.Context) error, databas
 			return
 		}
 		output.Header().Set("X-Oberth-Idle-Version", "1")
-		busy := state.Queued+state.Running != 0
+		busy := state.Preparing+state.Running != 0
 		if mode == "critical" {
 			busy = state.Critical() != 0
 		}

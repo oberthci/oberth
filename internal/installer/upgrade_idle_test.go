@@ -65,10 +65,10 @@ func TestUpgradeWaitCriticalAndStreamProgress(t *testing.T) {
 		if name != "kubectl" || !strings.Contains(strings.Join(args, " "), "--wait-for=critical") {
 			t.Fatal(name, args)
 		}
-		_, err := io.WriteString(w, "queued=2 running=1 branch=1 critical=2\n")
+		_, err := io.WriteString(w, "preparing=2 running=1 branch=1 critical=2\n")
 		return err
 	}})
-	if err != nil || !strings.Contains(output.String(), "queued=2 running=1 branch=1 critical=2") {
+	if err != nil || !strings.Contains(output.String(), "preparing=2 running=1 branch=1 critical=2") {
 		t.Fatalf("%v %s", err, &output)
 	}
 }
@@ -125,7 +125,7 @@ func TestUpgradeWaitDeadlineRetainsChildProbeDiagnostic(t *testing.T) {
 				err := waitForUpgradeIdle(t.Context(), cfg, Deps{RunCommandStream: func(ctx context.Context, w io.Writer, _ string, _ ...string) error {
 					line := "Waiting for critical queue: transient idle probe failure: fixture socket timeout; retrying (elapsed=5s)\n"
 					if recovered {
-						line += "Waiting for critical queue: queued=1 running=0 branch=0 critical=1\n"
+						line += "Waiting for critical queue: preparing=1 running=0 branch=0 critical=1\n"
 					}
 					for _, b := range []byte(line) {
 						if _, err := w.Write([]byte{b}); err != nil {

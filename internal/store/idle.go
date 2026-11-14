@@ -49,7 +49,7 @@ FROM runs WHERE status IN ('queued','running') GROUP BY status, started_at IS NO
 		if status == "running" && started {
 			state.Running += n
 		} else {
-			state.Queued += n
+			state.Preparing += n
 		}
 		switch {
 		case release || kind == "tag" || trigger == "release" || trigger == "tag":

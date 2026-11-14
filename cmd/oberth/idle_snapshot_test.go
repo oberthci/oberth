@@ -25,7 +25,7 @@ func TestIdleSnapshotAdminProbeDoesNotWaitForStorage(t *testing.T) {
 			snapshot.watch(ctx, func(ctx context.Context) (model.IdleQueueStatus, error) {
 				calls++
 				if calls == 1 {
-					return model.IdleQueueStatus{Version: 1, Queued: 1, Tag: 1}, nil
+					return model.IdleQueueStatus{Version: 1, Preparing: 1, Tag: 1}, nil
 				}
 				if calls == 2 {
 					select {

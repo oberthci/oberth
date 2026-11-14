@@ -44,7 +44,7 @@ func (c *flatRunConn) QueryContext(ctx context.Context, query string, args []dri
 	if err != nil {
 		return nil, err
 	}
-	if strings.Contains(query, "WHERE ("+queuedRunSQL+")") && c.afterQueue != nil {
+	if strings.Contains(query, "WHERE ("+preparingRunSQL+")") && c.afterQueue != nil {
 		after := c.afterQueue
 		c.afterQueue = nil
 		return &flatRunRows{Rows: rows, afterClose: after}, nil

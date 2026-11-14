@@ -18,7 +18,7 @@ import (
 // beside the restored database: the IDs of runs the backup recorded as
 // running, and for a rollback restore also those queued or waiting. A
 // running run whose Workflow is found here is adopted; otherwise startup
-// recovery records a failed run without resubmitting it. Queued, waiting
+// recovery records a failed run without resubmitting it. Preparing, waiting
 // and mid-submission restored runs are cancelled (interrupted, with
 // restoredRunCancelReason), because they may already have run on the
 // version the rollback undid. A restore never re-executes a pipeline (or

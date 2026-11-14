@@ -758,8 +758,8 @@ alias of `passed` for all passed runs; its `display_status` is `passed`.
 `oberth runs --active` is deprecated and remains available for compatibility.
 The dashboard uses the default flat list, status chips, and an independent
 release toggle. `/api/runs/counts` supplies its running/queued header and dated
-page range: `Total - Queued`. The response retains `Total` and `ByRepo`, adding
-`Queued`, `Running`, `QueuedByRepo` and `RunningByRepo`; all respect uplink scope.
+page range: `Total - Preparing`. The response retains `Total` and `ByRepo`, adding
+`Preparing`, `Running`, `PreparingByRepo` and `RunningByRepo`; all respect uplink scope.
 
 ## JSON API
 

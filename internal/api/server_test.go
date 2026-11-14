@@ -82,7 +82,7 @@ func (backend *fakeBackend) Runs(_ context.Context, _ Actor, filter RunFilter) (
 	return map[string]any{"runs": []any{}}, nil
 }
 func (backend *fakeBackend) RunCounts(context.Context, Actor) (any, error) {
-	return model.RunCounts{Total: 3, ByRepo: map[int64]int{1: 2, 2: 1}, Queued: 1, Running: 1, QueuedByRepo: map[int64]int{1: 1}, RunningByRepo: map[int64]int{2: 1}}, nil
+	return model.RunCounts{Total: 3, ByRepo: map[int64]int{1: 2, 2: 1}, Preparing: 1, Running: 1, PreparingByRepo: map[int64]int{1: 1}, RunningByRepo: map[int64]int{2: 1}}, nil
 }
 func (backend *fakeBackend) Run(_ context.Context, _ Actor, id string) (any, error) {
 	backend.runID = id
@@ -1122,7 +1122,7 @@ func TestRunCountsRoute(t *testing.T) {
 		t.Fatalf("status=%d runID=%q body=%s", response.Code, backend.runID, response.Body.String())
 	}
 	var counts model.RunCounts
-	if err := recordjson.Unmarshal(response.Body.Bytes(), &counts); err != nil || counts.Queued != 1 || counts.Running != 1 || counts.QueuedByRepo[1] != 1 || counts.RunningByRepo[2] != 1 {
+	if err := recordjson.Unmarshal(response.Body.Bytes(), &counts); err != nil || counts.Preparing != 1 || counts.Running != 1 || counts.PreparingByRepo[1] != 1 || counts.RunningByRepo[2] != 1 {
 		t.Fatalf("counts = %+v, %v", counts, err)
 	}
 	unauthenticated := httptest.NewRecorder()

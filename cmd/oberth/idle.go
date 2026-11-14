@@ -102,7 +102,7 @@ func waitIdle(ctx context.Context, client *http.Client, target string, interval 
 				elapsed := time.Since(start).Truncate(time.Second)
 				var writeErr error
 				if known {
-					_, writeErr = fmt.Fprintf(opt.output, "Waiting for %s queue: queued=%d running=%d branch=%d critical=%d (tag=%d promotion=%d plan=%d apply=%d other=%d) elapsed=%s\n", opt.mode, state.Queued, state.Running, state.Branch, state.Critical(), state.Tag, state.Promotion, state.Plan, state.Apply, state.Other, elapsed)
+					_, writeErr = fmt.Fprintf(opt.output, "Waiting for %s queue: preparing=%d running=%d branch=%d critical=%d (tag=%d promotion=%d plan=%d apply=%d other=%d) elapsed=%s\n", opt.mode, state.Preparing, state.Running, state.Branch, state.Critical(), state.Tag, state.Promotion, state.Plan, state.Apply, state.Other, elapsed)
 				} else {
 					_, writeErr = fmt.Fprintf(opt.output, "Waiting for %s queue: busy (counts unavailable on this server) elapsed=%s\n", opt.mode, elapsed)
 				}

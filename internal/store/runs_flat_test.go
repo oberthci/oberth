@@ -127,14 +127,14 @@ func TestFlatRunsRepositoryOrderAndCounts(t *testing.T) {
 		t.Fatalf("rows: %+v, %v", rows, err)
 	}
 	counts, err := s.CountRuns(t.Context())
-	if err != nil || counts.Queued != 4 || counts.Running != 0 || counts.QueuedByRepo[repo.ID] != 2 {
+	if err != nil || counts.Preparing != 4 || counts.Running != 0 || counts.PreparingByRepo[repo.ID] != 2 {
 		t.Fatalf("counts %+v, %v", counts, err)
 	}
 	if _, err := s.MarkRunSubmissionStarted(t.Context(), queued[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	counts, err = s.CountRuns(t.Context())
-	if err != nil || counts.Total != 4 || counts.Queued != 3 || counts.Running != 1 || counts.RunningByRepo[other.ID] != 1 {
+	if err != nil || counts.Total != 4 || counts.Preparing != 3 || counts.Running != 1 || counts.RunningByRepo[other.ID] != 1 {
 		t.Fatalf("admitted counts %+v, %v", counts, err)
 	}
 	rows, err = s.ListRecentRuns(t.Context(), model.RunListFilter{RepoID: other.ID})

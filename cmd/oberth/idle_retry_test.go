@@ -128,7 +128,7 @@ func TestWaitIdleTransientFailuresBackOffAndRecover(t *testing.T) {
 				response.Body = idleBrokenBody{}
 				return response, nil
 			case 4:
-				return idleResponse(409, `{"version":1,"queued":1,"tag":1}`), nil
+				return idleResponse(409, `{"version":1,"preparing":1,"tag":1}`), nil
 			case 5:
 				return nil, errors.New("connection reset")
 			default:

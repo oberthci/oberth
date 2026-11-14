@@ -245,12 +245,12 @@ type RunListFilter struct {
 
 // RunCounts is the number of retained runs, in total and per repository ID.
 type RunCounts struct {
-	Total         int
-	ByRepo        map[int64]int
-	Queued        int
-	Running       int
-	QueuedByRepo  map[int64]int
-	RunningByRepo map[int64]int
+	Total           int
+	ByRepo          map[int64]int
+	Preparing       int
+	Running         int
+	PreparingByRepo map[int64]int
+	RunningByRepo   map[int64]int
 }
 
 type RunCancellation struct {

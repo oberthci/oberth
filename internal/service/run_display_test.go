@@ -200,7 +200,7 @@ func TestRunListsUseStorePositionsWithoutPerRowQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := counts.(model.RunCounts); got.Total != 2 || got.Queued != 2 || got.Running != 0 || got.QueuedByRepo[fixture.repo.ID] != 2 {
+	if got := counts.(model.RunCounts); got.Total != 2 || got.Preparing != 2 || got.Running != 0 || got.PreparingByRepo[fixture.repo.ID] != 2 {
 		t.Fatalf("counts %+v", got)
 	}
 }

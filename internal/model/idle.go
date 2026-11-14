@@ -4,7 +4,7 @@ package model
 // the pod-private upgrade observer. Unknown triggers remain critical.
 type IdleQueueStatus struct {
 	Version   int `json:"version"`
-	Queued    int `json:"queued"`
+	Preparing int `json:"preparing"`
 	Running   int `json:"running"`
 	Branch    int `json:"branch"`
 	Tag       int `json:"tag"`
@@ -16,10 +16,10 @@ type IdleQueueStatus struct {
 
 func (s IdleQueueStatus) Critical() int { return s.Tag + s.Promotion + s.Plan + s.Apply + s.Other }
 func (s IdleQueueStatus) Valid() bool {
-	for _, n := range []int{s.Queued, s.Running, s.Branch, s.Tag, s.Promotion, s.Plan, s.Apply, s.Other} {
+	for _, n := range []int{s.Preparing, s.Running, s.Branch, s.Tag, s.Promotion, s.Plan, s.Apply, s.Other} {
 		if n < 0 || n > 1_000_000_000 {
 			return false
 		}
 	}
-	return s.Version == 1 && s.Branch+s.Critical() == s.Queued+s.Running
+	return s.Version == 1 && s.Branch+s.Critical() == s.Preparing+s.Running
 }

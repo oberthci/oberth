@@ -41,7 +41,7 @@ func TestIdleQueueStatusIncludesEveryActiveTrigger(t *testing.T) {
 		}
 	}
 	state, err := database.IdleQueueStatus(t.Context())
-	if err != nil || !state.Valid() || state.Queued+state.Running != 7 || state.Branch != 2 || state.Critical() != 5 || state.Tag != 1 || state.Promotion != 1 || state.Plan != 1 || state.Apply != 1 || state.Other != 1 {
+	if err != nil || !state.Valid() || state.Preparing+state.Running != 7 || state.Branch != 2 || state.Critical() != 5 || state.Tag != 1 || state.Promotion != 1 || state.Plan != 1 || state.Apply != 1 || state.Other != 1 {
 		t.Fatalf("%+v %v", state, err)
 	}
 	// Completed history contributes no live work.
@@ -55,7 +55,7 @@ func TestIdleQueueStatusIncludesEveryActiveTrigger(t *testing.T) {
 		}
 	}
 	after, err := database.IdleQueueStatus(t.Context())
-	if err != nil || !after.Valid() || after.Queued != 0 {
+	if err != nil || !after.Valid() || after.Preparing != 0 {
 		t.Fatalf("%+v %v", after, err)
 	}
 }
@@ -90,7 +90,7 @@ func TestIdleQueueReadersStayFreshDuringWriterHold(t *testing.T) {
 	ctxRead, stopRead := context.WithTimeout(t.Context(), time.Second)
 	defer stopRead()
 	state, err := database.IdleQueueStatus(ctxRead)
-	if err != nil || state.Queued != 1 || state.Running != 0 || state.Branch != 1 {
+	if err != nil || state.Preparing != 1 || state.Running != 0 || state.Branch != 1 {
 		t.Fatalf("queue read blocked or saw uncommitted state: %+v %v", state, err)
 	}
 	if err := tx.Rollback(); err != nil {
@@ -104,7 +104,7 @@ func TestIdleQueueReadersStayFreshDuringWriterHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	state, err = database.IdleQueueStatus(t.Context())
-	if err != nil || state.Queued+state.Running != 0 || !state.Valid() {
+	if err != nil || state.Preparing+state.Running != 0 || !state.Valid() {
 		t.Fatalf("queue reader retained an old snapshot after commit: %+v %v", state, err)
 	}
 }

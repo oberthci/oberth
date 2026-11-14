@@ -62,7 +62,7 @@ func (s *Store) listLatestRefRuns(ctx context.Context, filter model.RunListFilte
 	params = append(params, beforeID, MaxActiveRuns, beforeID, beforeTime, beforeTime, beforeID, pageLimit(filter.Limit))
 	// Group using a narrow covering index: only sequences/counts are scanned,
 	// never historical errors/logs. Fetch the wide rows after selecting heads.
-	// Queued heads keep the same acceptance order as the flat list.
+	// Preparing heads keep the same acceptance order as the flat list.
 	rows, err := tx.QueryContext(ctx, latestRefQuery(restriction, statusSQL), params...) //nolint:gosec // Fixed query with placeholder-only scope restrictions.
 	if err != nil {
 		return nil, fmt.Errorf("list latest refs: %w", err)
@@ -104,7 +104,7 @@ func latestRefQuery(restriction string, statusSQL ...string) string {
 	return `WITH heads AS MATERIALIZED (
  SELECT MAX(queue_sequence) AS head_sequence, id AS head_id, COUNT(*)-1 AS earlier_attempts, started_at AS head_started_at,
   ` + runEndTimeSQL + ` AS end_time,
-  CASE WHEN ` + queuedRunSQL + ` THEN 0 WHEN status='running' THEN 1 ELSE 2 END AS list_group
+  CASE WHEN ` + preparingRunSQL + ` THEN 0 WHEN status='running' THEN 1 ELSE 2 END AS list_group
  FROM runs INDEXED BY runs_latest_ref_idx
  WHERE 1=1` + restriction + `
  GROUP BY repo_id,ref_kind,ref

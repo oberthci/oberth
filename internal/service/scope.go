@@ -391,13 +391,13 @@ func (history scopedHistory) CountRuns(ctx context.Context) (model.RunCounts, er
 	if err != nil {
 		return model.RunCounts{}, err
 	}
-	scoped := model.RunCounts{ByRepo: map[int64]int{}, QueuedByRepo: map[int64]int{}, RunningByRepo: map[int64]int{}}
+	scoped := model.RunCounts{ByRepo: map[int64]int{}, PreparingByRepo: map[int64]int{}, RunningByRepo: map[int64]int{}}
 	for repoID, count := range counts.ByRepo {
 		if history.scope.seesRepo(repoID) {
 			scoped.ByRepo[repoID] = count
 			scoped.Total += count
-			scoped.QueuedByRepo[repoID], scoped.RunningByRepo[repoID] = counts.QueuedByRepo[repoID], counts.RunningByRepo[repoID]
-			scoped.Queued += counts.QueuedByRepo[repoID]
+			scoped.PreparingByRepo[repoID], scoped.RunningByRepo[repoID] = counts.PreparingByRepo[repoID], counts.RunningByRepo[repoID]
+			scoped.Preparing += counts.PreparingByRepo[repoID]
 			scoped.Running += counts.RunningByRepo[repoID]
 		}
 	}

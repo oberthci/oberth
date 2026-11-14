@@ -275,7 +275,7 @@ func TestScopedUplinkSeesOnlyItsUpstream(t *testing.T) {
 	if got := counts.(model.RunCounts); got.Total != len(visibleRuns) || len(got.ByRepo) != 1 || got.ByRepo[fixture.visible.ID] != len(visibleRuns) {
 		t.Fatalf("scoped counts = %#v", got)
 	}
-	if got := counts.(model.RunCounts); got.Queued != 1 || got.Running != 0 || len(got.QueuedByRepo) != 1 || len(got.RunningByRepo) != 1 || got.QueuedByRepo[fixture.visible.ID] != 1 {
+	if got := counts.(model.RunCounts); got.Preparing != 1 || got.Running != 0 || len(got.PreparingByRepo) != 1 || len(got.RunningByRepo) != 1 || got.PreparingByRepo[fixture.visible.ID] != 1 {
 		t.Fatalf("scoped queue/admission counts = %#v", got)
 	}
 	if all, _ := fixture.service.RunCounts(ctx, unscopedActor); all.(model.RunCounts).Total != len(visibleRuns)+len(hiddenRuns) {

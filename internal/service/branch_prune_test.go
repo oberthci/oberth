@@ -272,7 +272,7 @@ func TestBranchDeleteManyRefusals(t *testing.T) {
 	}
 }
 
-// Queued prune rows are not due until the local deletion has run: a
+// Preparing prune rows are not due until the local deletion has run: a
 // propagator pass in between neither skips them nor touches upstream.
 func TestPropagatorBetweenPruneQueueAndLocalDeletion(t *testing.T) {
 	f := newPruneFixture(t)
