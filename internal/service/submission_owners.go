@@ -19,7 +19,6 @@ type submissionOwner struct {
 	sequence, order, repoID int64
 	runID                   string
 	adopted                 bool
-	submitted               bool
 }
 
 func newSubmissionRegistry() *submissionRegistry {
@@ -76,13 +75,6 @@ func (r *submissionOwner) creationContext(parent context.Context) (context.Conte
 		}
 	}()
 	return ctx, cancel
-}
-
-// Remember a created or uncertain Workflow, independently of execution capacity.
-func (r *submissionOwner) markSubmitted() {
-	r.gate.mu.Lock()
-	defer r.gate.mu.Unlock()
-	r.submitted = true
 }
 
 // Terminal store evidence releases any leftover in-process submission owner.

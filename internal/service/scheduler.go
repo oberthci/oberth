@@ -893,7 +893,6 @@ func (scheduler *Scheduler) createRunWorkflow(ctx context.Context, jobRequest Wo
 		}
 		return failureErr
 	}
-	reservation.markSubmitted()
 	submittedCtx, cancelSubmitted := boundedWorkspaceCleanupContext(ctx)
 	current, err = scheduler.database().MarkRunSubmitted(submittedCtx, run.ID)
 	cancelSubmitted()

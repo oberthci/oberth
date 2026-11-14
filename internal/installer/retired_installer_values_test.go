@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"os"
 	"reflect"
-
-	"sigs.k8s.io/yaml"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 )
 
 func TestRetiredInstallerCleanupMatchesHistoricalSnapshot(t *testing.T) {

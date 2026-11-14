@@ -480,7 +480,8 @@ trust assumptions and complete invalidation rules.
   priority, retries, optional deadlines and synchronization. See
   [native scheduling](docs/native-scheduling.md).
 - Push, promotion, rerun and cron accepting handlers validate, write run history,
-  and submit the specific run's Workflow before returning. No claim loop selects
+  and start submission of the specific run on the server lifetime. Acceptance
+  returns before checkout and cluster preparation complete. No claim loop selects
   a next run, and pending publication does not delay Workflow creation. Git's
   branch-head check prevents an older result from overwriting a newer commit.
   Workflow creation posts once under a fixed name. AlreadyExists adopts only
