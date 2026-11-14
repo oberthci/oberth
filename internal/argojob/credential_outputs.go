@@ -89,7 +89,11 @@ func validateCredentialHookKeys(wf *wfv1.Workflow, credentialed map[*wfv1.Templa
 				continue
 			}
 			if strings.ContainsAny(string(key), ".()[]") {
-				failure = fmt.Errorf("argojob: hook %q on %s %q in template %q invokes a credentialed template or a template chosen at run time; its key cannot contain '.', '(', ')', '[' or ']'", key, kind, invocation, parent)
+				location := fmt.Sprintf("template %q", parent)
+				if parent == "" {
+					location = "inline template"
+				}
+				failure = fmt.Errorf("argojob: hook %q on %s %q in %s invokes a credentialed template or a template chosen at run time; its key cannot contain '.', '(', ')', '[' or ']'", key, kind, invocation, location)
 			}
 		}
 	}
