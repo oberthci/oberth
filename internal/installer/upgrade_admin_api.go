@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/oberthci/oberth/internal/client"
 	"golang.org/x/mod/semver"
+
+	"github.com/oberthci/oberth/internal/client"
 )
 
 // A server without these routes must be backed up with its own released CLI.
