@@ -26,7 +26,7 @@ import (
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
-func upgradeWaitKubeAPI(t *testing.T) *httptest.Server {
+func upgradeWaitKubeconfig(t *testing.T, root string) string {
 	t.Helper()
 	objects := upgradeWaitArgoObjects()
 	deployment := objects[0].(*appsv1.Deployment)
@@ -51,7 +51,11 @@ func upgradeWaitKubeAPI(t *testing.T) *httptest.Server {
 		}
 	}))
 	t.Cleanup(server.Close)
-	return server
+	kubeconfig := filepath.Join(root, "kubeconfig")
+	if err := os.WriteFile(kubeconfig, []byte("apiVersion: v1\nkind: Config\ncurrent-context: fixture\ncontexts:\n- name: fixture\n  context:\n    cluster: fixture\n    user: fixture\nclusters:\n- name: fixture\n  cluster:\n    server: "+server.URL+"\nusers:\n- name: fixture\n  user: {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return kubeconfig
 }
 
 // The helper runs the actual CLI main, or the production in-pod wait loop in
@@ -155,11 +159,7 @@ esac
 					t.Fatal(err)
 				}
 			}
-			kubeconfig := filepath.Join(root, "kubeconfig")
-			kubeAPI := upgradeWaitKubeAPI(t)
-			if err := os.WriteFile(kubeconfig, []byte("apiVersion: v1\nkind: Config\ncurrent-context: fixture\ncontexts:\n- name: fixture\n  context:\n    cluster: fixture\n    user: fixture\nclusters:\n- name: fixture\n  cluster:\n    server: "+kubeAPI.URL+"\nusers:\n- name: fixture\n  user: {}\n"), 0600); err != nil {
-				t.Fatal(err)
-			}
+			kubeconfig := upgradeWaitKubeconfig(t, root)
 			ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(170*time.Second))
 			defer cancel()
 			command := exec.CommandContext(ctx, "/bin/sh", "-c", `exec "$@"`, "fixture", executable, "-test.run", "^TestUpgradeWaitProcessHelper$")
