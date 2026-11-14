@@ -83,25 +83,25 @@ func validateCredentialHookKeys(wf *wfv1.Workflow, credentialed map[*wfv1.Templa
 		}
 	}
 	var failure error
-	check := func(hooks wfv1.LifecycleHooks) {
+	check := func(hooks wfv1.LifecycleHooks, kind, invocation, parent string) {
 		for key, hook := range hooks {
 			if !names[hook.Template] && (len(names) == 0 || !strings.Contains(hook.Template, "{{")) {
 				continue
 			}
 			if strings.ContainsAny(string(key), ".()[]") {
-				failure = fmt.Errorf("argojob: hooks invoking credentialed templates cannot use keys containing '.', '(', ')', '[' or ']'")
+				failure = fmt.Errorf("argojob: hook %q on %s %q in template %q invokes a credentialed template or a template chosen at run time; its key cannot contain '.', '(', ')', '[' or ']'", key, kind, invocation, parent)
 			}
 		}
 	}
 	walkTemplates(wf, func(parent *wfv1.Template) {
 		for _, group := range parent.Steps {
 			for _, step := range group.Steps {
-				check(step.Hooks)
+				check(step.Hooks, "step", step.Name, parent.Name)
 			}
 		}
 		if parent.DAG != nil {
 			for _, task := range parent.DAG.Tasks {
-				check(task.Hooks)
+				check(task.Hooks, "task", task.Name, parent.Name)
 			}
 		}
 	})

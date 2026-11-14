@@ -97,7 +97,7 @@ func TestCredentialHookUnreferencedResultAllowed(t *testing.T) {
 
 func assertCredentialHookKeyRefused(t *testing.T, err error) {
 	t.Helper()
-	const message = "argojob: hooks invoking credentialed templates cannot use keys containing '.', '(', ')', '[' or ']'"
+	const message = "its key cannot contain '.', '(', ')', '[' or ']'"
 	if err == nil || !strings.Contains(err.Error(), message) {
 		t.Fatalf("credentialed hook delimiter was admitted or returned an unexpected error: %v", err)
 	}
@@ -116,9 +116,50 @@ func TestCredentialHookDelimiterKeysRefused(t *testing.T) {
 					}
 					_, err := Build(config, request)
 					assertCredentialHookKeyRefused(t, err)
+					assertCredentialHookContext(t, err, dag, key)
 				})
 			}
 		}
+	}
+}
+
+func assertCredentialHookContext(t *testing.T, err error, dag bool, key string) {
+	t.Helper()
+	kind := "step"
+	if dag {
+		kind = "task"
+	}
+	context := fmt.Sprintf("hook %q on %s %q in template %q", key, kind, "host", "parent")
+	if err == nil || !strings.Contains(err.Error(), context) {
+		t.Fatalf("hook refusal did not identify its invocation (%s): %v", context, err)
+	}
+}
+
+func TestCredentialHookDynamicDelimiterMessage(t *testing.T) {
+	for _, dag := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dag=%t", dag), func(t *testing.T) {
+			config, request := credentialHookOutputRequest(t, dag, false, false, "scan)", "unused")
+			request = changeCredentialOutputRequest(t, request, func(wf *wfv1.Workflow) {
+				for i := range wf.Spec.Templates {
+					parent := &wf.Spec.Templates[i]
+					if parent.Name != "parent" {
+						continue
+					}
+					hooks := wfv1.LifecycleHooks{"scan)": {Template: "{{workflow.parameters.hook}}", Expression: "true"}}
+					if dag {
+						parent.DAG.Tasks[1].Hooks = hooks
+					} else {
+						parent.Steps[0].Steps[1].Hooks = hooks
+					}
+				}
+			})
+			_, err := Build(config, request)
+			assertCredentialHookKeyRefused(t, err)
+			assertCredentialHookContext(t, err, dag, "scan)")
+			if !strings.Contains(err.Error(), "or a template chosen at run time") {
+				t.Fatalf("dynamic hook refusal did not explain template selection: %v", err)
+			}
+		})
 	}
 }
 
