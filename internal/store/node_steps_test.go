@@ -55,7 +55,7 @@ func TestNativeNodeStepsStore2000RowsInBoundedTransactions(t *testing.T) {
 }
 
 func TestNativeNodeStepsMigrationRetainsPopulatedHistory(t *testing.T) {
-	const id = "20261113214401-native-node-steps-c477a88045b8945eb269fade9eb006e2"
+	const id = "20261114004723-native-node-steps-27f59fc788a4a8304c21bda8085e8936"
 	s := newMigrationIDTestStore(t)
 	index := -1
 	for i, m := range migrations {
