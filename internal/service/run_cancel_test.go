@@ -77,16 +77,18 @@ func assertCancelled(t *testing.T, run model.Run, actor, reason string) {
 	}
 }
 
-// A queued run is terminalized at once and never claimed.
-func TestRunCancelQueuedRunIsNeverClaimed(t *testing.T) {
+// Cancelling accepted work before submission creates no Workflow.
+func TestRunCancelBeforeSubmissionCreatesNoWorkflow(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
 	queued := fixture.branch(t, fixture.exampleService, "feature-q", "a")
 
 	response := mustRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": queued.ID[:8], "reason": "pushed by mistake"})
 	if response.RunID != queued.ID || response.PreviousState != "waiting" || response.Workflow != "not_submitted" ||
 		response.Status != "running" || response.Phase != "cancelled" || response.CancelledBy != cancelAgent.Identity ||
-		response.Reason != "cancelling by agent@host: pushed by mistake" || response.Warning != "" {
-		t.Fatalf("queued cancel response = %#v", response)
+		response.Reason != "cancelling by agent@host: pushed by mistake" ||
+		!strings.Contains(response.Warning, "repeat cancel while the run is active") ||
+		!strings.Contains(response.Warning, "Argo Terminate; exit handlers will be skipped") {
+		t.Fatalf("pre-submission cancel response = %#v", response)
 	}
 	fixture.start(t)
 	fixture.awaitTerminal(t, queued.ID)
