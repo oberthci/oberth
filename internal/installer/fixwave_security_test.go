@@ -119,7 +119,7 @@ func TestExternalArgoConfigMapStillChecksControllerAndServerPods(t *testing.T) {
 	for _, component := range []string{"controller", "server"} {
 		for _, context := range []string{`null`, `{"allowPrivilegeEscalation":true}`, `{"capabilities":{"add":["SYS_ADMIN"]}}`} {
 			t.Run(component+context, func(t *testing.T) {
-				stored := `{"controller":{"configMap":{"create":false}}}`
+				var stored string
 				if component == "controller" {
 					stored = `{"controller":{"configMap":{"create":false},"securityContext":` + context + `}}`
 				} else {
