@@ -4,15 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	argofile "github.com/argoproj/argo-workflows/v4/util/file"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -103,9 +106,73 @@ func nativeLogIdentityTree(failed string) (*wfv1.Workflow, []*corev1.Pod) {
 	return wf, pods
 }
 
+type nativeReaderCase struct {
+	name, wanted     string
+	compressed, wait bool
+}
+
+type nativeLogTestHub struct {
+	workflow *wfv1.Workflow
+	pods     []*corev1.Pod
+}
+
+func (hub nativeLogTestHub) Workflow(name string) (*wfv1.Workflow, bool) {
+	return hub.workflow, name == hub.workflow.Name
+}
+func (hub nativeLogTestHub) PodsOf(string) []*corev1.Pod { return hub.pods }
+func (hub nativeLogTestHub) Pods() []*corev1.Pod         { return hub.pods }
+func (nativeLogTestHub) Subscribe(string) (<-chan struct{}, func()) {
+	return make(chan struct{}), func() {}
+}
+func (nativeLogTestHub) Healthy() bool                     { return true }
+func (nativeLogTestHub) Synced() bool                      { return true }
+func (nativeLogTestHub) UnhealthySince() (time.Time, bool) { return time.Time{}, false }
+
+func nativeReaderCompletion(t *testing.T, wf *wfv1.Workflow, pods []*corev1.Pod, test nativeReaderCase) argojob.Completion {
+	t.Helper()
+	snapshot := wf.DeepCopy()
+	if test.compressed {
+		body, err := json.Marshal(snapshot.Status.Nodes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot.Status.CompressedNodes = argofile.CompressEncodeString(t.Context(), string(body))
+		snapshot.Status.Nodes = nil
+	}
+	before := snapshot.DeepCopy()
+	controller, err := argojob.NewController(&shutdownWorkflowFake{object: snapshot}, nil, argojob.Config{Namespace: wf.Namespace, PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release", CISecretsServiceAccount: "ci", ExecutorServiceAccount: "executor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var completion *argojob.Completion
+	if test.wait {
+		controller.WithWatchHub(nativeLogTestHub{workflow: snapshot, pods: pods})
+		got, waitErr := controller.Wait(t.Context(), wf.Name, wf.Annotations["oberth.ci/run-id"], io.Discard)
+		completion, err = &got, waitErr
+	} else {
+		completion, err = controller.TerminalState(t.Context(), wf.Name)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(snapshot, before) {
+		t.Fatal("native reader mutated cached Workflow")
+	}
+	return *completion
+}
+
 func TestNativeNodeIdentityFlowsThroughRunAndLogs(t *testing.T) {
+	cases := []nativeReaderCase{}
 	for _, wanted := range []string{"flat-node", "nested-node", "attempt-1", "set-build", "exit-node", "duplicate-left", "duplicate-right"} {
-		t.Run(wanted, func(t *testing.T) {
+		cases = append(cases, nativeReaderCase{name: wanted, wanted: wanted})
+	}
+	for _, wanted := range []string{"flat-node", "duplicate-left", "duplicate-right", "set-build"} {
+		cases = append(cases, nativeReaderCase{name: "compressed-terminal/" + wanted, wanted: wanted, compressed: true})
+		cases = append(cases, nativeReaderCase{name: "compressed-wait/" + wanted, wanted: wanted, compressed: true, wait: true})
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			wanted := test.wanted
 			ctx := t.Context()
 			database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "history.sqlite"), store.Options{})
 			if err != nil {
@@ -132,15 +199,8 @@ func TestNativeNodeIdentityFlowsThroughRunAndLogs(t *testing.T) {
 				t.Fatal(err)
 			}
 			wf.Annotations = map[string]string{"oberth.ci/run-id": run.ID}
-			controller, err := argojob.NewController(&shutdownWorkflowFake{object: wf}, nil, argojob.Config{Namespace: wf.Namespace, PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release", CISecretsServiceAccount: "ci", ExecutorServiceAccount: "executor"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			completion, err := controller.TerminalState(ctx, wf.Name)
-			if err != nil {
-				t.Fatal(err)
-			}
-			result := (&ArgoJobs{}).result(*completion)
+			completion := nativeReaderCompletion(t, wf, pods, test)
+			result := (&ArgoJobs{}).result(completion)
 			if result.FailedStep != wanted || completion.FailedNodeID != wanted {
 				t.Fatalf("failure identity split: got %q want native node %q", result.FailedStep, wanted)
 			}
