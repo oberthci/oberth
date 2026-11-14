@@ -135,7 +135,7 @@ func validateArgoSecurityReview(ns string, stored map[string]any, review []ArgoS
 			}
 		case *corev1.SecurityContext:
 			valid := argoSecurityContextMeetsFloor(s, false)
-			if entry.Component == "mainContainer" || entry.Component == "executor" {
+			if (entry.Component == "mainContainer" || entry.Component == "executor") && workflowPod != nil {
 				valid = argoWorkflowSecurityContextMeetsFloor(s, workflowPod)
 			}
 			if !valid {
