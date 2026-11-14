@@ -296,3 +296,24 @@ It uses a capable `openssl`/`openssl3` on PATH or the standard Homebrew
 `openssl@3` location on macOS. System LibreSSL without these checks is refused;
 install OpenSSL outside Oberth (on macOS, `brew install openssl@3`) and retry.
 The helper never installs tools or skips identity verification.
+
+## Read-only run display
+
+`/oberth:runs [--limit=N]` prints a fixed-width table of recent runs (default
+5, maximum 50), including duration and failed step. `/oberth:watch [id]`
+pins one run above the prompt; without an id it selects the latest run.
+The line refreshes every 15 seconds and reports completion with a toast.
+Polling that run stops on completion, a missing run, or session end.
+The status line summarizes the latest 50 visible runs as
+`Oberth ▸ N running · last ✓ ref`. The model can call the `runs` and
+`watch` tools too. These displays only read `run_list` and `run_get` through
+the installed CLI with the same configured mTLS identity as the plugin;
+they never change runs. Missing setup shows a single `/oberth:install`
+instruction. Terminal controls are stripped, fields are bounded, and wide
+or combining characters are replaced with `?` to preserve table columns.
+
+The live display requires a client with function hooks support. On older
+clients the module is unavailable; the existing plugin skills and classic
+session hook remain, and the two new command files explain how to use the
+read-only MCP tools instead. The module ships as TypeScript source and needs
+no separate build step.
