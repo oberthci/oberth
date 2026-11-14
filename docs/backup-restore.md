@@ -600,3 +600,31 @@ Migrations are forward-only: a bare `helm rollback` cannot restore the
 database. `oberth upgrade --rollback <record>` rolls the Helm releases back and,
 when a migration ran, restores the pre-upgrade backup's history
 ([installer reruns](installer-reruns.md#install-reconciles-upgrade-moves-versions)).
+
+
+## Upgrading a server without the administration API
+
+The current CLI cannot take a pre-upgrade backup from a server whose admin routes
+return not-found. It refuses before any cluster change and names that installed
+release and the exact commands. Use the verified CLI matching the running release
+for this one-time history backup. For example, with the verified v0.22.6 binary
+saved as `./oberth-v0.22.6` and context `selected`:
+
+```sh
+./oberth-v0.22.6 backup --history-only --context selected --namespace oberth
+oberth upgrade --no-backup --context selected --namespace oberth
+```
+
+The backup uses the existing recipient, or the matching CLI's normal key setup.
+Keep its private recovery key separately. Substitute the actual selected context,
+namespace and running release version; the refusal fills those values in for you.
+The new CLI has no exec fallback. Keep any required explicit upgrade options,
+including `--argo-security-defaults` when consenting to absent security defaults.
+
+Upgrade `--wait-idle` observes native Workflows through Kubernetes for every
+server version, using the pipeline namespace stored in the release. Pending,
+running and unclassified Workflows count as active; terminal Workflows do not.
+`--wait-for critical` conservatively waits for all active Oberth Workflows.
+This advisory read neither freezes admission nor observes the server's queue.
+If Workflow reads are unavailable, the wait refuses: confirm no runs are active
+before deliberately retrying without the wait flags.

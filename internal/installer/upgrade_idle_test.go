@@ -24,7 +24,7 @@ func (f idleAdminFunc) DownloadAdminBackup(context.Context, int64, io.Writer) er
 	return errors.New("unexpected download")
 }
 
-func TestUpgradeAdminIdleObservation(t *testing.T) {
+func TestAdminIdleObservation(t *testing.T) {
 	t.Run("BusyThenIdleAndCriticalSelection", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			calls := 0
@@ -45,7 +45,7 @@ func TestUpgradeAdminIdleObservation(t *testing.T) {
 				}
 				return fixtureDecode(map[string]any{"busy": busy, "queue": queue}, into)
 			})}
-			if err := waitForUpgradeIdle(t.Context(), UpgradeConfig{WaitFor: "critical", WaitTimeout: time.Minute}, deps); err != nil || calls != 2 || !strings.Contains(out.String(), "critical=1") {
+			if err := observeAdminIdle(t.Context(), UpgradeConfig{WaitFor: "critical", WaitTimeout: time.Minute}, deps); err != nil || calls != 2 || !strings.Contains(out.String(), "critical=1") {
 				t.Fatal(err, calls, out.String())
 			}
 		})
@@ -60,7 +60,7 @@ func TestUpgradeAdminIdleObservation(t *testing.T) {
 				}
 				return fixtureDecode(map[string]any{"busy": false, "queue": model.IdleQueueStatus{Version: 1}}, into)
 			})}
-			if err := waitForUpgradeIdle(t.Context(), UpgradeConfig{}, deps); err != nil || calls != 2 {
+			if err := observeAdminIdle(t.Context(), UpgradeConfig{}, deps); err != nil || calls != 2 {
 				t.Fatal(err, calls)
 			}
 		})
@@ -71,7 +71,7 @@ func TestUpgradeAdminIdleObservation(t *testing.T) {
 			calls++
 			return &client.AdminError{StatusCode: http.StatusForbidden, Cause: errors.New("forbidden")}
 		})}
-		if err := waitForUpgradeIdle(t.Context(), UpgradeConfig{}, deps); err == nil || calls != 1 {
+		if err := observeAdminIdle(t.Context(), UpgradeConfig{}, deps); err == nil || calls != 1 {
 			t.Fatal(err, calls)
 		}
 	})
@@ -79,13 +79,13 @@ func TestUpgradeAdminIdleObservation(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			start := time.Now()
 			deps := Deps{Output: io.Discard, Admin: idleAdminFunc(func(ctx context.Context, _ string, _ any, _ any) error { <-ctx.Done(); return ctx.Err() })}
-			err := waitForUpgradeIdle(t.Context(), UpgradeConfig{Timeout: time.Second, WaitTimeout: 3 * time.Minute}, deps)
-			if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 3*time.Minute || !strings.Contains(err.Error(), "upgrade not attempted") {
+			err := observeAdminIdle(t.Context(), UpgradeConfig{Timeout: time.Second, WaitTimeout: 3 * time.Minute}, deps)
+			if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 3*time.Minute {
 				t.Fatal(err, time.Since(start))
 			}
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
-			err = waitForUpgradeIdle(ctx, UpgradeConfig{}, deps)
+			err = observeAdminIdle(ctx, UpgradeConfig{}, deps)
 			if !errors.Is(err, context.Canceled) {
 				t.Fatal(err)
 			}
@@ -95,7 +95,7 @@ func TestUpgradeAdminIdleObservation(t *testing.T) {
 		deps := Deps{Admin: idleAdminFunc(func(_ context.Context, _ string, _ any, into any) error {
 			return fixtureDecode(map[string]any{"busy": false, "queue": model.IdleQueueStatus{}}, into)
 		})}
-		if err := waitForUpgradeIdle(t.Context(), UpgradeConfig{}, deps); err == nil {
+		if err := observeAdminIdle(t.Context(), UpgradeConfig{}, deps); err == nil {
 			t.Fatal("invalid queue accepted")
 		}
 	})

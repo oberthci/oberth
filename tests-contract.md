@@ -316,7 +316,7 @@ Old preflight execution is terminalized rather than reattached. Native
 execution keeps exact source, UID, target and operator identity custody;
 historical execution journals do not authorize new work.
 
-Upgrade idle-probe retries: `TestUpgradeAdminIdleObservation` drives the
+Upgrade idle-probe retries: `TestAdminIdleObservation` drives the
 installer's authenticated API wait path through transient failures, busy/idle
 samples, critical selection, authorization refusal, deadline and cancellation.
 `TestWaitIdleTransientFailuresBackOffAndRecover` checks transport, 503 and

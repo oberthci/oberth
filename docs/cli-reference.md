@@ -1903,9 +1903,9 @@ Flags:
   -values value
         values file to pass to helm upgrade (repeatable)
   -wait-for string
-        enable waiting for all or critical (tag/promotion/plan/apply/unknown) runs
+        enable native Workflow observation; critical conservatively waits for all active Workflows
   -wait-idle
-        wait for all queued/running runs before upgrading (advisory, not an admission freeze)
+        wait for active Kubernetes Workflows before upgrading (advisory, not an admission freeze)
   -wait-timeout duration
         maximum queue wait, independent of --timeout (default 2h0m0s)
   -yes

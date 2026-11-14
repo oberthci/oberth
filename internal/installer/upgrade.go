@@ -351,6 +351,10 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
+	if err := checkUpgradeBackupAPI(ctx, cfg, deps, currentVersion); err != nil {
+		return result, err
+	}
+
 	liveSchema, err := announceUpgradeSchema(ctx, w, cfg, deps, cmp > 0)
 	if err != nil {
 		return result, err
@@ -901,10 +905,9 @@ func upgradeWaitSelection(cfg UpgradeConfig) string {
 	return "all"
 }
 
-// waitForUpgradeIdle observes the selected Deployment through its authenticated admin
-// API, which requires an unscoped admin and returns the complete queue.
+// waitForUpgradeIdle observes active native Workflows without a server-version dependency.
 func waitForUpgradeIdle(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
-	if err := observeAdminIdle(ctx, cfg, deps); err != nil {
+	if err := waitForUpgradeWorkflows(ctx, cfg, deps); err != nil {
 		return fmt.Errorf("upgrade not attempted: %w", err)
 	}
 	return nil
