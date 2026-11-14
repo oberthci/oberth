@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -322,10 +323,10 @@ func TestSchedulerPendingCancellationKeepsPodJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	close(jobs.waitBlocks)
-	// The refused deletion is deferred to the dispatch-loop retry instead of
+	// The refused Stop is deferred to the dispatch-loop retry instead of
 	// ending the scheduler, and its obligation stays pending.
 	if err := <-done; err != nil {
-		t.Fatalf("refused deletion ended the owner with an error: %v", err)
+		t.Fatalf("refused Stop ended the owner with an error: %v", err)
 	}
 	if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 1 || pending[0].RunID != run.ID {
 		t.Fatalf("uncertain physical cleanup hidden: pending=%+v %v", pending, err)
@@ -337,13 +338,37 @@ func TestSchedulerPendingCancellationKeepsPodJournal(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal("terminal DB row with live cleanup lost recovery journal", err)
 	}
-	// The dispatch pass that later deletes the Workflow prunes the journal.
+	// Settlement keeps the journal until the resumed final observer finishes.
 	jobs.deleteErr = nil
+	jobs.waitErr = nil
+	jobs.waitResult = JobResult{Status: model.RunFailed, Phase: "job", Error: "Stopped with strategy Stop"}
+	finalBlocks := make(chan struct{})
+	releaseFinal := sync.OnceFunc(func() { close(finalBlocks) })
+	defer releaseFinal()
+	jobs.waitBlocks = finalBlocks
+	jobs.waitEntered = make(chan struct{})
+	jobs.enteredOnce = sync.Once{}
+	scheduler.settleOneCreate(t.Context())
+	select {
+	case <-jobs.waitEntered:
+	case <-time.After(testStartTimeout(5 * time.Second)):
+		t.Fatal("settled Workflow did not resume final observation")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("journal pruned before final observation completed", err)
+	}
+	releaseFinal()
+	waitAdoptedStatus(t, fixture.store, run.ID, model.RunInterrupted)
+	scheduler.createObservers.Wait()
+	scheduler.createMu.Lock()
+	scheduler.createPending[run.ID].next = time.Time{}
+	scheduler.createMu.Unlock()
 	scheduler.settleOneCreate(t.Context())
 	if err := scheduler.completePendingCancellationsWithGate(context.Background(), scheduler.requireMutation); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("journal kept after the deferred deletion completed", err)
+		t.Fatal("journal kept after the resumed final observation completed", err)
 	}
 }
