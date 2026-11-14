@@ -21,6 +21,8 @@ type exitTokenJobs struct {
 	finished  atomic.Bool
 }
 
+func (*exitTokenJobs) WaitForWatchSync(ctx context.Context) error { return ctx.Err() }
+
 func (j *exitTokenJobs) Adopt(context.Context, model.Run) (bool, error) { return true, nil }
 func (*exitTokenJobs) WorkflowNamespace() string                        { return "pipeline" }
 func (j *exitTokenJobs) SettleCreate(ctx context.Context, name, id string, _ time.Time) (bool, error) {
@@ -38,7 +40,7 @@ func (j *exitTokenJobs) WaitResumed(ctx context.Context, _ string, output io.Wri
 		return JobResult{}, err
 	}
 	j.finished.Store(true)
-	return JobResult{Status: model.RunFailed, Phase: "job", Error: "Stopped with strategy Stop", Steps: []model.StepResult{{Stage: "exit", Step: "cleanup", Status: model.StepPassed}}}, nil
+	return JobResult{Status: model.RunFailed, Phase: "job", Error: "Stopped with strategy Stop", Steps: []model.StepResult{{NodeID: "exit-cleanup", Stage: "exit", Step: "cleanup", Status: model.StepPassed}}}, nil
 }
 func (j *exitTokenJobs) TerminalResult(context.Context, string) (JobResult, error) {
 	if !j.finished.Load() {
