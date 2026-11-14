@@ -289,9 +289,9 @@ values with the actual run, repository and environment identities.
    Compare the producer's output parameter `digest` with the report task's
    input and log; this is an Argo parameter handoff between separate Pods.
    Finish the authored-resource and generated-helper Pod comparisons in
-   scenario step 6. v0.22.7 supplies security contexts and private `/tmp` mounts;
-   compare requests, limits and placement without mistaking these documented
-   changes for authored resource changes.
+   scenario step 6. The example authors each main and sidecar security context;
+   Oberth preserves it and supplies no private `/tmp` mount. Compare requests,
+   limits, placement and authored security contexts on the actual Pods.
 
 3. **Held build (scenario step 7).** On a separate `demo/assist` branch from
    the green commit, change only `expect.txt` to `broken`. Keep `cancel.txt`
@@ -377,6 +377,7 @@ values with the actual run, repository and environment identities.
    with `(tag)` in the handoff, then:
 
    ```text
+   secret: sidecar passed
    secret: marker present
    release: v0.1.0
    ```
@@ -386,9 +387,13 @@ values with the actual run, repository and environment identities.
    no secret-store settings in the test/report steps or HTTP sidecar, and the
    file/step-scoped identity only on `read-secret`. This demonstration reads a
    secret and completes a tag release; it has no external application publisher.
+   `read-secret` has its own HTTP sidecar; every container of that granted Pod
+   shares its trust even though store settings are supplied only to main. It
+   declares no path output and no caller consumes its `outputs.result`. The
+   digest handoff remains in separate ungranted steps.
    Return to scenario step 8 for restart/unseal and the remaining required checks.
 
-### Three deliberate refusals
+### Four deliberate refusals
 
 Perform each case separately, restore the original state, and require the
 ordinary green walk to work again. Save only sanitized refusals. The repository's
@@ -398,12 +403,14 @@ ordinary green walk to work again. Save only sanitized refusals. The repository'
 | --- | --- | --- |
 | Forge a run fact | In a disposable copy of `build.yaml`, add `spec.arguments.parameters: [{name: oberth-sha, value: forged}]`; run `oberth validate --runner-image-prefixes= <copy-root>` | Nonzero result containing `server-owned`. Remove the declaration; consume the workflow parameter without declaring it. |
 | Read the node filesystem | In a separate copy, add `spec.volumes: [{name: host, hostPath: {path: /}}]`; run the same validation | Nonzero result containing `mounts the node filesystem`. Remove the volume; authored node paths are never a cache grant. |
+| Capture output from a granted Pod with a sidecar | In a separate release copy, keep the `read-secret` grant and sidecar and add to that template `outputs.parameters: [{name: marker, valueFrom: {path: /tmp/marker}}]`. Separately, restore it and instead add to the parent `release` template `outputs.parameters: [{name: marker, valueFrom: {parameter: '{{tasks.read-secret.outputs.result}}'}}]`. Deliver each changed source through an ordinary green build/promotion and attempt a fresh annotated release tag. | Server Build refuses the path case with exactly `argojob: credentialed template "read-secret" cannot use path-read output parameter "marker" because another container of the Pod can redirect what Argo reads`; the result case is exactly `argojob: credentialed template "read-secret" cannot use referenced outputs.result because another container of the Pod can redirect what Argo reads`. Local structural validation alone does not check the live grant. Remove the output capture, retain the ungranted digest handoff, restore and recheck with a fresh tag. |
 | Use another step's secret grant | On the test installation, revoke the exact `read-secret` tuple with `access_revoke` and grant the same file/path to `report` with `access_allow`. Attempt a fresh annotated version tag such as `v0.1.1-refused` on the delivered commit | Release admission refuses `secret grant denied` for `read-secret`; no granted secret Pod starts. Revoke `report`, re-grant `read-secret`, reconcile identities/policies and retry with a fresh version tag. A grant to a different workflow file also supplies no authority. |
 
 Use only the acceptance-only secret for the last case. Keep the refused tag's
 local identity in the private record and do not move or reuse an admitted tag.
-The CLI's local validator cannot establish the live grant refusal; observe the
-server's release admission. A push refusal or recorded failed admission must
+The CLI's local validator cannot establish live grant or credential-output
+refusals; observe server admission and require the exact output error before
+any secret Pod starts. The queued admission/Build test covers both output shapes. A push refusal or recorded failed admission must
 name the grant boundary, rather than being a connectivity or tag-ancestry error.
 
 ## Report template
@@ -454,7 +461,7 @@ Total time from step 3 to step 6 green: <min>   Total scenario time: <min>
 - Cancel: <run ID, observed Stop then Terminate, exit handler and retained Workflow>
 - Promotion: <source SHA, promotion ID, result SHA and upstream publication>
 - Tag release: <annotated tag object/peeled SHA, run ID, scoped grant, marker-presence result>
-- Three deliberate refusals: <server-owned parameter, node filesystem, wrong-step secret grant; restored and rechecked>
+- Four deliberate refusals: <server-owned parameter, node filesystem, granted-sidecar path/result capture, wrong-step secret grant; restored and rechecked>
 
 ## Restart and recovery
 - Restart method and evidence: <public summary>

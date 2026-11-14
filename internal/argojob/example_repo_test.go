@@ -80,6 +80,9 @@ func TestExampleRepoAdmissionAndBuild(t *testing.T) {
 				if original.Container == nil {
 					continue
 				}
+				if !reflect.DeepEqual(actual.Container.SecurityContext, original.Container.SecurityContext) {
+					t.Errorf("%s security context changed", original.Name)
+				}
 				if !reflect.DeepEqual(actual.Container.Resources, original.Container.Resources) {
 					t.Errorf("%s resources changed", original.Name)
 				}
@@ -88,8 +91,8 @@ func TestExampleRepoAdmissionAndBuild(t *testing.T) {
 				}
 				for i, sidecar := range original.Sidecars {
 					got := actual.Sidecars[i]
-					if got.Image != sidecar.Image || !reflect.DeepEqual(got.Command, sidecar.Command) || !reflect.DeepEqual(got.Args, sidecar.Args) || !reflect.DeepEqual(got.Resources, sidecar.Resources) {
-						t.Errorf("%s sidecar program/resources changed", original.Name)
+					if got.Image != sidecar.Image || !reflect.DeepEqual(got.Command, sidecar.Command) || !reflect.DeepEqual(got.Args, sidecar.Args) || !reflect.DeepEqual(got.Resources, sidecar.Resources) || !reflect.DeepEqual(got.SecurityContext, sidecar.SecurityContext) {
+						t.Errorf("%s sidecar program/resources/security changed", original.Name)
 					}
 					assertNoStoreSettings(t, got.Container)
 				}
@@ -114,6 +117,9 @@ func TestExampleRepoAdmissionAndBuild(t *testing.T) {
 					t.Fatalf("release tag = %q, want bare tag v0.1.0", got)
 				}
 				secret := exampleRepoTemplate(t, built, "read-secret")
+				if len(secret.Sidecars) != 1 || len(secret.Outputs.Parameters) != 0 || credentialResultReferenced(built, secret) {
+					t.Fatal("granted sidecar step must have no path outputs or consumed result")
+				}
 				if secret.ServiceAccountName != "example-read-secret" {
 					t.Fatal("named release grant identity missing")
 				}
@@ -131,7 +137,7 @@ func TestExampleRepoAdmissionAndBuild(t *testing.T) {
 					t.Fatal("cancel exit handler missing")
 				}
 				testStep := exampleRepoTemplate(t, authored, "test")
-				if !assistHoldEligible(testStep, "", nil) {
+				if !assistHoldEligible(testStep, "") {
 					t.Fatal("test cannot exercise assisted continuation")
 				}
 			}
@@ -158,6 +164,36 @@ func TestExampleRepoRefusals(t *testing.T) {
 			t.Fatalf("wrong-step grant: %v", err)
 		}
 	})
+	for _, shape := range []string{"path-output", "consumed-result"} {
+		t.Run("granted-sidecar-"+shape, func(t *testing.T) {
+			config, request := exampleRepoRequest(t, argoworkflow.RunTriggerTag)
+			document, err := argoworkflow.Decode(request.Source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			secret := exampleRepoTemplate(t, document, "read-secret")
+			output := `path-read output parameter "marker"`
+			if shape == "path-output" {
+				secret.Outputs.Parameters = []wfv1.Parameter{{Name: "marker", ValueFrom: &wfv1.ValueFrom{Path: "/tmp/marker"}}}
+			} else {
+				parent := exampleRepoTemplate(t, document, "release")
+				parent.Outputs.Parameters = []wfv1.Parameter{{Name: "marker", ValueFrom: &wfv1.ValueFrom{Parameter: "{{tasks.read-secret.outputs.result}}"}}}
+				output = "referenced outputs.result"
+			}
+			// Structural admission succeeds; Build checks the actual grant and Pod.
+			if err := argoworkflow.Admit(document, argoworkflow.Policy{}); err != nil {
+				t.Fatal(err)
+			}
+			request.Source, err = json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := `argojob: credentialed template "read-secret" cannot use ` + output + ` because another container of the Pod can redirect what Argo reads`
+			if _, err := Build(config, request); err == nil || err.Error() != want {
+				t.Fatalf("granted sidecar refusal = %v, want %s", err, want)
+			}
+		})
+	}
 	for _, name := range []string{"server-owned-parameter", "host-path"} {
 		t.Run(name, func(t *testing.T) {
 			config, request := exampleRepoRequest(t, argoworkflow.RunTriggerBranch)

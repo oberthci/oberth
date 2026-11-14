@@ -34,13 +34,18 @@ spec:
       resources: &small
         requests: {cpu: 100m, memory: 64Mi, ephemeral-storage: 64Mi}
         limits: {cpu: 500m, memory: 128Mi, ephemeral-storage: 128Mi}
-    sidecars:
+      securityContext: &floor
+        allowPrivilegeEscalation: false
+        capabilities: {drop: [ALL]}
+        seccompProfile: {type: RuntimeDefault}
+    sidecars: &fixture
     - name: fixture
       image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
       command: [/bin/sh, -eu, -c]
       args:
       - mkdir -p /tmp/www; printf 'ready\n' > /tmp/www/index.html; exec httpd -f -p 8080 -h /tmp/www
       resources: *small
+      securityContext: *floor
   - name: digest
     outputs:
       parameters:
@@ -56,6 +61,7 @@ spec:
         sha256sum app.sh | cut -d' ' -f1 > /tmp/source-digest
         printf 'build: '; cat /tmp/source-digest
       resources: *small
+      securityContext: *floor
   - name: report
     inputs:
       parameters:
@@ -69,7 +75,10 @@ spec:
       - '{{inputs.parameters.digest}}'
       - '{{workflow.parameters.oberth-trigger}}'
       resources: *small
+      securityContext: *floor
+  # Granted Pod: sidecar shares its trust; no path outputs or consumed result.
   - name: read-secret
+    sidecars: *fixture
     container:
       image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
       command: [/run/oberth/bin/oberth]
@@ -82,7 +91,18 @@ spec:
       - /bin/sh
       - -eu
       - -c
-      - 'test -s "$OBERTH_SECRETSTORE_DIR/example-repo/marker"; echo "secret: marker present"; printf "release: %s\n" "$1"'
+      - |
+        attempt=0
+        until test "$(wget -q -T 1 -O - http://127.0.0.1:8080/ 2>/dev/null)" = ready; do
+          attempt=$((attempt + 1))
+          test "$attempt" -lt 30 || { echo 'secret: sidecar unavailable' >&2; exit 1; }
+          sleep 1
+        done
+        echo 'secret: sidecar passed'
+        test -s "$OBERTH_SECRETSTORE_DIR/example-repo/marker"
+        echo 'secret: marker present'
+        printf 'release: %s\n' "$1"
       - --
       - '{{workflow.parameters.oberth-release-tag}}'
       resources: *small
+      securityContext: *floor

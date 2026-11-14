@@ -32,6 +32,10 @@ spec:
       resources: &small
         requests: {cpu: 100m, memory: 64Mi, ephemeral-storage: 64Mi}
         limits: {cpu: 500m, memory: 128Mi, ephemeral-storage: 128Mi}
+      securityContext: &floor
+        allowPrivilegeEscalation: false
+        capabilities: {drop: [ALL]}
+        seccompProfile: {type: RuntimeDefault}
     sidecars:
     - name: fixture
       image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
@@ -39,6 +43,7 @@ spec:
       args:
       - mkdir -p /tmp/www; printf 'ready\n' > /tmp/www/index.html; exec httpd -f -p 8080 -h /tmp/www
       resources: *small
+      securityContext: *floor
   - name: digest
     outputs:
       parameters:
@@ -54,6 +59,7 @@ spec:
         sha256sum app.sh | cut -d' ' -f1 > /tmp/source-digest
         printf 'build: '; cat /tmp/source-digest
       resources: *small
+      securityContext: *floor
   - name: report
     inputs:
       parameters:
@@ -67,6 +73,7 @@ spec:
       - '{{inputs.parameters.digest}}'
       - '{{workflow.parameters.oberth-trigger}}'
       resources: *small
+      securityContext: *floor
   - name: wait
     container:
       image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
@@ -79,6 +86,7 @@ spec:
           sleep 600
         fi
       resources: *small
+      securityContext: *floor
   - name: cleanup
     container:
       image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
@@ -92,3 +100,4 @@ spec:
         fi
         echo 'cleanup: complete'
       resources: *small
+      securityContext: *floor

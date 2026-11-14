@@ -7,15 +7,17 @@ after installing and connecting to the exact candidate.
 
 | Directory | Target | Validation |
 | --- | --- | --- |
-| [`v0.22.7/`](v0.22.7/.oberth/build.yaml) | `land/v0.22.7` | Real Decode, Admit and Build for branch, promotion and release tag; three refusal cases |
+| [`v0.22.7/`](v0.22.7/.oberth/build.yaml) | `land/v0.22.7` | Real Decode, Admit and Build for branch, promotion and release tag; four refusal cases (both forbidden output shapes) |
 | [`next/`](next/.oberth/build.yaml) | **DRAFT v0.23.0** | Decodes at the integration snapshot below; full admission and execution are blocked |
 
 The shell project has no downloaded tools or dependencies. `app.sh` prints
 `hello from example-repo`. `test.sh` checks it, requires `expect.txt` to contain
 `fixed`, and polls a local HTTP sidecar. The sidecar serves `ready` on port 8080.
 The optional first argument to `test.sh` selects a loopback fixture URL for the
-repository test. Every authored container declares its own resources. v0.22.7 supplies the
-security context; the next variant authors the security floor. All images use public digest pins already present in Oberth.
+repository test. Every authored container declares its own resources and
+security context; Oberth preserves those declarations. The container filesystem
+stays writable for `/tmp` output files and the fixture. All images use public
+digest pins already present in Oberth.
 
 `build.yaml` tests the project, hashes `app.sh` into an Argo output parameter,
 passes that parameter to `report`, and finishes with an exit handler. Changing
@@ -30,7 +32,12 @@ reads **one** KV v2 secret, `oberth/data/release/example-repo`, granted only to
 field. The public log includes `secret: marker present`, followed by
 `release: v0.1.0` for tag `v0.1.0`. Receive strips `refs/tags/` before passing
 the bare tag through the `oberth-release-tag` workflow parameter.
-No secret is passed through an output parameter. The example release records
+In v0.22.7, `read-secret` also checks its own HTTP sidecar and logs
+`secret: sidecar passed`. All containers of that granted Pod share its trust.
+The granted step declares no path output and no caller consumes its
+`outputs.result`; the digest handoff stays in separate ungranted Pods. Adding
+either forbidden output shape is refused by Build; see the walk for exact
+messages. No secret is passed through an output parameter. The example release records
 a successful tag run; it does not publish an application to an external service.
 
 In v0.22.7, the granted main invokes the injected client with a static path;
@@ -91,7 +98,8 @@ The v0.22.7 proof lives in
 [`example_repo_test.go`](../../internal/argojob/example_repo_test.go).
 It loads the actual files, admits them and calls the real Build with exact-file,
 exact-step grants and a materialized release identity. It checks parameter and
-sidecar preservation, authored resources, token defaults, assist eligibility,
+sidecar preservation, authored resources/security contexts, the bare release
+tag, granted-sidecar output refusals, token defaults, assist eligibility,
 and secret-store isolation. Shell checks use a loopback fixture and deliberately
 break `expect.txt`; they are not live Kubernetes evidence. The bootstrap cell's
 private recorder and final credential scan remain separate acceptance checks.
