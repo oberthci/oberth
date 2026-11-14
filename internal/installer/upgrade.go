@@ -354,13 +354,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
-	if cfg.DryRun {
-		if err := prepareUpgradeDryRunValues(ctx, &cfg, deps); err != nil {
-			return result, err
-		}
-		return printUpgradeDryRun(w, cfg, result, retryFailed)
-	}
-
 	if err := requireUpgradeHelmVersion(ctx, deps); err != nil {
 		return result, err
 	}
@@ -407,6 +400,13 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 	defer cleanupStored()
+	if cfg.DryRun {
+		prepared.pki.configure(&cfg)
+		if _, err := planUpgradeArgoSecurity(ctx, deps, prepared.values, cfg.ArgoSecurityDefaults); err != nil {
+			return result, err
+		}
+		return printUpgradeDryRun(w, cfg, result, retryFailed)
+	}
 	defaults, err := reconcileChangedDefaults(ctx, cfg, deps, prepared.revision, valuesYAML)
 	if err != nil {
 		return result, err

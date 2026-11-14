@@ -1,0 +1,22 @@
+{
+  "image": {"ref": "example.invalid/oberth@sha256:2222222222222222222222222222222222222222222222222222222222222222"},
+  "utilityImage": "busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74",
+  "clientEndpoint": {"host": "ci.example.invalid", "sshPort": "30222", "httpsPort": "30443"},
+  "pushBannerURL": "https://ci.example.invalid:30443/runs",
+  "service": {"type": "NodePort"},
+  "assist": {"enabled": true},
+  "networkPolicy": {"enabled": true},
+  "tls": {"extraDNSNames": ["ci.example.invalid"], "extraIPs": ["192.0.2.1"], "pki": {"enabled": true, "mount": "oberth-pki", "role": "oberth-server", "ttl": "720h"}},
+  "secretstore": {"enabled": true, "address": "https://openbao.openbao.svc:8200", "role": "oberth-ci", "caCert": "fixture-public-ca", "insecureHTTPForDev": false},
+  "argo": {
+    "namespace": "oberth-argo",
+    "vault": {"address": "https://openbao.openbao.svc:8200", "credentialedRole": "oberth-release", "caCert": "fixture-public-ca"},
+    "ciSecrets": {"vaultRole": "oberth-ci-secrets"},
+    "perRepoIdentities": ["oberth-repo-release"],
+    "perRepoCIIdentities": ["oberth-repo-ci"],
+    "perStepIdentities": ["oberth-step-release"]
+  },
+  "compatibility": {"schemaIdentity": "oberth-schema-v1", "auditDomain": "oberth-audit-v1", "witnessKeyInfo": "oberth-audit-witness-v1"},
+  "retention": {"keepNewestPerRef": 0},
+  "podAnnotations": {"oberth.ci/server-certificate-sha256": "1111111111111111111111111111111111111111111111111111111111111111"}
+}
