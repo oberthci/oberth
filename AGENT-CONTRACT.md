@@ -1596,8 +1596,10 @@ trust assumptions and complete invalidation rules.
   grant for its stable template name or wildcard in the repository/upstream.
   Admission and Build share `argojob.GrantedSecretSteps`; only that main
   Container/Script receives store address/role/CA, helper binary, login token
-  and secret-root mounts. Other containers and steps receive no settings;
-  Argo wait loses the generated store mirrors. Run records carry no durable
+  and secret-root mounts. Oberth injects no store settings into other containers
+  or steps; Argo wait retains its native store mirrors. Every container of a
+  credentialed step shares its trust; output-read refusals guard Argo reads.
+  Run records carry no durable
   credential classification. Retry/rerun reload current grants, and granted
   consumers require healthy access reconciliation. Step-level credential
   evidence remains part of replay safety.
