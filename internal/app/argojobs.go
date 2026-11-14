@@ -836,28 +836,16 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 			}
 		}
 	}
-	if result.Status != model.RunPassed && completion.FailedStep != "" {
-		failedID := ""
-		for _, step := range completion.Steps {
-			if step.Stage == completion.FailedStage && step.Step == completion.FailedStep {
-				failedID = step.NodeID
-				break
-			}
-		}
+	if result.Status != model.RunPassed && completion.FailedNodeID != "" {
 		for _, row := range result.Steps {
-			if row.BoundaryID == failedID && row.NodeType == "Container" && (row.Status == model.StepFailed || row.Status == model.StepTimedOut) {
-				failedID = row.NodeID
-				break
-			}
-		}
-		for _, row := range result.Steps {
-			if row.NodeID == failedID {
+			if row.NodeID == completion.FailedNodeID {
 				result.FailedStage, result.FailedStep = row.Stage, row.NodeID
 				result.Phase = row.Stage
 				break
 			}
 		}
 	}
+
 	if result.Status == model.RunFailed && completion.Infrastructure {
 		result.Phase = "infrastructure"
 		result.FailedStage, result.FailedStep = "", ""

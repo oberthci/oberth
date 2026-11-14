@@ -670,7 +670,7 @@ func TestCompletionNoOverrideWithoutNonBlockingFailure(t *testing.T) {
 }
 
 // TestCompletionRetriedStepFinalPassIsGreen proves that a retried step whose
-// final attempt succeeded is treated as a pass. deduplicateRetries keeps only
+// final attempt succeeded is treated as a pass. Native Retry ancestry selects
 // the final attempt, so a step that failed once but then passed on retry does
 // not make the run red.
 func TestCompletionRetriedStepFinalPassIsGreen(t *testing.T) {

@@ -1546,7 +1546,8 @@ trust assumptions and complete invalidation rules.
   if the upstream tag appeared first. Run success requires BOTH a Succeeded
   Workflow AND zero terminally failed configured step results. A step with
   retry attempts where the final attempt succeeded is a pass
-  (deduplicateRetries keeps only the final attempt). A terminally failed
+  (native Retry ancestry identifies superseded attempts; equal display names
+  never merge independent nodes). A terminally failed
   configured step—regardless of whether the DAG's depends expressions handle
   it—makes the run red. Enhanced-depends cleanup or verification tasks may
   still execute after a failure but cannot convert the terminal run to green.

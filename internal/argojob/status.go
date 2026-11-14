@@ -62,7 +62,9 @@ type Completion struct {
 	Reason              string
 	FailedStage         string `json:"FailedStage"`
 	FailedStep          string
-	Steps               []StepResult
+	// FailedNodeID is the authoritative failure identity; the names are display metadata.
+	FailedNodeID string
+	Steps        []StepResult
 }
 
 // StepResults maps a Workflow's node tree onto Oberth's two-level burn/step
@@ -96,10 +98,6 @@ func finalStepResults(observed []StepResult) []StepResult {
 		}
 		results = append(results, result)
 	}
-	// Deduplicate any remaining same-named rows (a Retry node whose attempt
-	// order could not be read): keep the last-started one, so the durable
-	// step result still reflects the terminal outcome.
-	results = deduplicateRetries(results)
 	// Filtering must not move a retried step behind a parallel sibling.
 	sort.SliceStable(results, func(i, j int) bool { return results[i].Ordinal < results[j].Ordinal })
 	return results
@@ -408,45 +406,6 @@ func retryAttemptIndex(name string) (int, bool) {
 	return index, true
 }
 
-// deduplicateRetries collapses multiple rows for the same burn+step into a
-// single row carrying the last-started one's data. Superseded retry attempts
-// are already gone by the time it runs; this is the fallback for a Retry node
-// whose attempts could not be told apart. The input
-// must be sorted by start time so that later attempts appear after earlier
-// ones; the deduplicated row keeps the chronological position of the first
-// attempt (the step's natural place in the pipeline) but uses the final
-// attempt's status, exit code, pod name, and timestamps.
-func deduplicateRetries(results []StepResult) []StepResult {
-	type key struct{ stage, step string }
-	lastIndex := make(map[key]int, len(results))
-	for i, r := range results {
-		lastIndex[key{r.Stage, r.Step}] = i
-	}
-	if len(lastIndex) == len(results) {
-		return results
-	}
-	deduped := make([]StepResult, 0, len(lastIndex))
-	emitted := make(map[key]bool, len(lastIndex))
-	for _, r := range results {
-		k := key{r.Stage, r.Step}
-		if emitted[k] {
-			continue
-		}
-		emitted[k] = true
-		selected := results[lastIndex[k]]
-		for _, candidate := range results {
-			if candidate.Stage != selected.Stage || candidate.Step != selected.Step || candidate.NodeID == selected.NodeID {
-				continue
-			}
-			if selected.StartedAt == nil || candidate.StartedAt == nil || selected.StartedAt.Equal(*candidate.StartedAt) {
-				selected.AttemptAmbiguous = true
-			}
-		}
-		deduped = append(deduped, selected)
-	}
-	return deduped
-}
-
 // terminal reports whether a step status is final. runprogress keeps its own
 // predicate unexported, so the engine carries its own rather than widening a
 // shared package's API for one caller.
@@ -636,7 +595,7 @@ func completionFor(workflow *wfv1.Workflow) Completion {
 		// Preserve the first failed step in deterministic execution order.
 		// Later cleanup failures remain evidence without replacing the cause.
 		if completion.FailedStep == "" {
-			completion.FailedStage, completion.FailedStep = step.Stage, step.Step
+			completion.setFailedStep(step)
 		}
 		completion.Succeeded = false
 	}
@@ -649,4 +608,16 @@ func completionFor(workflow *wfv1.Workflow) Completion {
 	}
 	completion.classifyInfrastructure()
 	return completion
+}
+
+// setFailedStep carries identity without resolving human-readable coordinates.
+// A ContainerSet failure belongs to its failed Container child, when observed.
+func (completion *Completion) setFailedStep(step StepResult) {
+	completion.FailedStage, completion.FailedStep, completion.FailedNodeID = step.Stage, step.Step, step.NodeID
+	for _, row := range completion.NodeSteps {
+		if row.BoundaryID == step.NodeID && row.NodeType == "Container" && (row.Status == model.StepFailed || row.Status == model.StepTimedOut) {
+			completion.FailedNodeID = row.NodeID
+			return
+		}
+	}
 }
