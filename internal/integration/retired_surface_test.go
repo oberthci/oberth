@@ -20,7 +20,6 @@ func TestRetiredProductionSurface(t *testing.T) {
 		"internal/service/secretstoreplan.go":   {"deriveStepPolicyName", "ExportComputeSecretStorePlan"},
 		"internal/argojob/controller.go":        {"publish"},
 		"internal/argojob/identitystore.go":     {"NewIdentityStore"},
-		"internal/argojob/live_logs.go":         {"consume"},
 
 		"internal/gitcache/cache.go":         {"TagTime"},
 		"internal/app/upstream_bootstrap.go": {"parseScannedHostKeys"},
@@ -56,7 +55,7 @@ func TestRetiredProductionSurface(t *testing.T) {
 }
 
 func TestRetiredFilesAbsent(t *testing.T) {
-	for _, path := range []string{"internal/service/admission.go", "pkg/argoworkflow/nonblocking.go", "internal/integration/testdata/gitssh/main.go"} {
+	for _, path := range []string{"internal/argojob/live_logs.go", "internal/service/admission.go", "pkg/argoworkflow/nonblocking.go", "internal/integration/testdata/gitssh/main.go"} {
 		if _, err := os.Stat(filepath.Join("..", "..", path)); !os.IsNotExist(err) {
 			t.Errorf("retired file %s must be absent (stat: %v)", path, err)
 		}

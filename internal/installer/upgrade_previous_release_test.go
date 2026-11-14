@@ -46,6 +46,12 @@ func TestUpgradePreviousReleaseStoredValuesAndDryRunSchema(t *testing.T) {
 			var output bytes.Buffer
 			renders := 0
 			deps := Deps{Output: &output, KubeClient: argoSecurityTestClient(), RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"}}
+			deps.Admin = idleAdminFunc(func(_ context.Context, action string, _, into any) error {
+				if action != "version" {
+					t.Fatalf("dry run attempted administration action %s", action)
+				}
+				return fixtureDecode(map[string]any{"version": "v0.22.7", "schema": 73}, into)
+			})
 			deps.RunHelm = func(ctx context.Context, args []string) ([]byte, error) {
 				if out, ok := testUpgradeArgoSecurityPreflight(args); ok {
 					return out, nil
