@@ -100,7 +100,7 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 		return infrastructure("interrupted", "run_rerun", "the run was interrupted, not failed")
 	}
 	if run.FailedStep != "" || run.FailedStage != "" {
-		return code("step_failed", "read run_logs for the failed step and fix the code", "step "+strings.Trim(run.FailedStage+"/"+run.FailedStep, "/")+" failed")
+		return code("step_failed", "read run_logs for the failed step and fix the code", "step "+strings.Trim(run.FailedStage+"/"+run.FailedStepDisplayName(), "/")+" failed")
 	}
 	return &model.RetryHint{Class: model.RetryUnknown, Cause: "unknown", Action: "read run_get and run_logs", Detail: boundedText(message, 200)}
 }

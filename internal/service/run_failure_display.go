@@ -34,7 +34,7 @@ func failedRunDisplayReason(run model.Run) string {
 	// the attempt's exit code and the hold. The held Pod's runtime and
 	// deadline (budget plus two hold TTLs) say nothing about the step, so no
 	// generic deadline or step wording is added in front of it.
-	if step := run.FailedStep; step != "" && run.Assist != nil && run.Assist.SweepAbandoned(step) {
+	if step := run.FailedStepName(); step != "" && run.Assist != nil && run.Assist.SweepAbandoned(step) {
 		return ""
 	}
 	if reason := evictionDisplayReason(run); reason != "" {
@@ -55,7 +55,7 @@ func failedRunDisplayReason(run model.Run) string {
 		}
 		return "steps passed; upstream publication failed"
 	}
-	step := run.FailedStep
+	step := run.FailedStepDisplayName()
 	if step == "" {
 		step = run.FailedStage
 	}
@@ -104,7 +104,7 @@ func nodeRebootDisplayReason(run model.Run) string {
 func listFailureCause(run model.Run) string {
 	cause := run.FailureCause
 	prefix := run.FailedStage + "/" + run.FailedStep + " failed"
-	step := run.FailedStep
+	step := run.FailedStepDisplayName()
 	if step == "" {
 		step = run.FailedStage
 	}

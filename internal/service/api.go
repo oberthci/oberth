@@ -1147,6 +1147,7 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
+	run = run.WithFailedNode(steps)
 	if summary {
 		shown := service.presentationRun(ctx, run)
 		run.Repo, err = service.repositoryIdentity(ctx, run.RepoID)
@@ -1660,6 +1661,11 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (res
 }
 
 func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.Run, successors map[string]model.Run) model.Run {
+	if run.Status.Terminal() && run.FailedStep != "" && run.FailedNode == nil && service.history != nil {
+		if rows, err := service.history.StepResults(ctx, run.ID); err == nil {
+			run = run.WithFailedNode(rows)
+		}
+	}
 	visible := presentationRunAt(run, service.schedulingClock().Now())
 	successor, ok := successors[run.SupersededBy]
 	if !ok {
