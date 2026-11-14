@@ -16,7 +16,7 @@ const state = {
   timer: null, routeSeq: 0,
   attempts: new Map(), detailRun: null,
   filter: readRunFilter(),
-  releaseOnly: localStorage.getItem("oberth-kind") === "release" || localStorage.getItem("oberth-filter") === "release",
+  releaseOnly: localStorage.getItem("oberth-kind") === "release",
   repo: localStorage.getItem("oberth-repo") || "all",
   showArchived: localStorage.getItem("oberth-archived") === "show",
   step: "", stepRunID: "",
