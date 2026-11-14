@@ -46,8 +46,6 @@ import (
 	"github.com/oberthci/oberth/internal/sshserver"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/pipeline"
-
-	"k8s.io/client-go/kubernetes"
 )
 
 type stringList []string

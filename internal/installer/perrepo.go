@@ -28,9 +28,8 @@ type PerRepoIdentity struct {
 	// ("*") approval-table grants for. Each is a path like
 	// "oberth/data/release/cosign-secret". Named-step grants are never listed
 	// here — they belong to the per-step identity (PerStepIdentity.GrantPaths),
-	// so the per-repo policy can only ever read what every template of the
-	// repo may read (issue #814). Only release-tier repos need grants; CI-tier
-	// repos get org-scoped upstream access only.
+	// Repository policies receive no implicit secret access. Granted release
+	// and CI steps use distinct identities scoped to their workflow and step.
 	Grants []string
 }
 

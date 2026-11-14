@@ -126,10 +126,6 @@ type backupSource struct {
 	// server URL (https://127.0.0.1:6443 on every k3s), it tells a rollback
 	// of the same cluster from a restore onto a reinstalled one (#068).
 	ClusterUID string `json:"cluster_uid,omitempty"`
-	// ServiceAccountKeyIDs and SigningKeyID were recorded by v2 archives;
-	// read, not written.
-	ServiceAccountKeyIDs []string `json:"service_account_key_ids,omitempty"`
-	SigningKeyID         string   `json:"service_account_signing_key_id,omitempty"`
 }
 
 // backupContents counts what the archived database holds.

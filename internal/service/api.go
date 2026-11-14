@@ -3244,6 +3244,9 @@ func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, wor
 		return api.AccessGrantResponse{}, hiddenRepository(repo)
 	}
 	grant, err := service.secretAccess.Revoke(ctx, repo, workflow, step, secret, actor.Identity)
+	if errors.Is(err, store.ErrNotFound) {
+		return api.AccessGrantResponse{}, fmt.Errorf("%w: no active grant matches the exact repository, workflow, step and secret tuple", ErrInvalidInput)
+	}
 	if err != nil {
 		return api.AccessGrantResponse{}, err
 	}

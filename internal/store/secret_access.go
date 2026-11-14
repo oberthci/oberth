@@ -73,7 +73,7 @@ func (s *Store) SecretAccessList(ctx context.Context, repo string, includeRevoke
 // action are committed in a single transaction; a failed audit append rolls
 // back the grant. Duplicate-tolerant: INSERT ... ON CONFLICT ... WHERE
 // revoked_at IS NULL DO NOTHING targets the partial unique index so a
-// concurrent CLI+reconciler race cannot surface a spurious constraint error
+// concurrent API mutations cannot surface a spurious constraint error
 // for a grant that is already durably in effect.
 func (s *Store) Grant(ctx context.Context, repo, workflow, step, secret, actor string) (SecretAccessGrant, error) {
 	if err := validateSecretAccessKey(model.SecretAccessKey{Repo: repo, Workflow: workflow, Step: step, Path: secret}, actor); err != nil {
