@@ -53,7 +53,9 @@ func TestFirstAdminInterruptedInstallResumes(t *testing.T) {
 }
 
 func testJSONFirstOnboardingCase(t *testing.T, pending bool, interruption string) {
-	public, _ := newEd25519HostKey(t)
+	public, private := newEd25519HostKey(t)
+	bootstrapCredentialInventory(t, private)
+	defer clear(private)
 	key := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(public)))
 	registered := false
 	var authenticated atomic.Bool
@@ -98,6 +100,7 @@ func testJSONFirstOnboardingCase(t *testing.T, pending bool, interruption string
 		_ = json.NewEncoder(w).Encode(value)
 	}))
 	defer server.Close()
+	bootstrapPrivateKey(t, server.TLS.Certificates[0].PrivateKey)
 	ca = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
 	remote, err := client.New(t.Context(), client.Config{BaseURL: server.URL, CACert: ca, Token: "fixture"})
 	if err != nil {
@@ -159,6 +162,8 @@ func testJSONFirstOnboardingCase(t *testing.T, pending bool, interruption string
 		t.Fatal(err)
 	}
 	enrollmentRoot := t.TempDir()
+	defer bootstrapPrivateFiles(t, enrollmentRoot)
+	defer bootstrapInstallerEnrollments(t, enrollmentRoot)
 	if err := os.Chmod(enrollmentRoot, 0700); err != nil {
 		t.Fatal(err)
 	}

@@ -95,3 +95,28 @@ func bootstrapPrivateFiles(t *testing.T, directory string) {
 		t.Fatal("cannot inventory fixture files")
 	}
 }
+
+func bootstrapInstallerEnrollments(t *testing.T, directory string) {
+	t.Helper()
+	output := flag.Lookup("test.outputdir")
+	if output == nil || output.Value.String() == "" {
+		return
+	}
+	paths, err := filepath.Glob(filepath.Join(directory, "installer-pending-*.json"))
+	if err != nil {
+		t.Fatal("cannot inventory pending enrollment")
+	}
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal("cannot read private enrollment fixture")
+		}
+		var pending pendingInstallerEnrollment
+		if json.Unmarshal(raw, &pending) != nil || len(pending.Key) == 0 {
+			t.Fatal("cannot decode private enrollment fixture")
+		}
+		bootstrapCredentialInventory(t, pending.Key)
+		clear(pending.Key)
+		clear(raw)
+	}
+}

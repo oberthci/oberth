@@ -37,11 +37,15 @@ func TestFirstAdminCachedKeyWithoutCSRCanResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clear(enrollment.key)
+	bootstrapCredentialInventory(t, enrollment.key)
+	defer bootstrapPrivateFiles(t, root)
+	defer bootstrapInstallerEnrollments(t, configRoot)
 	files, err := clientcert.GenerateAuthority()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer clear(files["ca.key"])
+	bootstrapCredentialInventory(t, files["ca.key"])
 	authority, err := clientcert.Load(files["ca.crt"], files["ca.key"])
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +83,9 @@ func TestFirstAdminCachedKeyWithoutCSRCanResume(t *testing.T) {
 		}
 		return []byte(`{"token":"do-not-publish-stdout"}`), &exec.ExitError{Stderr: []byte("oberth: an active unscoped admin exists; retry with the original installer key or use authenticated administrative APIs")}
 	}
-	public, _ := newEd25519HostKey(t)
+	public, private := newEd25519HostKey(t)
+	bootstrapCredentialInventory(t, private)
+	defer clear(private)
 	publicPath := filepath.Join(root, "operator.pub")
 	if err := os.WriteFile(publicPath, ssh.MarshalAuthorizedKey(public), 0600); err != nil {
 		t.Fatal(err)
