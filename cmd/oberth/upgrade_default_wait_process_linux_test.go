@@ -154,6 +154,10 @@ func upgradeDefaultWaitKubeconfig(t *testing.T, root string, workflows http.Hand
 	deployment := objects[0].(*appsv1.Deployment)
 	config := objects[1].(*corev1.ConfigMap)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/portforward") || r.URL.Path == "/api/v1/namespaces/oberth/pods" {
+			(&upgradeWaitProcessFixture{}).serve(t, w, r)
+			return
+		}
 		if r.URL.Path == "/api/admin/version" {
 			http.NotFound(w, r)
 			return
