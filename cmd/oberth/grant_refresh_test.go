@@ -8,6 +8,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 type blockedGrantIdentityStore struct {
@@ -17,7 +18,7 @@ type blockedGrantIdentityStore struct {
 	release chan struct{}
 }
 
-func (s *blockedGrantIdentityStore) ListRepositories(ctx context.Context) ([]model.Repository, error) {
+func (s *blockedGrantIdentityStore) SecretAccessList(ctx context.Context, qualified string, pending bool) ([]store.SecretAccessGrant, error) {
 	if s.reads.Add(1) == 1 {
 		close(s.entered)
 		select {
@@ -26,7 +27,7 @@ func (s *blockedGrantIdentityStore) ListRepositories(ctx context.Context) ([]mod
 			return nil, ctx.Err()
 		}
 	}
-	return s.fakePerRepoStore.ListRepositories(ctx)
+	return s.fakePerRepoStore.SecretAccessList(ctx, qualified, pending)
 }
 
 func TestRefreshGrantIdentitiesSerializesBuildAndPublish(t *testing.T) {

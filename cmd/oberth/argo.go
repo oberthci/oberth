@@ -24,7 +24,6 @@ import (
 	"github.com/oberthci/oberth/internal/argowatch"
 	"github.com/oberthci/oberth/internal/artifacts"
 	"github.com/oberthci/oberth/internal/installer"
-	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 )
@@ -269,63 +268,29 @@ func (adapter artifactStoreAdapter) Extract(runID string, stream io.Reader, limi
 	return err
 }
 
-// perRepoStore is the narrow interface the per-repo identity producer needs.
-// *store.Store satisfies it directly.
+// perRepoStore is the approval catalog used by the server identity producer.
 type perRepoStore interface {
-	ListRepositories(context.Context) ([]model.Repository, error)
-	ListUpstreams(context.Context) ([]model.Upstream, error)
 	SecretAccessList(context.Context, string, bool) ([]store.SecretAccessGrant, error)
 }
 
-// buildPerRepoIdentities reads the repo registry and approval table, and
-// builds the per-repo identity map that scopes each credentialed repository
-// to its own Vault policy at the ServiceAccount level. Only repositories
-// with at least one active secret grant get a per-repo identity; repos
-// without grants continue using the shared credentialed identity.
-//
-// This is the serve-path producer for issue #246 phase 2. The installer
-// path has its own producer that reads from the ConfigMap and the live pod.
+// buildPerRepoIdentities derives identities from active grant tuples, including
+// approvals made before repository registration. Registration needs no refresh:
+// the exact identity already exists when the repository becomes admissible.
 func buildPerRepoIdentities(ctx context.Context, db perRepoStore) (map[string]argojob.PerRepoIdentityConfig, error) {
-	repos, err := db.ListRepositories(ctx)
+	grants, err := db.SecretAccessList(ctx, "", false)
 	if err != nil {
-		return nil, fmt.Errorf("list repositories for per-repo identities: %w", err)
+		return nil, fmt.Errorf("load grants for per-repo identities: %w", err)
 	}
-	upstreams, err := db.ListUpstreams(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list upstreams for per-repo identities: %w", err)
-	}
-
-	upstreamByID := make(map[int64]model.Upstream, len(upstreams))
-	for _, u := range upstreams {
-		upstreamByID[u.ID] = u
-	}
-
 	result := make(map[string]argojob.PerRepoIdentityConfig)
-	for _, repo := range repos {
-		upstream, ok := upstreamByID[repo.UpstreamID]
-		if !ok {
-			continue
+	for _, grant := range grants {
+		parts := strings.Split(grant.Repo, "/")
+		if len(parts) != 3 {
+			return nil, fmt.Errorf("invalid qualified repository in secret grant: %q", grant.Repo)
 		}
-		org := upstream.Org()
-		if org == "" {
-			continue
-		}
-
-		grants, err := db.SecretAccessList(ctx, upstream.Name+"/"+org+"/"+repo.Name, false)
-		if err != nil {
-			return nil, fmt.Errorf("load grants for %s: %w", repo.Name, err)
-		}
-		if len(grants) == 0 {
-			continue
-		}
-
-		key := upstream.Name + "/" + org + "/" + repo.Name
-		saName := installer.PerRepoName(upstream.Name, org, repo.Name)
-		result[key] = argojob.PerRepoIdentityConfig{
-			ServiceAccountName: saName,
+		result[grant.Repo] = argojob.PerRepoIdentityConfig{
+			ServiceAccountName: installer.PerRepoName(parts[0], parts[1], parts[2]),
 		}
 	}
-
 	return result, nil
 }
 
@@ -357,48 +322,21 @@ func buildPerRepoCIIdentities(releaseIdentities map[string]argojob.PerRepoIdenti
 // the corresponding named or wildcard step identities. Admission subsequently
 // looks up only the exact selected workflow file.
 func buildPerStepIdentities(ctx context.Context, db perRepoStore) (map[string]argojob.PerRepoIdentityConfig, error) {
-	repos, err := db.ListRepositories(ctx)
+	grants, err := db.SecretAccessList(ctx, "", false)
 	if err != nil {
-		return nil, fmt.Errorf("list repositories for per-step identities: %w", err)
+		return nil, fmt.Errorf("load grants for per-step identities: %w", err)
 	}
-	upstreams, err := db.ListUpstreams(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list upstreams for per-step identities: %w", err)
-	}
-
-	upstreamByID := make(map[int64]model.Upstream, len(upstreams))
-	for _, u := range upstreams {
-		upstreamByID[u.ID] = u
-	}
-
 	result := make(map[string]argojob.PerRepoIdentityConfig)
-	for _, repo := range repos {
-		upstream, ok := upstreamByID[repo.UpstreamID]
-		if !ok {
-			continue
+	for _, grant := range grants {
+		parts := strings.Split(grant.Repo, "/")
+		if len(parts) != 3 {
+			return nil, fmt.Errorf("invalid qualified repository in secret grant: %q", grant.Repo)
 		}
-		org := upstream.Org()
-		if org == "" {
-			continue
-		}
-
-		grants, err := db.SecretAccessList(ctx, upstream.Name+"/"+org+"/"+repo.Name, false)
-		if err != nil {
-			return nil, fmt.Errorf("load grants for %s: %w", repo.Name, err)
-		}
-
-		// grants is map[step]map[secret]bool. Scan for named steps.
-		for _, grant := range grants {
-			step := grant.Step
-			// Named-step grant: create a per-step identity.
-			key := upstream.Name + "/" + org + "/" + repo.Name + "/" + grant.Workflow + "/" + step
-			saName := installer.PerStepName(upstream.Name, org, repo.Name, grant.Workflow, step)
-			result[key] = argojob.PerRepoIdentityConfig{
-				ServiceAccountName:   saName,
-				CIServiceAccountName: installer.PerStepCIName(upstream.Name, org, repo.Name, grant.Workflow, step),
-			}
+		key := grant.Repo + "/" + grant.Workflow + "/" + grant.Step
+		result[key] = argojob.PerRepoIdentityConfig{
+			ServiceAccountName:   installer.PerStepName(parts[0], parts[1], parts[2], grant.Workflow, grant.Step),
+			CIServiceAccountName: installer.PerStepCIName(parts[0], parts[1], parts[2], grant.Workflow, grant.Step),
 		}
 	}
-
 	return result, nil
 }
