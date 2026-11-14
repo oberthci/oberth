@@ -422,6 +422,8 @@ var ErrAdoptionRefused = errors.New("service: Workflow refused for adoption")
 // On error it returns a nonzero result only if the exact Workflow was terminal.
 // WorkflowNamespace names where the engine's Workflows live, for operator messages.
 type JobAdopter interface {
+	// WaitForWatchSync blocks startup until the native observation cache is ready.
+	WaitForWatchSync(context.Context) error
 	Adopt(context.Context, model.Run) (bool, error)
 	WaitResumed(context.Context, string, io.Writer, []runprogress.Event, int64) (JobResult, error)
 	WorkflowNamespace() string

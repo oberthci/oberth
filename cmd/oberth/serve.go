@@ -1599,13 +1599,7 @@ func runComponents(
 	start("Argo watch", func() error { runWatch(runCtx); return nil })
 	schedulerActivated := make(chan struct{})
 	start("scheduler", func() error {
-		if activateScheduler != nil {
-			if err := activateScheduler(runCtx); err != nil {
-				return err
-			}
-		}
-		close(schedulerActivated)
-		return scheduler.Run(runCtx)
+		return runSchedulerAfterActivation(runCtx, scheduler, activateScheduler, schedulerActivated)
 	})
 	if retention != nil {
 		workers.Add(1)

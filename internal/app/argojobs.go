@@ -603,6 +603,9 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (bool, error) {
 		PinnedSources: run.SourceBindings, RepositoryID: run.RepoID, Name: run.WorkflowName, RunID: run.ID, Ref: run.Ref, SHA: sha,
 		Trigger: trigger, RunTrigger: kind, ScheduleEntry: run.ScheduleEntry,
 	})
+	if errors.Is(err, argojob.ErrAdoptionUnavailable) {
+		return false, fmt.Errorf("%w: %w", service.ErrUnavailable, err)
+	}
 	if errors.Is(err, argojob.ErrAdoptionRefused) {
 		return false, fmt.Errorf("%w: %w", service.ErrAdoptionRefused, err)
 	}
@@ -612,9 +615,15 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (bool, error) {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	if current, exists := jobs.intents[run.WorkflowName]; exists {
-		if current.runID != run.ID || current.cancelled || current.adoption == nil || !reflect.DeepEqual(*current.adoption, binding) {
+		if current.runID != run.ID || current.cancelled || current.adoption == nil {
 			return false, fmt.Errorf("%w: app: conflicting Workflow adoption intent", service.ErrAdoptionRefused)
 		}
+		previous, next := *current.adoption, binding
+		if !reflect.DeepEqual(previous, next) {
+			return false, fmt.Errorf("%w: app: conflicting Workflow adoption intent", service.ErrAdoptionRefused)
+		}
+		current.adoption = &binding
+		jobs.intents[run.WorkflowName] = current
 		return true, nil
 	}
 	jobs.intents[run.WorkflowName] = argoIntent{runID: run.ID, trigger: trigger, created: true, adoption: &binding, sources: run.SourceBindings}

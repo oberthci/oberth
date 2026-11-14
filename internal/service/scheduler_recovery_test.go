@@ -29,6 +29,8 @@ type recoveryJobs struct {
 	deleteErr      error // error returned by Delete
 }
 
+func (*recoveryJobs) WaitForWatchSync(ctx context.Context) error { return ctx.Err() }
+
 func (j *recoveryJobs) CreateWorkflow(context.Context, WorkflowRequest) error { return nil }
 
 func (j *recoveryJobs) Wait(ctx context.Context, _ string, _ io.Writer) (JobResult, error) {

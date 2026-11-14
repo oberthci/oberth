@@ -5,6 +5,16 @@ specification, identity, and credential bindings. Branch, tag, release, and
 promotion Workflows keep their original run ID. Shutdown leaves running
 Workflows alone for the successor to adopt.
 
+Startup recovery waits for the namespace Workflow and Pod watch caches to sync.
+A running cached Workflow is adopted and handed to the native observer. A cached
+completion requires one live Workflow read before recording its result. A cache
+miss also requires one live read to confirm absence before applying the restart
+failure rule below. Existing Workflow identity and grant checks still apply.
+
+If the cluster API is unreachable at boot, recovery keeps waiting until the
+server shuts down and logs its wait every 30 seconds. Unavailable reads leave
+runs pending recovery; they do not establish a failed or missing Workflow.
+
 A run whose Workflow is confirmed absent, including a claimed run that never
 submitted a Workflow, fails with `interrupted by server restart`. Recovery does
 not resubmit it. Users can request an explicit retry or rerun through the
