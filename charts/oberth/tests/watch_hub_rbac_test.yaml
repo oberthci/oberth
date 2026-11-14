@@ -20,7 +20,7 @@ tests:
           content:
             apiGroups: [argoproj.io]
             resources: [workflows]
-            verbs: [create, get, list, watch, delete]
+            verbs: [create, get, list, watch, patch]
       - contains:
           path: rules
           content:

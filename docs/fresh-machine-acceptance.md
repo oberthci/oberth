@@ -127,8 +127,7 @@ check leaves fresh-machine acceptance incomplete for that candidate.
    submitted YAML; require Oberth to preserve those fields unchanged.
 
    Separately inventory generated helpers: Argo's `wait` and `init`,
-   `oberth-executor-token`, and `oberth-prepare-nonroot` when that profile is
-   selected. Compare Argo-generated helpers with the controller's native
+   and `oberth-executor-token`. Compare Argo-generated helpers with the controller's native
    `executor.resources`; record the stored operator value or installer defaults.
    Compare Oberth-owned helpers' requests and limits, including the token waiter's
    conditional ephemeral-storage budget, with the
@@ -472,7 +471,7 @@ Total time from step 3 to step 6 green: <min>   Total scenario time: <min>
 
 | Generated helper | Kind (init/regular) | CPU request | Memory request | Ephemeral-storage request | Limits | Matches documented budget? |
 |---|---|---|---|---|---|---|
-| <wait/init/oberth-executor-token; nonroot preparation if selected> | <kind> | <value> | <value> | <value/absent, per documented condition> | <values> | <yes/no, detail> |
+| <wait/init/oberth-executor-token> | <kind> | <value> | <value> | <value/absent, per documented condition> | <values> | <yes/no, detail> |
 
 - Helper scheduling cost: <contribution to effective Pod requests using Kubernetes init/steady-state aggregation; include CPU, memory and storage>
 - Cluster admission defaults: <fields, values and their source, attributed separately>

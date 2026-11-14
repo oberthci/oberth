@@ -1,50 +1,31 @@
 package argojob
 
 import (
+	"reflect"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-func TestExecutorScratchDefaultAndOverride(t *testing.T) {
-	for _, size := range []string{"", "4Gi", "1024Mi", "1.5Gi"} {
-		want := size
-		if want == "" {
-			want = "1Gi"
+func TestControllerExecutorScratchVolumeIsPreserved(t *testing.T) {
+	for _, script := range []bool{false, true} {
+		shape := "container"
+		if script {
+			shape = "script"
 		}
-		for _, script := range []bool{false, true} {
-			shape := "container"
-			if script {
-				shape = "script"
+		before := nonrootControllerFixture(t, shape+"-before-patch.json")
+		wf := authoredNonrootFixture(t, script)
+		after := nonrootApplyControllerFixture(t, before, wf)
+		find := func(pod *corev1.Pod) *corev1.Volume {
+			for i := range pod.Spec.Volumes {
+				if pod.Spec.Volumes[i].Name == "var-run-argo" {
+					return &pod.Spec.Volumes[i]
+				}
 			}
-			wf := nonrootBuiltWithScratch(t, script, size)
-			pod := nonrootApplyControllerFixture(t, nonrootControllerFixture(t, shape+"-before-patch.json"), wf)
-			assertExecutorScratch(t, pod, want)
+			return nil
 		}
-
-	}
-}
-
-func assertExecutorScratch(t *testing.T, pod *corev1.Pod, want string) {
-	t.Helper()
-	for _, volume := range pod.Spec.Volumes {
-		if volume.Name == "var-run-argo" {
-			if volume.EmptyDir == nil || volume.EmptyDir.SizeLimit == nil || volume.EmptyDir.SizeLimit.Cmp(resource.MustParse(want)) != 0 || volume.EmptyDir.Medium != "" {
-				t.Fatalf("executor scratch = %#v; want disk-backed %s", volume, want)
-			}
-			return
-		}
-	}
-	t.Fatal("missing executor scratch volume")
-}
-
-func TestExecutorScratchRejectsInvalidLimits(t *testing.T) {
-	for _, size := range []string{"invalid", "0", "-1Gi", "2Pi", " "} {
-		config := testConfig()
-		config.ExecutorScratchSizeLimit = size
-		if err := config.Validate(); err == nil {
-			t.Fatalf("accepted invalid executor scratch limit %q", size)
+		if find(before) == nil || !reflect.DeepEqual(find(before), find(after)) {
+			t.Fatalf("native executor scratch was rewritten: before=%+v after=%+v", find(before), find(after))
 		}
 	}
 }

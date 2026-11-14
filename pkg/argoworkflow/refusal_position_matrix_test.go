@@ -57,9 +57,11 @@ func TestRefusalPositionTemplateKeepRowsEveryCarrier(t *testing.T) {
 		"24-hostAliases": func(x *wfv1.Template) {
 			x.HostAliases = []corev1.HostAlias{{IP: "1.2.3.4", Hostnames: []string{"openbao"}}}
 		},
-		"26-scheduler":       func(x *wfv1.Template) { x.SchedulerName = "x" },
-		"26-priority":        func(x *wfv1.Template) { x.PriorityClassName = "system-node-critical" },
-		"27-securityContext": func(x *wfv1.Template) { x.SecurityContext = &corev1.PodSecurityContext{RunAsUser: ptr.To(int64(0))} },
+		"26-scheduler": func(x *wfv1.Template) { x.SchedulerName = "x" },
+		"26-priority":  func(x *wfv1.Template) { x.PriorityClassName = "system-node-critical" },
+		"27-appArmorProfile": func(x *wfv1.Template) {
+			x.SecurityContext = &corev1.PodSecurityContext{AppArmorProfile: &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}}
+		},
 		"32-semaphore": func(x *wfv1.Template) {
 			x.Synchronization = &wfv1.Synchronization{Semaphores: []*wfv1.SemaphoreRef{{ConfigMapKeyRef: &corev1.ConfigMapKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "other"}, Key: "k"}}}}
 		},
@@ -169,8 +171,10 @@ func TestRefusalPositionContainerKeepRowsEveryCarrier(t *testing.T) {
 		"74-ARGO":     func(c *corev1.Container) { c.Env = []corev1.EnvVar{{Name: "ARGO_DEBUG_PAUSE_AFTER", Value: "true"}} },
 		"75-hostPort": func(c *corev1.Container) { c.Ports = []corev1.ContainerPort{{ContainerPort: 80, HostPort: 80}} },
 		"75-hostIP":   func(c *corev1.Container) { c.Ports = []corev1.ContainerPort{{ContainerPort: 80, HostIP: "0.0.0.0"}} },
-		"76-secctx":   func(c *corev1.Container) { c.SecurityContext = &corev1.SecurityContext{Privileged: ptr.To(true)} },
-		"77-claims":   func(c *corev1.Container) { c.Resources.Claims = []corev1.ResourceClaim{{Name: "gpu"}} },
+		"76-procMount": func(c *corev1.Container) {
+			c.SecurityContext = &corev1.SecurityContext{ProcMount: ptr.To(corev1.UnmaskedProcMount)}
+		},
+		"77-claims": func(c *corev1.Container) { c.Resources.Claims = []corev1.ResourceClaim{{Name: "gpu"}} },
 		"79-mount": func(c *corev1.Container) {
 			c.VolumeMounts = []corev1.VolumeMount{{Name: "v", MountPath: "/run/oberth/bin"}}
 		},
@@ -309,7 +313,9 @@ func TestRefusalPositionArgumentsAndRefsEveryCarrier(t *testing.T) {
 		c{"spec/artifactGC.podSpecPatch", base(func(w *wfv1.Workflow) { w.Spec.ArtifactGC = &wfv1.WorkflowLevelArtifactGC{PodSpecPatch: "{}"} })},
 		c{"spec/dnsPolicy", base(func(w *wfv1.Workflow) { p := corev1.DNSDefault; w.Spec.DNSPolicy = &p })},
 		c{"spec/podPriorityClassName", base(func(w *wfv1.Workflow) { w.Spec.PodPriorityClassName = "x" })},
-		c{"spec/securityContext", base(func(w *wfv1.Workflow) { w.Spec.SecurityContext = &corev1.PodSecurityContext{} })},
+		c{"spec/sysctls", base(func(w *wfv1.Workflow) {
+			w.Spec.SecurityContext = &corev1.PodSecurityContext{Sysctls: []corev1.Sysctl{{Name: "net.ipv4.ip_forward", Value: "1"}}}
+		})},
 		c{"spec/sem", base(func(w *wfv1.Workflow) {
 			w.Spec.Synchronization = &wfv1.Synchronization{Semaphores: []*wfv1.SemaphoreRef{{Database: &wfv1.SyncDatabaseRef{Key: "k"}}}}
 		})},
@@ -411,8 +417,7 @@ func TestRefusalPositionDupRowsNoPanic(t *testing.T) {
 				}()
 				aerr := Admit(w.DeepCopy(), Policy{})
 				steps, perr := PlannedSteps(w.DeepCopy())
-				_, nerr := DeclaredNonrootTemplates(w)
-				done <- fmt.Sprintf("admit=%v | plan=%d,%v | nonroot=%v", aerr, len(steps), perr, nerr)
+				done <- fmt.Sprintf("admit=%v | plan=%d,%v", aerr, len(steps), perr)
 			}()
 			select {
 			case s := <-done:

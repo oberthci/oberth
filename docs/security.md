@@ -28,16 +28,14 @@
   see [workspace isolation](workspace-isolation.md) for supported shapes,
   defaults restrictions and controller-proof limits.
 
-- Uncredentialed Argo workflows can select fixed UID/GID65534 ordinary test
-  leaves with `oberth.ci/nonroot-templates`. Direct securityContext and Pod
-  patch input remains rejected. Main and generated Argo init/wait retain
-  RuntimeDefault, dropALL, read-only root and no privilege escalation. A fixed
-  server initializer uses UID0 only to prepare fresh per-Pod scratch directories;
-  it has no token, PVC or host mount and never changes shared ownership. Selected
-  leaves consume source/tools read-only and use bounded ephemeral private scratch caches.
-  This is separate from trusted VM execution. Browser sandbox compatibility
-  still needs proof under the actual runtime; no capabilities, unconfined
-  seccomp or sandbox-disabling flags are granted by this mode.
+- Authored Pod and container `securityContext` fields pass through unchanged,
+  except Go admission still refuses AppArmor, SELinux, procMount, sysctls,
+  Windows options and beta AppArmor Pod annotations. Kubernetes enforces the
+  namespace Pod security floor at Pod creation. Root and writable-root execution
+  are allowed; privileged execution, unsafe capabilities, escalation and unsafe
+  seccomp are refused. The removed `oberth.ci/nonroot-templates` annotation is
+  refused. Authors declare any user, groups and private scratch directly; see
+  [authored nonroot execution](nonroot-test-leaves.md).
 
 - Install and upgrade require Argo security defaults even when
   `argo.podPolicy.enabled=false`. They check the live
@@ -224,3 +222,12 @@ flag must be treated as unverified. `oberth install`, `oberth upgrade` and
 `oberth restore` do not run cosign: they verify the signed record and the
 chart offline against the compiled-in key (the transparency-log entry is not
 consulted), so upgrading from v0.17.95 is unaffected.
+
+On steps receiving secret-store or cloud-identity mounts, output parameter file
+paths must stay outside every volume mount. Argo wait follows symlinks on mounted
+paths, so a previous step could otherwise plant a link that copies a credential
+into Workflow outputs. Paths are normalized before this check; paths containing
+unresolved substitutions are refused. A file written on the step's own root
+filesystem remains a supported output parameter. Native output artifacts remain
+refused. Argo wait retains its native mirrors, including CA and helper mounts;
+the executor-token delivery and read-only source protections remain in place.

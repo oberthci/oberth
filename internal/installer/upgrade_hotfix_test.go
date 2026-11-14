@@ -48,6 +48,9 @@ func hotfixHelm(t *testing.T, values map[string]any, output *bytes.Buffer) (Deps
 		case "version":
 			return []byte("v4.2.3"), nil
 		case "list":
+			if slices.Contains(args, DefaultArgoNamespace) {
+				return []byte(`[]`), nil
+			}
 			return []byte(`[{"name":"oberth","chart":"oberth-0.22.4","status":"deployed"}]`), nil
 		case "history":
 			return []byte(`[{"revision":1,"status":"deployed"}]`), nil
@@ -85,6 +88,7 @@ func TestUpgradeStoredInstallerValuesRenderAfterCleanup(t *testing.T) {
 	if proxy["enabled"] != true || proxy["modulePrefix"] == "" || proxy["upstream"] == "" || proxy["organization"] == "" {
 		t.Fatal("historical fixture must exercise an enabled proxy and its stored module settings")
 	}
+	values["argo"].(map[string]any)["executorScratchSizeLimit"] = "1Gi"
 	var output bytes.Buffer
 	deps, chart := hotfixHelm(t, values, &output)
 	prepared, err := prepareUpgradeValues(t.Context(), UpgradeConfig{Namespace: "oberth", ChartOverride: chart}, deps, chart, "example.invalid/server@sha256:"+strings.Repeat("1", 64))
@@ -99,13 +103,14 @@ func TestUpgradeStoredInstallerValuesRenderAfterCleanup(t *testing.T) {
 	delete(argo, "executionPlacementConfigMap")
 	delete(argo, "executionTargetConfigMap")
 	delete(argo, "executionTargetCredentialsSecret")
+	delete(argo, "executorScratchSizeLimit")
 	delete(argo, "goProxy")
 	want, _ := json.Marshal(values)
 	got, _ := json.Marshal(prepared.storedSnapshot)
 	if !bytes.Equal(got, want) {
 		t.Fatalf("another stored value changed: got %s want %s", got, want)
 	}
-	const omitted = "Omitted retired installer-written stored values: secretstore.transit.enabled, secretstore.transit.mount, secretstore.transit.key, argo.controllerProfile, argo.controllerProfileConfigMap, argo.executionPlacementConfigMap, argo.executionTargetConfigMap, argo.executionTargetCredentialsSecret\n"
+	const omitted = "Omitted retired installer-written stored values: secretstore.transit.enabled, secretstore.transit.mount, secretstore.transit.key, argo.controllerProfile, argo.controllerProfileConfigMap, argo.executionPlacementConfigMap, argo.executionTargetConfigMap, argo.executionTargetCredentialsSecret, argo.executorScratchSizeLimit\n"
 	if strings.Count(output.String(), omitted) != 1 || strings.Count(output.String(), "Omitted retired installer-written") != 1 {
 		t.Fatal("omission list differs", output.String())
 	}
@@ -151,13 +156,14 @@ func TestRestoreOldChartKeepsInstallerValues(t *testing.T) {
 		if args[1] == "chart" {
 			return []byte("name: oberth\nversion: 0.22.4\n"), nil
 		}
-		return before, nil
+		return bytes.Clone(before), nil
 	}}
 	args, err := restoreHelmArgs(t.Context(), RestoreConfig{Namespace: "oberth", ChartPath: "old-chart"}, backupDeps{Deps: deps}, restoreTarget{Overlay: map[string]any{"compatibility": values["compatibility"]}}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(args, "--reuse-values") || slices.Contains(args, "--reset-values") {
+	after, _ := json.Marshal(values)
+	if !bytes.Equal(before, after) || !slices.Contains(args, "--reuse-values") || slices.Contains(args, "--reset-values") {
 		t.Fatal("old-chart restore rewrote owned values", args)
 	}
 	index := slices.Index(args, "-f")

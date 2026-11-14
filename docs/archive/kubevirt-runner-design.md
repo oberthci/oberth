@@ -377,5 +377,5 @@ inventory and a real process exit bound to the admitted inputs and VM UID.
 - `docs/solutions/kernel-e2e-bridge.md`: QEMU/virtme-ng path for kernel testing
 - `pkg/argoworkflow/admit.go`: Admission gate
 - `internal/argojob/spec.go`: Container security baseline
-- `internal/argojob/nonroot.go`: Nonroot execution profile (pattern reference)
+- `internal/argojob/server_container_security.go`: Server helper security context (pattern reference)
 - `internal/argojob/nonroot_verifier.go`: Trust verification model

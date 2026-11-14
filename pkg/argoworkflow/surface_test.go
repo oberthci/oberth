@@ -37,20 +37,10 @@ var sensitiveTypes = map[string]string{
 	"AppArmorProfile":                   "overrides the AppArmor profile",
 	"Sysctl":                            "sets kernel parameters",
 
-	// SecurityContext and PodSecurityContext are deliberately ABSENT from this
-	// list, and that absence is load-bearing.
-	//
-	// Listing them made the walk stop at the struct and report the whole
-	// security surface as one path, which "SecurityContext" then closed --
-	// so the audit reported the area as covered while seccompProfile:
-	// Unconfined and runAsUser sailed through a gate that only checked
-	// privileged, allowPrivilegeEscalation, and capabilities.add. A leaf that
-	// terminates the walk hides every field beneath it, which is exactly the
-	// failure mode this test exists to prevent.
-	//
-	// Omitted, the walk descends into them and enumerates SeccompProfile,
-	// AppArmorProfile, Capabilities, SELinuxOptions and the rest individually,
-	// each of which must then be closed by a named root.
+	// Descend into security contexts so new sensitive subfields stay visible.
+	// Narrow platform controls are refused by Go; capabilities and seccomp are
+	// passed through and enforced by the Kubernetes Pod policy.
+
 }
 
 // TestSensitiveSurfaceIsKnown enumerates every path by which a
@@ -170,10 +160,9 @@ func surfaceRoots() map[string]surfaceRoot {
 			withSpec("  arguments:\n    parameters:\n      - name: p\n        valueFrom:\n          configMapKeyRef:\n            name: c\n            key: k\n")},
 		"Memoize": {"template.memoize is refused",
 			withTemplate("      memoize:\n        key: k\n        maxAge: 1h\n        cache:\n          configMap:\n            name: c\n            key: k\n")},
-		"SecurityContext": {"the whole container security context is refused; the engine forces the baseline",
-			withContainer("        securityContext:\n          privileged: true\n")},
-		"PodSecurityContext": {"the whole Pod security context is refused; the engine forces the baseline",
-			withSpec("  securityContext:\n    runAsUser: 0\n")},
+		"AppArmorProfile": {"authored appArmorProfile is refused by Go", withContainer("        securityContext:\n          appArmorProfile: {type: Unconfined}\n")},
+		"SELinuxOptions":  {"authored seLinuxOptions is refused by Go", withContainer("        securityContext:\n          seLinuxOptions: {type: unconfined_t}\n")},
+		"Sysctls":         {"authored sysctls are refused by Go", withSpec("  securityContext:\n    sysctls: [{name: net.ipv4.ip_forward, value: '1'}]\n")},
 		"PodMetadata": {"repository-authored Pod annotations are refused",
 			withSpec("  podMetadata:\n    annotations:\n      container.apparmor.security.beta.kubernetes.io/main: unconfined\n")},
 		"Metadata": {"repository-authored Pod annotations are refused",
@@ -186,19 +175,20 @@ func surfaceRoots() map[string]surfaceRoot {
 	}
 }
 
-// TestSensitiveSurfaceIsClosedAtItsRoots proves every sensitive path is
-// unreachable because Admit refuses a construct on the way to it -- and that
-// each claimed refusal is real, by submitting a document that reaches it.
-func TestSensitiveSurfaceIsClosedAtItsRoots(t *testing.T) {
+// TestSensitiveSurfaceHasAnEnforcementStage assigns every sensitive path to
+// Go admission or the Kubernetes Pod policy. Go-owned roots must refuse their
+// examples; Pod-policy roots must reach that boundary unchanged by Go.
+func TestSensitiveSurfaceHasAnEnforcementStage(t *testing.T) {
 	roots := surfaceRoots()
+	podRoots := podPolicySurfaceRoots()
 	raw, err := os.ReadFile(sensitiveSurfaceGolden)
 	if err != nil {
 		t.Fatalf("read %s: %v", sensitiveSurfaceGolden, err)
 	}
 	for _, path := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		if !closedAtSomeRoot(path, roots) {
-			t.Errorf("no documented root closes %s\n"+
-				"  every sensitive path must be unreachable because Admit refuses a construct on the way to it", path)
+		if !closedAtSomeRoot(path, roots) && !closedAtSomeRoot(path, podRoots) {
+			t.Errorf("no enforcement stage covers %s\n"+
+				"  each sensitive path needs a documented Go refusal or Kubernetes policy boundary", path)
 		}
 	}
 
@@ -216,6 +206,25 @@ func TestSensitiveSurfaceIsClosedAtItsRoots(t *testing.T) {
 				t.Fatalf("%s claims %q, but Admit accepted a document reaching it", name, root.why)
 			}
 		})
+	}
+	for name, root := range podRoots {
+		t.Run("pod-policy/"+name, func(t *testing.T) {
+			workflow, err := Decode([]byte(root.document))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := Admit(workflow, Policy{}); err != nil {
+				t.Fatalf("%s must pass through Go for %s: %v", name, root.why, err)
+			}
+		})
+	}
+
+}
+
+func podPolicySurfaceRoots() map[string]surfaceRoot {
+	return map[string]surfaceRoot{
+		"Capabilities":   {"Kubernetes Pod policy permits only NET_BIND_SERVICE and requires drop ALL; covered by TestPodPolicySecurityFloor", strings.Replace(admissibleDocument, "        command: [/bin/true]\n", "        command: [/bin/true]\n        securityContext:\n          capabilities: {add: [SYS_ADMIN]}\n", 1)},
+		"SeccompProfile": {"Kubernetes Pod policy refuses Unconfined; covered by TestPodPolicySeccompTiers", strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  securityContext:\n    seccompProfile: {type: Unconfined}\n", 1)},
 	}
 }
 

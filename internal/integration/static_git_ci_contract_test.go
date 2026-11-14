@@ -3,10 +3,13 @@ package integration_test
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/yaml"
 )
 
@@ -26,9 +29,25 @@ func checkStaticGitGate(workflow *wfv1.Workflow) error {
 	if runtime.Container.Image != "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd" || strings.Join(runtime.Container.Command, " ") != "/qualification/launch-static-git" || len(runtime.Container.Args) != 0 || runtime.Container.WorkingDir != "/qualification/source/internal/gitcache" {
 		return fmt.Errorf("qualification bypassed or narrowed")
 	}
-	if workflow.Annotations["oberth.ci/nonroot-templates"] != "test-static-git-runtime" {
-		return fmt.Errorf("qualification lost server-owned UID/GID65534 profile")
+	pod, container := runtime.SecurityContext, runtime.Container.SecurityContext
+	if pod == nil || pod.RunAsUser == nil || *pod.RunAsUser != 65534 || pod.RunAsGroup == nil || *pod.RunAsGroup != 65534 || pod.RunAsNonRoot == nil || !*pod.RunAsNonRoot || pod.FSGroup == nil || *pod.FSGroup != 65534 || pod.SeccompProfile == nil || pod.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault || container == nil || container.AllowPrivilegeEscalation == nil || *container.AllowPrivilegeEscalation || container.ReadOnlyRootFilesystem == nil || !*container.ReadOnlyRootFilesystem || container.Capabilities == nil || !slices.Contains(container.Capabilities.Drop, corev1.Capability("ALL")) {
+		return fmt.Errorf("qualification lost authored security context")
 	}
+	scratch, mounted := false, false
+	for _, volume := range runtime.Volumes {
+		if volume.Name == "qualification-tmp" && volume.EmptyDir != nil && volume.EmptyDir.SizeLimit != nil && volume.EmptyDir.SizeLimit.Cmp(resource.MustParse("512Mi")) == 0 {
+			scratch = true
+		}
+	}
+	for _, mount := range runtime.Container.VolumeMounts {
+		if mount.Name == "qualification-tmp" && mount.MountPath == "/tmp" && !mount.ReadOnly {
+			mounted = true
+		}
+	}
+	if !scratch || !mounted {
+		return fmt.Errorf("qualification lost authored private scratch")
+	}
+
 	wanted := map[string]string{"/qualification": "static-git-qualification", "/usr/bin/git": "static-git-qualification/rootfs/usr/bin/git", "/usr/local/bin": "static-git-qualification/rootfs/usr/local/bin", "/etc/ssl/certs/ca-certificates.crt": "static-git-qualification/rootfs/etc/ssl/certs/ca-certificates.crt"}
 	for _, mount := range runtime.Container.VolumeMounts {
 		if path, ok := wanted[mount.MountPath]; ok {
@@ -68,7 +87,7 @@ func checkStaticGitGate(workflow *wfv1.Workflow) error {
 }
 
 func TestStaticGitRuntimeIsARequiredFreshArtifactGate(t *testing.T) {
-	body, err := os.ReadFile("../../.oberth/build.yaml")
+	body, err := os.ReadFile("../argojob/testdata/own-pipelines-next/build.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,15 +98,18 @@ func TestStaticGitRuntimeIsARequiredFreshArtifactGate(t *testing.T) {
 	if err := checkStaticGitGate(&workflow); err != nil {
 		t.Fatal(err)
 	}
-	for _, fault := range []string{"stale-git", "writable-helper", "conditional", "missing-gate", "wrong-runner", "missing-nonroot"} {
+	for _, fault := range []string{"stale-git", "writable-helper", "conditional", "missing-gate", "wrong-runner", "missing-security", "missing-scratch"} {
 		t.Run(fault, func(t *testing.T) {
 			candidate := workflow.DeepCopy()
-			if fault == "missing-nonroot" {
-				delete(candidate.Annotations, "oberth.ci/nonroot-templates")
-			}
 			for i := range candidate.Spec.Templates {
 				template := &candidate.Spec.Templates[i]
 				if template.Name == "test-static-git-runtime" {
+					if fault == "missing-security" {
+						template.Container.SecurityContext = nil
+					}
+					if fault == "missing-scratch" {
+						template.Volumes = nil
+					}
 					if fault == "wrong-runner" {
 						template.Container.Image = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:" + strings.Repeat("f", 64)
 					}

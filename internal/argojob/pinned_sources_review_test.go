@@ -23,7 +23,7 @@ func TestPinnedSourcesPublicRetryAndAdoption(t *testing.T) {
 			document := greedyDocument
 			if nonroot {
 
-				document = nonrootTestDocument
+				document = authoredNonrootDocument
 			}
 			runningSeedPods(kube)
 			client := &createRetryWorkflowClient{}

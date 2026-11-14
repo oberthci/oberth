@@ -305,9 +305,6 @@ upstream:
 # accepts pushes and then executes nothing. Install the controller with
 # `oberth install`, or point argo.namespace at an existing one.
 argo:
-  # Emissary retains stdout/stderr and control files here until Pod cleanup.
-  # Separate from the test leaf private scratch; applies to nonroot leaves.
-  executorScratchSizeLimit: 1Gi
   # Public administrator capabilities only; empty disables release federation.
   # Tokens/private keys must never be supplied here. See docs/release-wif.md.
   # This is the boot default: release_wif_grant/revoke/reset change repository
@@ -320,13 +317,6 @@ argo:
   # Selected files retain their own size/resource declarations. Empty preserves
   # .oberth/release.yaml for every tag. Overlapping matches refuse the run.
   releaseTagRoutes: {}
-  # Optional workflow annotation oberth.ci/nonroot-templates selects fixed
-  # UID/GID65534 plain uncredentialed test leaves. This has no chart UID knob:
-  # the server owns all identities, executor patches and bounded Pod scratch.
-  # A trusted initializer using the existing pinned source-seed image prepares
-  # only fresh EmptyDirs; no PVC/host cache ownership or fsGroup is changed.
-  # Repository securityContext overrides remain forbidden. Actual DB/browser
-  # compatibility requires separate execution proof after an authorized rollout.
   # Pipelines run in their own namespace, never the server's. The Vault
   # Kubernetes-auth roles bind (namespace, ServiceAccount) pairs, so a shared
   # namespace would put pipeline identities beside server ones. Oberth refuses

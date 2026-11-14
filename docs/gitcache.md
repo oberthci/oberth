@@ -59,13 +59,13 @@ regression; go-git-specific decoder and comparison tests were removed together
 with that implementation. The required `build-static-git-runtime` / `test-static-git-runtime` CI chain
 builds the same pinned C recipe as Dockerfile's git-build stage, then runs the
 complete tagged CLI suite on the already allowed, digest-pinned Go runner.
-The built scratch-like payload is mounted read-only; Oberth's verified nonroot
-profile assigns real UID/GID 65534. A static, single-threaded CI launcher uses
+The built scratch-like payload is mounted read-only; the qualification template
+authors UID/GID 65534, read-only root and private scratch. A static, single-threaded CI launcher uses
 Landlock to expose only payload, fixture, scratch, procfs and device reads and permit execution
 only of candidate Git, Oberth and the test executable. The runner's templates
 and interpreters cannot mask missing runtime dependencies; PATH has no shell.
 Git object/quarantine moves remain allowed within non-executable private scratch.
-Landlock ABI 2 or newer and the selected nonroot test leaf are required:
+Landlock ABI 2 or newer and the authored nonroot qualification settings are required:
 unavailable restrictions fail closed. No image-prefix,
 privilege, capability or security-context exception is introduced. The full
 suite retains early upload/receive exit128, mismatch, fetch and cancellation

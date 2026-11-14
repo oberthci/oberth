@@ -99,7 +99,7 @@ func TestGrantedSecretStepContainerBoundary(t *testing.T) {
 				before.InitContainers[i].Env = append(before.InitContainers[i].Env, corev1.EnvVar{Name: "ARGO_TEMPLATE", Value: string(metadata)})
 			}
 			after := applyCredentialWaitPatch(t, before, leaf.PodSpecPatch)
-			assertNoStoreSettings(t, after.Containers[0])
+			assertNativeWaitCredentialMirrors(t, before.Containers[0], after.Containers[0])
 			for _, c := range after.InitContainers {
 				assertNoStoreSettings(t, c)
 			}

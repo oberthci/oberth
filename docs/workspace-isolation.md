@@ -139,9 +139,7 @@ uses private scratch instead. Tool binaries remain on the per-run claim. A
 Trivy `--cache-dir` inside `/work/cache` is shared across concurrent runs of
 the same repository, so keep Trivy's database in private scratch.
 
-`cache` is refused on leaves that never take a host-backed mount:
-`oberth.ci/nonroot-templates` leaves (whose Go caches move to their
-private scratch). Keep `none` for steps that must not see writable shared state, such
+Keep `none` for steps that must not see writable shared state, such
 as signing, publishing, credential handling, and fetching or verifying
 tools: a writable cache shared with every other build step of the
 repository is exactly such state.
