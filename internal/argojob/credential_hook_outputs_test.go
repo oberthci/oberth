@@ -69,7 +69,9 @@ func TestCredentialHookResultCaptureRefused(t *testing.T) {
 			t.Run(fmt.Sprintf("dag=%t/%s", dag, hook.name), func(t *testing.T) {
 				config, request := credentialHookOutputRequest(t, dag, hook.onExit, true, hook.key, hook.alias)
 				_, err := Build(config, request)
-				if err == nil || !strings.Contains(err.Error(), "referenced outputs.result") || !strings.Contains(err.Error(), "another container of the Pod") {
+				if strings.ContainsAny(hook.key, ".()[]") {
+					assertCredentialHookKeyRefused(t, err)
+				} else if err == nil || !strings.Contains(err.Error(), "referenced outputs.result") || !strings.Contains(err.Error(), "another container of the Pod") {
 					t.Fatal("hook result capture was admitted", err)
 				}
 			})
@@ -80,6 +82,9 @@ func TestCredentialHookResultCaptureRefused(t *testing.T) {
 func TestCredentialHookUnreferencedResultAllowed(t *testing.T) {
 	for _, dag := range []bool{false, true} {
 		for _, hook := range credentialHookOutputCases {
+			if strings.ContainsAny(hook.key, ".()[]") {
+				continue
+			}
 			t.Run(fmt.Sprintf("dag=%t/%s", dag, hook.name), func(t *testing.T) {
 				config, request := credentialHookOutputRequest(t, dag, hook.onExit, false, hook.key, hook.alias)
 				if _, err := Build(config, request); err != nil {
@@ -87,5 +92,115 @@ func TestCredentialHookUnreferencedResultAllowed(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func assertCredentialHookKeyRefused(t *testing.T, err error) {
+	t.Helper()
+	const message = "argojob: hooks invoking credentialed templates cannot use keys containing '.', '(', ')', '[' or ']'"
+	if err == nil || !strings.Contains(err.Error(), message) {
+		t.Fatalf("credentialed hook delimiter was admitted or returned an unexpected error: %v", err)
+	}
+}
+
+func TestCredentialHookDelimiterKeysRefused(t *testing.T) {
+	for _, dag := range []bool{false, true} {
+		for _, sidecar := range []bool{false, true} {
+			for _, key := range []string{"x.scan", "scan(", "scan)", "scan[", "scan]"} {
+				t.Run(fmt.Sprintf("dag=%t/sidecar=%t/key=%s", dag, sidecar, key), func(t *testing.T) {
+					config, request := credentialHookOutputRequest(t, dag, false, false, key, "unused")
+					if !sidecar {
+						request = changeCredentialOutputRequest(t, request, func(wf *wfv1.Workflow) {
+							wf.Spec.Templates[0].Sidecars = nil
+						})
+					}
+					_, err := Build(config, request)
+					assertCredentialHookKeyRefused(t, err)
+				})
+			}
+		}
+	}
+}
+
+func TestOrdinaryHookDelimiterKeysAllowed(t *testing.T) {
+	for _, dag := range []bool{false, true} {
+		for _, key := range []string{"x.scan", "scan(", "scan)", "scan[", "scan]"} {
+			t.Run(fmt.Sprintf("dag=%t/key=%s", dag, key), func(t *testing.T) {
+				config, request := credentialHookOutputRequest(t, dag, false, false, key, "unused")
+				request = changeCredentialOutputRequest(t, request, func(wf *wfv1.Workflow) {
+					for i := range wf.Spec.Templates {
+						parent := &wf.Spec.Templates[i]
+						if parent.Name != "parent" {
+							continue
+						}
+						hooks := wfv1.LifecycleHooks{wfv1.LifecycleEvent(key): {Template: "ordinary", Expression: "true"}}
+						if dag {
+							parent.DAG.Tasks[1].Hooks = hooks
+						} else {
+							parent.Steps[0].Steps[1].Hooks = hooks
+						}
+					}
+				})
+				if _, err := Build(config, request); err != nil {
+					t.Fatalf("ordinary hook with delimiter was refused: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestCredentialHookExpandedParentDelimiterRefused(t *testing.T) {
+	for _, name := range []string{"steps-expanded-paren", "dag-nested-expanded-paren", "steps-nested-bracket"} {
+		t.Run(name, func(t *testing.T) {
+			dag := name == "dag-nested-expanded-paren"
+			key, reference := "scan)", "host"
+			if name == "steps-nested-bracket" {
+				key = "scan]"
+			}
+			if name != "steps-expanded-paren" {
+				reference = "outer"
+			}
+			config, request := credentialHookOutputRequest(t, dag, false, true, key, reference)
+			request = changeCredentialOutputRequest(t, request, func(wf *wfv1.Workflow) {
+				for i := range wf.Spec.Templates {
+					parent := &wf.Spec.Templates[i]
+					if parent.Name != "parent" {
+						continue
+					}
+					if name == "steps-expanded-paren" {
+						parent.Steps[0].Steps = parent.Steps[0].Steps[1:]
+						parent.Steps[0].Steps[0].WithParam = `["item"]`
+						return
+					}
+					parent.Name = "inner"
+					top := wfv1.Template{Name: "parent"}
+					if dag {
+						top.DAG = &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "outer", Template: "inner", WithParam: `["item"]`}}}
+					} else {
+						top.Steps = []wfv1.ParallelSteps{{Steps: []wfv1.WorkflowStep{{Name: "outer", Template: "inner"}}}}
+					}
+					wf.Spec.Templates = append(wf.Spec.Templates, top)
+					return
+				}
+			})
+			_, err := Build(config, request)
+			assertCredentialHookKeyRefused(t, err)
+		})
+	}
+}
+
+func TestCredentialHookExpandedParentPlainAllowed(t *testing.T) {
+	config, request := credentialHookOutputRequest(t, false, false, true, "scan", "host")
+	request = changeCredentialOutputRequest(t, request, func(wf *wfv1.Workflow) {
+		for i := range wf.Spec.Templates {
+			parent := &wf.Spec.Templates[i]
+			if parent.Name == "parent" {
+				parent.Steps[0].Steps = parent.Steps[0].Steps[1:]
+				parent.Steps[0].Steps[0].WithParam = `["item"]`
+			}
+		}
+	})
+	if _, err := Build(config, request); err != nil {
+		t.Fatalf("plain credentialed hook on an expanded parent was refused: %v", err)
 	}
 }

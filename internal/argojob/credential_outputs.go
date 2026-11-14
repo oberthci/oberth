@@ -25,6 +25,9 @@ func validateCredentialOutputPaths(wf *wfv1.Workflow, granted map[*wfv1.Template
 	for _, t := range cloud {
 		credentialed[t] = true
 	}
+	if err := validateCredentialHookKeys(wf, credentialed); err != nil {
+		return err
+	}
 	var failure error
 	walkTemplates(wf, func(t *wfv1.Template) {
 		if !credentialed[t] || failure != nil {
@@ -64,6 +67,41 @@ func validateCredentialOutputPaths(wf *wfv1.Workflow, granted map[*wfv1.Template
 			if credentialOutputOnMount(t, output) {
 				failure = fmt.Errorf("argojob: credentialed template %q output read path %q is on a volume mount or cannot be resolved before execution", t.Name, output)
 				return
+			}
+		}
+	})
+	return failure
+}
+
+// Hook delimiters can make Argo's result alias depend on expanded ancestor
+// names. Refuse them for credentialed leaves even without a local result read.
+func validateCredentialHookKeys(wf *wfv1.Workflow, credentialed map[*wfv1.Template]bool) error {
+	names := map[string]bool{}
+	for leaf, allowed := range credentialed {
+		if allowed && leaf.Name != "" {
+			names[leaf.Name] = true
+		}
+	}
+	var failure error
+	check := func(hooks wfv1.LifecycleHooks) {
+		for key, hook := range hooks {
+			if !names[hook.Template] && !(len(names) > 0 && strings.Contains(hook.Template, "{{")) {
+				continue
+			}
+			if strings.ContainsAny(string(key), ".()[]") {
+				failure = fmt.Errorf("argojob: hooks invoking credentialed templates cannot use keys containing '.', '(', ')', '[' or ']'")
+			}
+		}
+	}
+	walkTemplates(wf, func(parent *wfv1.Template) {
+		for _, group := range parent.Steps {
+			for _, step := range group.Steps {
+				check(step.Hooks)
+			}
+		}
+		if parent.DAG != nil {
+			for _, task := range parent.DAG.Tasks {
+				check(task.Hooks)
 			}
 		}
 	})
