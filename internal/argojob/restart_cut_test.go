@@ -38,7 +38,7 @@ func restartCutFixture(t *testing.T, change func(*wfv1.Workflow, *wfv1.NodeStatu
 			t.Fatal(err)
 		}
 	}
-	controller := &Controller{restartedAt: time.Now().UTC(), workflows: &staticWorkflowClient{workflow: wf}, kube: kube, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 1 << 20}, interval: time.Millisecond}
+	controller := &Controller{restartedAt: time.Now().UTC(), workflows: &staticWorkflowClient{workflow: wf}, kube: kube, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 1 << 20}, idleInterval: time.Millisecond}
 	controller.WithPodLogFollower(func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader("")), nil
 	})
@@ -99,7 +99,7 @@ func TestRestartCutAdoptedWaitDistinguishesMissingExitFromFailure(t *testing.T) 
 		t.Run(test.name, func(t *testing.T) {
 			controller, wf, binding, events := restartCutFixture(t, test.change)
 			var output bytes.Buffer
-			result, err := controller.WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], &output, events, 100, binding)
+			result, err := withWaitTestHub(t, controller).WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], &output, events, 100, binding)
 			if err != nil || result.Interrupted != test.interrupted || result.Succeeded != test.passed {
 				t.Fatalf("wrong restart verdict: %+v err=%v", result, err)
 			}
@@ -130,7 +130,7 @@ func TestRestartCutRequiresVerifiedAdoptionAndBoundTerminalRead(t *testing.T) {
 	if err != nil || ordinary.Interrupted || ordinary.Infrastructure {
 		t.Fatal("unknown non-adopted failure was reclassified", ordinary, err)
 	}
-	ordinaryWait, err := controller.Wait(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard)
+	ordinaryWait, err := withWaitTestHub(t, controller).Wait(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard)
 	if err != nil || ordinaryWait.Interrupted || ordinaryWait.Infrastructure {
 		t.Fatal("ordinary wait acquired restart authority", ordinaryWait, err)
 	}
@@ -269,7 +269,7 @@ func TestRestartCutRetainedJournalFailureBindsExactAttempt(t *testing.T) {
 			// Invalid journal input remains refused by Wait's existing validation;
 			// the terminal reader must also never use an invalid record as evidence.
 			if mode != "invalid-record" {
-				result, err := controller.WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, retained, 100, binding)
+				result, err := withWaitTestHub(t, controller).WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, retained, 100, binding)
 				if err != nil || result.Interrupted != (mode != "exact-failure") {
 					t.Fatal("retained failure lost or wrong attempt bound", result, err)
 				}
@@ -301,7 +301,7 @@ func TestRestartCutSettlingReadCannotEraseKnownFailure(t *testing.T) {
 			var result *Completion
 			var err error
 			if path == "wait" {
-				value, e := controller.WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, nil, 0, binding)
+				value, e := withWaitTestHub(t, controller).WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, nil, 0, binding)
 				result, err = &value, e
 			} else {
 				result, err = controller.TerminalStateResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], binding, nil)

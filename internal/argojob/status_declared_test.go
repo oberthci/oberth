@@ -81,11 +81,11 @@ func TestDeclaredRetryRowsResolveThroughWait(t *testing.T) {
 				}
 				defer func() { _ = file.Close() }()
 				controller := &Controller{kube: fixtureKube(wf), workflows: &staticWorkflowClient{workflow: wf},
-					config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 1 << 20}, interval: time.Millisecond,
+					config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 1 << 20}, idleInterval: time.Millisecond,
 					logs: func(_ context.Context, _, pod, _ string) (io.ReadCloser, error) {
 						return io.NopCloser(strings.NewReader("output of " + pod + "\n")), nil
 					}}
-				completion, err := controller.WaitResumed(context.Background(), wf.Name, "run-retry",
+				completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, "run-retry",
 					io.MultiWriter(file, journalMarkers{logs, "run-retry"}), events, retained, Adoption{})
 				if err != nil || completion.Succeeded != (test.want == runprogress.StepPassed) {
 					t.Fatalf("completion: %+v: %v", completion, err)

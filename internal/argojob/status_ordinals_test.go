@@ -152,8 +152,8 @@ func TestWaitResumedLegacyRetryKeyKeepsSiblingOrdinal(t *testing.T) {
 			}
 			defer func() { _ = file.Close() }()
 			controller := &Controller{workflows: &staticWorkflowClient{workflow: wf},
-				config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 1 << 20}, interval: time.Millisecond}
-			completion, err := controller.WaitResumed(context.Background(), wf.Name, "run-retry",
+				config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 1 << 20}, idleInterval: time.Millisecond}
+			completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, "run-retry",
 				journalMarkers{logs, "run-retry"}, events, retained, Adoption{})
 			if err != nil || !completion.Succeeded {
 				t.Fatalf("adoption completion: %+v: %v", completion, err)

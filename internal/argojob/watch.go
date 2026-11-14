@@ -15,6 +15,7 @@ import (
 // ObservationHub supplies shared, read-only native objects. Reads that gate
 // mutations continue to use the live clients.
 type ObservationHub interface {
+	Subscribe(string) (<-chan struct{}, func())
 	Workflow(string) (*wfv1.Workflow, bool)
 	PodsOf(string) []*corev1.Pod
 	Pods() []*corev1.Pod

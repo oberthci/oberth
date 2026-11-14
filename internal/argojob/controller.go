@@ -41,17 +41,13 @@ type WorkflowClient interface {
 type PodLogReader func(ctx context.Context, namespace, pod, container string) (io.ReadCloser, error)
 
 const (
-	pollInterval        = 500 * time.Millisecond
+	waitIdleInterval    = 15 * time.Second
 	deletionGracePeriod = int64(10)
 	// mainContainerName is the container Argo runs the template's command in.
 	mainContainerName = "main"
 	// maxStepLogBytes bounds one step's replayed log so a runaway step cannot
 	// exhaust the run log budget on its own.
 	maxStepLogBytes = 32 << 20
-	// workflowReadGrace bounds how long Wait keeps polling through failed
-	// Workflow reads (API server restart, connection reset) before it gives
-	// up on observing the run.
-	workflowReadGrace = 2 * time.Minute
 )
 
 // Process initialization is the conservative boundary for restart attribution.
@@ -80,8 +76,7 @@ type Controller struct {
 	logPod       func(context.Context, string, string) (*corev1.Pod, error)
 	seeder       *SourceSeeder
 	config       Config
-	interval     time.Duration
-	readGrace    time.Duration
+	idleInterval time.Duration
 	// assistSeen remembers the holds the sweep already logged.
 	assistSeen struct {
 		sync.Mutex
@@ -102,7 +97,7 @@ func NewController(workflows WorkflowClient, client kubernetes.Interface, config
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	controller := &Controller{restartedAt: serverStartedAt, workflows: workflows, kube: client, config: config, interval: pollInterval, readGrace: workflowReadGrace}
+	controller := &Controller{restartedAt: serverStartedAt, workflows: workflows, kube: client, config: config, idleInterval: waitIdleInterval}
 	if client != nil {
 		controller.logPod = func(ctx context.Context, namespace, pod string) (*corev1.Pod, error) {
 			return client.CoreV1().Pods(namespace).Get(ctx, pod, metav1.GetOptions{})
@@ -386,6 +381,11 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	if retained < 0 {
 		return Completion{}, errors.New("argojob: invalid retained log size")
 	}
+	if controller.hub == nil {
+		return Completion{}, errors.New("argojob: shared Workflow watch is required")
+	}
+	wake, cancelWatch := controller.hub.Subscribe(name)
+	defer cancelWatch()
 	budget := &runBudgetWriter{destination: destination, remaining: controller.config.MaxRunLogBytes - retained}
 	var live *stepLogFollowers
 	if controller.followLogs != nil {
@@ -404,137 +404,200 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		reporter.ordinals[event.Stage+"/"+event.Step] = event.Ordinal
 		reporter.ordinalOwners[event.Ordinal] = event.Stage + "/" + event.Step
 	}
-	ticker := time.NewTicker(controller.interval)
+	idle := controller.idleInterval
+	if idle <= 0 {
+		idle = waitIdleInterval
+	}
+	ticker := time.NewTicker(idle)
 	defer ticker.Stop()
 	var budgetBreachErr error
 	delivered := map[types.UID]bool{}
 	var admissionWatch executorIdentityProgress
-	var readFailingSince time.Time
 	timed := map[string]bool{}
 	boundTiming := false
+	eventDriven := true
+	confirmPending := false
+	observationPaused := false
+	nodeBoots := map[string]*corev1.Node{}
 	for {
-		readCtx, cancelRead := context.WithTimeout(ctx, executorIdentityAttemptTimeout)
-		workflow, err := controller.workflows.Get(readCtx, name, metav1.GetOptions{})
-		cancelRead()
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				return Completion{}, fmt.Errorf("argojob: Workflow %s disappeared before completing", name)
-			}
-			// One failed read must not end a run whose Workflow is still
-			// progressing: keep polling for a bounded grace and report only
-			// a persistent outage.
-			if readFailingSince.IsZero() {
-				readFailingSince = time.Now()
-			}
-			if ctx.Err() != nil || time.Since(readFailingSince) >= controller.readGrace {
-				return Completion{}, fmt.Errorf("argojob: read Workflow %s: %w", name, err)
-			}
-			select {
-			case <-ctx.Done():
+		for {
+			if ctx.Err() != nil {
 				return Completion{}, ctx.Err()
-			case <-ticker.C:
 			}
-			continue
-		}
-		readFailingSince = time.Time{}
-		if err := controller.verifyOwnership(workflow, runID); err != nil {
-			return Completion{}, err
-		}
-		if binding.UID != "" && !binding.matches(workflow) {
-			return Completion{}, errors.New("argojob: adopted Workflow identity changed")
-		}
-		// Observe already-created Pods before identity delivery can block on a
-		// later Pod: early step output must not wait behind that setup RPC.
-		if live != nil {
-			live.observe(workflow)
-		}
-		if !workflow.Status.Phase.Completed() {
-			controller.observeRunningNodeBoots(ctx, workflow)
-		}
-		if err := controller.checkExecutorIdentityProgress(ctx, workflow, &admissionWatch, delivered); err != nil {
-			return completionFor(workflow), err
-		}
-		// Bound reads and identity transport even when no waiter observation exists.
-		deliveryCtx, stopDelivery := context.WithTimeout(ctx, identityObservationTimeout)
-		identityReadUnavailable := false
-		deliveryErr := controller.deliverExecutorTokensObserved(deliveryCtx, workflow, delivered, func() { identityReadUnavailable = true })
-		if deliveryCtx.Err() != nil && ctx.Err() == nil {
-			deliveryErr = &executorIdentityProgressError{reason: "Kubernetes executor identity observation unavailable for 2m"}
-		}
-		stopDelivery()
-		if deliveryErr == nil {
-			deliveryErr = admissionWatch.observeIdentityReads(identityReadUnavailable, time.Now())
-		}
-		if err := deliveryErr; err != nil {
-			// Preserve observed execution evidence; a delivery error on a later
-			// Pod must not make already executed steps look like a pre-step failure.
-			return completionFor(workflow), err
-		}
-		if workflow.Status.Phase.Completed() {
-			// One final read after the controller marks completion: the last
-			// node transitions and the workflow phase are not written
-			// atomically, so a status read that races the final update can
-			// miss a step's terminal event.
-			settled, completeRead := controller.settle(ctx, name, runID, workflow)
-			if binding.UID != "" && !binding.matches(settled) {
-				return Completion{}, errors.New("argojob: adopted Workflow identity changed at completion")
+			workflow, found := controller.hub.Workflow(name)
+			healthy := controller.hub.Healthy()
+			if !healthy {
+				admissionWatch.identityReadFailingSince = time.Time{}
+				observationPaused = true
+			} else if observationPaused {
+				admissionWatch.resumeAfterOutage(time.Now())
+				observationPaused = false
 			}
-			controller.retainWorkflowTiming(ctx, settled)
-			completion := completionFor(settled)
-			completion.ObservationComplete = completion.ObservationComplete && completeRead
-			completion.Steps = reporter.order(completion.Steps)
-			preserveObservedExitCodes(&completion, workflow)
-			preserveRecordedExitCodes(&completion, events)
-			controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
-			if publishErr := controller.publishLogs(ctx, settled, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
-				budgetBreachErr = publishErr
+			// A terminal Workflow event can still be confirmed live when only the
+			// Pod informer is unavailable. Unhealthy idle ticks do no live reads.
+			if !healthy && (!found || !workflow.Status.Phase.Completed() || !eventDriven) {
+				break
 			}
-			if live != nil {
-				live.drain(settled)
-				live.applyDiagnostics(&completion)
-				if err := live.failure(); err != nil && budgetBreachErr == nil {
-					budgetBreachErr = err
+			confirm := eventDriven || confirmPending
+			confirmPending = false
+			if !found {
+				// A missing cache entry never proves deletion. Confirm on the initial
+				// observation/event, retrying only an owed confirmation on idle.
+				if !confirm {
+					break
+				}
+				readCtx, cancelRead := context.WithTimeout(ctx, executorIdentityAttemptTimeout)
+				current, err := controller.workflows.Get(readCtx, name, metav1.GetOptions{})
+				cancelRead()
+				if apierrors.IsNotFound(err) {
+					return Completion{}, fmt.Errorf("argojob: Workflow %s disappeared before completing", name)
+				}
+				if err != nil {
+					confirmPending = true
+					break
+				}
+				workflow = current
+			}
+			pods := make([]corev1.Pod, 0)
+			for _, pod := range controller.hub.PodsOf(name) {
+				pods = append(pods, *pod)
+			}
+			if err := controller.verifyOwnership(workflow, runID); err != nil {
+				return Completion{}, err
+			}
+			if binding.UID != "" && !binding.matches(workflow) {
+				return Completion{}, errors.New("argojob: adopted Workflow identity changed")
+			}
+			// Observe already-created Pods before identity delivery can block on a
+			// later Pod: early step output must not wait behind that setup RPC.
+			if live != nil && eventDriven {
+				live.observe(workflow)
+			}
+			if eventDriven && !workflow.Status.Phase.Completed() {
+				controller.observeRunningNodeBoots(ctx, workflow, nodeBoots)
+			}
+			if err := controller.checkExecutorIdentityProgress(ctx, workflow, pods, &admissionWatch, delivered); err != nil {
+				return completionFor(workflow), err
+			}
+			// Bound reads and identity transport even when no waiter observation exists.
+			deliveryCtx, stopDelivery := context.WithTimeout(ctx, identityObservationTimeout)
+			identityReadUnavailable := false
+			deliveryErr := controller.deliverExecutorTokensObserved(deliveryCtx, workflow, pods, delivered, func() { identityReadUnavailable = true })
+			if deliveryCtx.Err() != nil && ctx.Err() == nil {
+				deliveryErr = &executorIdentityProgressError{reason: "Kubernetes executor identity observation unavailable for 2m"}
+			}
+			stopDelivery()
+			if deliveryErr == nil {
+				deliveryErr = admissionWatch.observeIdentityReads(identityReadUnavailable, time.Now())
+			}
+			confirmPending = identityReadUnavailable
+			if err := deliveryErr; err != nil {
+				// Preserve observed execution evidence; a delivery error on a later
+				// Pod must not make already executed steps look like a pre-step failure.
+				if failure, ok := err.(interface{ InfrastructureFailure() bool }); ok && failure.InfrastructureFailure() && !controller.hub.Healthy() {
+					break
+				}
+				return completionFor(workflow), err
+			}
+			if workflow.Status.Phase.Completed() {
+				if !confirm {
+					break
+				}
+				// One final read after the controller marks completion: the last
+				// node transitions and the workflow phase are not written
+				// atomically, so a status read that races the final update can
+				// miss a step's terminal event.
+				settleCtx, cancelSettle := context.WithTimeout(ctx, 10*time.Second)
+				settled, settleErr := controller.workflows.Get(settleCtx, name, metav1.GetOptions{})
+				cancelSettle()
+				if apierrors.IsNotFound(settleErr) {
+					return Completion{}, fmt.Errorf("argojob: Workflow %s disappeared before completing", name)
+				}
+				if settleErr != nil {
+					confirmPending = true
+					break
+				}
+				if err := controller.verifyOwnership(settled, runID); err != nil {
+					return Completion{}, err
+				}
+				if workflow.UID != "" && settled.UID != workflow.UID {
+					return Completion{}, errors.New("argojob: Workflow identity changed at completion")
+				}
+				if !settled.Status.Phase.Completed() {
+					confirmPending = true
+					break
+				}
+				completeRead := len(settled.Status.Nodes) >= len(workflow.Status.Nodes)
+				if !completeRead {
+					copy := settled.DeepCopy()
+					copy.Status.Nodes = workflow.DeepCopy().Status.Nodes
+					settled = copy
+				}
+				if binding.UID != "" && !binding.matches(settled) {
+					return Completion{}, errors.New("argojob: adopted Workflow identity changed at completion")
+				}
+				controller.retainWorkflowTiming(ctx, settled)
+				completion := completionFor(settled)
+				completion.ObservationComplete = completion.ObservationComplete && completeRead
+				completion.Steps = reporter.order(completion.Steps)
+				preserveObservedExitCodes(&completion, workflow)
+				preserveRecordedExitCodes(&completion, events)
+				controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
+				if publishErr := controller.publishLogs(ctx, settled, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
+					budgetBreachErr = publishErr
+				}
+				if live != nil {
+					live.drain(settled)
+					live.applyDiagnostics(&completion)
+					if err := live.failure(); err != nil && budgetBreachErr == nil {
+						budgetBreachErr = err
+					}
+				}
+				completion.classifyRestartCut()
+				reporter.finish(budget)
+				if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
+					return completion, fmt.Errorf("retire executor identity: %w", err)
+				}
+				if budgetBreachErr != nil {
+					return completion, budgetBreachErr
+				}
+				if progressErr := reporter.failure(); progressErr != nil {
+					return completion, fmt.Errorf("argojob: run progress markers degraded: %w", progressErr)
+				}
+				return completion, nil
+			}
+			if controller.timings != nil && eventDriven {
+				if !boundTiming {
+					controller.retainWorkflowTiming(ctx, workflow)
+					boundTiming = true
+				}
+				observation := Completion{}
+				for _, step := range reporter.order(StepResults(workflow)) {
+					if terminal(step.Status) && !timed[step.NodeID] {
+						observation.Steps = append(observation.Steps, step)
+					}
+				}
+				if len(observation.Steps) > 0 {
+					controller.collectWatchedStepDiagnostics(ctx, workflow, &observation, time.Time{})
+					for _, step := range observation.Steps {
+						timed[step.NodeID] = true
+					}
 				}
 			}
-			completion.classifyRestartCut()
-			reporter.finish(budget)
-			if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
-				return completion, fmt.Errorf("retire executor identity: %w", err)
-			}
-			if budgetBreachErr != nil {
-				return completion, budgetBreachErr
-			}
-			if progressErr := reporter.failure(); progressErr != nil {
-				return completion, fmt.Errorf("argojob: run progress markers degraded: %w", progressErr)
-			}
-			return completion, nil
-		}
-		if controller.timings != nil {
-			if !boundTiming {
-				controller.retainWorkflowTiming(ctx, workflow)
-				boundTiming = true
-			}
-			observation := Completion{}
-			for _, step := range reporter.order(StepResults(workflow)) {
-				if terminal(step.Status) && !timed[step.NodeID] {
-					observation.Steps = append(observation.Steps, step)
+			if eventDriven {
+				if publishErr := controller.publishLogs(ctx, workflow, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
+					budgetBreachErr = publishErr
 				}
 			}
-			if len(observation.Steps) > 0 {
-				controller.collectStepDiagnostics(ctx, workflow, &observation)
-				for _, step := range observation.Steps {
-					timed[step.NodeID] = true
-				}
-			}
+			break
 		}
-		if publishErr := controller.publishLogs(ctx, workflow, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
-			budgetBreachErr = publishErr
-		}
-
 		select {
 		case <-ctx.Done():
 			return Completion{}, ctx.Err()
+		case <-wake:
+			eventDriven = true
 		case <-ticker.C:
+			eventDriven = false
 		}
 	}
 }

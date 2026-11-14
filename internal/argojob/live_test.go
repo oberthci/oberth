@@ -25,6 +25,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
 
+	"github.com/oberthci/oberth/internal/argowatch"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
@@ -47,6 +48,7 @@ const (
 )
 
 type liveCluster struct {
+	hub        *argowatch.Hub
 	workflows  WorkflowClient
 	kube       kubernetes.Interface
 	restConfig *rest.Config
@@ -76,7 +78,21 @@ func requireLiveCluster(t *testing.T) liveCluster {
 	if err != nil {
 		t.Fatalf("argo client: %v", err)
 	}
+	hub, err := argowatch.New(kube, argo, namespace, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	watchCtx, stopWatch := context.WithCancel(t.Context())
+	watchDone := make(chan struct{})
+	go func() { defer close(watchDone); hub.Run(watchCtx) }()
+	t.Cleanup(func() { stopWatch(); <-watchDone })
+	syncCtx, stopSync := context.WithTimeout(watchCtx, 30*time.Second)
+	defer stopSync()
+	if err := hub.WaitForSync(syncCtx); err != nil {
+		t.Fatal(err)
+	}
 	return liveCluster{
+		hub:        hub,
 		workflows:  argo.ArgoprojV1alpha1().Workflows(namespace),
 		kube:       kube,
 		restConfig: config,
@@ -279,7 +295,7 @@ func TestLiveReadOnlyRootFilesystemIsRealAndTmpIsWritable(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	log := &recordingWriter{}
-	completion, err := controller.Wait(ctx, request.Name, request.RunID, log)
+	completion, err := withWaitTestHub(t, controller, cluster.hub).Wait(ctx, request.Name, request.RunID, log)
 	if err != nil {
 		t.Fatalf("wait: %v", err)
 	}
@@ -332,7 +348,7 @@ func TestLiveWorkflowRunsToCompletion(t *testing.T) {
 	}
 
 	log := &recordingWriter{}
-	completion, err := controller.Wait(ctx, request.Name, request.RunID, log)
+	completion, err := withWaitTestHub(t, controller, cluster.hub).Wait(ctx, request.Name, request.RunID, log)
 	if err != nil {
 		t.Fatalf("wait: %v", err)
 	}
@@ -393,7 +409,7 @@ func TestLiveFailingWorkflowReportsTheFailedStep(t *testing.T) {
 	if _, err := controller.Create(ctx, request); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	completion, err := controller.Wait(ctx, request.Name, request.RunID, &recordingWriter{})
+	completion, err := withWaitTestHub(t, controller, cluster.hub).Wait(ctx, request.Name, request.RunID, &recordingWriter{})
 	if err != nil {
 		t.Fatalf("wait: %v", err)
 	}
@@ -437,7 +453,7 @@ func TestLiveTerminalStateReconstructsWithoutInProcessState(t *testing.T) {
 	if _, err := controller.Create(ctx, request); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := controller.Wait(ctx, request.Name, request.RunID, &recordingWriter{}); err != nil {
+	if _, err := withWaitTestHub(t, controller, cluster.hub).Wait(ctx, request.Name, request.RunID, &recordingWriter{}); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
 

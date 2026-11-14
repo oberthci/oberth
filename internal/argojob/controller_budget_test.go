@@ -147,7 +147,7 @@ func TestRunLogBudgetEnforcedAcrossSteps(t *testing.T) {
 	})
 
 	var destination bytes.Buffer
-	_, waitErr := controller.Wait(context.Background(), "wf", "run-budget", &destination)
+	_, waitErr := withWaitTestHub(t, controller).Wait(context.Background(), "wf", "run-budget", &destination)
 	if waitErr == nil {
 		t.Fatal("expected Wait to return an error when the aggregate budget is exceeded")
 	}
@@ -194,7 +194,7 @@ func TestProgressWriterFailurePropagatesFromWait(t *testing.T) {
 		return io.NopCloser(strings.NewReader("log output\n")), nil
 	})
 
-	_, waitErr := controller.Wait(context.Background(), "wf", "run-single", brokenWriter{})
+	_, waitErr := withWaitTestHub(t, controller).Wait(context.Background(), "wf", "run-single", brokenWriter{})
 	if waitErr == nil {
 		t.Fatal("expected Wait to return an error when progress writes fail")
 	}

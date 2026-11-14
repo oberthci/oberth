@@ -189,7 +189,7 @@ func TestContinuityFailedInitLogsExitAndMessage(t *testing.T) {
 	})
 	controller.logPod = func(context.Context, string, string) (*corev1.Pod, error) { return pod.DeepCopy(), nil }
 	var completion Completion
-	completion, err = controller.Wait(context.Background(), wf.Name, strings.Repeat("a", 32), &output)
+	completion, err = withWaitTestHub(t, controller).Wait(context.Background(), wf.Name, strings.Repeat("a", 32), &output)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -158,7 +158,7 @@ func TestLiveOutputPathsCannotReadTheExecutorToken(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	log := &recordingWriter{}
-	completion, err := controller.Wait(ctx, request.Name, request.RunID, log)
+	completion, err := withWaitTestHub(t, controller, cluster.hub).Wait(ctx, request.Name, request.RunID, log)
 	if err != nil {
 		t.Fatalf("wait: %v", err)
 	}

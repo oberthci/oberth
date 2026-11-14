@@ -229,26 +229,14 @@ func setExecutorEnvironment(container map[string]any) {
 	container["env"] = env
 }
 
-func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context, wf *wfv1.Workflow, delivered map[types.UID]bool, unavailable func()) error {
+func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context, wf *wfv1.Workflow, pods []corev1.Pod, delivered map[types.UID]bool, unavailable func()) error {
 	if wf.Status.Phase.Completed() || controller.kube == nil || controller.seeder == nil {
 		return nil
 	}
-	capability, err := controller.boundCapability(ctx, wf, 0)
-	if err != nil {
-		return identityFailure("operator_capability", err)
-	}
-	pods, err := controller.kube.CoreV1().Pods(wf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=" + wf.Name})
-	if err != nil {
-		if ctx.Err() == nil && retryExecutorIdentityRead(err) {
-			if unavailable != nil {
-				unavailable()
-			}
-			return nil
-		}
-		return identityFailure("pod_list", err)
-	}
-	for i := range pods.Items {
-		pod := &pods.Items[i]
+	var capability *argoworkflow.Capability
+	capabilityChecked := false
+	for i := range pods {
+		pod := &pods[i]
 		if delivered[pod.UID] || pod.DeletionTimestamp != nil {
 			continue
 		}
@@ -277,6 +265,16 @@ func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context,
 			if _, ok := wf.Status.Nodes[nodeID]; !ok {
 				continue
 			}
+		}
+		// Capability validation gates identity delivery. With no eligible waiter,
+		// observing a run (including an idle clock tick) needs no live API reads.
+		if !capabilityChecked {
+			var err error
+			capability, err = controller.boundCapability(ctx, wf, 0)
+			if err != nil {
+				return identityFailure("operator_capability", err)
+			}
+			capabilityChecked = true
 		}
 		resourceAccount := ""
 		if capability != nil {

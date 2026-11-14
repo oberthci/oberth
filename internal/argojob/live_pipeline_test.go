@@ -104,7 +104,7 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 	go reportProgress(t, ctx, controller, request.Name, stop)
 
 	log := &recordingWriter{}
-	completion, err := controller.Wait(ctx, request.Name, request.RunID, log)
+	completion, err := withWaitTestHub(t, controller, cluster.hub).Wait(ctx, request.Name, request.RunID, log)
 	if err != nil {
 		t.Fatalf("wait: %v\n%s", err, truncate(log.String(), 20000))
 	}

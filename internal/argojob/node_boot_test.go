@@ -62,7 +62,7 @@ func TestNodeRebootClassifiesOwnedUnknownTerminationAcrossResume(t *testing.T) {
 			kube := fake.NewClientset(oldPod, machine)
 			controller := (&Controller{kube: kube}).WithNodeBootRecorder(db)
 			if kind != "no-running-observation" {
-				controller.observeRunningNodeBoots(ctx, wf)
+				controller.observeRunningNodeBoots(ctx, wf, nil)
 			}
 			// Reopen canonical storage, as a replacement server process would.
 			if err = db.Close(); err != nil {

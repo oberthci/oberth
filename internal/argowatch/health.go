@@ -23,17 +23,20 @@ type attemptHealth struct {
 
 func (h *Hub) recordAttempt(kind resourceKind, err error) {
 	h.healthMu.Lock()
-	defer h.healthMu.Unlock()
 	// Observe transitions before and after this attempt, preserving one
 	// timestamp while outages overlap across the two resource kinds.
-	h.healthSinceLocked()
+	wasUnhealthy := !h.healthSinceLocked().IsZero()
 	state := &h.attempts[kind]
 	if err == nil {
 		state.failureSince = time.Time{}
 	} else if state.failureSince.IsZero() {
 		state.failureSince = h.now()
 	}
-	h.healthSinceLocked()
+	recovered := wasUnhealthy && h.healthSinceLocked().IsZero()
+	h.healthMu.Unlock()
+	if recovered {
+		h.notifyRecovery()
+	}
 }
 
 // Healthy reports whether both caches are synced and their API observations

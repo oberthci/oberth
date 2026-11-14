@@ -27,8 +27,8 @@ func TestLiveLogDeliveryMatchesPodOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	runID := fmt.Sprintf("oberth-live-logs-%d", time.Now().UnixNano())
-	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: runID, Namespace: cluster.namespace, Annotations: map[string]string{runIDAnnotation: runID, identityAnnotation: "live-log-delivery"}}, Spec: wfv1.WorkflowSpec{
-		Entrypoint: "logs", ServiceAccountName: config.PipelineServiceAccount, Executor: &wfv1.ExecutorConfig{ServiceAccountName: config.ExecutorServiceAccount}, AutomountServiceAccountToken: ptr.To(false), ActiveDeadlineSeconds: ptr.To(int64(120)),
+	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: runID, Namespace: cluster.namespace, Labels: map[string]string{"oberth.ci/engine": "argo"}, Annotations: map[string]string{runIDAnnotation: runID, identityAnnotation: "live-log-delivery"}}, Spec: wfv1.WorkflowSpec{
+		PodMetadata: &wfv1.Metadata{Labels: map[string]string{triggerLabel: "ci"}}, Entrypoint: "logs", ServiceAccountName: config.PipelineServiceAccount, Executor: &wfv1.ExecutorConfig{ServiceAccountName: config.ExecutorServiceAccount}, AutomountServiceAccountToken: ptr.To(false), ActiveDeadlineSeconds: ptr.To(int64(120)),
 		Templates: []wfv1.Template{
 			{Name: "logs", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "noisy", Template: "noisy"}, {Name: "quiet", Template: "quiet"}, {Name: "retry", Template: "retry"}}}},
 			{Name: "noisy", Container: &corev1.Container{Image: "busybox:1.37", Command: []string{"sh", "-c"}, Args: []string{`i=0; while [ "$i" -lt 6 ]; do printf 'line-%03d\n' "$i"; i=$((i+1)); sleep 1; done`}}},
@@ -64,7 +64,7 @@ func TestLiveLogDeliveryMatchesPodOutput(t *testing.T) {
 	defer file.Close()
 	result := make(chan error, 1)
 	go func() {
-		completion, err := controller.Wait(ctx, runID, runID, file)
+		completion, err := withWaitTestHub(t, controller, cluster.hub).Wait(ctx, runID, runID, file)
 		if err == nil && !completion.Succeeded {
 			err = fmt.Errorf("workflow failed: %s", completion.Reason)
 		}

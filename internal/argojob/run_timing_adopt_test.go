@@ -153,8 +153,8 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	recorder := &failingTimingRecorder{Store: db}
 	ownerCtx, stop := context.WithCancel(ctx)
 	defer stop()
-	owner := &Controller{workflows: &scriptedWorkflowClient{states: []*wfv1.Workflow{running}, exhausted: stop}, kube: fake.NewClientset(firstPod.DeepCopy()), logs: logs, config: config, interval: time.Millisecond, timings: recorder}
-	if _, err = owner.Wait(ownerCtx, terminal.Name, run.ID, io.Discard); err == nil {
+	owner := &Controller{workflows: &scriptedWorkflowClient{states: []*wfv1.Workflow{running}, exhausted: stop}, kube: fake.NewClientset(firstPod.DeepCopy()), logs: logs, config: config, idleInterval: time.Millisecond, timings: recorder}
+	if _, err = withWaitTestHub(t, owner).Wait(ownerCtx, terminal.Name, run.ID, io.Discard); err == nil {
 		t.Fatal("pre-restart owner observed a terminal Workflow")
 	}
 	before, err := db.RunTiming(ctx, run.ID)
@@ -185,8 +185,8 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 			events = append(events, runprogress.Event{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
 		}
 	}
-	resumed := &Controller{workflows: &scriptedWorkflowClient{states: []*wfv1.Workflow{running, terminal}}, kube: fake.NewClientset(secondPod.DeepCopy()), logs: logs, config: config, interval: time.Millisecond, timings: recorder}
-	completion, err := resumed.WaitResumed(ctx, terminal.Name, run.ID, io.Discard, events, 100, binding)
+	resumed := &Controller{workflows: &scriptedWorkflowClient{states: []*wfv1.Workflow{running, terminal}}, kube: fake.NewClientset(secondPod.DeepCopy()), logs: logs, config: config, idleInterval: time.Millisecond, timings: recorder}
+	completion, err := withWaitTestHub(t, resumed).WaitResumed(ctx, terminal.Name, run.ID, io.Discard, events, 100, binding)
 	if err != nil || !completion.Succeeded || len(completion.Steps) != 2 {
 		t.Fatalf("resumed completion = %+v, %v", completion, err)
 	}

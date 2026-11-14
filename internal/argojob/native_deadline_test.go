@@ -42,7 +42,7 @@ func TestNativeWaitingWorkflowHasNoServerWatchdog(t *testing.T) {
 			t.Fatal(err)
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-		_, err = controller.Wait(ctx, wf.Name, wf.Annotations[runIDAnnotation], io.Discard)
+		_, err = withWaitTestHub(t, controller).Wait(ctx, wf.Name, wf.Annotations[runIDAnnotation], io.Discard)
 		cancel()
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("native wait expired before caller stopped observing: %v", err)

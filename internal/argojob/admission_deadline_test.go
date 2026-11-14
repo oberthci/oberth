@@ -24,14 +24,14 @@ func TestAdmissionDeadlineIdentityRetriesIssuanceOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 		c.workflows = wffake.NewSimpleClientset(wf).ArgoprojV1alpha1().Workflows(wf.Namespace)
-		c.interval = time.Minute
+		c.idleInterval = time.Minute
 		c.seeder.exec = func(context.Context, string, string, string, []string, io.Reader, io.Writer, io.Writer) error {
 			return nil
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 		defer cancel()
 		start := time.Now()
-		_, err := c.Wait(ctx, wf.Name, "identity-run", io.Discard)
+		_, err := withWaitTestHub(t, c).Wait(ctx, wf.Name, "identity-run", io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "executor identity readiness deadline exceeded after one issuance retry") || *requests != 2 || time.Since(start) != 4*time.Minute {
 			t.Fatalf("identity deadline/retry: requests=%d elapsed=%s err=%v", *requests, time.Since(start), err)
 		}

@@ -201,3 +201,7 @@ func TestRunListBeforeInitialSyncAwaitsArgoWithoutOutageClaim(t *testing.T) {
 		t.Fatal("startup observation used live API")
 	}
 }
+
+func (emptyHealthyWatchHub) Subscribe(string) (<-chan struct{}, func()) {
+	return make(chan struct{}, 1), func() {}
+}

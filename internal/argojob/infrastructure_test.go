@@ -26,7 +26,7 @@ func TestCompletionKubeletMessagesSurvivePodGC(t *testing.T) {
 			wf.Status.Nodes[node.ID] = node
 			completion := completionFor(wf)
 			controller := &Controller{kube: fake.NewClientset()}
-			controller.collectStepDiagnostics(context.Background(), wf, &completion)
+			controller.collectRestartStepDiagnostics(context.Background(), wf, &completion, time.Time{})
 			if completion.Succeeded || !completion.Infrastructure || !strings.Contains(completion.Reason, message) || strings.Contains(completion.Reason, "application-controlled") {
 				t.Fatalf("lost kubelet reason: %#v", completion)
 			}
@@ -64,7 +64,7 @@ func TestCompletionOwnedPodEvictionAndOOM(t *testing.T) {
 			}
 			controller := &Controller{kube: fake.NewClientset(pod)}
 			completion := completionFor(wf)
-			controller.collectStepDiagnostics(context.Background(), wf, &completion)
+			controller.collectRestartStepDiagnostics(context.Background(), wf, &completion, time.Time{})
 			if !completion.Infrastructure || !strings.Contains(completion.Reason, "Evicted") || strings.Contains(completion.Reason, "application-controlled") {
 				t.Fatalf("owned Pod not classified: %#v", completion)
 			}
@@ -77,7 +77,7 @@ func TestCompletionOwnedPodEvictionAndOOM(t *testing.T) {
 			pod.OwnerReferences[0].UID = "foreign"
 			controller.kube = fake.NewClientset(pod)
 			completion = completionFor(wf)
-			controller.collectStepDiagnostics(context.Background(), wf, &completion)
+			controller.collectRestartStepDiagnostics(context.Background(), wf, &completion, time.Time{})
 			if completion.Infrastructure {
 				t.Fatal("foreign Pod changed verdict")
 			}
@@ -110,7 +110,7 @@ func TestCompletionContainerMemoryLimitOOMIsTestFailure(t *testing.T) {
 	wf.Status.Nodes[node.ID] = node
 	completion := completionFor(wf)
 	controller := &Controller{kube: fake.NewClientset(pod)}
-	controller.collectStepDiagnostics(t.Context(), wf, &completion)
+	controller.collectRestartStepDiagnostics(t.Context(), wf, &completion, time.Time{})
 	if completion.Infrastructure || completion.Succeeded || completion.FailedStep != "test" {
 		t.Fatalf("step memory limit OOM lost test attribution: %#v", completion)
 	}
@@ -190,7 +190,7 @@ func TestDeclaredStorageEvictionIsStepFailure(t *testing.T) {
 			}
 			completion := completionFor(wf)
 			controller := &Controller{kube: kube}
-			controller.collectStepDiagnostics(context.Background(), wf, &completion)
+			controller.collectRestartStepDiagnostics(context.Background(), wf, &completion, time.Time{})
 			if completion.Succeeded {
 				t.Fatal("evicted step succeeded")
 			}

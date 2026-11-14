@@ -3,6 +3,7 @@ package argojob
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -19,13 +20,24 @@ const executorIdentityRetryAnnotation = "oberth.ci/executor-identity-retry-at"
 
 type executorIdentityProgress struct {
 	identity                 map[types.UID]identityWait
-	readFailingSince         time.Time
 	identityReadFailingSince time.Time
+	resumedAt                time.Time
 }
 type identityWait struct {
 	since     time.Time
 	retried   bool
 	persisted bool
+}
+
+// Observation gaps are not evidence that a waiter failed to make progress.
+// Keep the one-retry state, but start a fresh observed readiness/read window.
+func (p *executorIdentityProgress) resumeAfterOutage(now time.Time) {
+	p.identityReadFailingSince = time.Time{}
+	p.resumedAt = now
+	for uid, wait := range p.identity {
+		wait.since = now
+		p.identity[uid] = wait
+	}
 }
 
 type executorIdentityProgressError struct {
@@ -95,6 +107,9 @@ func (p *executorIdentityProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, d
 					}
 				}
 			}
+			if wait.since.Before(p.resumedAt) {
+				wait.since = p.resumedAt
+			}
 			if now.Sub(wait.since) >= executorReadinessTimeout {
 				if wait.retried {
 					return &executorIdentityProgressError{reason: "executor identity readiness deadline exceeded after one issuance retry"}
@@ -163,34 +178,18 @@ func podCapacityPending(pod *corev1.Pod) bool {
 	return false
 }
 
-func (controller *Controller) checkExecutorIdentityProgress(ctx context.Context, wf *wfv1.Workflow, progress *executorIdentityProgress, delivered map[types.UID]bool) error {
+func (controller *Controller) checkExecutorIdentityProgress(ctx context.Context, wf *wfv1.Workflow, pods []corev1.Pod, progress *executorIdentityProgress, delivered map[types.UID]bool) error {
 	if wf.Status.Phase.Completed() || controller.kube == nil {
 		return nil
 	}
 	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	pods, err := controller.kube.CoreV1().Pods(wf.Namespace).List(readCtx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=" + wf.Name})
-	if err != nil {
-		// Failed observations never count as progress. The caller settles failure
-		// through ownership-checked workflow deletion before releasing capacity.
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if progress.readFailingSince.IsZero() {
-			progress.readFailingSince = time.Now()
-		}
-		if time.Since(progress.readFailingSince) >= identityObservationTimeout {
-			return &executorIdentityProgressError{reason: "Kubernetes executor identity Pod observation unavailable for 2m"}
-		}
-		return nil
-	}
-	progress.readFailingSince = time.Time{}
-	err = progress.check(wf, pods.Items, delivered, time.Now())
+	err := progress.check(wf, pods, delivered, time.Now())
 	if err != nil {
 		return err
 	}
-	for i := range pods.Items {
-		pod := &pods.Items[i]
+	for i := range pods {
+		pod := &pods[i]
 		wait, ok := progress.identity[pod.UID]
 		if !ok || !wait.retried || wait.persisted {
 			continue
@@ -198,6 +197,23 @@ func (controller *Controller) checkExecutorIdentityProgress(ctx context.Context,
 		if err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, mainMountsExecutorToken(pod)); err != nil {
 			return identityFailure("target_validation", err)
 		}
+		// The cached Pod nominates a retry; a live target check supplies the UID
+		// and resourceVersion that gate its persisted retry marker.
+		current, err := controller.executorIdentityTarget(readCtx, wf, pod, mainMountsExecutorToken(pod))
+		if errors.Is(err, errExecutorIdentityTargetGone) {
+			continue
+		}
+		if err != nil {
+			if retryExecutorIdentityRead(err) {
+				continue
+			}
+			var failure *executorIdentityError
+			if errors.As(err, &failure) {
+				return failure
+			}
+			return identityFailure("pod_read", err)
+		}
+		pod = current
 		patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": pod.UID, "resourceVersion": pod.ResourceVersion, "annotations": map[string]string{executorIdentityRetryAnnotation: wait.since.UTC().Format(time.RFC3339Nano)}}})
 		if err != nil {
 			return err
