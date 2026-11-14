@@ -106,7 +106,7 @@ func testReleasedServerUpgrade(t *testing.T, version string, noBackup bool) {
 		}
 		// These exact flags exist in v0.22.6 cmd/oberth/backup.go, including
 		// --history-only and addClusterFlags' --context/--namespace.
-		for _, command := range []string{"./oberth-v" + version + " backup --history-only --context fixture --namespace oberth", "oberth upgrade --no-backup --context fixture --namespace oberth", "confirm no runs are active"} {
+		for _, command := range []string{"./oberth-v" + version + " backup --history-only --context fixture --namespace oberth", "oberth upgrade --no-backup --context fixture --namespace oberth", "confirm no runs are active", "--wait-for critical"} {
 			if !strings.Contains(err.Error(), command) {
 				t.Fatal("refusal lacks exact recovery instruction", command, err)
 			}
@@ -159,6 +159,9 @@ func TestUpgradeNativeWorkflowObservation(t *testing.T) {
 			calls := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
+				if r.URL.Path != "/apis/argoproj.io/v1alpha1/namespaces/pipelines/workflows" || r.URL.Query().Get("labelSelector") != "oberth.ci/run" {
+					t.Error("native observation lost its selected namespace or selector")
+				}
 				w.Header().Set("Content-Type", "application/json")
 				current := phase
 				if calls > 1 {

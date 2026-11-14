@@ -17,7 +17,7 @@ import (
 // this read is advisory and does not freeze admission or inspect a server queue.
 func waitForUpgradeWorkflows(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
 	if deps.RestConfig == nil {
-		return errors.New("Kubernetes Workflow observation unavailable; confirm no runs are active and retry without --wait-idle or --wait-for")
+		return errors.New("native Kubernetes Workflow observation unavailable; confirm no runs are active and retry without --wait-idle or --wait-for")
 	}
 	if err := verifyRecordedCluster(deps.ContextName, deps.RestConfig); err != nil {
 		return err
