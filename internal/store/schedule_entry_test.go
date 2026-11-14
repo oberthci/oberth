@@ -87,13 +87,13 @@ func TestScheduleEntriesAreIndependentAndSurviveRetryRecovery(t *testing.T) {
 
 func TestScheduleEntryMigrationPreservesLegacyIdentityAcrossReopen(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "legacy.sqlite")
+	path := filepath.Join(t.TempDir(), "prior.sqlite")
 	s, err := Open(ctx, path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := createRepo(t, s)
-	legacy, err := s.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "oberth:scheduler", Trigger: "schedule"})
+	prior, err := s.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "oberth:scheduler", Trigger: "schedule"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,14 +108,14 @@ func TestScheduleEntryMigrationPreservesLegacyIdentityAcrossReopen(t *testing.T)
 		t.Fatal(err)
 	}
 	defer s.Close()
-	got, err := s.Run(ctx, legacy.ID)
-	if err != nil || got.ID != legacy.ID || got.ScheduleEntry != legacy.ScheduleEntry || got.Trigger != legacy.Trigger || got.Status != model.RunFailed || got.Error != model.ServerRestartReason {
-		t.Fatalf("legacy run changed: %+v vs %+v (%v)", got, legacy.Run, err)
+	got, err := s.Run(ctx, prior.ID)
+	if err != nil || got.ID != prior.ID || got.ScheduleEntry != prior.ScheduleEntry || got.Trigger != prior.Trigger || got.Status != model.RunFailed || got.Error != model.ServerRestartReason {
+		t.Fatalf("prior run changed: %+v vs %+v (%v)", got, prior.Run, err)
 	}
 	// Unknown old entries stay unknown; a current schedule file cannot
 	// backfill a guess into historical run identity.
 	if got.ScheduleEntry != "" {
-		t.Fatal("legacy identity invented")
+		t.Fatal("prior identity invented")
 	}
 	assertFreshSchemaLedger(t, s.db)
 }

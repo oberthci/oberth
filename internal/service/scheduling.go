@@ -84,7 +84,7 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 	if run.Phase == "publishing" || scheduling == nil || scheduling.Execution == nil {
 		return
 	}
-	if scheduling.Execution.Phase == "Pending" {
+	if scheduling.Execution.Phase == "Pending" && !strings.HasPrefix(scheduling.Execution.Reason, "SourceSeed") {
 		run.DisplayStatus = model.DisplayQueued
 		run.DisplayReason = queuedDisplayReason(scheduling)
 	}
