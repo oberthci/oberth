@@ -736,8 +736,8 @@ func TestRestartRecoveryRetainsBranchWorkflows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if noJobRecovered.Status != model.RunFailed || noJobRecovered.FinishedAt == nil || noJobRecovered.SupersededBy != "" {
-		t.Fatalf("no-job recovered run = %#v, want failed under the same ID", noJobRecovered)
+	if noJobRecovered.Status != model.RunFailed || noJobRecovered.FinishedAt == nil {
+		t.Fatalf("no-job recovered run = %#v, want queued under the same ID", noJobRecovered)
 	}
 	recoveredRun, err := s.Run(ctx, noJobRun.ID)
 	if err != nil {
@@ -790,7 +790,7 @@ func TestRestartRecoveryFailsUnsubmittedTagRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunFailed || recovered.SupersededBy != "" || recovered.Error != model.ServerRestartReason {
+	if recovered.Status != model.RunFailed || recovered.Error != model.ServerRestartReason {
 		t.Fatalf("recovered tag run = %#v, want failed under the same ID", recovered)
 	}
 }
@@ -1808,7 +1808,7 @@ func TestOwnerRecoveryRetiresLegacyBranchRestartCancellation(t *testing.T) {
 	if _, err := s.MarkRunSubmissionStarted(context.Background(), run.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at) VALUES(?,?,'','owner_restart',?)`, run.ID, "old-owner-workflow", unixNano(now)); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,reason,created_at) VALUES(?,?,'owner_restart',?)`, run.ID, "old-owner-workflow", unixNano(now)); err != nil {
 		t.Fatal(err)
 	}
 	applyStopRestartMigration(t, s)
@@ -1819,7 +1819,7 @@ func TestOwnerRecoveryRetiresLegacyBranchRestartCancellation(t *testing.T) {
 		t.Fatalf("legacy restart deletion retained: %#v %v", pending, err)
 	}
 	current, err := s.Run(context.Background(), run.ID)
-	if err != nil || current.Status != model.RunRunning || current.SupersededBy != "" {
+	if err != nil || current.Status != model.RunRunning {
 		t.Fatalf("legacy recovery = %#v %v", current, err)
 	}
 }

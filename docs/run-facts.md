@@ -89,3 +89,19 @@ ref name is invalid: start with a letter or digit; use only letters, digits and 
 ```
 
 Rename an unsupported branch or tag explicitly before submitting it again.
+If `rg` is unavailable, replace it with
+`grep -Ev '^refs/(heads|tags)/[A-Za-z0-9][A-Za-z0-9._/+@=,-]*$'` in the listing.
+
+Oberth's push and branch-delete APIs refuse unsupported names. Delete or rename
+the branch or tag at the upstream repository, then refresh Oberth's repository
+cache to synchronize that change. An operator maintaining the hosted bare
+repository can delete an obsolete local ref with
+`git -C /path/to/hosted.git update-ref -d 'refs/heads/OLD_NAME'`; quote the exact
+name and update the upstream first so refresh cannot restore it. Rename an
+unsupported upstream default branch and change the upstream's default-branch
+setting before refreshing: an invalid upstream default branch prevents runs and
+refresh until corrected.
+
+Schedule entry names use the same alphabet, with a maximum of 64 bytes. Names
+outside it are refused both when reading `.oberth/schedule.yaml` and when
+compiling a stored scheduled run into `oberth-schedule`.

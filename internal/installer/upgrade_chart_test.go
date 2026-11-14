@@ -173,6 +173,7 @@ func TestUpgradeActualHelmPreservesValuesAndAddsDefaults(t *testing.T) {
 	fixture.checkHistoricalRestore(t)
 	fixture.checkDefaultTransit(t)
 	fixture.checkUnknownStoredValues(t)
+	fixture.checkScratchOnlyDefaults(t)
 
 }
 
@@ -361,7 +362,7 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T) {
 				}
 			}
 			if mode == "install" {
-				args, err = prepareRetiredInstallerReuse(t.Context(), deps, "oberth", t.TempDir(), args)
+				args, err = prepareRetiredInstallerReuse(t.Context(), deps, "oberth", t.TempDir(), args, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -390,7 +391,7 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T) {
 			if err := json.Unmarshal(stored, &want); err != nil {
 				t.Fatal(err)
 			}
-			dropRetiredInstallerValues(want, nil)
+			dropRetiredInstallerValues(want, nil, nil)
 			want["compatibility"] = identities
 			if mode == "install" {
 				want["image"].(map[string]any)["ref"] = image
@@ -518,4 +519,48 @@ func (f historicalHelmUpgrade) checkUnknownStoredValues(t *testing.T) {
 		}
 		delete(parent, "removedByTarget")
 	}
+}
+
+// v0.22.6 has already retired the earlier installer fields. Its chart still
+// supplied executorScratchSizeLimit, even when it was absent from user values.
+func (f historicalHelmUpgrade) checkScratchOnlyDefaults(t *testing.T) {
+	t.Helper()
+	t.Run("v0.22.6-scratch-only-in-chart-defaults", func(t *testing.T) {
+		body, err := json.Marshal(f.release)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var release []any
+		if err := json.Unmarshal(body, &release); err != nil {
+			t.Fatal(err)
+		}
+		stored := release[0].(map[string]any)
+		chart := stored["chart"].(map[string]any)
+		chart["metadata"].(map[string]any)["version"] = "0.22.6"
+		defaults := chart["values"].(map[string]any)
+		config := stored["config"].(map[string]any)
+		// Shape the prior release independently of the cleanup implementation.
+		for _, values := range []map[string]any{defaults, config} {
+			delete(values, "removedOldDefault")
+			delete(values["secretstore"].(map[string]any), "transit")
+			argo := values["argo"].(map[string]any)
+			for _, key := range []string{"controllerProfile", "controllerProfileConfigMap", "goProxy", "executorScratchSizeLimit"} {
+				delete(argo, key)
+			}
+		}
+		defaults["argo"].(map[string]any)["executorScratchSizeLimit"] = "1Gi"
+		body, err = json.Marshal(release)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		history := filepath.Join(dir, "release.json")
+		if err := os.WriteFile(history, body, 0600); err != nil {
+			t.Fatal(err)
+		}
+		fixture := f
+		fixture.values, fixture.config, fixture.release, fixture.history = defaults, config, release, history
+		fixture.deps = Deps{RunHelm: upgradeTestHelm(t, dir, history)}
+		fixture.checkInstallRestore(t)
+	})
 }

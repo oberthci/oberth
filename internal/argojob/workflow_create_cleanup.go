@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -50,7 +52,7 @@ func (controller *Controller) SettleCreate(ctx context.Context, name, runID stri
 	}
 	stopCtx, cancelStop := context.WithTimeout(budgetCtx, workflowCreateCleanupReadBudget)
 	defer cancelStop()
-	_, err = requestWorkflowStop(stopCtx, controller.workflows, workflow)
+	_, err = requestWorkflowShutdown(stopCtx, controller.workflows, workflow, wfv1.ShutdownStrategyStop)
 	if err != nil {
 		return false, fmt.Errorf("argojob: Stop pending Workflow %s: %w", name, err)
 	}

@@ -1081,20 +1081,24 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err != nil {
 		return nil, err
 	}
+	// Optional live diagnostics share one page deadline. Cached observations
+	// remain immediate even after the live-read budget expires.
+	observationCtx, cancelObservations := context.WithTimeout(ctx, 250*time.Millisecond)
+	defer cancelObservations()
 	for i := range runs {
 		if filter.View == api.RunViewHistory {
 			continue
 		}
 		switch runs[i].DisplayStatus {
 		case model.DisplayRunning:
-			runs[i].Scheduling = service.observeRunListExecution(ctx, runs[i])
+			runs[i].Scheduling = service.observeRunListExecution(observationCtx, runs[i])
 			applyExecutionDisplay(&runs[i], runs[i].Scheduling)
 			if runs[i].DisplayReason == "" && (runs[i].Scheduling == nil || runs[i].Scheduling.Execution == nil || runs[i].Scheduling.Execution.State == "unavailable" || runs[i].Scheduling.Execution.State == "not_observed") {
 				runs[i].DisplayReason = "awaiting Argo state"
 			}
 		case model.DisplayQueued:
 			var reason string
-			runs[i].Scheduling, reason = service.observeScheduling(ctx, runs[i], nil, false)
+			runs[i].Scheduling, reason = service.observeScheduling(observationCtx, runs[i], nil, false)
 			applyQueuedDisplay(&runs[i], runs[i].Scheduling, reason)
 		}
 	}
@@ -2226,7 +2230,7 @@ func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, s
 	if err := auditedGitMutation(ctx, service.auditor, actor.Identity, "sync.branch", "run", run.ID,
 		map[string]any{"repo": repository.Name, "branch": run.Ref, "sha": run.SHA},
 		func() error {
-			return service.git.SyncBranch(ctx, service.cacheInputFor(ctx, repository), run.Ref, run.SHA)
+			return service.git.SyncBranch(ctx, service.cacheInputFor(ctx, repository), run.Ref, run.SHA, true)
 		}); err != nil {
 		return model.Run{}, fmt.Errorf("sync branch: %w", err)
 	}

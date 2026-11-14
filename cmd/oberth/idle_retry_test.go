@@ -13,8 +13,26 @@ import (
 	"testing/synctest"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+
 	"github.com/oberthci/oberth/internal/installer"
 )
+
+// Idle-wait fixtures have an external Argo controller with compliant live
+// defaults, even when the Oberth Pod policy is disabled.
+func upgradeWaitArgoObjects() []runtime.Object {
+	return []runtime.Object{
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "workflow-controller", Namespace: installer.DefaultArgoNamespace}, Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "workflow-controller", Command: []string{"workflow-controller"}, Args: []string{"--configmap", "idle-test-config"}}}}}}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "idle-test-config", Namespace: installer.DefaultArgoNamespace}, Data: map[string]string{"config": `{
+			"mainContainer":{"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"seccompProfile":{"type":"RuntimeDefault"}}},
+			"executor":{"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"seccompProfile":{"type":"RuntimeDefault"}}}
+		}`}},
+	}
+}
 
 func idleResponse(code int, body string) *http.Response {
 	return &http.Response{StatusCode: code, Header: http.Header{"X-Oberth-Idle-Version": {"1"}}, Body: io.NopCloser(strings.NewReader(body))}
@@ -37,7 +55,8 @@ func TestUpgradeWaitRetriesTimeoutBeforeUpgrade(t *testing.T) {
 				var output bytes.Buffer
 				upgradeReached := errors.New("fixture reached Helm upgrade")
 				deps := installer.Deps{
-					Output: &output,
+					KubeClient: fake.NewClientset(upgradeWaitArgoObjects()...),
+					Output:     &output,
 					RunCommandStream: func(ctx context.Context, w io.Writer, name string, args ...string) error {
 						if name != "kubectl" || !slices.Contains(args, "--wait-for=critical") {
 							t.Fatalf("unexpected command %s %v", name, args)

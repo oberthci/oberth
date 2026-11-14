@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 type adoptedRun struct {
@@ -38,6 +38,9 @@ func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 }
 
 func (scheduler *Scheduler) handleAdoptionFailure(ctx context.Context, adopter JobAdopter, run model.Run, cause error, require mutationRequirement) error {
+	if errors.Is(cause, argoworkflow.ErrWorkflowCapabilityRequired) {
+		return scheduler.failRetiredRun(ctx, run, require)
+	}
 	failure := adoptionFailure(adopter, run, cause)
 	if !errors.Is(cause, ErrAdoptionRefused) {
 		return failure
@@ -48,6 +51,13 @@ func (scheduler *Scheduler) handleAdoptionFailure(ctx context.Context, adopter J
 
 // adopt restores submission ownership for work already running.
 func (gate *submissionRegistry) adopt(run model.Run) (*submissionOwner, error) {
+	owner, _, err := gate.adoptOwner(run)
+	return owner, err
+}
+
+// adoptOwner reports whether this call acquired ownership. A settlement
+// observer must never share an existing observer's reservation or log file.
+func (gate *submissionRegistry) adoptOwner(run model.Run) (*submissionOwner, bool, error) {
 	order := run.AdmissionSequence
 	if order <= 0 {
 		order = run.QueueSequence
@@ -56,68 +66,29 @@ func (gate *submissionRegistry) adopt(run model.Run) (*submissionOwner, error) {
 	defer gate.mu.Unlock()
 	if previous, ok := gate.owners[run.QueueSequence]; ok {
 		if previous.runID != run.ID || previous.order != order || !previous.adopted || previous.repoID != run.RepoID {
-			return nil, fmt.Errorf("%w: conflicting adopted run", ErrAdoptionRefused)
+			return nil, false, fmt.Errorf("%w: conflicting adopted run", ErrAdoptionRefused)
 		}
-		return previous, nil
+		return previous, false, nil
 	}
 	reservation := &submissionOwner{withdrawn: make(chan struct{}), gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID, adopted: true}
 	gate.owners[run.QueueSequence] = reservation
-	return reservation, nil
+	return reservation, true, nil
 }
 
 func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run, require mutationRequirement, reservation *submissionOwner) error {
-	defer reservation.cancel()
+	return scheduler.resumeObservedRun(ctx, run, require, reservation, false)
+}
+
+// Retired execution is terminal, rather than a reason to stop the new owner.
+// Terminate only the owned Argo Workflow; operators own any external resources.
+func (scheduler *Scheduler) failRetiredRun(ctx context.Context, run model.Run, require mutationRequirement) error {
 	if err := require(ctx); err != nil {
 		return err
 	}
-	repository, err := scheduler.database().Repository(ctx, run.RepoID)
-	if err != nil {
-		return err
+	// Refused recovery cannot supply exit identities, so native Terminate skips exits.
+	scheduler.deferCreateCleanup(ctx, run, run.WorkflowName, argoworkflow.ErrWorkflowCapabilityRequired)
+	if err := scheduler.jobs.Terminate(ctx, run.WorkflowName, run.ID); err != nil {
+		log.Printf("WARN: retired Workflow termination remains pending: %v", err)
 	}
-
-	current, err := scheduler.database().Run(ctx, run.ID)
-	if err != nil {
-		return err
-	}
-	if current.Cancelled() {
-		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-			return scheduler.deferRefusedStops(ctx, run.ID, err)
-		}
-	}
-	file, events, retained, err := scheduler.logs.Resume(run.ID)
-	if err != nil {
-		return err
-	}
-	// A previous owner can stop between Workflow creation and this transition.
-	if run.Phase == "waiting" || isPendingCreate(run) {
-		run, err = scheduler.database().MarkRunSubmitted(ctx, run.ID)
-		if err != nil {
-			_ = file.Close()
-			return err
-		}
-	}
-	if run.Status == model.RunRunning && run.Phase == "running" {
-		// The matching Workflow is adopted and submission is durable. A
-		// failed unlink is retried by terminal workspace recovery.
-		_ = os.Remove(scheduler.createAdmissionPath(run.ID))
-	}
-	err = scheduler.observeRun(ctx, run, repository, require, reservation, runObservation{
-		file: file, events: events, retained: retained, adopted: true,
-	})
-	cleanupCtx, cancel := boundedWorkspaceCleanupContext(ctx)
-	defer cancel()
-	current, lookupErr := scheduler.database().Run(cleanupCtx, run.ID)
-	if lookupErr != nil || !current.Status.Terminal() {
-		return errors.Join(err, lookupErr)
-	}
-	cleanupErr := scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
-	if run.Trigger == "promotion" {
-		promotion, promotionErr := scheduler.database().PromotionByRun(cleanupCtx, run.ID)
-		if promotionErr != nil {
-			cleanupErr = errors.Join(cleanupErr, promotionErr)
-		} else {
-			cleanupErr = errors.Join(cleanupErr, scheduler.workspaces.cleanupPromotion(cleanupCtx, promotion.ID))
-		}
-	}
-	return errors.Join(err, cleanupErr)
+	return nil
 }

@@ -9,7 +9,7 @@ metadata:
 rules:
   - apiGroups: ["argoproj.io"]
     resources: ["workflows"]
-    verbs: ["create", "get", "list", "watch", "delete"]
+    verbs: ["create", "get", "list", "watch", "patch"]
   # A Pod may only mount PersistentVolumeClaims in its own namespace, so the
   # checkout on the server's volume cannot be handed to a pipeline that runs
   # here. The server instead creates a claim per run and fills it through a

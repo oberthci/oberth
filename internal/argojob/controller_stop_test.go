@@ -42,17 +42,14 @@ func TestCancelUsesNativeStopAndKeepsExitHandlers(t *testing.T) {
 				}
 				if action.GetVerb() == "patch" {
 					patches++
-					var body map[string]json.RawMessage
-					if err := json.Unmarshal(action.(ktesting.PatchAction).GetPatch(), &body); err != nil {
+					var operations []map[string]any
+					if err := json.Unmarshal(action.(ktesting.PatchAction).GetPatch(), &operations); err != nil {
 						t.Fatal(err)
 					}
-					var metadata map[string]string
-					if err := json.Unmarshal(body["metadata"], &metadata); err != nil {
-						t.Fatal(err)
+					if len(operations) != 3 || operations[0]["path"] != "/metadata/uid" || operations[0]["value"] != "workflow-uid" || operations[1]["op"] != "test" || operations[1]["path"] != "/spec/shutdown" || operations[1]["value"] != nil || operations[2]["path"] != "/spec/shutdown" || operations[2]["value"] != "Stop" {
+						t.Fatalf("patch lost its identity or strategy fence: %s", action.(ktesting.PatchAction).GetPatch())
 					}
-					if metadata["uid"] != "workflow-uid" || metadata["resourceVersion"] != "1" || string(body["spec"]) != `{"shutdown":"Stop"}` {
-						t.Fatalf("patch lost its identity fence or rewrote a field: %s", action.(ktesting.PatchAction).GetPatch())
-					}
+
 				}
 			}
 			if patches != 1 {
@@ -92,5 +89,64 @@ func TestCancelRefusesForeignOrReplacedWorkflow(t *testing.T) {
 				t.Fatal("replacement was stopped", err)
 			}
 		})
+	}
+}
+
+func TestNativeTerminateSkipsExitHandlersAndCannotBeDowngraded(t *testing.T) {
+	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "release", Namespace: "pipeline", UID: "original", ResourceVersion: "1", Annotations: map[string]string{runIDAnnotation: "run"}}, Spec: wfv1.WorkflowSpec{OnExit: "granted-publish"}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowRunning}}
+	client := argofake.NewSimpleClientset(workflow)
+	controller := &Controller{workflows: client.ArgoprojV1alpha1().Workflows(workflow.Namespace)}
+	if err := controller.Cancel(t.Context(), workflow.Name, "run"); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Terminate(t.Context(), workflow.Name, "run"); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Cancel(t.Context(), workflow.Name, "run"); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := controller.workflows.Get(t.Context(), workflow.Name, metav1.GetOptions{})
+	if err != nil || observed.Spec.Shutdown != wfv1.ShutdownStrategyTerminate || observed.Spec.OnExit != "granted-publish" {
+		t.Fatalf("native immediate stop was weakened: %+v %v", observed, err)
+	}
+	patches := 0
+	for _, action := range client.Actions() {
+		if action.GetVerb() == "delete" {
+			t.Fatal("shutdown deleted a Workflow")
+		}
+		if action.GetVerb() == "patch" {
+			patches++
+			var operations []map[string]any
+			if err := json.Unmarshal(action.(ktesting.PatchAction).GetPatch(), &operations); err != nil {
+				t.Fatal(err)
+			}
+			if operations[0]["op"] != "test" || operations[0]["path"] != "/metadata/uid" || operations[0]["value"] != "original" || operations[len(operations)-1]["path"] != "/spec/shutdown" {
+				t.Fatalf("shutdown lost UID fence: %+v", operations)
+			}
+
+		}
+	}
+	if patches != 2 {
+		t.Fatalf("Stop, Terminate, Stop issued %d patches; want monotonic escalation", patches)
+	}
+}
+
+func TestNativeShutdownRetriesConflictWithoutResourceVersionFence(t *testing.T) {
+	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "workflow", Namespace: "pipeline", UID: "original", ResourceVersion: "1", Annotations: map[string]string{runIDAnnotation: "run"}}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowRunning}}
+	client := argofake.NewSimpleClientset(workflow)
+	patches := 0
+	client.PrependReactor("patch", "workflows", func(ktesting.Action) (bool, runtime.Object, error) {
+		patches++
+		if patches == 1 {
+			return true, nil, apierrors.NewConflict(workflowTestResource, workflow.Name, errors.New("status changed"))
+		}
+		return false, nil, nil
+	})
+	controller := &Controller{workflows: client.ArgoprojV1alpha1().Workflows(workflow.Namespace)}
+	if err := controller.Terminate(t.Context(), workflow.Name, "run"); err != nil {
+		t.Fatal(err)
+	}
+	if patches != 2 {
+		t.Fatalf("conflict attempts=%d", patches)
 	}
 }

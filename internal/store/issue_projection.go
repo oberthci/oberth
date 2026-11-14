@@ -133,7 +133,7 @@ func transientNodeFailure(run model.Run) bool {
 	}
 	message, _ := model.SplitArtifactCollectionDeadline(run.Error)
 	message = strings.TrimPrefix(message, "trusted preflight: trusted preflight infrastructure failure: ")
-	return message == "Evicted" || strings.HasPrefix(message, "Evicted: ") || model.IsStartupDeadlineReason(message)
+	return model.IsNodeRebootReason(message) || message == "Evicted" || strings.HasPrefix(message, "Evicted: ") || model.IsStartupDeadlineReason(message)
 }
 
 func runIssueBody(run model.Run, failureTail string) string {

@@ -1031,9 +1031,6 @@ ORDER BY queue_sequence`)
 			if _, err := s.finishRunTx(ctx, tx, active.ID, model.RunResult{Status: model.RunInterrupted, Phase: model.PhaseCancelled, Error: strings.Replace(active.Reason, "cancelling by ", "cancelled by ", 1)}, model.PhaseCancelled, now); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE run_cancellations SET completed_at=? WHERE run_id=? AND job_name=''`, now, active.ID); err != nil {
-				return err
-			}
 			continue
 		}
 		if _, err := s.finishRunTx(ctx, tx, active.ID, model.RunResult{

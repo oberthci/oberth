@@ -71,12 +71,9 @@ func assertCancelled(t *testing.T, run model.Run, actor, reason string) {
 	if reason != "" {
 		want += ": " + reason
 	}
-	if run.Status == model.RunFailed {
-		want = strings.Replace(want, "cancelled by ", "stopped by ", 1)
-	}
-	if (run.Status != model.RunInterrupted && run.Status != model.RunFailed) || run.Phase != model.PhaseCancelled || run.Reason != want || run.SupersededBy != "" {
-		t.Fatalf("run %s = status %s phase %q reason %q superseded_by %q; want cancelled with %q",
-			run.ID, run.Status, run.Phase, run.Reason, run.SupersededBy, want)
+	if run.Status != model.RunInterrupted || run.Phase != model.PhaseCancelled || run.Reason != want {
+		t.Fatalf("run %s = status %s phase %q reason %q; want cancelled with %q",
+			run.ID, run.Status, run.Phase, run.Reason, want)
 	}
 }
 
@@ -128,7 +125,7 @@ func TestRunCancelWaitingRunJoinsCreatorAndPreservesPeer(t *testing.T) {
 	fixture.assertNothingCreated(t)
 
 	response := mustRunCancel(t, fixture.control, cancelAdmin, map[string]any{"id": head.ID, "reason": "wrong size"})
-	if response.PreviousState != "waiting" || response.Warning != "" {
+	if response.PreviousState != "waiting" || !strings.Contains(response.Warning, "Terminate; exit handlers will be skipped") {
 		t.Fatalf("waiting cancel response = %#v", response)
 	}
 	cancelled := fixture.awaitTerminal(t, head.ID)
@@ -172,7 +169,6 @@ func TestRunCancelWaitsForNativeStopAndExitHandlers(t *testing.T) {
 	if first.Workflow != "pending" || first.Status != "running" {
 		t.Fatalf("cancel = %+v", first)
 	}
-	mustRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": running.ID})
 	current := fixture.run(t, running.ID)
 	if current.Status != model.RunRunning || current.FinishedAt != nil || !strings.HasPrefix(current.Reason, "cancelling by ") {
 		t.Fatalf("Stop acceptance terminalized onExit: %+v", current)
@@ -186,7 +182,7 @@ func TestRunCancelWaitsForNativeStopAndExitHandlers(t *testing.T) {
 	}
 	fixture.engine.finish(t, running.ID)
 	final := fixture.awaitTerminal(t, running.ID)
-	if final.Status != model.RunFailed || final.Phase != model.PhaseCancelled || !strings.Contains(final.Reason, "stopped by agent@host: stuck test") {
+	if final.Status != model.RunInterrupted || final.Phase != model.PhaseCancelled || !strings.Contains(final.Reason, "cancelled by agent@host: stuck test") {
 		t.Fatalf("native Stop verdict = %+v", final)
 	}
 	fixture.awaitNoPendingCancellations(t)
@@ -314,7 +310,7 @@ func TestRunCancelPromotionFailsThePromotionWithoutMerging(t *testing.T) {
 	assertCancelled(t, fixture.awaitTerminal(t, enqueued.ID), cancelAdmin.Identity, "target frozen")
 	fixture.awaitNoPendingCancellations(t)
 	failed, err := fixture.store.Promotion(t.Context(), promotion.ID)
-	if err != nil || failed.Status != model.PromotionFailed || !strings.Contains(failed.Error, "stopped by dima@example-node: target frozen") {
+	if err != nil || failed.Status != model.PromotionFailed || !strings.Contains(failed.Error, "cancelled by dima@example-node: target frozen") {
 		t.Fatalf("promotion after cancel = %#v, %v", failed, err)
 	}
 	if pending, err := fixture.store.PendingPublications(t.Context()); err != nil || len(pending) != 0 {

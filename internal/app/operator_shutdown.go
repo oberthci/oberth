@@ -7,7 +7,8 @@ import (
 )
 
 func operatorShutdownResult(result service.JobResult, completion argojob.Completion) service.JobResult {
-	if completion.OperatorStopped {
+	if completion.OperatorStopped && !completion.Succeeded {
+		result.Status = model.RunInterrupted
 		result.Phase = model.PhaseCancelled
 		result.FailedStage, result.FailedStep = "", ""
 		result.Error = "Workflow stopped by its Workflow spec: " + completion.Reason

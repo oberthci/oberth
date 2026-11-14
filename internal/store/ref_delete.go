@@ -15,10 +15,10 @@ const deletedBranchRuns = `repo_id=? AND ref_kind='branch' AND ref=?
  AND NOT EXISTS (SELECT 1 FROM publications WHERE publications.run_id=runs.id AND publications.status='pending')`
 
 func cancelDeletedBranchTx(ctx context.Context, tx *sql.Tx, repoID int64, ref string, now int64) error {
-	if _, err := tx.ExecContext(ctx, `INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at)
- SELECT id,job_name,'',CASE WHEN phase='infrastructure-pending' THEN 'owner_restart' ELSE 'cancelled' END,?
+	if _, err := tx.ExecContext(ctx, `INSERT INTO run_cancellations(run_id,job_name,reason,created_at)
+ SELECT id,job_name,CASE WHEN phase='infrastructure-pending' THEN 'owner_restart' ELSE 'cancelled' END,?
  FROM runs WHERE `+deletedBranchRuns+` AND (status='running' OR job_name!='')
- ON CONFLICT(run_id) DO UPDATE SET job_name=excluded.job_name,superseded_by='',reason=excluded.reason,
+ ON CONFLICT(run_id) DO UPDATE SET job_name=excluded.job_name,reason=excluded.reason,
  created_at=excluded.created_at,completed_at=NULL`, now, repoID, ref); err != nil {
 		return fmt.Errorf("record deleted ref cancellations: %w", err)
 	}

@@ -347,56 +347,6 @@ func TestWorkflowCreateProcessNextAndCancelNeverSettleInline(t *testing.T) {
 	}
 }
 
-// Legacy owner_restart rows represent trusted-KVM cleanup, not uncertain CI
-// creates. A settler-capable engine must still reach Delete (and its VMI cleanup).
-type legacyOwnerRestartStore struct {
-	SchedulerStore
-	cancellation model.RunCancellation
-	completed    bool
-}
-
-func (s *legacyOwnerRestartStore) PendingRunCancellations(context.Context) ([]model.RunCancellation, error) {
-	if s.completed {
-		return nil, nil
-	}
-	return []model.RunCancellation{s.cancellation}, nil
-}
-func (s *legacyOwnerRestartStore) CompleteObservedRunCancellation(context.Context, model.RunCancellation) error {
-	s.completed = true
-	return nil
-}
-func TestWorkflowCreateLegacyOwnerRestartStillUsesDeleteWithSettlerEngine(t *testing.T) {
-	f := newControlFixture(t)
-	source, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "legacy-preflight", Repository: f.repo, Branch: "feature/preflight", SHA: strings.Repeat("f", 40), Actor: "pusher"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	run, err := f.store.ClaimNextRun(t.Context())
-	if err != nil || run.ID != source.ID {
-		t.Fatal(err)
-	}
-	run, err = f.store.SetRunWorkflowName(t.Context(), run.ID, "preflight-workflow")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunInterrupted, Phase: "interrupted"}); err != nil {
-		t.Fatal(err)
-	}
-	ledger := &legacyOwnerRestartStore{SchedulerStore: f.store, cancellation: model.RunCancellation{RunID: run.ID, WorkflowName: run.WorkflowName, Reason: "owner_restart", CreatedAt: time.Now()}}
-	f.scheduler.store = ledger
-	jobs := &pendingCreateJobs{fakeJobs: f.jobs, settle: func(context.Context, string, string, time.Time) (bool, error) {
-		t.Fatal("trusted-KVM owner_restart bypassed VMI Delete cleanup")
-		return false, nil
-	}}
-	f.scheduler.jobs = jobs
-	if err := f.scheduler.completePendingCancellations(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if !ledger.completed || len(f.jobs.deleted) != 1 || f.jobs.deleted[0] != run.WorkflowName {
-		t.Fatalf("legacy cleanup not deleted: completed=%t deleted=%v", ledger.completed, f.jobs.deleted)
-	}
-}
-
 func TestWorkflowCreateSettlementBackoffIsCapped(t *testing.T) {
 	want := []time.Duration{5, 10, 20, 40, 80, 160, 300, 300}
 	for i, seconds := range want {

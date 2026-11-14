@@ -130,14 +130,14 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 	policy, policyErr := readPushPromotionPolicy(ctx, ingestor.git, push.Repository)
 	if policyErr == nil && policy.parks(push.Branch) && push.Branch != repository.DefaultBranch && !policy.requiresBranchCI(push.Branch) {
 		mirror, ok := ingestor.git.(interface {
-			SyncBranch(context.Context, string, string, string) error
+			SyncBranch(context.Context, string, string, string, bool) error
 		})
 		if !ok {
 			return PushResult{}, refuse(ErrUnavailable, "park branch mirror")
 		}
 		if err := auditedGitMutation(ctx, ingestor.auditor, push.Actor, "branch.park", "repository", push.Repository,
 			map[string]any{"branch": push.Branch, "sha": peeled.CommitSHA, "event_id": push.EventID},
-			func() error { return mirror.SyncBranch(ctx, push.Repository, push.Branch, peeled.CommitSHA) }); err != nil {
+			func() error { return mirror.SyncBranch(ctx, push.Repository, push.Branch, peeled.CommitSHA, true) }); err != nil {
 			return PushResult{}, fmt.Errorf("mirror park branch: %w", err)
 		}
 		duplicate, err := ingestor.receives.RecordReceiveEvent(ctx, receiveSpec(push.EventID, push.Actor, repository.ID, model.RefBranch, push.Branch, push.OldOID, peeled.CommitSHA, peeled.CommitSHA, "parked"))

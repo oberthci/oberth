@@ -323,7 +323,7 @@ func (pod *podRunCanceller) cancel(ctx context.Context, id, reason string, force
 	response := api.RunCancelResponse{
 		RunID: result.Run.ID, Status: string(result.Run.Status), Phase: result.Run.Phase,
 		PreviousState: string(result.PreviousState), CancelledBy: administrativeActor, Reason: result.Run.Reason,
-		Workflow: "none", PromotionID: result.PromotionID, Warning: warning,
+		Workflow: "none", PromotionID: result.PromotionID, Warning: service.RunCancelWarning(warning, result.Cancellations),
 	}
 	if len(result.Cancellations) > 0 {
 		response.Workflow = "pending"

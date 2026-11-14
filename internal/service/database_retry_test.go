@@ -262,8 +262,8 @@ func testDatabaseCancellationContinuesLiveDispatch(t *testing.T, failure error) 
 			if run := awaitDeadlineRun(t, &recoveryFixture{store: fixture.store}, successor.ID, done); run.Status != model.RunFailed || run.Phase != "failed" || run.FailedStep != "unit" {
 				t.Fatal("successor failed", run)
 			}
-			if run := fixture.run(t, old.ID); run.Status != model.RunFailed || run.Phase != model.PhaseCancelled {
-				t.Fatal("superseded run lost", run)
+			if run := fixture.run(t, old.ID); run.Status != model.RunInterrupted || run.Phase != model.PhaseCancelled {
+				t.Fatal("cancelled run lost", run)
 			}
 			if database.count(operation) < before+3 || fixture.scheduler.DatabaseRetries() < 2 {
 				t.Fatal("cancellation guard not exercised", database.count(operation), fixture.scheduler.DatabaseRetries())
@@ -481,4 +481,8 @@ func TestDatabaseRetryHasTotalBudget(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) || calls == 0 || calls > 2 {
 		t.Fatalf("unbounded retry: calls=%d err=%v", calls, err)
 	}
+}
+
+func (g *deadlineGit) SyncBranch(ctx context.Context, repo, branch, sha string, _ bool) error {
+	return g.PushPromotion(ctx, repo, branch, sha)
 }

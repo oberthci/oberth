@@ -202,41 +202,38 @@ func TestAssistHoldEligibilityRefusesIdentityAndLaunchers(t *testing.T) {
 		t.Fatal(err)
 	}
 	leaf := templateNamed(t, wf, "lint")
-	if !assistHoldEligible(leaf, "", nil) {
+	if !assistHoldEligible(leaf, "") {
 		t.Fatal("plain leaf ineligible")
 	}
-	if assistHoldEligible(leaf, "", map[string]bool{"lint": true}) {
-		t.Fatal("a nonroot launcher leaf forbids exec and must not hold")
-	}
 	leaf.ServiceAccountName = "oberth-argo-pipeline"
-	if !assistHoldEligible(leaf, "oberth-argo-pipeline", nil) {
+	if !assistHoldEligible(leaf, "oberth-argo-pipeline") {
 		t.Fatal("the forced pipeline identity is not a step identity")
 	}
-	if assistHoldEligible(leaf, "oberth-argo-other", nil) {
+	if assistHoldEligible(leaf, "oberth-argo-other") {
 		t.Fatal("a per-step identity must not hold")
 	}
 	leaf.ServiceAccountName = ""
 	leaf.Metadata.Annotations = map[string]string{argoworkflow.ReleaseWIFRoleAnnotation: "publisher"}
-	if assistHoldEligible(leaf, "", nil) {
+	if assistHoldEligible(leaf, "") {
 		t.Fatal("a release WIF leaf must not hold")
 	}
 	leaf.Metadata.Annotations = nil
 	leaf.Container.Command = []string{"/run/oberth/bin/oberth", "secretstore", "exec", "--", "make"}
-	if assistHoldEligible(leaf, "", nil) {
+	if assistHoldEligible(leaf, "") {
 		t.Fatal("a credential-chain leaf must not hold")
 	}
 	leaf.Container.Command = []string{"make"}
 	leaf.Container.VolumeMounts = []corev1.VolumeMount{{Name: ReleaseTokenVolumeName, MountPath: ReleaseTokenMountPath}}
-	if assistHoldEligible(leaf, "", nil) {
+	if assistHoldEligible(leaf, "") {
 		t.Fatal("a token-mounting leaf must not hold")
 	}
 	leaf.Container.VolumeMounts = nil
 	automount := true
 	leaf.AutomountServiceAccountToken = &automount
-	if assistHoldEligible(leaf, "", nil) {
+	if assistHoldEligible(leaf, "") {
 		t.Fatal("an automounted token must not hold")
 	}
-	if assistHoldEligible(templateNamed(t, wf, "main"), "", nil) || assistHoldEligible(templateNamed(t, wf, "flaky"), "", nil) {
+	if assistHoldEligible(templateNamed(t, wf, "main"), "") || assistHoldEligible(templateNamed(t, wf, "flaky"), "") {
 		t.Fatal("DAG and authored-retry templates must not hold")
 	}
 }

@@ -29,9 +29,6 @@ func TestRunnerImageAllowlistUsesRegistryAndRepositoryBoundaries(t *testing.T) {
 	} {
 		t.Run(test.image+strings.Join(test.prefixes, ","), func(t *testing.T) {
 			image := test.image + "@sha256:" + strings.Repeat("a", 64)
-			if err := ValidateRunnerImage(image); err != nil {
-				t.Fatal(err)
-			}
 			if got := RunnerImageAllowed(image, test.prefixes); got != test.allowed {
 				t.Fatalf("allowed=%v, want %v", got, test.allowed)
 			}
@@ -67,40 +64,6 @@ func TestValidateRunnerImagePrefixes(t *testing.T) {
 	} {
 		if err := ValidateRunnerImagePrefixes(prefixes); err == nil {
 			t.Fatalf("prefixes %q admitted", prefixes)
-		}
-	}
-}
-
-func TestValidateRunnerImageAcceptsGoodImages(t *testing.T) {
-	for _, image := range []string{
-		// tag + digest (the recommended form)
-		"golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"golang:1.26-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd",
-		"registry.example/base/go:1.26@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		// digest-only (no tag, but repository + digest)
-		"golang@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-		"registry.example/base/go@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-	} {
-		if err := ValidateRunnerImage(image); err != nil {
-			t.Errorf("ValidateRunnerImage(%q) = %v", image, err)
-		}
-	}
-}
-
-func TestValidateRunnerImageRejectsBadImages(t *testing.T) {
-	for _, image := range []string{
-		"",
-		"golang",
-		"golang:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"golang:1.26 alpine",
-		"registry.example:5000/golang",
-		// Tag-only references are now rejected (mutable, drift)
-		"golang:1.26-alpine",
-		"golang:1.26-trixie",
-		"registry.example/base/go:1.26",
-	} {
-		if err := ValidateRunnerImage(image); err == nil {
-			t.Errorf("ValidateRunnerImage(%q) should fail", image)
 		}
 	}
 }

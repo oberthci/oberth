@@ -56,13 +56,13 @@ func (s *Store) MarkRunCreatePending(ctx context.Context, id, workflowName strin
 	if len(reason) == 1 && WorkflowCleanupReason(reason[0]) {
 		message = reason[0]
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET phase=CASE WHEN status='running' AND phase!='cancelled' THEN 'infrastructure-pending' ELSE phase END, error=?, reason=CASE WHEN phase='cancelled' THEN reason ELSE ? END, updated_at=? WHERE id=?`, message, OberthStopReasonPrefix+strings.TrimSuffix(message, "; cleanup pending"), now, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET phase=CASE WHEN ? THEN 'cancelled' WHEN status='running' AND phase!='cancelled' THEN 'infrastructure-pending' ELSE phase END, error=?, reason=CASE WHEN phase='cancelled' THEN reason ELSE ? END, updated_at=? WHERE id=?`, message == argoworkflow.ErrWorkflowCapabilityRequired.Error(), message, OberthStopReasonPrefix+strings.TrimSuffix(message, "; cleanup pending"), now, id); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
-VALUES(?, ?, ?, 'owner_restart', ?)
-ON CONFLICT(run_id) DO UPDATE SET job_name=excluded.job_name, reason='owner_restart', created_at=excluded.created_at, completed_at=NULL`, id, workflowName, "", now); err != nil {
+INSERT INTO run_cancellations(run_id, job_name, reason, created_at, terminate)
+VALUES(?, ?, 'owner_restart', ?, ?)
+ON CONFLICT(run_id) DO UPDATE SET job_name=excluded.job_name, reason='owner_restart', created_at=excluded.created_at, completed_at=NULL,terminate=MAX(run_cancellations.terminate,excluded.terminate)`, id, workflowName, now, message == argoworkflow.ErrWorkflowCapabilityRequired.Error()); err != nil {
 		return err
 	}
 	return tx.Commit()

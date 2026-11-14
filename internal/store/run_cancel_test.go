@@ -42,7 +42,7 @@ func TestCancelQueuedRunTerminalizesWithActorReasonAndAuditWithoutObligationOrIs
 	cancelled := result.Run
 	if cancelled.Status != model.RunInterrupted || cancelled.Phase != model.PhaseCancelled || !cancelled.Cancelled() ||
 		!cancelled.Cancelled() || cancelled.Reason != "cancelled by dima@host: wrong branch" ||
-		cancelled.Error != cancelled.Reason || cancelled.FinishedAt == nil || cancelled.SupersededBy != "" {
+		cancelled.Error != cancelled.Reason || cancelled.FinishedAt == nil {
 		t.Fatalf("cancelled queued run = %#v", cancelled)
 	}
 	if result.PreviousState != model.RunQueued || len(result.Cancellations) != 0 {
@@ -136,7 +136,7 @@ func TestCancelClaimedRunRecordsStopObligationAndIsNotRefiredAtRestart(t *testin
 		t.Fatal(err)
 	}
 	if running.PreviousState != model.RunRunning || len(running.Cancellations) != 1 ||
-		running.Cancellations[0].WorkflowName != "oberth-job-running" || running.Cancellations[0].SupersededBy != "" {
+		running.Cancellations[0].WorkflowName != "oberth-job-running" {
 		t.Fatalf("running cancel = %#v", running)
 	}
 	waiting, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: withoutJob.ID, Actor: "dima@host"})
@@ -198,7 +198,7 @@ func TestCancelClaimedRunRecordsStopObligationAndIsNotRefiredAtRestart(t *testin
 	if err != nil || enqueued.Status != model.RunQueued {
 		t.Fatalf("newer push after cancel = %#v, %v", enqueued.Run, err)
 	}
-	if again, _ := s.Run(ctx, withJob.ID); again.SupersededBy != "" || !again.Cancelled() {
+	if again, _ := s.Run(ctx, withJob.ID); !again.Cancelled() {
 		t.Fatalf("supersede rewrote a cancelled run: %#v", again)
 	}
 }

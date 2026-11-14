@@ -115,9 +115,8 @@ func PlanSteps(workflow *wfv1.Workflow) (StepPlan, error) {
 	return plan, nil
 }
 
-// planWalk carries the accumulator across the same recursive descent
-// applyServerSecurity and injectSourceCheckout already make over this
-// structure: templates, step groups, and DAG tasks, with a depth bound.
+// planWalk carries the accumulator through templates, step groups and DAG
+// tasks, with the same bounded traversal used for source checkout.
 type planWalk struct {
 	templates map[string]*wfv1.Template
 	onPath    map[string]struct{}

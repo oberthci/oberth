@@ -24,6 +24,10 @@ type ArgoSecurityReview struct {
 // operator. Fill absent fields only; an unsafe explicit value remains visible
 // in review and the cluster policy refuses Pods that use it.
 func argoSecurityDefaults(values map[string]any) ([]string, []ArgoSecurityReview, error) {
+	workflowPod, err := argoWorkflowPodSecurity(values)
+	if err != nil {
+		return nil, nil, err
+	}
 	args := []string{}
 	review := []ArgoSecurityReview{}
 	for _, target := range []struct {
@@ -79,6 +83,8 @@ func argoSecurityDefaults(values map[string]any) ([]string, []ArgoSecurityReview
 		}
 		if target.pod {
 			defaults = defaults[3:]
+		} else if (component == "mainContainer" || component == "executor") && workflowPod != nil && workflowPod.SeccompProfile != nil && allowedArgoSeccomp(workflowPod.SeccompProfile) {
+			defaults = defaults[:3]
 		}
 		for _, entry := range defaults {
 			path := append([]string{component, field}, entry.path...)
@@ -149,6 +155,9 @@ func readArgoSecurityReview(ctx context.Context, cfg *Config, deps Deps) error {
 	snapshot := cfg.argoReviewRelease
 	if !cfg.argoReleaseRead {
 		snapshot = nil
+	}
+	if cfg.DryRun {
+		deps.Input, deps.IsTerminal = nil, nil
 	}
 	plan, err := prepareArgoSecurity(ctx, deps, ns, cfg.ArgoSecurityDefaults, !cfg.SkipArgo, snapshot)
 	if err != nil {

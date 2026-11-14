@@ -163,7 +163,7 @@ func printRestorePlan(w io.Writer, cfg RestoreConfig, deps backupDeps, archive r
 	_, _ = fmt.Fprintf(w, "\nRestore onto context %s (namespace %s, OpenBao %s, Argo %s): %s\n",
 		deps.ContextName, cfg.Namespace, cfg.OpenBaoNamespace, cfg.ArgoNamespace, joinWords(parts.names()))
 	// Same cluster means a rollback: every run created after the backup
-	// disappears and its Workflows receive Argo Stop below. The API server URL
+	// disappears and its Workflows receive Argo Terminate below. The API server URL
 	// alone cannot tell (every k3s serves https://127.0.0.1:6443); the
 	// kube-system namespace UID can (#068).
 	switch {
@@ -213,7 +213,7 @@ func printRestorePlan(w io.Writer, cfg RestoreConfig, deps backupDeps, archive r
 			for _, wf := range target.Orphans {
 				names = append(names, wf.Name)
 			}
-			_, _ = fmt.Fprintf(w, "  Workflows  Argo Stop for %d whose runs the restored database does not know (completed Workflows stay for TTL cleanup): %s\n", len(names), strings.Join(names, ", "))
+			_, _ = fmt.Fprintf(w, "  Workflows  Argo Terminate for %d whose runs the restored database does not know (exit handlers skipped; completed Workflows stay for TTL cleanup): %s\n", len(names), strings.Join(names, ", "))
 		}
 		if len(target.RestoredRunning) > 0 {
 			version := canonicalChartVersion(target.ChartVersion)

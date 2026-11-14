@@ -41,7 +41,7 @@ func TestNativeOperatorShutdownTerminalMapping(t *testing.T) {
 					}
 					stopped := phase != wfv1.WorkflowSucceeded && (strategy == wfv1.ShutdownStrategyStop || strategy == wfv1.ShutdownStrategyTerminate)
 					if stopped {
-						if result.Status != model.RunFailed || result.Phase != model.PhaseCancelled || result.Error != "Workflow stopped by its Workflow spec: "+message || result.FailedStage != "" || result.FailedStep != "" {
+						if result.Status != model.RunInterrupted || result.Phase != model.PhaseCancelled || result.Error != "Workflow stopped by its Workflow spec: "+message || result.FailedStage != "" || result.FailedStep != "" {
 							t.Fatalf("native shutdown misclassified: %+v", result)
 						}
 					} else if result.Status == model.RunInterrupted || strings.HasPrefix(result.Error, "Workflow stopped:") {
@@ -110,7 +110,7 @@ spec:
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Status != model.RunFailed || result.Phase != model.PhaseCancelled || result.Error != "Workflow stopped by its Workflow spec: "+message {
+			if result.Status != model.RunInterrupted || result.Phase != model.PhaseCancelled || result.Error != "Workflow stopped by its Workflow spec: "+message {
 				t.Fatalf("authored shutdown attributed to an actor: %+v", result)
 			}
 			if client.posts != 1 || client.deletes != 0 || client.patches != 0 || client.object.Spec.Shutdown != strategy {

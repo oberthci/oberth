@@ -295,3 +295,10 @@ func (j *steadyCancellationJobs) SettleCreate(ctx context.Context, name, id stri
 	}
 	return true, nil
 }
+
+func (j *retryingStartupJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
+}
+func (j *steadyCancellationJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
+}

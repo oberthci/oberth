@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -337,22 +338,37 @@ func TestSchedulerPendingCancellationKeepsPodJournal(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal("terminal DB row with live cleanup lost recovery journal", err)
 	}
-	// Once the worker joins, dispatch hands native observation to cleanup.
+	// Settlement keeps the journal until the resumed final observer finishes.
 	jobs.deleteErr = nil
-	if err := scheduler.completePendingCancellationsWithGate(t.Context(), scheduler.requireMutation); err != nil {
-		t.Fatal(err)
-	}
-	if scheduler.pendingCreateCount() != 1 {
-		t.Fatal("Stop acceptance lost its terminal observation task")
+	jobs.waitErr = nil
+	jobs.waitResult = JobResult{Status: model.RunFailed, Phase: "job", Error: "Stopped with strategy Stop"}
+	finalBlocks := make(chan struct{})
+	releaseFinal := sync.OnceFunc(func() { close(finalBlocks) })
+	defer releaseFinal()
+	jobs.waitBlocks = finalBlocks
+	jobs.waitEntered = make(chan struct{})
+	jobs.enteredOnce = sync.Once{}
+	scheduler.settleOneCreate(t.Context())
+	select {
+	case <-jobs.waitEntered:
+	case <-time.After(testStartTimeout(5 * time.Second)):
+		t.Fatal("settled Workflow did not resume final observation")
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Fatal("Stop acceptance pruned journal before terminal observation", err)
+		t.Fatal("journal pruned before final observation completed", err)
 	}
+	releaseFinal()
+	waitAdoptedStatus(t, fixture.store, run.ID, model.RunInterrupted)
+	scheduler.createObservers.Wait()
+	scheduler.createMu.Lock()
+	scheduler.createPending[run.ID].next = time.Time{}
+	scheduler.createMu.Unlock()
 	scheduler.settleOneCreate(t.Context())
 	if err := scheduler.completePendingCancellationsWithGate(context.Background(), scheduler.requireMutation); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("journal kept after native terminal observation", err)
+		t.Fatal("journal kept after the resumed final observation completed", err)
 	}
 }

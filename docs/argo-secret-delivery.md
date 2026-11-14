@@ -26,7 +26,7 @@ or `*`. Inline and unnamed templates require wildcard grants. Missing
 step grants confer no authority. Token opt-outs receive no store settings.
 Admission and Build delivery use this same decision. The grant table is keyed by repository/upstream, exact repository-relative workflow file, template name, and path. The workflow field is required; no default, alias, or wildcard file selector is accepted. `*` grants cover steps only within that exact file. Pending declarations, revocation, policy names, and store identities retain the same file scope.
 
-Only the granted step's container gets the secret-store env, mounts, token and helper; non-secret settings (address, role name, CA path) can be visible in the Pod's template metadata. Sidecars, init containers, other steps and Argo wait helpers receive no secret-store env or mounts of their own. Argo serializes the main template into `ARGO_TEMPLATE`; this metadata carries public settings and mount descriptions, never the projected token bytes or materialised secrets. No per-run settings ConfigMap is created. Oberth sets `automountServiceAccountToken: false` on the Workflow and every template, independently of the live ServiceAccount setting. Granted mains keep their explicit projected login token. Authored token opt-outs are checked before identity normalization.
+Only the granted step's container gets the secret-store env, mounts, token and helper; non-secret settings (address, role name, CA path) can be visible in the Pod's template metadata. Oberth does not inject those settings into authored sidecars or init containers or into other steps. Argo retains its native mirrors of main-container mounts in wait. Argo serializes the main template into `ARGO_TEMPLATE`; this metadata carries public settings and mount descriptions, never the projected token bytes or materialised secrets. No per-run settings ConfigMap is created. Oberth sets `automountServiceAccountToken: false` on the Workflow and every template, independently of the live ServiceAccount setting. Granted mains keep their explicit projected login token. Authored token opt-outs are checked before identity normalization.
 
 Branch credentials use a separate role
 limited to the upstream subtree; release grants require a release trigger.
@@ -40,10 +40,18 @@ environment, redacts fetched values from stdout and stderr, and preserves
 the child's exit status. Disable disk-backed swap to keep tmpfs memory-only;
 `OBERTH_REQUIRE_SWAPLESS` makes detected swap a hard failure.
 
-The server injects a memory-backed emptyDir for the secret root. The admitted
-Pod patch removes the Argo wait container's mirrors of that root, the login
-token, the CA, and the store helper binary. Validate the admitted Pod to verify
-that boundary; source YAML alone cannot show the controller's mutation.
+The server injects a memory-backed emptyDir for the secret root. Argo retains
+its native wait-container mirrors of the secret root, login token, CA and helper.
+Every container of a credentialed step (main, sidecars, containerSet members and
+init containers) shares that step's trust; output refusals guard Argo's reads
+and do not create a boundary between containers of one step.
+
+On steps receiving secret-store or cloud-identity mounts, output parameter file
+paths must be absolute and outside all volume mounts. Use an absolute path on
+the step's own filesystem. If the step has sidecars or several containerSet
+members, path-read output parameters and references to its `outputs.result` are
+refused because another container of the Pod can redirect what Argo reads.
+Sidecars remain allowed when those output reads are absent.
 
 The environment-variable materialize command is retired.
 `oberth secretstore materialize` is no longer accepted. Migrate callers to

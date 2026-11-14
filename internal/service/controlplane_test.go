@@ -95,7 +95,10 @@ func (*controlGit) ReadDefaultBlob(context.Context, string, string, int) (string
 	return "", nil, false, nil
 }
 
-func (git *controlGit) SyncBranch(_ context.Context, repo, branch, sha string) error {
+func (git *controlGit) SyncBranch(ctx context.Context, repo, branch, sha string, force bool) error {
+	if !force {
+		return git.PushPromotion(ctx, repo, branch, sha)
+	}
 	if git.publishStarted != nil {
 		git.publishOnce.Do(func() {
 			close(git.publishStarted)
@@ -156,7 +159,7 @@ func TestNewPushWaitsWhilePreviousRunPublishes(t *testing.T) {
 	if enqueueErr != nil {
 		t.Fatal(enqueueErr)
 	}
-	if ownerErr != nil || owner.Status != model.RunRunning || owner.Phase != "publishing" || owner.SupersededBy != "" {
+	if ownerErr != nil || owner.Status != model.RunRunning || owner.Phase != "publishing" {
 		t.Fatalf("publication owner during newer enqueue = %#v, %v", owner, ownerErr)
 	}
 	if queuedErr != nil || queued.Status != model.RunQueued {
@@ -886,6 +889,7 @@ func (git *controlGit) setRemoteRefLocked(ref, sha string) {
 
 type fakeJobs struct {
 	nativeAdmission func(context.Context, WorkflowRequest) error
+	terminated      []string
 	mu              sync.Mutex
 	results         []JobResult
 	// transcripts, when set, replace the generated per-step output for the
@@ -2084,8 +2088,8 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finished.Status != model.RunRunning || finished.SupersededBy != "" || finished.ID != enqueued.ID || finished.Ref != running.Ref || finished.SHA != running.SHA || finished.QueueSequence != running.QueueSequence {
-		t.Fatalf("shutdown run = %#v, want the original running run", finished)
+	if finished.Status != model.RunRunning || finished.ID != enqueued.ID || finished.WorkflowName != workflowName || finished.FinishedAt != nil {
+		t.Fatalf("shutdown run = %#v, want the original run reset to queued", finished)
 	}
 	pending, err := fixture.store.PendingRunCancellations(context.Background())
 	if err != nil {
@@ -2096,12 +2100,8 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	}
 }
 
-// TestJobObservationCancellationDoesNotImpersonateSchedulerShutdown verifies
-// that a Wait error from an inner observation context (context.Canceled,
-// context.DeadlineExceeded) is recorded as RunFailed — NOT RunInterrupted,
-// which is the scheduler-shutdown pattern. The Workflow finishes Stop before
-// terminalizing (Fix 2: a still-running workflow must not be left untracked
-// while its durable run is recorded as terminal).
+// An inner Wait cancellation requests native Stop and records cancelled only
+// after Argo finishes. It does not initiate scheduler shutdown.
 func TestJobObservationCancellationDoesNotImpersonateSchedulerShutdown(t *testing.T) {
 	for name, waitErr := range map[string]error{
 		"canceled": context.Canceled,
@@ -2124,12 +2124,11 @@ func TestJobObservationCancellationDoesNotImpersonateSchedulerShutdown(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			// The run must be terminalized as RunFailed (not RunInterrupted,
-			// which is the scheduler shutdown pattern).
-			if finished.Status != model.RunFailed || finished.Phase != "job" || !strings.Contains(finished.Error, "Stopped with strategy") {
+			// Accepted Stop uses the existing interrupted/cancelled result.
+			if finished.Status != model.RunInterrupted || finished.Phase != model.PhaseCancelled || !strings.Contains(finished.Error, "Stopped with strategy") {
 				t.Fatalf("inner observation cancellation = %#v, want failed job without scheduler shutdown", finished)
 			}
-			// The workflow must be deleted before terminalizing: a
+			// The Workflow must finish native shutdown before terminalizing: a
 			// still-running workflow must not be left untracked while its
 			// durable run is recorded as terminal.
 			if len(fixture.jobs.deleted) != 1 {
@@ -3975,4 +3974,25 @@ func (jobs *flakyDeleteJobs) SettleCreate(ctx context.Context, name, id string, 
 		return false, err
 	}
 	return true, nil
+}
+
+func (*controlGit) MirrorBranchMatches(context.Context, string, string, string) (bool, error) {
+	return true, nil
+}
+
+func (j *completingJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
+}
+func (j *flakyDeleteJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
+}
+func (j *blockingJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
+}
+
+func (j *fakeJobs) Terminate(ctx context.Context, name, id string) error {
+	j.mu.Lock()
+	j.terminated = append(j.terminated, name)
+	j.mu.Unlock()
+	return j.Stop(ctx, name, id)
 }

@@ -19,7 +19,7 @@ type rowScanner interface {
 const runColumns = `
 queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
-status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
+status, reason, queued_at, started_at, finished_at, created_at, updated_at,
 schedule_entry, issue_trailers, source_bindings, failure_cause, assist_requested, assisted, assist_record`
 
 // ErrRunCursorNotFound lets clients restart paging without exposing a missing run ID.
@@ -494,10 +494,10 @@ RETURNING `+runColumns, workflowName, unixNano(s.now()), id))
 	}
 	if value.Cancelled() {
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
-VALUES(?, ?, ?, 'cancelled', ?)
+INSERT INTO run_cancellations(run_id, job_name, reason, created_at)
+VALUES(?, ?, 'cancelled', ?)
 ON CONFLICT(run_id) DO UPDATE SET job_name = excluded.job_name
-WHERE run_cancellations.completed_at IS NULL`, value.ID, workflowName, "", unixNano(s.now())); err != nil {
+WHERE run_cancellations.completed_at IS NULL`, value.ID, workflowName, unixNano(s.now())); err != nil {
 			return model.Run{}, fmt.Errorf("retain run cancellation: %w", err)
 		}
 	}
@@ -509,7 +509,7 @@ WHERE run_cancellations.completed_at IS NULL`, value.ID, workflowName, "", unixN
 
 func (s *Store) PendingRunCancellations(ctx context.Context) ([]model.RunCancellation, error) {
 	rows, err := s.reader().QueryContext(ctx, `
-SELECT run_id, job_name, superseded_by, reason, created_at, completed_at
+SELECT run_id, job_name, reason, created_at, completed_at, terminate
 FROM run_cancellations WHERE completed_at IS NULL ORDER BY created_at, run_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list pending run cancellations: %w", err)
@@ -636,19 +636,16 @@ RETURNING `+runColumns,
 		if promotionErr != nil {
 			return model.Run{}, fmt.Errorf("load promotion for terminal run: %w", promotionErr)
 		}
-		promotionStatus := model.PromotionFailed
-		switch value.Status {
-		case model.RunPassed:
-			// A Stop can race a native success. Keep the CI verdict green but
-			// do not publish a promotion its operator requested to stop.
-			promotionStatus = model.PromotionFailed
-
-		case model.RunInterrupted:
-			promotionStatus = model.PromotionInterrupted
-		}
-		_, promotionErr = finishPromotionTx(ctx, tx, promotion, promotionStatus, value.ID, value.Error, now)
-		if promotionErr != nil {
-			return model.Run{}, promotionErr
+		if promotion.Status == model.PromotionPending {
+			promotionStatus := model.PromotionFailed
+			if value.Status == model.RunInterrupted && value.Phase != model.PhaseCancelled {
+				promotionStatus = model.PromotionInterrupted
+			}
+			if _, err := finishPromotionTx(ctx, tx, promotion, promotionStatus, value.ID, value.Error, now); err != nil {
+				return model.Run{}, err
+			}
+		} else if !current.Cancelled() || promotion.RunID != value.ID {
+			return model.Run{}, fmt.Errorf("%w: promotion is already terminal", ErrInvalidState)
 		}
 	} else {
 		if err := s.projectRunIssue(ctx, tx, value, result.FailureTail, now); err != nil {
@@ -909,7 +906,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.QueueSequence, &value.AdmissionSequence, &value.ID, &value.RepoID, &value.RefKind, &value.Ref,
 		&value.SHA, &value.Actor, &release, &value.Trigger, &value.Phase, &value.WorkflowName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedStage, &value.FailedStep, &value.Error,
-		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
+		&value.Status, &value.Reason, &queued, &started, &finished,
 		&created, &updated, &value.ScheduleEntry, &issueTrailers, &sourceBindings, &value.FailureCause, &assistRequested, &assisted, &assistRecord,
 	}
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
@@ -956,7 +953,7 @@ func scanRunCancellation(row rowScanner) (model.RunCancellation, error) {
 	var value model.RunCancellation
 	var created int64
 	var completed sql.NullInt64
-	if err := scanRowNotFound(row, "RunCancellation", &value.RunID, &value.WorkflowName, &value.SupersededBy, &value.Reason, &created, &completed); err != nil {
+	if err := scanRowNotFound(row, "RunCancellation", &value.RunID, &value.WorkflowName, &value.Reason, &created, &completed, &value.Terminate); err != nil {
 		return model.RunCancellation{}, err
 	}
 	value.CreatedAt = fromUnixNano(created)

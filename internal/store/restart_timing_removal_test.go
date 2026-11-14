@@ -75,7 +75,7 @@ func TestRemoveRestartTimingsPreservesCurrentDurableEvidence(t *testing.T) {
 					appendHistoricalRestart()
 				}
 			}
-			if _, err := s.db.Exec(testdb.PostExecutionTargetRemovalDowngrade); err != nil {
+			if _, err := s.db.Exec(testdb.PostWorkflowStopDowngrade + testdb.PostExecutionTargetRemovalDowngrade); err != nil {
 				t.Fatal(err)
 			}
 			_, err = s.db.Exec(`-- Reconstruct the old column because this fixture rewinds past its drop migration.

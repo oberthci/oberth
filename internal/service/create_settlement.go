@@ -31,6 +31,7 @@ type createAdmission struct {
 type pendingCreate struct {
 	runID       string
 	reason      string
+	observer    chan error
 	persisted   bool
 	confirmed   bool
 	restarting  bool
@@ -148,6 +149,7 @@ func createSettlementBackoff(attempt int) time.Duration {
 // One shared background task, one due run per tick. Per-attempt API/DB work is bounded;
 // retries have no total deadline. An outage leaves cleanup pending.
 func (scheduler *Scheduler) runCreateCleanup(ctx context.Context) {
+	defer scheduler.createObservers.Wait()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	ticks := ticker.C
@@ -187,7 +189,7 @@ func (scheduler *Scheduler) settleOneCreate(ctx context.Context) {
 	pending := due[0]
 	scheduler.createMu.Unlock()
 	attemptCtx, cancel := context.WithTimeout(ctx, createSettlementAttemptBudget)
-	done, err := scheduler.settleCreateAttempt(attemptCtx, pending)
+	done, err := scheduler.settleCreateAttempt(attemptCtx, ctx, pending)
 	cancel()
 	if ctx.Err() != nil {
 		return
@@ -213,7 +215,7 @@ func (scheduler *Scheduler) settleOneCreate(ctx context.Context) {
 	}
 	log.Printf("WARN: create_cleanup run=%q pending_for=%s attempt=%d reason=%s retry_in=%s", pending.runID, age, pending.attempts, reason, delay)
 }
-func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pendingCreate) (bool, error) {
+func (scheduler *Scheduler) settleCreateAttempt(ctx, observerCtx context.Context, pending *pendingCreate) (bool, error) {
 	// This reconciler owns its own bounded attempts and backoff. Nested DB
 	// adapters must not acquire the scheduler's unbounded retry continuation.
 	ctx = context.WithValue(ctx, databaseRetryKey{}, (*databaseRetryScope)(nil))
@@ -224,7 +226,18 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 	if err != nil {
 		return false, err
 	}
-	if run.Status.Terminal() {
+	if pending.observer != nil {
+		select {
+		case err := <-pending.observer:
+			pending.observer = nil
+			if err != nil {
+				return false, err
+			}
+		default:
+			return false, nil
+		}
+	}
+	if run.Status.Terminal() || run.Phase == "publishing" {
 		// A terminal observer may have closed this obligation before an API
 		// cancellation snapshot handed off its local bookkeeping.
 		cancellations, err := scheduler.store.PendingRunCancellations(ctx)
@@ -264,7 +277,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 			break
 		}
 	}
-	if pending.restarting && run.Status == model.RunRunning {
+	if pending.restarting && run.Status == model.RunRunning && !run.Cancelled() {
 		return scheduler.observeRestartCreate(ctx, pending, run, observed)
 	}
 	if observed != nil {
@@ -274,9 +287,51 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		if !ok {
 			return false, errors.New("service: engine cannot settle uncertain create")
 		}
+		if observed.Terminate {
+			if err := scheduler.jobs.Terminate(ctx, observed.WorkflowName, run.ID); err != nil {
+				return false, err
+			}
+		}
 		done, err := settler.SettleCreate(ctx, observed.WorkflowName, run.ID, observed.CreatedAt.Add(createObservationWindow))
-		if err != nil || !done {
+		if err != nil {
 			return false, err
+		}
+		// Completion still needs final logs, step evidence and identity retirement.
+		if run.Status.Active() && run.Error != argoworkflow.ErrWorkflowCapabilityRequired.Error() {
+			if adopter, ok := scheduler.jobs.(JobAdopter); ok {
+				found, err := adopter.Adopt(ctx, run)
+				if errors.Is(err, argoworkflow.ErrWorkflowCapabilityRequired) {
+					if persistErr := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.WorkflowName, argoworkflow.ErrWorkflowCapabilityRequired.Error()); persistErr != nil {
+						return false, persistErr
+					}
+					pending.reason = argoworkflow.ErrWorkflowCapabilityRequired.Error()
+					return false, scheduler.jobs.Terminate(ctx, run.WorkflowName, run.ID)
+				}
+				if err != nil {
+					return false, err
+				}
+				if found {
+					reservation, acquired, err := scheduler.submissions.adoptOwner(run)
+					if err != nil {
+						return false, err
+					}
+					if !acquired {
+						return false, nil
+					}
+					pending.observer = make(chan error, 1)
+					done := pending.observer
+					scheduler.createObservers.Add(1)
+					go func() {
+						defer scheduler.createObservers.Done()
+						done <- scheduler.resumeObservedRun(observerCtx, run, scheduler.requireMutation, reservation, true)
+						scheduler.signalCreateCleanup()
+					}()
+					return false, nil
+				}
+			}
+		}
+		if !done {
+			return false, nil
 		}
 		if err := scheduler.store.CompleteObservedRunCancellation(ctx, *observed); err != nil {
 			return false, err
@@ -304,21 +359,15 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 			message = "executor identity readiness deadline exceeded after one issuance retry; cleanup confirmed absence"
 		}
 		if terminal, err := scheduler.jobs.TerminalResult(ctx, run.WorkflowName); err == nil {
-			if terminal.Status == model.RunFailed && !run.Cancelled() && strings.HasPrefix(run.Reason, store.OberthStopReasonPrefix) {
-				terminal.Error = "Oberth requested Argo Stop: " + strings.TrimPrefix(run.Reason, store.OberthStopReasonPrefix)
-			}
-			if run.Error == argoworkflow.ErrWorkflowCapabilityRequired.Error() && terminal.Status == model.RunFailed {
-				terminal.Error = "Workflow stopped by Oberth: " + run.Error
-			}
-			if run.Cancelled() && terminal.Status != model.RunPassed {
-				terminal.Phase = model.PhaseCancelled
-				terminal.Error = strings.Replace(run.Reason, "cancelling by ", "stopped by ", 1)
-			}
-			if err := scheduler.persistSteps(ctx, run.ID, terminal.Steps, runlog.Index{}); err != nil {
+			repository, err := scheduler.store.Repository(ctx, run.RepoID)
+			if err != nil {
 				return false, err
 			}
-			_, err = scheduler.store.FinishRun(ctx, run.ID, model.RunResult{Status: terminal.Status, Phase: terminal.Phase, Error: terminal.Error, FailedStage: terminal.FailedStage, FailedStep: terminal.FailedStep, TerminalObservation: terminal.TerminalObservation})
-			if err != nil {
+			index, indexErr := scheduler.logs.BuildIndex(run.ID)
+			if indexErr != nil {
+				index = runlog.Index{}
+			}
+			if err := scheduler.finishObservedRun(ctx, run, repository, scheduler.requireMutation, terminal, index, true); err != nil {
 				return false, err
 			}
 		} else if !errors.Is(err, ErrJobNotTerminal) {

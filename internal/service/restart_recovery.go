@@ -35,7 +35,7 @@ func (scheduler *Scheduler) completeRestartCreateObservation(ctx context.Context
 	}
 	for _, observation := range pending {
 		if observation.RunID == run.ID {
-			if observation.Reason != "owner_restart" || observation.SupersededBy != "" {
+			if observation.Reason != "owner_restart" {
 				return errors.New("service: explicit cancellation changed during restart adoption")
 			}
 			return scheduler.database().CompleteObservedRunCancellation(ctx, observation)

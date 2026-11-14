@@ -107,18 +107,3 @@ func TestUpgradePreviousReleaseStoredValuesAndDryRunSchema(t *testing.T) {
 		})
 	}
 }
-
-// Older preview fixtures supply no chart contents because they stop before
-// rendering. Give those tests a signed chart and its pinned values now that
-// preview and apply share validation; their existing write traps remain.
-func withUpgradeDryRunRelease(t *testing.T, deps *Deps, version string) {
-	t.Helper()
-	withSignedRelease(t, deps, version, fakeChartImageRef)
-	runHelm := deps.RunHelm
-	deps.RunHelm = func(ctx context.Context, args []string) ([]byte, error) {
-		if len(args) >= 2 && args[0] == "show" && args[1] == "values" {
-			return []byte("image:\n  ref: " + fakeChartImageRef + "\nreplicaCount: 1\npushBannerURL: \"\"\n"), nil
-		}
-		return runHelm(ctx, args)
-	}
-}

@@ -157,3 +157,11 @@ func (j *collectJobs) Stop(ctx context.Context, name, runID string) error {
 func (j *collectJobs) TerminalResult(ctx context.Context, name string) (service.JobResult, error) {
 	return j.adapter.TerminalResult(ctx, name)
 }
+
+func (collectGit) MirrorBranchMatches(context.Context, string, string, string) (bool, error) {
+	return true, nil
+}
+
+func (j *collectJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.adapter.Terminate(ctx, name, id)
+}

@@ -25,7 +25,7 @@ func TestRetiredWorkflowFailsRunWithoutStoppingOwner(t *testing.T) {
 	}
 	s.settleOneCreate(t.Context())
 	got, err := f.store.Run(t.Context(), run.ID)
-	if err != nil || got.Status != model.RunFailed || !strings.Contains(got.Error, "workflow capability grant") || len(jobs.deleted) != 0 {
+	if err != nil || got.Status != model.RunInterrupted || got.Phase != model.PhaseCancelled || !strings.Contains(got.Error, "workflow capability grant") || len(jobs.deleted) != 1 {
 		t.Fatalf("run=%+v delete=%v err=%v", got, jobs.deleted, err)
 	}
 	if err := s.reconcileStrandedRunsWithGate(t.Context(), s.requireMutation, nil); err != nil {

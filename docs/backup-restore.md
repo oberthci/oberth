@@ -367,7 +367,7 @@ backup, `history` for a history-only one (where `--only secrets` is refused).
 
 | Part | What it restores |
 | --- | --- |
-| `history` | the database, replacing this install's rather than merging; the compatibility values the restored database must be opened under; and Argo Stop for Workflows whose runs the restored database does not know; exit handlers finish and Argo TTL owns their deletion |
+| `history` | the database, replacing this install's rather than merging; the compatibility values the restored database must be opened under; and Argo Terminate for Workflows whose runs the restored database does not know; exit handlers do not run and Argo TTL owns their deletion |
 | `secrets` | the OpenBao KV secrets (never `identities/`), ACL policies and `auth/kubernetes` roles, each verified by read-back; and the grants (`oberth-secret-access` ConfigMap). The per-repository roles bind the backup's namespaces, so this part restores only into the same namespaces; otherwise use `--only history` |
 
 The compatibility values (`compatibility.schemaIdentity`, `auditDomain`,

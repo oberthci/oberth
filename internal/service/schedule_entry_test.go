@@ -95,7 +95,7 @@ func TestScheduleCronUsesAtomicCursorAndCoalescesLiveEntry(t *testing.T) {
 		t.Fatalf("next cron = %+v, %v", next, err)
 	}
 	retained, err := fixture.store.Run(t.Context(), first.Enqueued.ID)
-	if err != nil || retained.Status != model.RunQueued || retained.SupersededBy != "" {
+	if err != nil || retained.Status != model.RunQueued {
 		t.Fatalf("cron superseded its own live entry: %+v, %v", retained, err)
 	}
 }

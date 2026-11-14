@@ -71,11 +71,24 @@ func RunCancelPolicy(run model.Run, admin, force bool) (string, error) {
 	return strings.Join(warnings, "; "), nil
 }
 
+// RunCancelWarning explains the consequence of another active cancellation.
+// MCP and in-pod CLI acknowledgements share the durable shutdown selection.
+func RunCancelWarning(warning string, cancellations []model.RunCancellation) string {
+	if len(cancellations) == 0 || cancellations[0].Terminate {
+		return warning
+	}
+	notice := "repeat cancel while the run is active to use Argo Terminate; exit handlers will be skipped"
+	if warning != "" {
+		return warning + "; " + notice
+	}
+	return notice
+}
+
 // CancelRun is the audited cancel of one queued, waiting or running run by
 // actor. It resolves the run within the actor's scope, applies RunCancelPolicy,
 // records the request durably, and hands any Workflow-Stop obligation to
-// the scheduler, which also cancels preparation and retains its worker custody
-// until join. Repeating the same Stop is idempotent.
+// the scheduler, which also withdraws a waiting run's admission reservation at
+// once. Repeating an active cancellation escalates it to native Terminate.
 func (service *API) CancelRun(ctx context.Context, actor api.Actor, runID, reason string, force bool) (api.RunCancelResponse, error) {
 	if strings.TrimSpace(actor.Identity) == "" {
 		return api.RunCancelResponse{}, errors.New("service: acting uplink identity is required")
@@ -132,7 +145,7 @@ func (service *API) cancelRun(ctx context.Context, actor api.Actor, id, reason s
 	response := api.RunCancelResponse{
 		RunID: result.Run.ID, Status: string(result.Run.Status), Phase: result.Run.Phase,
 		PreviousState: string(result.PreviousState), CancelledBy: actor.Identity, Reason: result.Run.Reason,
-		Workflow: cancelWorkflowNone, PromotionID: result.PromotionID, Warning: warning,
+		Workflow: cancelWorkflowNone, PromotionID: result.PromotionID, Warning: RunCancelWarning(warning, result.Cancellations),
 	}
 	if len(result.Cancellations) == 0 {
 		return response, nil
@@ -150,4 +163,18 @@ func (service *API) cancelRun(ctx context.Context, actor api.Actor, id, reason s
 		}
 	}
 	return response, nil
+}
+
+// shutdownRun honours the durable native escalation in every observation path.
+func (scheduler *Scheduler) shutdownRun(ctx context.Context, workflowName, runID string) error {
+	pending, err := scheduler.database().PendingRunCancellations(ctx)
+	if err != nil {
+		return err
+	}
+	for _, request := range pending {
+		if request.RunID == runID && request.Terminate {
+			return scheduler.jobs.Terminate(ctx, workflowName, runID)
+		}
+	}
+	return scheduler.jobs.Stop(ctx, workflowName, runID)
 }

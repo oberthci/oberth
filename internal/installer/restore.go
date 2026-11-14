@@ -329,6 +329,9 @@ func runRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps) (result
 	}
 	printRestorePlan(w, cfg, deps, archive, target, parts)
 	if cfg.DryRun {
+		if _, err := previewRestoreHelm(ctx, cfg, deps, target, work); err != nil {
+			return err
+		}
 		_, _ = fmt.Fprintln(w, "\nNo changes were made (--dry-run).")
 		return nil
 	}
@@ -511,12 +514,9 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	_, _ = fmt.Fprintln(w)
 	// Resolve the chart before changing anything, so a missing chart cannot
 	// leave secrets replaced or the server scaled down.
-	var helmArgs []string
-	if len(target.Overlay) > 0 {
-		var err error
-		if helmArgs, err = restoreHelmArgs(ctx, cfg, deps, target, work); err != nil {
-			return err
-		}
+	helmArgs, err := previewRestoreHelm(ctx, cfg, deps, target, work)
+	if err != nil {
+		return err
 	}
 	if parts.History {
 		// A stopped server's schema is known only once the restore pod
@@ -595,17 +595,17 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	if parts.History {
 		workflows, err := listRunWorkflows(ctx, deps, cfg.ArgoNamespace)
 		if err != nil {
-			return stopped(fmt.Errorf("list Workflows for Stop: %w", err))
+			return stopped(fmt.Errorf("list Workflows for Terminate: %w", err))
 		}
 		orphans, err := orphanedWorkflows(ctx, workflows, archive, cfg.InterruptQueued)
 		if err != nil {
 			return stopped(err)
 		}
-		if err := stopWorkflows(ctx, deps, cfg.ArgoNamespace, orphans); err != nil {
+		if err := terminateOrphanedWorkflows(ctx, deps, cfg.ArgoNamespace, orphans); err != nil {
 			return stopped(err)
 		}
 		if len(orphans) > 0 {
-			_, _ = fmt.Fprintf(w, "  ✓ requested Argo Stop for %d orphaned workflows (completed Workflows stay for TTL cleanup)\n", len(orphans))
+			_, _ = fmt.Fprintf(w, "  ✓ requested Argo Terminate for %d orphaned workflows (exit handlers skipped; completed Workflows stay for TTL cleanup)\n", len(orphans))
 		}
 	}
 
@@ -689,14 +689,29 @@ func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, ta
 		return nil, fmt.Errorf("chart %s is not available (pass --chart with the chart release oberth was installed from): %w", args[2], err)
 	}
 	args = append(args, "-n", cfg.Namespace, "--reuse-values", "-f", valuesFile)
-	retainsTransit, err := targetChartRetainsTransit(ctx, deps.Deps, chart)
+	targetDefaults, err := targetChartInstallerDefaults(ctx, deps.Deps, chart)
 	if err != nil {
 		return nil, err
 	}
-	if retainsTransit {
-		return args, nil
+	return prepareRetiredInstallerReuse(ctx, deps.Deps, cfg.Namespace, work, args, targetDefaults)
+}
+
+// Preview the exact restore upgrade before either secrets or the database change.
+func previewRestoreHelm(ctx context.Context, cfg RestoreConfig, deps backupDeps, target restoreTarget, work string) ([]string, error) {
+	if len(target.Overlay) == 0 {
+		return nil, nil
 	}
-	return prepareRetiredInstallerReuse(ctx, deps.Deps, cfg.Namespace, work, args)
+	args, err := restoreHelmArgs(ctx, cfg, deps, target, work)
+	if err != nil {
+		return nil, err
+	}
+	preview := append(append([]string(nil), args...), "--dry-run=server", "--no-hooks", "--output=json")
+	raw, err := deps.RunHelm(ctx, preview)
+	clear(raw)
+	if err != nil {
+		return nil, fmt.Errorf("preview restore before writes: %w", err)
+	}
+	return args, nil
 }
 
 // scaleServer scales through the scale subresource. A merge patch of the
@@ -1065,31 +1080,51 @@ func orphanedWorkflows(ctx context.Context, workflows []runWorkflow, archive res
 	return orphans, nil
 }
 
-// stopWorkflows requests native Stop on the exact objects listed after the
-// server stopped. UID and resourceVersion prevent a replacement or changed
-// ownership from being patched. Argo runs exit handlers and owns TTL cleanup.
-func stopWorkflows(ctx context.Context, deps backupDeps, namespace string, workflows []runWorkflow) error {
+// terminateOrphanedWorkflows uses native immediate shutdown because restored
+// history has no owner that can safely supply credentials to their exit Pods.
+// UID fences replacement; conflicts trigger a bounded identity re-read.
+func terminateOrphanedWorkflows(ctx context.Context, deps backupDeps, namespace string, workflows []runWorkflow) error {
 	for _, wf := range workflows {
-		switch wf.Phase {
-		case "Succeeded", "Failed", "Error":
+		if wf.Phase == "Succeeded" || wf.Phase == "Failed" || wf.Phase == "Error" || wf.Shutdown == "Terminate" {
 			continue
 		}
-		if wf.Shutdown == "Stop" {
-			continue
+		if wf.Name == "" || wf.RunID == "" || wf.UID == "" {
+			return fmt.Errorf("terminate orphaned Workflow %s: original object identity required", wf.Name)
 		}
-		if wf.Name == "" || wf.RunID == "" || wf.UID == "" || wf.ResourceVersion == "" {
-			return fmt.Errorf("stop orphaned Workflow %s: original object identity required", wf.Name)
-		}
-		patch, err := json.Marshal(map[string]any{
-			"metadata": map[string]string{"uid": wf.UID, "resourceVersion": wf.ResourceVersion},
-			"spec":     map[string]string{"shutdown": "Stop"},
-		})
+		patch, err := json.Marshal(map[string]any{"metadata": map[string]string{"uid": wf.UID}, "spec": map[string]string{"shutdown": "Terminate"}})
 		if err != nil {
 			return err
 		}
-		args := kubectlContextArgs(deps.ContextName, "patch", "workflows.argoproj.io", wf.Name, "-n", namespace, "--type=merge", "-p", string(patch))
-		if out, err := deps.RunCommand(ctx, nil, "kubectl", args...); err != nil {
-			return fmt.Errorf("stop orphaned Workflow %s: %w%s", wf.Name, err, commandOutputSuffix(out))
+		for attempt := 0; attempt < 3; attempt++ {
+			args := kubectlContextArgs(deps.ContextName, "patch", "workflows.argoproj.io", wf.Name, "-n", namespace, "--type=merge", "-p", string(patch))
+			output, err := deps.RunCommand(ctx, nil, "kubectl", args...)
+			if err == nil {
+				break
+			}
+			if attempt == 2 || (!apierrors.IsConflict(err) && !strings.Contains(string(output), "(Conflict)")) {
+				return fmt.Errorf("terminate orphaned Workflow %s: %w%s", wf.Name, err, commandOutputSuffix(output))
+			}
+			listed, readErr := listRunWorkflows(ctx, deps, namespace)
+			if readErr != nil {
+				return readErr
+			}
+			found := false
+			for _, current := range listed {
+				if current.Name != wf.Name {
+					continue
+				}
+				found = true
+				if current.UID != wf.UID || current.RunID != wf.RunID {
+					return fmt.Errorf("terminate orphaned Workflow %s: original object was replaced", wf.Name)
+				}
+				if current.Phase == "Succeeded" || current.Phase == "Failed" || current.Phase == "Error" || current.Shutdown == "Terminate" {
+					found = false
+				}
+				break
+			}
+			if !found {
+				break
+			}
 		}
 	}
 	return nil

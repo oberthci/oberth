@@ -51,7 +51,7 @@ func TestRefDeletionStopsRunningAndAssistedWorkflows(t *testing.T) {
 				t.Fatal("deleted run result overwritten", stopped)
 			}
 			shown := f.control.presentationRun(t.Context(), stopped)
-			if shown.DisplayStatus != model.DisplayFailed || shown.DisplayReason != "ref deleted" {
+			if shown.DisplayStatus != model.DisplayCancelled || shown.DisplayReason != "ref deleted" {
 				t.Fatal("deletion reason not projected", shown)
 			}
 			f.engine.mu.Lock()

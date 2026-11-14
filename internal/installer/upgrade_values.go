@@ -116,9 +116,13 @@ func readUpgradeStoredValues(ctx context.Context, namespace, revision string, de
 // no longer exist. Unknown keys are reported and refused; never silently prune
 // administrator configuration or print a rendered manifest into the plan/log.
 func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, chart, imageRef string) (preparedUpgradeValues, error) {
-	revision, err := deployedUpgradeRevision(ctx, cfg.Namespace, deps)
-	if err != nil {
-		return preparedUpgradeValues{}, err
+	revision := cfg.deployedRevision
+	var err error
+	if revision == "" {
+		revision, err = deployedUpgradeRevision(ctx, cfg.Namespace, deps)
+		if err != nil {
+			return preparedUpgradeValues{}, err
+		}
 	}
 	compat, err := readUpgradeCompatibility(ctx, cfg.Namespace, revision, deps)
 	if err != nil {
@@ -130,7 +134,7 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	}
 	var storedSnapshot map[string]any
 	droppedProxy := dropStoredGoProxy(values, deps.Output)
-	if dropRetiredInstallerValues(values, deps.Output) || droppedProxy {
+	if dropRetiredInstallerValues(values, nil, deps.Output) || droppedProxy {
 		storedSnapshot = values
 	}
 	if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {

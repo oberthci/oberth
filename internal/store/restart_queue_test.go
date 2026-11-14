@@ -71,7 +71,7 @@ func TestOwnerRestartPreservesWaitingQueue(t *testing.T) {
 				} else if named {
 					want = model.RunRunning
 				}
-				if current.Status != want || current.ID != original.ID || current.QueueSequence != original.QueueSequence || current.AdmissionSequence != original.AdmissionSequence || !current.QueuedAt.Equal(original.QueuedAt) || current.SupersededBy != "" {
+				if current.Status != want || current.ID != original.ID || current.QueueSequence != original.QueueSequence || current.AdmissionSequence != original.AdmissionSequence || !current.QueuedAt.Equal(original.QueuedAt) {
 					t.Fatal("restart changed queue identity", current)
 				}
 				if want == model.RunFailed && current.Error != model.ServerRestartReason {

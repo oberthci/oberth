@@ -111,7 +111,7 @@ func TestWatchHubRunListAndSweepsMakeNoAPIReads(t *testing.T) {
 // exact GET must have a short local deadline even on an otherwise healthy hub.
 func TestRunListBlockedSeedReadsReturnPromptly(t *testing.T) {
 	f := newControlFixture(t)
-	for i := range 3 {
+	for i := range 20 {
 		submittedDisplayRun(t, f, fmt.Sprintf("blocked-seed-%d", i))
 	}
 	var gets atomic.Int32
@@ -144,13 +144,13 @@ func TestRunListBlockedSeedReadsReturnPromptly(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	start := time.Now()
-	value, err := s.Runs(ctx, api.Actor{Identity: "owner"}, api.RunFilter{})
+	value, err := s.Runs(ctx, api.Actor{Identity: "owner"}, api.RunFilter{Limit: 100})
 	elapsed := time.Since(start)
 	if err != nil || elapsed > 750*time.Millisecond {
 		t.Fatal("blocked seed GET held the list", elapsed, err)
 	}
 	rows := value.([]model.Run)
-	if len(rows) != 3 || gets.Load() != 3 {
+	if len(rows) != 20 || gets.Load() == 0 || gets.Load() > 3 {
 		t.Fatal("seed fallback not exercised", len(rows), gets.Load())
 	}
 	for _, run := range rows {
@@ -164,6 +164,40 @@ func TestRunListBlockedSeedReadsReturnPromptly(t *testing.T) {
 }
 
 type emptyHealthyWatchHub struct{}
+
+func TestRunListCachedObservationSurvivesPageDeadline(t *testing.T) {
+	f := newControlFixture(t)
+	cached := submittedDisplayRun(t, f, "cached-before-seeds")
+	for i := range 20 {
+		submittedDisplayRun(t, f, fmt.Sprintf("missing-before-cache-%d", i))
+	}
+	s := f.api(t)
+	cachedAfterDeadline := false
+	s.schedulingObserver = schedulingObserverFunc(func(ctx context.Context, run model.Run) (*model.ExecutionObservation, error) {
+		if run.ID == cached.ID {
+			cachedAfterDeadline = ctx.Err() != nil
+			return &model.ExecutionObservation{State: "observed", Phase: "Running", Message: "Workflow execution is running."}, nil
+		}
+		<-ctx.Done()
+		return &model.ExecutionObservation{State: "unavailable"}, nil
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	start := time.Now()
+	value, err := s.Runs(ctx, api.Actor{Identity: "owner"}, api.RunFilter{Limit: 100})
+	if err != nil || time.Since(start) > 750*time.Millisecond {
+		t.Fatal("missing rows consumed more than the page budget", err)
+	}
+	rows := value.([]model.Run)
+	if len(rows) != 21 || !cachedAfterDeadline {
+		t.Fatalf("cached row was not inspected after the live budget: rows=%d cached=%v", len(rows), cachedAfterDeadline)
+	}
+	for _, run := range rows {
+		if run.ID == cached.ID && (run.Scheduling == nil || run.Scheduling.Execution == nil || run.Scheduling.Execution.State != "observed") {
+			t.Fatal("expired page budget hid the cached Workflow", run)
+		}
+	}
+}
 
 func (emptyHealthyWatchHub) Workflow(string) (*wfv1.Workflow, bool) { return nil, false }
 func (emptyHealthyWatchHub) PodsOf(string) []*corev1.Pod            { return nil }

@@ -14,7 +14,6 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -351,10 +350,7 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 	if err := verifyDeliveredPinnedSources(existing, sources); err != nil {
 		return &workflowSpecMismatch{}
 	}
-	if intended.Annotations[argoworkflow.NonrootTemplatesAnnotation] != "" && !apiequality.Semantic.DeepEqual(existing.Spec, intended.Spec) {
-		return &workflowSpecMismatch{}
-	}
-	// Ordinary pipelines retain the annotation-only identity check. Namespace
+	// Pipelines retain the annotation-only identity check. Namespace
 	// Workflow-create RBAC remains part of that trust boundary.
 	return nil
 }
@@ -807,36 +803,47 @@ func (controller *Controller) Owns(ctx context.Context, name string) (bool, erro
 // Cancel requests Argo Stop for this run. Argo executes exit handlers and owns
 // the Workflow's eventual TTL cleanup; a foreign object is never patched.
 func (controller *Controller) Cancel(ctx context.Context, name, runID string) error {
-	if runID == "" {
-		return errors.New("argojob: run ID is required to Stop a Workflow")
-	}
-	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("argojob: read Workflow %s before stopping: %w", name, err)
-	}
-	if err := controller.verifyOwnership(workflow, runID); err != nil {
-		return err
-	}
-	_, err = requestWorkflowStop(ctx, controller.workflows, workflow)
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if apierrors.IsConflict(err) {
-		// Concurrent Stop requests are idempotent, but a replaced UID must
-		// never inherit this run's request.
-		current, readErr := controller.workflows.Get(ctx, name, metav1.GetOptions{})
-		if readErr == nil && current.UID == workflow.UID && controller.verifyOwnership(current, runID) == nil &&
-			(current.Spec.Shutdown == wfv1.ShutdownStrategyStop || current.Status.Phase.Completed()) {
+	return controller.shutdown(ctx, name, runID, wfv1.ShutdownStrategyStop)
+}
+
+// Terminate is Argo's immediate shutdown: exit handlers do not run.
+func (controller *Controller) Terminate(ctx context.Context, name, runID string) error {
+	return controller.shutdown(ctx, name, runID, wfv1.ShutdownStrategyTerminate)
+}
+
+func (controller *Controller) shutdown(ctx context.Context, name, runID string, strategy wfv1.ShutdownStrategy) error {
+	var originalUID types.UID
+	var lastConflict error
+	for attempt := 0; attempt < 3; attempt++ {
+		workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
 			return nil
 		}
+		if err != nil {
+			return fmt.Errorf("argojob: read Workflow %s before shutdown: %w", name, err)
+		}
+		if err := controller.verifyOwnership(workflow, runID); err != nil {
+			return err
+		}
+		if attempt == 0 {
+			originalUID = workflow.UID
+		} else if workflow.UID != originalUID {
+			return fmt.Errorf("argojob: Workflow %s was replaced before shutdown", name)
+		}
+		_, err = requestWorkflowShutdown(ctx, controller.workflows, workflow, strategy)
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if apierrors.IsConflict(err) {
+			lastConflict = err
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("argojob: %s Workflow %s: %w", strategy, name, err)
+		}
+		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("argojob: Stop Workflow %s: %w", name, err)
-	}
-	return nil
+	return fmt.Errorf("argojob: Workflow %s kept changing during shutdown: %w", name, lastConflict)
 }
 
 // progressReporter turns repeated status observations into the monotonic

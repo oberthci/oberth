@@ -9,13 +9,12 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/internal/cron"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 const FileName = ".oberth/schedule.yaml"
 
 const MaxSourceBytes = 1 << 20
-
-const maxNameBytes = 64
 
 type Limits struct {
 	MinInterval time.Duration
@@ -76,8 +75,8 @@ func Parse(raw []byte, limits Limits, now time.Time) (File, error) {
 		if name == "" {
 			return File{}, fmt.Errorf("schedule: entry %d has no name", index)
 		}
-		if len(name) > maxNameBytes {
-			return File{}, fmt.Errorf("schedule: entry %q has a name longer than %d bytes", name, maxNameBytes)
+		if err := model.ValidateScheduleName(name); err != nil {
+			return File{}, fmt.Errorf("schedule: entry %d: %w", index, err)
 		}
 		if seen[name] {
 			return File{}, fmt.Errorf("schedule: entry %q is declared more than once", name)
