@@ -238,6 +238,7 @@ type fakeBackupCluster struct {
 	restoredRunsMarker []byte
 	audited            []string // `oberth audit record` commands, in order
 	deleted            []string
+	stopped            []string
 	helmUpgrade        []string
 	helmValues         map[string]any
 	scales             []int32
@@ -398,9 +399,27 @@ func (c *fakeBackupCluster) run(ctx context.Context, input []byte, name string, 
 	case "get":
 		items := []map[string]any{}
 		for _, wf := range c.workflows {
-			items = append(items, map[string]any{"metadata": map[string]any{"name": wf.Name, "labels": map[string]string{"oberth.ci/run": wf.RunID}}, "status": map[string]any{"phase": wf.Phase}})
+			items = append(items, map[string]any{"metadata": map[string]any{"name": wf.Name, "uid": wf.UID, "resourceVersion": wf.ResourceVersion, "labels": map[string]string{"oberth.ci/run": wf.RunID}}, "status": map[string]any{"phase": wf.Phase}, "spec": map[string]any{"shutdown": wf.Shutdown}})
 		}
 		return json.Marshal(map[string]any{"items": items})
+	case "patch":
+		if len(args) != 8 || args[1] != "workflows.argoproj.io" || args[5] != "--type=merge" || args[6] != "-p" {
+			c.t.Fatalf("unexpected restore patch: %v", args)
+		}
+		var patch struct {
+			Metadata struct{ UID, ResourceVersion string }
+			Spec     struct{ Shutdown string }
+		}
+		if err := json.Unmarshal([]byte(args[7]), &patch); err != nil {
+			c.t.Fatal(err)
+		}
+		index := slices.IndexFunc(c.workflows, func(wf runWorkflow) bool { return wf.Name == args[2] })
+		if index < 0 || patch.Metadata.UID != c.workflows[index].UID || patch.Spec.Shutdown != "Terminate" {
+			c.t.Fatalf("restore lost native Stop or its object fence: %s", args[7])
+		}
+		c.workflows[index].Shutdown = "Terminate"
+		c.stopped = append(c.stopped, args[2])
+		return nil, nil
 	case "delete":
 		for _, arg := range args[1:] {
 			if strings.HasPrefix(arg, "oberth-oberth-") {
@@ -502,6 +521,9 @@ func (c *fakeBackupCluster) helm(_ context.Context, args []string) ([]byte, erro
 		}
 		return []byte("name: oberth\n"), nil
 	case args[0] == "upgrade":
+		if slices.Contains(args, "--dry-run=server") {
+			return []byte(`{}`), nil
+		}
 		c.helmUpgrade = args
 		if c.helmConflictOnce {
 			c.helmConflictOnce = false
@@ -749,8 +771,8 @@ func restoreTargetCluster(t *testing.T, knownRunID string) *fakeBackupCluster {
 	target.bao.policies["oberth-ci"] = "# installer default"
 	target.bao.kv["identities/oberth/ssh-host"] = map[string]any{"ed25519": "fresh-host-key"}
 	target.workflows = []runWorkflow{
-		{Name: "oberth-oberth-known", RunID: knownRunID, Phase: "Running"},
-		{Name: "oberth-oberth-orphan", RunID: strings.Repeat("f", 32), Phase: "Running"},
+		{Name: "oberth-oberth-known", RunID: knownRunID, UID: "known-uid", ResourceVersion: "7", Phase: "Running"},
+		{Name: "oberth-oberth-orphan", RunID: strings.Repeat("f", 32), UID: "orphan-uid", ResourceVersion: "7", Phase: "Running"},
 	}
 	return target
 }
@@ -838,9 +860,9 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 		t.Fatalf("secret-access ConfigMap = %v, %v", cm, err)
 	}
 
-	// Only the workflow unknown to the restored database was deleted.
-	if !slices.Equal(target.deleted, []string{"oberth-oberth-orphan"}) {
-		t.Fatalf("deleted workflows = %v", target.deleted)
+	// Only the Workflow unknown to the restored database receives native Terminate.
+	if len(target.deleted) != 0 || !slices.Equal(target.stopped, []string{"oberth-oberth-orphan"}) {
+		t.Fatalf("deleted=%v stopped=%v", target.deleted, target.stopped)
 	}
 
 	// Only the compatibility values went onto the release.
@@ -1052,7 +1074,7 @@ func TestRestoreFailsWhenARoleDoesNotReadBack(t *testing.T) {
 func assertNoRestoreMutation(t *testing.T, target *fakeBackupCluster) {
 	t.Helper()
 	if len(target.bao.writes) != 0 || len(target.scales) != 0 || len(target.uploads) != 0 ||
-		len(target.deleted) != 0 || target.helmUpgrade != nil {
+		len(target.deleted) != 0 || len(target.stopped) != 0 || target.helmUpgrade != nil {
 		t.Fatalf("cluster changed: bao writes %v, scales %v, uploads %d, deleted %v, helm %v",
 			target.bao.writes, target.scales, len(target.uploads), target.deleted, target.helmUpgrade)
 	}

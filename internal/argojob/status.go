@@ -534,23 +534,9 @@ func optionalTime(value metav1.Time) *time.Time {
 
 // completionFor maps a terminal Workflow onto the engine's Completion.
 //
-// Completion success requires BOTH a Succeeded Workflow AND zero failed or
-// errored configured step results. A step with retry attempts where the final
-// attempt succeeded is a pass: StepResults drops superseded attempts, whether
-// the retryStrategy wraps the pod itself or a whole DAG or steps template, so
-// only the latest attempt of every Retry node is a verdict. Retries exhausted
-// leave that latest attempt failed, which keeps the run red and attributes
-// FailedStage/FailedStep to it.
-// A terminally failed configured step — regardless of whether the DAG's depends
-// expressions handle it — makes the run red. Enhanced-depends cleanup or
-// verification tasks may still run after a failure but must not convert the
-// terminal run to green.
-//
-// The Workflow phase itself is never overridden upward: Argo's Failed phase
-// always fails the run, whatever the step rows say. Steps come from
-// Status.Nodes, and a task that never reached pod creation has no node row at
-// all, so "no failed rows" cannot distinguish "all work passed" from "work
-// never ran" (stopped, deadline-exceeded, or controller failure).
+// The Workflow phase determines the verdict. Step outcomes, including failures
+// tolerated by the authored Workflow, remain evidence without overriding it.
+// Observation completeness is a separate authorization/inventory check.
 // completeTerminalTree refuses compressed/offloaded, dangling or unfinished
 // trees. A terminal phase alone says nothing about unobserved credential starts.
 func completeTerminalTree(workflow *wfv1.Workflow) bool {
@@ -624,10 +610,9 @@ func completionFor(workflow *wfv1.Workflow) Completion {
 		}
 		// Preserve the first failed step in deterministic execution order.
 		// Later cleanup failures remain evidence without replacing the cause.
-		if completion.FailedStep == "" {
+		if !completion.Succeeded && completion.FailedStep == "" {
 			completion.FailedStage, completion.FailedStep = step.Stage, step.Step
 		}
-		completion.Succeeded = false
 	}
 
 	if !completion.Succeeded && completion.Reason == "" {

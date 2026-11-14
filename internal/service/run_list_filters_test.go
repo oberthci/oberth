@@ -85,10 +85,9 @@ func TestRunListOwnAndHeldFilters(t *testing.T) {
 		t.Fatalf("held after release = %v, %v", runIDs(runs), err)
 	}
 	for name, arguments := range map[string]map[string]any{
-		"before":     {"held": true, "before": 5},
-		"history":    {"held": true, "view": "history"},
-		"superseded": {"held": true, "superseded": true},
-		"view":       {"held": true, "view": "bogus"},
+		"before":  {"held": true, "before": 5},
+		"history": {"held": true, "view": "history"},
+		"view":    {"held": true, "view": "bogus"},
 	} {
 		if _, err := f.runList(t, arguments); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("held with %s = %v", name, err)

@@ -109,20 +109,6 @@ func (s *deadlineFaultStore) CompleteObservedRunCancellation(a0 context.Context,
 	return s.Store.CompleteObservedRunCancellation(a0, a1)
 }
 
-func (s *deadlineFaultStore) RearmRunCancellation(a0 context.Context, a1 string, a2 string) error {
-	if err := s.fault("RearmRunCancellation"); err != nil {
-		return err
-	}
-	return s.Store.RearmRunCancellation(a0, a1, a2)
-}
-
-func (s *deadlineFaultStore) CompleteSupersededRunCancellationWithoutJob(a0 context.Context, a1 string) error {
-	if err := s.fault("CompleteSupersededRunCancellationWithoutJob"); err != nil {
-		return err
-	}
-	return s.Store.CompleteSupersededRunCancellationWithoutJob(a0, a1)
-}
-
 func (s *deadlineFaultStore) FinishRun(a0 context.Context, a1 string, a2 model.RunResult) (model.Run, error) {
 	if err := s.fault("FinishRun"); err != nil {
 		var zero model.Run

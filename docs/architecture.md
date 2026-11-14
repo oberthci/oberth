@@ -10,12 +10,13 @@ An authenticated SSH connection binds one public-key fingerprint to an actor.
 Git pushes update a bare repository cache on the persistent data volume. Before
 publishing refs, the receive path records an actor-bound, fsync-backed outbox
 reservation. Callbacks replay accepted branch and tag events idempotently into
-SQLite after failures or restarts. Repository locks preserve receive order;
-network publication happens outside those locks.
+SQLite after failures or restarts. Repository locks preserve receive order and fence branch-head checks through
+branch publication.
 
 Branch pushes resolve `.oberth/build.yaml`; tag runs resolve
 `.oberth/release.yaml`. A run retains the exact commit, actor and trigger.
-A newer push can supersede an older run on the same branch. The scheduler
+A newer push leaves older runs on the same branch running. Publication checks
+the current branch head so an older green result cannot overwrite a newer commit. The scheduler
 claims eligible records in acceptance order and starts their submission work.
 Archived repositories, unfinished cancellations and pending publication on the
 same ref can delay a claim. Oberth has no capacity scheduler, run ceiling,
@@ -60,7 +61,10 @@ projection and does not load that timing record.
 
 Run observations explain native parallelism, lock and Pending-Pod waits using
 existing statuses and reason lines. Authored deadlines and retry strategies
-belong to Argo. Oberth cancellation and supersession delete the owned Workflow.
+belong to Argo. Ordinary branch cancellation uses Argo Stop and runs exit handlers.
+A repeated active cancel escalates to Terminate, skipping exit handlers; release,
+tag, apply and promotion cancellations use Terminate immediately. Argo TTL owns
+Workflow deletion.
 On restart, recovery verifies bindings before adopting existing Workflows.
 Ambiguous creates have a durable cleanup obligation and a background settlement
 task. After restart, stranded runs fail with a restart reason; Oberth does not

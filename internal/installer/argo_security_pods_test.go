@@ -18,37 +18,7 @@ import (
 // the actual namespace CEL. The controller and an enabled server are included;
 // no synthetic security context is added to make their rendered Pods pass.
 func TestArgoSecurityEveryRenderedPodPassesPolicy(t *testing.T) {
-	raw, err := exec.CommandContext(t.Context(), "helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@sha256:"+strings.Repeat("1", 64), "--show-only", "templates/argo-pod-policy.yaml").CombinedOutput()
-	if err != nil {
-		t.Fatalf("policy render: %v: %s", err, raw)
-	}
-	var policy admissionv1.ValidatingAdmissionPolicy
-	if err := yaml.Unmarshal([]byte(strings.Split(string(raw), "\n---")[0]), &policy); err != nil {
-		t.Fatal(err)
-	}
-	env, err := cel.NewEnv(cel.Variable("object", cel.DynType), cel.Variable("variables", cel.DynType), ext.Strings())
-	if err != nil {
-		t.Fatal(err)
-	}
-	compile := func(expression string) cel.Program {
-		ast, issues := env.Compile(expression)
-		if issues.Err() != nil {
-			t.Fatal(issues.Err())
-		}
-		program, err := env.Program(ast)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return program
-	}
-	variables := []cel.Program{}
-	checks := []cel.Program{}
-	for _, v := range policy.Spec.Variables {
-		variables = append(variables, compile(v.Expression))
-	}
-	for _, v := range policy.Spec.Validations {
-		checks = append(checks, compile(v.Expression))
-	}
+	evaluate := argoPodPolicyEvaluator(t)
 	for _, server := range []bool{false, true} {
 		t.Run(map[bool]string{false: "controller", true: "controller-and-server"}[server], func(t *testing.T) {
 			flags := ArgoHelmArgs(Config{})
@@ -86,24 +56,8 @@ func TestArgoSecurityEveryRenderedPodPassesPolicy(t *testing.T) {
 				if pod.Spec.SecurityContext == nil || pod.Spec.SecurityContext.SeccompProfile == nil || pod.Spec.SecurityContext.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
 					t.Fatalf("native %v %v lacks Pod RuntimeDefault default", object["kind"], valueAt(object, "metadata", "name"))
 				}
-				var input map[string]any
-				if err := json.Unmarshal(encoded, &input); err != nil {
-					t.Fatal(err)
-				}
-				vars := map[string]any{}
-				activation := map[string]any{"object": input, "variables": vars}
-				for i, program := range variables {
-					value, _, err := program.Eval(activation)
-					if err != nil {
-						t.Fatal(err)
-					}
-					vars[policy.Spec.Variables[i].Name] = value
-				}
-				for i, program := range checks {
-					value, _, err := program.Eval(activation)
-					if err != nil || value != types.True {
-						t.Fatalf("native %v %v refused: %s (error %v)", object["kind"], valueAt(object, "metadata", "name"), policy.Spec.Validations[i].Message, err)
-					}
+				if failures := evaluate(pod); len(failures) != 0 {
+					t.Fatalf("native %v %v refused: %v", object["kind"], valueAt(object, "metadata", "name"), failures)
 				}
 				count++
 			}
@@ -115,5 +69,70 @@ func TestArgoSecurityEveryRenderedPodPassesPolicy(t *testing.T) {
 				t.Fatalf("evaluated %d Pods, want %d", count, expected)
 			}
 		})
+	}
+}
+
+func argoPodPolicyEvaluator(t *testing.T) func(corev1.Pod) []string {
+	t.Helper()
+	raw, err := exec.CommandContext(t.Context(), "helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@sha256:"+strings.Repeat("1", 64), "--show-only", "templates/argo-pod-policy.yaml").CombinedOutput()
+	if err != nil {
+		t.Fatalf("policy render: %v: %s", err, raw)
+	}
+	var policy admissionv1.ValidatingAdmissionPolicy
+	if err := yaml.Unmarshal([]byte(strings.Split(string(raw), "\n---")[0]), &policy); err != nil {
+		t.Fatal(err)
+	}
+	env, err := cel.NewEnv(cel.Variable("object", cel.DynType), cel.Variable("variables", cel.DynType), ext.Strings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	compile := func(expression string) cel.Program {
+		ast, issues := env.Compile(expression)
+		if issues.Err() != nil {
+			t.Fatal(issues.Err())
+		}
+		program, err := env.Program(ast)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return program
+	}
+	variables := []cel.Program{}
+	checks := []cel.Program{}
+	for _, v := range policy.Spec.Variables {
+		variables = append(variables, compile(v.Expression))
+	}
+	for _, v := range policy.Spec.Validations {
+		checks = append(checks, compile(v.Expression))
+	}
+	return func(pod corev1.Pod) []string {
+		encoded, err := json.Marshal(pod)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var input map[string]any
+		if err := json.Unmarshal(encoded, &input); err != nil {
+			t.Fatal(err)
+		}
+		vars := map[string]any{}
+		activation := map[string]any{"object": input, "variables": vars}
+		for i, program := range variables {
+			value, _, err := program.Eval(activation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			vars[policy.Spec.Variables[i].Name] = value
+		}
+		var failures []string
+		for i, program := range checks {
+			value, _, err := program.Eval(activation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if value != types.True {
+				failures = append(failures, policy.Spec.Validations[i].Message)
+			}
+		}
+		return failures
 	}
 }

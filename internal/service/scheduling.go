@@ -150,7 +150,7 @@ func lockWaitReason(execution *model.ExecutionObservation) string {
 		}
 	}
 	for _, message := range messages {
-		if !strings.HasPrefix(message, "Waiting for ") || !strings.Contains(message, " lock. Lock status: ") {
+		if !strings.HasPrefix(message, "Waiting for ") || message == "Waiting for a persistent volume claim to be created." {
 			continue
 		}
 		return message

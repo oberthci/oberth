@@ -966,17 +966,16 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.repoRemove(ctx, actor, arguments.Repo)
 	case "run_list":
 		var arguments struct {
-			Repo       string                `json:"repo"`
-			Status     model.RunStatusFilter `json:"status"`
-			Superseded bool                  `json:"superseded"`
-			Ref        string                `json:"ref"`
-			Limit      int                   `json:"limit"`
-			Before     pageCursor            `json:"before"`
-			View       string                `json:"view"`
-			Own        bool                  `json:"own"`
-			Held       bool                  `json:"held"`
-			RefGlob    string                `json:"ref_glob"`
-			Latest     bool                  `json:"latest"`
+			Repo    string                `json:"repo"`
+			Status  model.RunStatusFilter `json:"status"`
+			Ref     string                `json:"ref"`
+			Limit   int                   `json:"limit"`
+			Before  pageCursor            `json:"before"`
+			View    string                `json:"view"`
+			Own     bool                  `json:"own"`
+			Held    bool                  `json:"held"`
+			RefGlob string                `json:"ref_glob"`
+			Latest  bool                  `json:"latest"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
@@ -989,9 +988,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			if arguments.Latest || arguments.RefGlob != "" {
 				return nil, fmt.Errorf("%w: held:true is one unpaged list; it takes no latest or ref_glob", ErrInvalidInput)
 			}
-			if arguments.Superseded {
-				return nil, fmt.Errorf("%w: held:true and superseded:true select different runs; pass one", ErrInvalidInput)
-			}
+
 			runs, err := service.heldRuns(ctx, api.RunFilter{Status: arguments.Status, Repository: arguments.Repo, Ref: arguments.Ref, View: arguments.View,
 				Before: arguments.Before.Sequence, BeforeRun: arguments.Before.ID, Actor: owner})
 			if err != nil {
@@ -1008,7 +1005,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if limit > 100 {
 			limit = 100
 		}
-		runs, err := service.Runs(ctx, actor, api.RunFilter{Status: arguments.Status, Superseded: arguments.Superseded, Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit,
+		runs, err := service.Runs(ctx, actor, api.RunFilter{Status: arguments.Status, Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit,
 			RefGlob: strings.TrimSpace(arguments.RefGlob), LatestPerRef: arguments.Latest,
 			Before: arguments.Before.Sequence, BeforeRun: arguments.Before.ID, View: arguments.View, Actor: owner})
 		if err != nil {
@@ -1073,7 +1070,7 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err := validRefGlob(filter.RefGlob); err != nil {
 		return nil, err
 	}
-	storeFilter := model.RunListFilter{Status: filter.Status, Superseded: filter.Superseded, LatestPerRef: filter.LatestPerRef, Ref: filter.Ref, RefGlob: filter.RefGlob, Limit: filter.Limit, Before: filter.Before, Terminal: filter.View == api.RunViewHistory, Actor: filter.Actor}
+	storeFilter := model.RunListFilter{Status: filter.Status, LatestPerRef: filter.LatestPerRef, Ref: filter.Ref, RefGlob: filter.RefGlob, Limit: filter.Limit, Before: filter.Before, Terminal: filter.View == api.RunViewHistory, Actor: filter.Actor}
 	if strings.TrimSpace(filter.BeforeRun) != "" {
 		// A cursor that is both a sequence and a run-ID spelling is a run
 		// first; an unscoped caller falls back to the sequence (#073).
@@ -1107,20 +1104,24 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err != nil {
 		return nil, err
 	}
+	// Optional live diagnostics share one page deadline. Cached observations
+	// remain immediate even after the live-read budget expires.
+	observationCtx, cancelObservations := context.WithTimeout(ctx, 250*time.Millisecond)
+	defer cancelObservations()
 	for i := range runs {
 		if filter.View == api.RunViewHistory {
 			continue
 		}
 		switch runs[i].DisplayStatus {
 		case model.DisplayRunning:
-			runs[i].Scheduling = service.observeRunListExecution(ctx, runs[i])
+			runs[i].Scheduling = service.observeRunListExecution(observationCtx, runs[i])
 			applyExecutionDisplay(&runs[i], runs[i].Scheduling)
 			if runs[i].DisplayReason == "" && (runs[i].Scheduling == nil || runs[i].Scheduling.Execution == nil || runs[i].Scheduling.Execution.State == "unavailable" || runs[i].Scheduling.Execution.State == "not_observed") {
 				runs[i].DisplayReason = "awaiting Argo state"
 			}
 		case model.DisplayQueued:
 			var reason string
-			runs[i].Scheduling, reason = service.observeScheduling(ctx, runs[i], nil, false)
+			runs[i].Scheduling, reason = service.observeScheduling(observationCtx, runs[i], nil, false)
 			applyQueuedDisplay(&runs[i], runs[i].Scheduling, reason)
 		}
 	}
@@ -1729,6 +1730,12 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	}
 	if run.Status == model.RunRunning && isPendingCreate(run) {
 		visible.DisplayReason = "workflow create uncertain, cleanup pending"
+		if strings.HasPrefix(run.Reason, store.OberthStopReasonPrefix) {
+			visible.DisplayReason = run.Reason
+		}
+	}
+	if run.Status == model.RunRunning && run.Cancelled() {
+		visible.DisplayReason = run.Reason
 	}
 	if run.Status == model.RunRunning && run.Phase == "publishing" {
 		visible.DisplayReason = "publishing to upstream"
@@ -1772,87 +1779,28 @@ func runDisplayReason(run model.Run) string {
 	if run.Status != model.RunInterrupted {
 		return ""
 	}
-	switch {
-	case run.Phase == model.PhaseCancelled:
+	switch run.Phase {
+	case model.PhaseCancelled:
 		return strings.TrimPrefix(run.Reason, "cancelled ")
-	case run.SupersededBy != "" && run.Reason == "superseded by newer run":
-		return "superseded by newer run"
 	default:
 		return "server restart, retry needed"
 	}
 }
 
-func (service *API) presentationRun(ctx context.Context, run model.Run) (result model.Run) {
-	defer func() {
-		visible := []model.Run{result}
-		result = visible[0]
-	}()
-	if run.SupersededBy == "" || service.history == nil {
-		return service.presentationRunWithSuccessor(ctx, run, nil)
-	}
-	successor, err := service.history.Run(ctx, run.SupersededBy)
-	if err != nil {
-		return service.presentationRunWithSuccessor(ctx, run, nil)
-	}
-	return service.presentationRunWithSuccessor(ctx, run, map[string]model.Run{successor.ID: successor})
-}
-
-// presentationRuns resolves every successor in one lookup for list views.
-func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (result []model.Run, resultErr error) {
-	defer func() {
-		for i := range result {
-			result[i].ResourceMessage = ""
-		}
-	}()
-	batch, ok := service.history.(interface {
-		RunsByIDs(context.Context, []string) (map[string]model.Run, error)
-	})
-	if !ok {
-		plain := *service
-		for i := range runs {
-			runs[i] = plain.presentationRun(ctx, runs[i])
-		}
-		return runs, nil
-	}
-	ids := make([]string, 0)
-	seen := make(map[string]bool)
-	for _, run := range runs {
-		if run.SupersededBy != "" && !seen[run.SupersededBy] {
-			seen[run.SupersededBy] = true
-			ids = append(ids, run.SupersededBy)
-		}
-	}
-	successors := map[string]model.Run{}
-	if len(ids) > 0 {
-		var err error
-		successors, err = batch.RunsByIDs(ctx, ids)
-		if err != nil {
-			return nil, err
-		}
-	}
-	for i := range runs {
-		runs[i] = service.presentationRunWithSuccessor(ctx, runs[i], successors)
-	}
-	return runs, nil
-}
-
-func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.Run, successors map[string]model.Run) model.Run {
+func (service *API) presentationRun(_ context.Context, run model.Run) model.Run {
 	visible := presentationRunAt(run, service.schedulingClock().Now())
-	successor, ok := successors[run.SupersededBy]
-	if !ok {
-		if service.scope != nil && run.SupersededBy != "" {
-			visible.SupersededBy = ""
-		}
-		return visible
-	}
-	if run.Status == model.RunInterrupted && run.Phase != model.PhaseCancelled && run.Reason == "superseded by newer run" {
-		sha := successor.SHA
-		if len(sha) > 8 {
-			sha = sha[:8]
-		}
-		visible.DisplayReason = "superseded by " + sha
+	if service.scope != nil && strings.HasPrefix(visible.Reason, "branch run deferred:") {
+		visible.Reason = parkPolicyDisplayReason(run, "branch run deferred: waiting for queue capacity")
 	}
 	return visible
+}
+
+func (service *API) presentationRuns(ctx context.Context, runs []model.Run) ([]model.Run, error) {
+	for i := range runs {
+		runs[i] = service.presentationRun(ctx, runs[i])
+		runs[i].ResourceMessage = ""
+	}
+	return runs, nil
 }
 
 // burnPrecedence resolves a burn to one word from the states of its steps.
@@ -2413,7 +2361,7 @@ func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, s
 	if err := auditedGitMutation(ctx, service.auditor, actor.Identity, "sync.branch", "run", run.ID,
 		map[string]any{"repo": repository.Name, "branch": run.Ref, "sha": run.SHA},
 		func() error {
-			return service.git.SyncBranch(ctx, service.cacheInputFor(ctx, repository), run.Ref, run.SHA)
+			return service.git.SyncBranch(ctx, service.cacheInputFor(ctx, repository), run.Ref, run.SHA, true)
 		}); err != nil {
 		return model.Run{}, fmt.Errorf("sync branch: %w", err)
 	}

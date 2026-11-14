@@ -21,7 +21,7 @@ func (*executorIdentityExpiredFailure) ExecutorIdentityExpired() bool { return t
 
 type expiredCleanupJobs struct{ *pendingCreateJobs }
 
-func (*expiredCleanupJobs) Delete(context.Context, string, string) error {
+func (*expiredCleanupJobs) Stop(context.Context, string, string) error {
 	return errors.New("API unavailable")
 }
 
@@ -76,4 +76,8 @@ func TestExecutorIdentityPendingCleanupShowsDeadlineReason(t *testing.T) {
 			t.Fatalf("pending cleanup hides deadline reason: %+v", got)
 		}
 	}
+}
+
+func (j *expiredCleanupJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
 }

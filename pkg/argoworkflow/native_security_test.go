@@ -18,15 +18,6 @@ func TestNativePlacementNeverBypassesSecurityDenials(t *testing.T) {
 		{"reserved-executor-env", func(w *wfv1.Workflow) {
 			w.Spec.Templates[0].Container.Env = []corev1.EnvVar{{Name: "ARGO_DEBUG_PAUSE_AFTER", Value: "true"}}
 		}},
-		{"privileged", func(w *wfv1.Workflow) {
-			w.Spec.Templates[0].Container.SecurityContext = &corev1.SecurityContext{Privileged: ptr.To(true)}
-		}},
-		{"escalation", func(w *wfv1.Workflow) {
-			w.Spec.Templates[0].Container.SecurityContext = &corev1.SecurityContext{AllowPrivilegeEscalation: ptr.To(true)}
-		}},
-		{"capabilities", func(w *wfv1.Workflow) {
-			w.Spec.Templates[0].Container.SecurityContext = &corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"SYS_ADMIN"}}}
-		}},
 		{"host-network", func(w *wfv1.Workflow) { w.Spec.HostNetwork = ptr.To(true) }},
 		{"host-pid", func(w *wfv1.Workflow) { w.Spec.PodSpecPatch = `{"hostPID":true}` }},
 		{"host-ipc", func(w *wfv1.Workflow) { w.Spec.PodSpecPatch = `{"hostIPC":true}` }},

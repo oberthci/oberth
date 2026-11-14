@@ -196,9 +196,17 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	if response.RunID != claimed.ID || response.PreviousState != "waiting" || response.Workflow != "pending" ||
-		response.CancelledBy != administrativeActor || response.Warning != "" || !json.Valid(raw) {
+		response.CancelledBy != administrativeActor || !strings.Contains(response.Warning, "Terminate; exit handlers will be skipped") || !json.Valid(raw) {
 		t.Fatalf("in-pod cancel = %#v (%s)", response, raw)
 	}
+	var firstOutput bytes.Buffer
+	if err := writeRunCancel(&firstOutput, response, raw, false); err != nil || !strings.Contains(firstOutput.String(), "repeat cancel while the run is active to use Argo Terminate; exit handlers will be skipped") {
+		t.Fatalf("first CLI Stop acknowledgement omits escalation warning: %q, %v", firstOutput.String(), err)
+	}
+	if !strings.Contains(string(raw), "Terminate; exit handlers will be skipped") {
+		t.Fatalf("JSON Stop acknowledgement omits escalation warning: %s", raw)
+	}
+
 	select {
 	case <-woken:
 	case <-time.After(testtimeout.Start(5 * time.Second)):
@@ -212,7 +220,7 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 	if err != nil || audit.Actor != administrativeActor || audit.ResourceID != claimed.ID {
 		t.Fatalf("in-pod cancel audit = %#v, %v", audit, err)
 	}
-	if _, _, err := pod.cancel(ctx, claimed.ID, "", false); !errors.Is(err, store.ErrRunNotActive) {
+	if _, _, err := pod.cancel(ctx, claimed.ID, "", false); err != nil {
 		t.Fatalf("second in-pod cancel = %v", err)
 	}
 	if _, _, err := pod.cancel(ctx, release.ID, "", false); err == nil || !strings.Contains(err.Error(), "force") {

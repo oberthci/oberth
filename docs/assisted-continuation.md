@@ -138,10 +138,7 @@ A leaf is held only when it has no credentials and no identity of its own:
 - no `oberth secretstore exec` or secretstore exec command, no
   `oberth.ci/release-wif-role`, no per-step `serviceAccountName`, no
   `automountServiceAccountToken: true`, no token, secret or WIF volume
-  mount;
-- not a declared nonroot launcher (`oberth.ci/nonroot-templates`): those
-  lanes, such as Oberth's own static-git qualification, forbid exec and own
-  their Pod patch.
+  mount.
 
 Everything else keeps today's behaviour.
 
@@ -302,9 +299,8 @@ per-workflow and unaffected.
   `step test-service evicted after continue: ephemeral-storage (…)`, instead
   of a plain step failure or a budget to raise in git; `run.hold_abandoned`
   carries `abandon_reason: evicted` and `eviction`. No status is added.
-- A newer push that supersedes the run deletes its Workflow through the
-  existing cancellation path, which removes any held Pod; explicit
-  `run_cancel` does the same.
+- A newer push leaves this run active. Explicit `run_cancel` requests native
+  Argo Stop and waits for exit handlers; Argo TTL cleans the Workflow.
 - Hold operations run only in the server's own pipeline namespace through
   the `pods/exec` and `pods` delete verbs the chart's Argo Role already
   grants; no RBAC is added.

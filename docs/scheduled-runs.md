@@ -41,6 +41,10 @@ commit and a review like any other change.
 when: "'{{workflow.parameters.oberth-schedule}}' == 'weekly-deps'"
 ```
 
+Entry names must start with a letter or digit, use only letters, digits and
+`. _ / + @ = , -`, and contain at most 64 bytes. Schedule parsing and stored-run
+compilation both enforce this alphabet before setting the workflow parameter.
+
 This is a reserved, server-owned workflow parameter. Reference it directly;
 do not declare it in `spec.arguments.parameters`, including a default or
 `valueFrom`. Such declarations are rejected at admission. Cron fires and
@@ -54,9 +58,8 @@ schedule run.
 Named entries on the same repository/branch/SHA remain distinct queued runs.
 Ordinary branch pushes and other entries are independent. A due cron occurrence
 coalesces into a queued or running attempt of the same entry and branch instead
-of superseding it. Other active work does not stop cron from queueing. Explicit
-manual retries or forced triggers can still replace an attempt of the same
-entry and branch. Admission, Argo parallelism and native Argo
+of creating another attempt. Other active work does not stop cron from queueing. Explicit
+forced triggers leave existing attempts active. Admission, Argo parallelism and native Argo
 synchronization bound execution ([where limits live](where-limits-live.md)).
 
 Run list/detail APIs expose `ScheduleEntry`; `status` and `wait` expose

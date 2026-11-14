@@ -314,3 +314,15 @@ func TestLockWaitReasonDoesNotMatchPVCWait(t *testing.T) {
 		t.Fatalf("PVC wait became a lock wait: %q", got)
 	}
 }
+
+func TestExecutionDisplayKeepsTruncatedLockReason(t *testing.T) {
+	message := "Waiting for pipeline/Mutex/" + strings.Repeat("x", 173) + "…"
+	if strings.Contains(message, " lock. Lock status: ") {
+		t.Fatal("fixture did not truncate the lock suffix")
+	}
+	run := model.Run{ID: "run", Status: model.RunRunning, DisplayStatus: model.DisplayRunning}
+	applyExecutionDisplay(&run, &model.RunScheduling{State: "observed", Execution: &model.ExecutionObservation{State: "observed", Phase: "Pending", Message: message}})
+	if run.DisplayReason != message {
+		t.Fatalf("long lock lost its reason: %q", run.DisplayReason)
+	}
+}

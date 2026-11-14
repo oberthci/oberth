@@ -119,14 +119,8 @@ upstream:
   keyFile: id_ed25519
   knownHostsKey: known_hosts
 argo:
-  executorScratchSizeLimit: 1Gi
   releaseWIF: {}
   releaseTagRoutes: {}
-  executionPlacementConfigMap: ''
-  executionTargetConfigMap: ''
-  executionTargetCredentialsSecret: ''
-  controllerProfile: ''
-  controllerProfileConfigMap: ''
   namespace: oberth-argo
   podPolicy:
     enabled: true

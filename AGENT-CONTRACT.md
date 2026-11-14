@@ -365,10 +365,11 @@ trust assumptions and complete invalidation rules.
     The server delivers the oberth binary into the source claim at seeding
     time and injects the secrets emptyDir volume automatically. Owner-private
     mode confines access by other UIDs and public paths, but does not by
-    itself isolate secrets from a same-UID Argo `wait` container. A separate
-    server-owned patch removes `wait` mirrors of both the secret volume and
-    main release token after Argo adds them (#621); the effective admitted Pod
-    must still be checked for those absent mounts.
+    itself isolate secrets from a same-UID Argo `wait` container. Native Argo
+    wait mirrors are retained. The executor token separately keeps its random
+    relocated path in private memory-backed storage; that protection does not
+    depend on deleting the secret or main release-token mirror.
+
   Values and value-derived digests never appear in etcd, Job annotations,
   node disk (on swapless nodes or verified RAM-only zram), or server-side
   logs; only names and paths are annotated. `secretstore exec` exempts active
@@ -432,8 +433,7 @@ trust assumptions and complete invalidation rules.
   pusher's branch run can plant `GOCACHE` objects that the next run links in
   (pre-existing for default-mode leaves). So `cache` is refused on CI-tier
   leaves that run a credential chain, and admitted on release leaves,
-  credentialed or not, because only admitted release runs write the release root. It is
-  also refused on nonroot leaves, which take no host cache mount. Any
+  credentialed or not, because only admitted release runs write the release root. Any
   other value is refused by admission and `oberth validate`.
   `readonly` covers shared aliases and Argo wait mirrors. Authored read-only
   requests survive mount-path replacement and protect overlapping subpaths
@@ -444,11 +444,9 @@ trust assumptions and complete invalidation rules.
   and controller-proof limits are in [workspace isolation](docs/workspace-isolation.md).
   Helper mount mirroring is resolved once before credential injection, with
   explicit helper paths taking precedence; generated credentials are never
-  mirrored into repository helpers. On credentialed leaves, a server-owned
-  Pod patch also removes Argo `wait` mirrors of the secret root and the main
-  release token after Argo adds them; `wait` retains its own executor token and
-  ordinary output mounts. This boundary still depends on actual controller
-  behavior and must be checked in the admitted Pod. Container-set common
+  mirrored into repository helpers. Argo's native `wait` credential mirrors are
+  retained; source and explicit read-only workspace mirrors stay protected.
+  Container-set common
   mounts are normalized before policy, and a server patch binds their
   referenced volumes to the admitted definitions and this Workflow's own
   generated claims.
@@ -1179,8 +1177,8 @@ trust assumptions and complete invalidation rules.
   Durable `Status` values are unchanged and `RunStatus.Valid` still refuses
   the read-only `waiting` projection.
 
-  `display_status` is exactly one of seven values: `queued`, `running`,
-  `passed`, `failed`, `superseded`, `cancelled`
+  `display_status` is exactly one of five values: `queued`, `running`,
+  `passed`, `failed`, `cancelled`
   (`model.DisplayStatuses`; `model.DisplayRunStatus` is the only mapping,
   and `TestEveryRawPhaseMapsToExactlyOneDisplayStatus` holds every raw
   status, phase and projection to it). A status says what to do with the
@@ -1204,17 +1202,17 @@ trust assumptions and complete invalidation rules.
   | running past its execution deadline | `running` | `Execution deadline exceeded.` |
   | failed by its execution deadline | `failed` | `Execution deadline exceeded.` or the retained resource guidance |
   | passed CI / published release | `passed` | empty |
-  | failed step or infrastructure | `failed` | failed phase and bounded cause; never empty |
+  | Argo Failed/Error or infrastructure failure | `failed` | failed phase and bounded cause; never empty |
   | upstream publication failure | `failed` | upstream rejection class, or upstream publication failure with transient cause |
   | queued publication retry | `running` | publication attempt/backoff message; from publication state |
-  | superseded (`reason='superseded by newer run'`) | `superseded` | `superseded by <short SHA>`; successor run remains linked |
   | Workflow confirmed absent after a server restart, including work never submitted | `failed` | `interrupted by server restart` |
-  | explicit cancel | `cancelled` | `cancelled by <actor>: <reason>` |
+  | active submitted cancellation | `running` | `cancelling by <actor>: <reason>` until Argo finishes |
+  | unsuccessful Oberth stop or cancellation before submission | `cancelled` | cancelling actor or retained stop reason |
   | observed Workflow interrupted by server restart, requiring an operator retry | `cancelled` | `server restart, retry needed` |
 
-  Raw status fields retain their values, but existing `display_status` values
-  can change from `cancelled` to `superseded` when a successor is known.
-  Clients must accept these display enum values. The former `waiting`
+  Raw status fields retain their values. A newer push leaves older runs active;
+  publication checks the current mirror branch head before pushing. Clients
+  accept the five display enum values above. The former `waiting`
   dashboard label and the `infra-pending` and `deadline-exceeded`
   `display_status` values are gone: they are `queued`, `running` and
   `failed`/`running` with the reason above. The display pair is additive
@@ -1291,52 +1289,52 @@ trust assumptions and complete invalidation rules.
 ## Behavioral guarantees
 
 - Branch pushes, including pushes to the discovered default branch, enqueue one
-  FIFO CI run for the exact accepted commit. A newer push to the same repository
-  and branch marks the older run `interrupted`, records which newer run
-  superseded it, and creates a durable cancellation obligation for any in-flight
-  Workflow. The scheduler cancels an in-flight create and retries deletion
-  until the Workflow is absent. Submission tracking reserves no capacity.
-- A branch deletion atomically cancels that ref's unfinished non-promotion runs
-  with phase `cancelled` and reason `ref deleted`, recording the same durable
-  cleanup obligations. Deferred receives retain a cancelled reason and cannot
-  drain into new runs. Receive replay cannot cancel later recreations, including
-  at the same SHA. Tags, promotion CI and pending publication owners are untouched.
+  FIFO CI run for the exact accepted commit. A newer push leaves older runs
+  running under Argo's parallelism. Before branch publication, Oberth verifies
+  the current mirror head under the Git lock through the push. An older green
+  result abandons publication if the branch has moved, even if the newer run
+  fails. Submission tracking reserves no capacity.
+- A branch deletion records cancellation of that ref's unfinished non-promotion
+  runs, with phase `cancelled` and reason `ref deleted`. Work not submitted
+  finishes cancelled; submitted Workflows receive native Stop and keep their
+  observer until Argo finishes. Deferred receives retain a cancelled reason and
+  cannot drain into new runs. Receive replay cannot cancel later recreations,
+  including at the same SHA. Tags, promotion CI and pending publication owners
+  are untouched.
 - An explicit run cancel (`run_cancel`, `oberth run cancel`, `oberth runs
-  cancel`) terminalizes one queued, waiting or running run through an audited
-  `CancelRun(actor, run, reason)`: the run becomes `interrupted` with phase
-  `cancelled` and reason `cancelled by <actor>[: <reason>]` (projected
-  unchanged by `run_get`, `run_list` and `/api/runs`), and a `run.cancel`
-  audit action carrying actor, reason, previous state, force and any warning is
-  appended in the same transaction. No run status is added: every consumer
-  already treats `interrupted` as terminal and non-green, and a new status
-  would need a `runs` CHECK-constraint table rebuild. A queued run simply
-  never gets claimed. A claimed run receives the existing supersede obligation
-  with no successor (`run_cancellations.reason = 'superseded'`, empty
-  `superseded_by`): its in-memory submission ownership is withdrawn if work
-  has not been submitted, and its owned Workflow is deleted through the normal
-  Delete path. The owner settles without recording another result and releases
-  submitted ownership only after deletion is accepted. The record is terminal before the deletion
-  finishes, exactly as for a supersede; a failed deletion stays a pending
-  obligation for the cancellation pass, including after a restart. The MCP
-  request performs the Workflow deletion synchronously on its own context
-  (`AcceptCancellations`): a client disconnect or timeout leaves the
-  committed cancel with a pending obligation (`workflow: pending`) that the
-  next cancellation pass completes. Cancelling
-  a terminal run is refused (HTTP 409 / `ErrInvalidState`) without any change.
-  A run owning a pending publication is refused: the publication owns it.
-  Cancelling promotion CI fails the promotion in the same transaction, so no
-  publication can begin and nothing is merged or pushed. A cancel projects no
-  CI issue. Authorization: an admin uplink may cancel any run it can see, but
-  tag/release and apply runs require an explicit `force` and record the
-  warning that their publication may be partial (anything the Workflow
-  already pushed stays published). A non-admin uplink may cancel only
-  `branch`-trigger runs in repositories its scope can see; release, tag,
-  plan, apply, promotion and scheduled runs are refused with `ErrForbidden`.
-  The decision is re-made on the run as it is inside the cancel transaction.
-  Because a cancellation pass can settle an obligation before the owner
-  creates the Workflow, the owner re-reads the run right before creation and,
-  if it must delete a Workflow it created for a preempted run and fails,
-  re-arms the obligation so the next pass or restart deletes it.
+  cancel`) records durable intent and a `run.cancel` audit action atomically,
+  including actor, reason, previous state, force and policy warning. Queued work
+  finishes `interrupted` with phase `cancelled` and an actor reason. Claimed
+  work retains its existing active status and a cancelling reason until native
+  Argo completion. No status or label is added.
+  Ordinary branch cancellation uses Argo Stop so exit handlers run. Repeating
+  an active cancellation uses Terminate and skips exit handlers; release, tag,
+  apply and promotion cancellations use Terminate immediately. The first Stop
+  response warns about repeat cancellation in both MCP and CLI output.
+  `run_cancellations` records native stop obligations with reason `cancelled`
+  or `owner_restart`; its terminate flag never decreases. No successor columns
+  remain. Ownership and UID checks refuse foreign or replaced Workflows, and a
+  stale Stop cannot overwrite Terminate. Failed shutdown requests remain pending
+  for recovery. Oberth never deletes Workflows; Argo TTL owns their deletion.
+  Accepted Stop keeps token delivery, logs and step observation until Argo's
+  final phase. An existing completed Workflow also passes through resumed final
+  collection and executor identity retirement. Settlement starts an observer
+  only when it acquires its own reservation. An unsuccessful Oberth stop ends
+  with the existing interrupted/cancelled verdict and opens no CI issue; native
+  Succeeded remains passed even when an author-tolerated step failed; the step
+  evidence remains failed. Authored shutdown retains a Workflow-spec reason.
+  The MCP request attempts the native shutdown on its request context; a client
+  disconnect or timeout leaves the durable obligation for the next pass. A
+  terminal run or a run owning pending publication refuses cancellation. A
+  promotion cancellation prevents a new publication. Work already published
+  stays published.
+  Authorization is rechecked inside the cancel transaction. An admin uplink may
+  cancel any run it can see, with explicit force for tag/release and apply runs
+  and a partial-publication warning. A non-admin uplink may cancel only branch
+  pushes within its repository scope; release, tag, plan, apply, promotion and
+  scheduled runs are refused. Cancellation racing Workflow creation preserves
+  the accepted native shutdown strategy and keeps observation/settlement of
+  that exact Workflow until native completion or confirmed absence.
 - An explicit rerun (`run_rerun`, `oberth run rerun <id> [--reason]
   [--force]`, #1098) queues a new run with the same repository, ref, SHA,
   trigger, tested and base SHA as one failed or interrupted run, including
@@ -1455,9 +1453,11 @@ trust assumptions and complete invalidation rules.
   An adopted run whose observation still fails settles like a submitted one:
   a terminal Workflow keeps its real result and artifacts (also after a log
   budget breach or executor identity retirement error), and an unobservable
-  Workflow is deleted and only that run fails with phase `infrastructure`;
-  the scheduler keeps running. If that deletion also fails, the run stays
-  owned for the next restart, exactly as for a submitted run.
+  Workflow is asked to stop through Argo's native shutdown (never deleted;
+  Argo's TTL owns deletion); the scheduler keeps running. The run stays owned
+  for settlement until the Workflow's completion is confirmed, and its result
+  is then the Workflow's native verdict from the final observation, exactly
+  as for a submitted run.
   A confirmed-absent Workflow, or a claimed run without a Workflow name,
   fails with `interrupted by server restart`. This applies to branch, tag,
   release, and promotion runs. Recovery never automatically requeues or
@@ -1478,9 +1478,10 @@ trust assumptions and complete invalidation rules.
   policy; it observes the exact admitted Workflow spec. Credential-bearing
   service accounts, projected WIF audiences and environment remain pinned by
   that spec hash. Promotion workspaces are cleaned only after their durable
-  run/publication/promotion owners permit terminal cleanup. Explicit cancellation and newer-push
-  supersession still delete the exact owned Workflow, and terminal runs are
-  never adopted or automatically re-fired.
+  run/publication/promotion owners permit terminal cleanup. Explicit cancellation
+  uses native Stop or Terminate; a newer push leaves older Workflows running.
+  A completed Workflow with an active run is adopted for final collection.
+  Terminal run rows are never automatically re-fired.
 - Green branch runs force-sync that same branch to the upstream forge. Red
   default-branch and scheduled branch runs create or update one open CI issue
   per repository and branch with the new SHA, a bounded (16 KiB) failure excerpt,
@@ -1584,7 +1585,7 @@ trust assumptions and complete invalidation rules.
 - Pipelines execute as Argo Workflows in a namespace that is never the server's.
   Oberth owns the envelope and the repository owns the work: the document
   supplies steps, DAG, images and commands, and Oberth forces namespace,
-  ServiceAccount, a non-root container security baseline, the source mount, the
+  ServiceAccount, the source mount, the
   per-repository build cache mount and its `GOMODCACHE`/`GOCACHE`, the
   server-owned run-fact workflow parameters, the active deadline and the TTL. A document's own `serviceAccountName` is never honoured — Vault validates
   identity, not intent, so a branch push that could name the release identity
@@ -1594,8 +1595,10 @@ trust assumptions and complete invalidation rules.
   grant for its stable template name or wildcard in the repository/upstream.
   Admission and Build share `argojob.GrantedSecretSteps`; only that main
   Container/Script receives store address/role/CA, helper binary, login token
-  and secret-root mounts. Other containers and steps receive no settings;
-  Argo wait loses the generated store mirrors. Run records carry no durable
+  and secret-root mounts. Oberth injects no store settings into other containers
+  or steps; Argo wait retains its native store mirrors. Every container of a
+  credentialed step shares its trust; output-read refusals guard Argo reads.
+  Run records carry no durable
   credential classification. Retry/rerun reload current grants, and granted
   consumers require healthy access reconciliation. Step-level credential
   evidence remains part of replay safety.
@@ -1955,24 +1958,15 @@ trust assumptions and complete invalidation rules.
   tokens and secretstore exec, not through the exec stream. The optional
   `secretstore.createAuthDelegatorBinding` ClusterRoleBinding lets OpenBao
   validate login tokens through TokenReview without a stored reviewer JWT.
-  Argo-authored workflows
-  may select named plain container/script leaves with the static annotation
-  `oberth.ci/nonroot-templates: test-one,test-two`. In this initial mode the
-  entire workflow must be uncredentialed, with no templateDefaults, and selected
-  leaves cannot add init containers, sidecars, plugins, artifacts or nested Pod
-  shapes. The fixed main and Argo init/wait UID/GID is65534, with RuntimeDefault,
-  dropALL, no escalation and a read-only root. Repository security contexts and
-  Pod patches remain forbidden. One server-owned UID0 initializer, using the
-  pinned source-seed image with the same restrictions and no token, prepares
-  only named fresh per-Pod EmptyDirs. It cannot mount source, PVCs or host paths.
-  No chown or fsGroup change is made. Main remains tokenless; Argo's existing
-  executor token remains scoped to its init/wait. Source and shared tool inputs,
-  including their executor mirrors, remain read-only; the selected leaf has no
-  host cache mount. TMPDIR/GOTMPDIR point to private scratch and Go/tool caches are ephemeral
-  within that bounded private Pod volume. Collected artifacts retain their
-  separate existing run-owned mount. Actual PostgreSQL startup and Chromium's
-  namespace/seccomp sandbox require separate execution proof; this interface
-  alone does not establish either test suite's coverage.
+  Authored Pod and container security contexts pass through unchanged. Go still
+  refuses AppArmor, SELinux, procMount, sysctls, Windows security options and
+  beta AppArmor Pod annotations; Kubernetes enforces the remaining Pod floor.
+  The removed `oberth.ci/nonroot-templates` annotation is refused, with no
+  preparation container, security rewrite or injected private `/tmp`. Authors
+  choose users/groups and declare scratch explicitly. Root and writable-root
+  execution are allowed; unsafe contexts reach Kubernetes admission unchanged.
+  The executor-token waiter keeps its existing security context.
+
 - Security-backported runner tools are rebuilt from immutable upstream release
   source, identify themselves as Oberth derivatives, and are bound to their
   patched module versions and exact binary digests by the image contract.
@@ -2503,7 +2497,7 @@ A branch-tier CI run that asked (`git push -o oberth.assist=1`, `run_rerun`
 `assist`, `oberth run rerun --assist`; immutable `runs.assist_requested`) and
 declares no secret-store paths gets, on every single-main container/script leaf
 without its own `retryStrategy` (and no `templateDefaults.retryStrategy` in
-the document), credentials, step identity, token mount or nonroot launcher, a
+the document), credentials, step identity or token mount, a
 server-owned `retryStrategy` (`limit 1`, `OnFailure`,
 `expression: asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) != 137
 && asInt(lastRetry.exitCode) != 143 && asFloat(lastRetry.duration) < <floored
@@ -2542,8 +2536,9 @@ continue follows nothing: it is never a promotion source, never published upstre
 never resolves a CI issue. No status,
 label or layout is added; the existing status carries the reason line
 `assisted: step <name> continued after patch sha256:<12 hex> by <actor>; not
-evidence`. Held runs keep their run slot, template locks and groups;
-supersession and cancellation delete their Workflow. No RBAC is added: the
+evidence`. Held runs retain Argo's native parallelism and template locks.
+Cancellation uses native Stop or Terminate; Argo TTL owns Workflow deletion.
+No RBAC is added for assisted continuation: the
 Argo Role's existing `pods/exec` and `pods` delete verbs are used in the
 pipeline namespace only. See
 [assisted continuation](docs/assisted-continuation.md).
@@ -2575,10 +2570,8 @@ when it reaches its own declared memory limit. Application termination-log
 suffixes never establish node pressure. Only a run whose failed
 steps all have infrastructure causes is reclassified. It retains step rows,
 clears run-level test attribution, permits eligible branch `run_rerun`, and does
-not open/update/resolve repository CI-red issues. Argo's server-injected executor
-scratch defaults to 1Gi for nonroot leaves and is configurable
-through `argo.executorScratchSizeLimit` / `--argo-executor-scratch-size-limit`;
-the nonroot verifier enforces the configured bound. These
+not open/update/resolve repository CI-red issues. Executor scratch follows native Argo configuration; the removed nonroot
+preparation patch no longer sets its volume bound. These
 records trust the Kubernetes API/kubelet and bind observation time separately
 from container event times; they are not independent execution attestations.
 
@@ -2823,7 +2816,7 @@ Authors use native Argo `retryStrategy`; manual `run_rerun` retain
 existing safety checks. Source preparation precedes Workflow creation and needs
 manual retry after a failure. Historical audit receipts remain immutable.
 Raw failed/interrupted statuses remain; public display states are queued,
-running, passed, failed, superseded and cancelled. No retry-link status is emitted.
+running, passed, failed and cancelled. No retry-link status is emitted.
 
 Readiness uses a 30s background reader budget, retaining green on deadline or
 typed SQLite reader contention without renewing the 90s last-success age.

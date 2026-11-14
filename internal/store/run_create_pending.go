@@ -8,19 +8,22 @@ import (
 	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 const WorkflowSpecMismatchPendingMessage = "Workflow spec mismatch; cleanup pending"
+const OberthStopReasonPrefix = "cancelling by oberth: "
+
 const ExecutorIdentityPendingMessage = "Executor identity readiness deadline exceeded after one issuance retry; cleanup pending"
 
 // WorkflowCleanupReason admits only server-authored fixed reasons. Transport
 // errors and untrusted controller messages cannot become durable public text.
 func WorkflowCleanupReason(reason string) bool {
-	return reason == WorkflowSpecMismatchPendingMessage || reason == ExecutorIdentityPendingMessage
+	return reason == WorkflowSpecMismatchPendingMessage || reason == ExecutorIdentityPendingMessage || reason == argoworkflow.ErrWorkflowCapabilityRequired.Error()
 }
 
 // MarkRunCreatePending retains an uncertain submission and re-arms its cleanup
-// atomically, even if cancel/supersede already completed an earlier NotFound.
+// atomically, even if cancel already completed an earlier NotFound.
 // An optional fixed reason survives restart and subsequent re-arms.
 // owner_restart also denotes a lost submission observer; no schema change.
 func (s *Store) MarkRunCreatePending(ctx context.Context, id, workflowName string, reason ...string) error {
@@ -42,7 +45,7 @@ func (s *Store) MarkRunCreatePending(ctx context.Context, id, workflowName strin
 	if err != nil {
 		return err
 	}
-	if run.WorkflowName != workflowName || (run.Status != model.RunRunning && !run.Preempted()) {
+	if run.WorkflowName != workflowName || run.Status != model.RunRunning {
 		return fmt.Errorf("%w: run cannot own pending create", ErrInvalidState)
 	}
 	now := unixNano(s.now())
@@ -53,20 +56,20 @@ func (s *Store) MarkRunCreatePending(ctx context.Context, id, workflowName strin
 	if len(reason) == 1 && WorkflowCleanupReason(reason[0]) {
 		message = reason[0]
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET phase=CASE WHEN status='running' THEN 'infrastructure-pending' ELSE phase END, error=?, updated_at=? WHERE id=?`, message, now, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET phase=CASE WHEN ? THEN 'cancelled' WHEN status='running' AND phase!='cancelled' THEN 'infrastructure-pending' ELSE phase END, error=?, reason=CASE WHEN phase='cancelled' THEN reason ELSE ? END, updated_at=? WHERE id=?`, message == argoworkflow.ErrWorkflowCapabilityRequired.Error(), message, OberthStopReasonPrefix+strings.TrimSuffix(message, "; cleanup pending"), now, id); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
-VALUES(?, ?, ?, 'owner_restart', ?)
-ON CONFLICT(run_id) DO UPDATE SET job_name=excluded.job_name, reason='owner_restart', created_at=excluded.created_at, completed_at=NULL`, id, workflowName, run.SupersededBy, now); err != nil {
+INSERT INTO run_cancellations(run_id, job_name, reason, created_at, terminate)
+VALUES(?, ?, 'owner_restart', ?, ?)
+ON CONFLICT(run_id) DO UPDATE SET job_name=excluded.job_name, reason='owner_restart', created_at=excluded.created_at, completed_at=NULL,terminate=MAX(run_cancellations.terminate,excluded.terminate)`, id, workflowName, now, message == argoworkflow.ErrWorkflowCapabilityRequired.Error()); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 // CompleteObservedRunCancellation cannot retire an obligation that was re-armed
-// after this pass read it (for example, after Delete observed NotFound while a
+// after this pass read it (for example, after cleanup observed NotFound while a
 // timed-out POST was still in flight).
 func (s *Store) CompleteObservedRunCancellation(ctx context.Context, observed model.RunCancellation) error {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -84,7 +87,7 @@ func (s *Store) CompleteObservedRunCancellation(ctx context.Context, observed mo
 		return err
 	}
 	if changed == 1 {
-		// A cancelled/superseded run keeps its classification, but must not keep
+		// A cancelled run keeps its classification, but must not keep
 		// displaying "cleanup pending" after the exact obligation is completed.
 		if _, err := tx.ExecContext(ctx, `UPDATE runs SET error=reason, updated_at=? WHERE id=? AND status='interrupted' AND error IN ('Workflow create outcome uncertain; cleanup pending', ?, ?)`, unixNano(s.now()), observed.RunID, WorkflowSpecMismatchPendingMessage, ExecutorIdentityPendingMessage); err != nil {
 			return err

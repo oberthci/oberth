@@ -24,7 +24,7 @@ func TestDocumentedHelperNamesMatchGeneratedContainers(t *testing.T) {
 	for _, row := range regexp.MustCompile("(?m)^  [|] `([^`]+)` [|]").FindAllStringSubmatch(table, -1) {
 		documented = append(documented, row[1])
 	}
-	workflow := nonrootBuiltFixture(t, false)
+	workflow := authoredNonrootFixture(t, false)
 	names := map[string]bool{}
 	for _, template := range workflow.Spec.Templates {
 		var patch struct {

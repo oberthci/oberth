@@ -28,29 +28,38 @@
   see [workspace isolation](workspace-isolation.md) for supported shapes,
   defaults restrictions and controller-proof limits.
 
-- Uncredentialed Argo workflows can select fixed UID/GID65534 ordinary test
-  leaves with `oberth.ci/nonroot-templates`. Direct securityContext and Pod
-  patch input remains rejected. Main and generated Argo init/wait retain
-  RuntimeDefault, dropALL, read-only root and no privilege escalation. A fixed
-  server initializer uses UID0 only to prepare fresh per-Pod scratch directories;
-  it has no token, PVC or host mount and never changes shared ownership. Selected
-  leaves consume source/tools read-only and use bounded ephemeral private scratch caches.
-  This is separate from trusted VM execution. Browser sandbox compatibility
-  still needs proof under the actual runtime; no capabilities, unconfined
-  seccomp or sandbox-disabling flags are granted by this mode.
+- Authored Pod and container `securityContext` fields pass through unchanged,
+  except Go admission still refuses AppArmor, SELinux, procMount, sysctls,
+  Windows options and beta AppArmor Pod annotations. Kubernetes enforces the
+  namespace Pod security floor at Pod creation. Root and writable-root execution
+  are allowed; privileged execution, unsafe capabilities, escalation and unsafe
+  seccomp are refused. The removed `oberth.ci/nonroot-templates` annotation is
+  refused. Authors declare any user, groups and private scratch directly; see
+  [authored nonroot execution](nonroot-test-leaves.md).
 
-- Before deploying the Argo Pod policy, install and upgrade check the live
+- Install and upgrade require Argo security defaults even when
+  `argo.podPolicy.enabled=false`. They check the live
   controller ConfigMap for `mainContainer.securityContext` and
   `executor.securityContext`: no privilege escalation, drop ALL capabilities,
   only NET_BIND_SERVICE added back, and RuntimeDefault or Localhost seccomp.
+  Seccomp may be inherited from `workflowDefaults.spec.securityContext`.
+  A non-null `workflowDefaults.spec.templateDefaults.securityContext` replaces
+  that Pod context, including when it has no seccomp profile. Valid Pod defaults
+  remain unchanged without adding container overrides. Explicit effective
+  Pod-level Unconfined or Unconfined in template default container contexts
+  refuses the operation, even when other containers select safe profiles.
+  A `workflowDefaults.spec.podSpecPatch` (or template default patch) that can
+  change security contexts is refused with the native key named; configure
+  those defaults directly. Resource-only patches remain allowed.
   Fresh managed installs supply missing defaults. Existing Argo releases require
   approval in interactive security review or `--argo-security-defaults` to fill
   absent native Helm values; operator values are preserved. Without consent the
   command refuses and prints the exact values to set. An external controller
   passes once its live configuration complies, including when installation uses
   `--skip-argo-workflows`. Unreadable live configuration refuses before policy
-  deployment. A stored `controller.configMap.create=false` is accepted when the live defaults
-  comply. Otherwise the error names the exact ConfigMap keys to configure and
+  deployment. With `controller.configMap.create=false`, only the live external
+  ConfigMap decides compliance; unused stored Helm contexts are ignored.
+  Otherwise the error names the exact ConfigMap keys to configure and
   links the [v0.22.5 migration](releases/v0.22.5.md) for old-profile releases.
 
 - SSH accepts only registered uplink public keys and exactly the two Git smart
@@ -213,6 +222,15 @@ flag must be treated as unverified. `oberth install`, `oberth upgrade` and
 `oberth restore` do not run cosign: they verify the signed record and the
 chart offline against the compiled-in key (the transparency-log entry is not
 consulted), so upgrading from v0.17.95 is unaffected.
+
+On steps receiving secret-store or cloud-identity mounts, output parameter file
+paths must stay outside every volume mount. Argo wait follows symlinks on mounted
+paths, so a previous step could otherwise plant a link that copies a credential
+into Workflow outputs. Paths are normalized before this check; paths containing
+unresolved substitutions are refused. A file written on the step's own root
+filesystem remains a supported output parameter. Native output artifacts remain
+refused. Argo wait retains its native mirrors, including CA and helper mounts;
+the executor-token delivery and read-only source protections remain in place.
 
 Administrative onboarding uses exactly one operator-authorized server Pod exec,
 `admin create-first-admin`. It accepts only public SSH and certificate requests.

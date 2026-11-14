@@ -95,8 +95,8 @@ func TestTagReplayReviewPendingDeletionRefusesEvenForce(t *testing.T) {
 			if tool == "run_rerun" {
 				args["force"] = force
 			}
-			if _, err := h.call(rerunAdmin, tool, args); !errors.Is(err, store.ErrInvalidState) || !strings.Contains(err.Error(), "deletion") {
-				t.Fatalf("pending deletion bypassed by %s force=%v: %v", tool, force, err)
+			if _, err := h.call(rerunAdmin, tool, args); !errors.Is(err, store.ErrInvalidState) && !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("pending Stop bypassed by %s force=%v: %v", tool, force, err)
 			}
 		}
 	}
@@ -105,6 +105,9 @@ func TestTagReplayReviewPendingDeletionRefusesEvenForce(t *testing.T) {
 		t.Fatalf("pending deletion queued work: %+v %v", counts, err)
 	}
 	if err := h.fixture.store.CompleteRunCancellation(t.Context(), source.ID, "live-source"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.fixture.store.FinishRun(t.Context(), source.ID, model.RunResult{Status: model.RunFailed, Phase: model.PhaseCancelled, Error: "stopped by operator"}); err != nil {
 		t.Fatal(err)
 	}
 	h.rerun(t, rerunAdmin, map[string]any{"id": source.ID, "force": true})

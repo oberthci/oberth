@@ -56,11 +56,11 @@ func TestScheduleOccurrenceCoalescesOnlySameEntryAndBranch(t *testing.T) {
 			spec.SHA, spec.TestedSHA = event.ObjectSHA, event.CommitSHA
 			fire.HasPrevious, fire.Previous, fire.At = true, now, now.Add(15*time.Minute)
 			next, err := s.EnqueueScheduleOccurrence(t.Context(), event, spec, fire)
-			if err != nil || next.Outcome != "coalesced" || next.Enqueued.ID != first.Enqueued.ID || len(next.Enqueued.Cancellations) != 0 {
+			if err != nil || next.Outcome != "coalesced" || next.Enqueued.ID != first.Enqueued.ID {
 				t.Fatalf("overlap = %+v, %v", next, err)
 			}
 			retained, err := s.Run(t.Context(), first.Enqueued.ID)
-			if err != nil || !retained.Status.Active() || retained.SHA != strings.Repeat("a", 40) || retained.SupersededBy != "" {
+			if err != nil || !retained.Status.Active() || retained.SHA != strings.Repeat("a", 40) {
 				t.Fatalf("live run changed: %+v, %v", retained, err)
 			}
 			outcomes, err := s.ScheduleOutcomes(t.Context(), fire.Repo)
@@ -263,7 +263,7 @@ func TestScheduleOccurrenceCoalescesRegardlessOfStoredTrigger(t *testing.T) {
 		t.Fatalf("same-entry run with another trigger was not coalesced: %+v, %v", result, err)
 	}
 	retained, err := s.Run(t.Context(), active.ID)
-	if err != nil || retained.Status != model.RunQueued || retained.SupersededBy != "" {
+	if err != nil || retained.Status != model.RunQueued {
 		t.Fatalf("same-entry run was superseded: %+v, %v", retained, err)
 	}
 }

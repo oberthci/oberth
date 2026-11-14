@@ -19,3 +19,11 @@ func ValidateRunRef(value string) error {
 	}
 	return nil
 }
+
+// ValidateScheduleName uses the same alphabet for the schedule workflow parameter.
+func ValidateScheduleName(value string) error {
+	if len(value) > 64 || !runRefPattern.MatchString(value) {
+		return errors.New("schedule name is invalid: at most 64 bytes; start with a letter or digit; use only letters, digits and . _ / + @ = , -")
+	}
+	return nil
+}

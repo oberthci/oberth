@@ -259,7 +259,7 @@ func TestSyncBranchForcePublishesAndVerifiesExactSHA(t *testing.T) {
 	}
 	branchSHA := repository.featureCommit(t, "feature/one", "feature-one\n")
 	runGit(t, repository.work, "push", "--force", ready.Path, branchSHA+":refs/heads/feature/one")
-	if err := cache.SyncBranch(context.Background(), "example", "feature/one", branchSHA); err != nil {
+	if err := cache.SyncBranch(context.Background(), "example", "feature/one", branchSHA, true); err != nil {
 		t.Fatal(err)
 	}
 	if got := remoteRef(t, repository.upstream, "refs/heads/feature/one"); got != branchSHA {
@@ -268,7 +268,7 @@ func TestSyncBranchForcePublishesAndVerifiesExactSHA(t *testing.T) {
 
 	replacement := repository.featureCommit(t, "feature/two", "replacement\n")
 	runGit(t, repository.work, "push", "--force", ready.Path, replacement+":refs/heads/feature/one")
-	if err := cache.SyncBranch(context.Background(), "example", "feature/one", replacement); err != nil {
+	if err := cache.SyncBranch(context.Background(), "example", "feature/one", replacement, true); err != nil {
 		t.Fatal(err)
 	}
 	if got := remoteRef(t, repository.upstream, "refs/heads/feature/one"); got != replacement {
@@ -286,7 +286,7 @@ func TestDeleteBranchRemovesUpstreamAndLocalRefs(t *testing.T) {
 	}
 	branchSHA := repository.featureCommit(t, "feature/delete-me", "ephemeral\n")
 	runGit(t, repository.work, "push", "--force", ready.Path, branchSHA+":refs/heads/feature/delete-me")
-	if err := cache.SyncBranch(context.Background(), "example", "feature/delete-me", branchSHA); err != nil {
+	if err := cache.SyncBranch(context.Background(), "example", "feature/delete-me", branchSHA, true); err != nil {
 		t.Fatal(err)
 	}
 	if got := remoteRef(t, repository.upstream, "refs/heads/feature/delete-me"); got != branchSHA {

@@ -48,6 +48,8 @@ func (jobs *adoptingJobs) CreateWorkflow(context.Context, WorkflowRequest) error
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.created++
+	jobs.terminalResult = JobResult{}
+	jobs.terminalErr = ErrJobNotTerminal
 	return nil
 }
 
@@ -155,7 +157,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if current.Status != model.RunRunning || current.SupersededBy != "" || current.QueueSequence != run.QueueSequence || current.AdmissionSequence != run.AdmissionSequence {
+				if current.Status != model.RunRunning || current.QueueSequence != run.QueueSequence || current.AdmissionSequence != run.AdmissionSequence {
 					t.Fatalf("adopted run = %#v", current)
 				}
 				scheduler.submissions.mu.Lock()
@@ -175,7 +177,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			if err := <-done; err != nil {
 				t.Fatal(err)
 			}
-			if current.SupersededBy != "" || current.WorkflowName != "oberth-adopt" || current.QueueSequence != run.QueueSequence || current.AdmissionSequence != run.AdmissionSequence {
+			if current.WorkflowName != "oberth-adopt" || current.QueueSequence != run.QueueSequence || current.AdmissionSequence != run.AdmissionSequence {
 				t.Fatalf("finalized run = %#v", current)
 			}
 			if counts, err := fixture.store.CountRuns(context.Background()); err != nil || counts.Total != 1 {
@@ -214,10 +216,10 @@ func TestAdoptionMissingWorkflowFailsButReadFailureDoesNot(t *testing.T) {
 			t.Fatal(lookupErr)
 		}
 		if readErr == nil {
-			if err != nil || current.Status != model.RunFailed || current.Error != model.ServerRestartReason || current.SupersededBy != "" {
+			if err != nil || current.Status != model.RunFailed || current.Error != model.ServerRestartReason {
 				t.Fatalf("missing recovery: %#v, %v", current, err)
 			}
-		} else if err == nil || current.Status != model.RunRunning || current.SupersededBy != "" {
+		} else if err == nil || current.Status != model.RunRunning {
 			t.Fatalf("failed observation mutated run: %#v, %v", current, err)
 		}
 	}
@@ -252,7 +254,7 @@ func TestAdoptedWorkflowSurvivesShutdownWithWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.Status != model.RunRunning || current.WorkflowName != "oberth-shutdown" || current.SupersededBy != "" || len(jobs.deleted) != 0 {
+	if current.Status != model.RunRunning || current.WorkflowName != "oberth-shutdown" || len(jobs.deleted) != 0 {
 		t.Fatalf("shutdown disrupted Workflow: %#v; deleted %v", current, jobs.deleted)
 	}
 	if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
@@ -298,62 +300,54 @@ func TestAdoptedAdmissionIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestAdoptedRunStillHonorsCancelAndSupersede(t *testing.T) {
-	for _, supersede := range []bool{false, true} {
-		t.Run(map[bool]string{false: "cancel", true: "supersede"}[supersede], func(t *testing.T) {
-			fixture := newRecoveryFixture(t)
-			run := fixture.enqueueAndClaim(t, "feature/preempted", "dddddddddddddddddddddddddddddddddddddddd")
-			fixture.setWorkflowName(t, run.ID, "oberth-preempted")
-			jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitErr: errors.New("Workflow deleted"), waitBlocks: make(chan struct{}), waitEntered: make(chan struct{})}}
-			scheduler := fixture.scheduler(t, jobs)
-			reservation, err := scheduler.submissions.adopt(run)
-			if err != nil {
-				t.Fatal(err)
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			done := make(chan error, 1)
-			go func() { done <- scheduler.resumeAdoptedRun(ctx, run, scheduler.requireMutation, reservation) }()
-			select {
-			case <-jobs.waitEntered:
-			case err := <-done:
-				t.Fatalf("resume stopped: %v", err)
-			case <-time.After(testStartTimeout(5 * time.Second)):
-				t.Fatal("Wait not entered")
-			}
-			if supersede {
-				if _, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: run.Ref, SHA: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Actor: "agent@host", Trigger: "branch"}); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				if _, err := fixture.store.CancelRun(context.Background(), model.RunCancelRequest{RunID: run.ID, Actor: "agent@host"}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := scheduler.completePendingCancellations(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			close(jobs.waitBlocks)
-			if err := <-done; err != nil {
-				t.Fatal(err)
-			}
-			current, err := fixture.store.Run(context.Background(), run.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !current.Preempted() || len(jobs.deleted) != 1 || jobs.deleted[0] != current.WorkflowName {
-				t.Fatalf("adopted cancellation = %#v deleted=%v", current, jobs.deleted)
-			}
-			if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
-				t.Fatalf("pending cancellation = %#v %v", pending, err)
-			}
-			scheduler.submissions.mu.Lock()
-			runs := len(scheduler.submissions.owners)
-			scheduler.submissions.mu.Unlock()
-			if runs != 0 {
-				t.Fatalf("cancelled adoption retained admission: %d", runs)
-			}
-		})
+func TestAdoptedRunStillHonorsCancel(t *testing.T) {
+
+	fixture := newRecoveryFixture(t)
+	run := fixture.enqueueAndClaim(t, "feature/preempted", "dddddddddddddddddddddddddddddddddddddddd")
+	fixture.setWorkflowName(t, run.ID, "oberth-preempted")
+	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitResult: JobResult{Status: model.RunFailed, Phase: model.PhaseCancelled}, waitBlocks: make(chan struct{}), waitEntered: make(chan struct{})}}
+	scheduler := fixture.scheduler(t, jobs)
+	reservation, err := scheduler.submissions.adopt(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- scheduler.resumeAdoptedRun(ctx, run, scheduler.requireMutation, reservation) }()
+	select {
+	case <-jobs.waitEntered:
+	case err := <-done:
+		t.Fatalf("resume stopped: %v", err)
+	case <-time.After(testStartTimeout(5 * time.Second)):
+		t.Fatal("Wait not entered")
+	}
+	if _, err := fixture.store.CancelRun(context.Background(), model.RunCancelRequest{RunID: run.ID, Actor: "agent@host"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := scheduler.completePendingCancellations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	close(jobs.waitBlocks)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	current, err := fixture.store.Run(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !current.Cancelled() || len(jobs.deleted) != 1 || jobs.deleted[0] != current.WorkflowName {
+		t.Fatalf("adopted cancellation = %#v deleted=%v", current, jobs.deleted)
+	}
+	if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
+		t.Fatalf("pending cancellation = %#v %v", pending, err)
+	}
+	scheduler.submissions.mu.Lock()
+	runs := len(scheduler.submissions.owners)
+	scheduler.submissions.mu.Unlock()
+	if runs != 0 {
+		t.Fatalf("cancelled adoption retained admission: %d", runs)
 	}
 }
 
@@ -381,7 +375,7 @@ func TestNewBranchWorkflowSurvivesShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.Status != model.RunRunning || current.SupersededBy != "" || current.WorkflowName == "" || jobs.created != 1 || len(jobs.deleted) != 0 {
+	if current.Status != model.RunRunning || current.WorkflowName == "" || jobs.created != 1 || len(jobs.deleted) != 0 {
 		t.Fatalf("new Workflow shutdown = %#v created=%d deleted=%v", current, jobs.created, jobs.deleted)
 	}
 	if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
@@ -389,7 +383,7 @@ func TestNewBranchWorkflowSurvivesShutdown(t *testing.T) {
 	}
 }
 
-func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
+func TestUnreadableNonAdoptingWorkflowKeepsRunForObservation(t *testing.T) {
 	for _, release := range []bool{false, true} {
 		fixture := newRecoveryFixture(t)
 		spec := model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/promotion", SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host", Trigger: "promotion"}
@@ -419,8 +413,7 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		}
 		fixture.setWorkflowName(t, run.ID, "oberth-legacy")
 		jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
-		// A legacy engine exposes no adoption capability. Release runs
-		// reset behind cleanup; promotion work uses its separate retry path.
+		// Without adoption or a terminal read, recovery retains this run.
 		scheduler := fixture.scheduler(t, struct{ JobController }{jobs})
 		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run) error { return errors.New("out-of-scope adoption") }); err == nil {
 			t.Fatal("unreadable Workflow was treated as absent")
@@ -429,8 +422,9 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if current.Status != model.RunRunning || len(jobs.deleted) != 0 || len(jobs.adopted) != 0 {
-			t.Fatal("unknown Workflow was mutated", current, jobs.deleted)
+		wantStatus, wantDeletes := model.RunRunning, 0
+		if current.Status != wantStatus || len(jobs.adopted) != 0 || len(jobs.deleted) != wantDeletes {
+			t.Fatalf("legacy recovery changed: %#v adopted=%v deleted=%v", current, jobs.adopted, jobs.deleted)
 		}
 
 	}
@@ -460,6 +454,7 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 	}
 	// The retry pass that completes the obligation releases the slot once.
 	jobs.deleteErr = nil
+	scheduler.settleOneCreate(t.Context())
 	if err := scheduler.completePendingCancellations(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -476,8 +471,8 @@ func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- scheduler.Run(ctx) }()
-	current := waitAdoptedStatus(t, fixture.store, run.ID, model.RunFailed)
-	if current.Phase != "infrastructure" || !strings.Contains(current.Error, "observe adopted Workflow oberth-blip") || !strings.Contains(current.Error, "connection refused") {
+	current := waitAdoptedStatus(t, fixture.store, run.ID, model.RunInterrupted)
+	if current.Phase != model.PhaseCancelled || !strings.Contains(current.Error, "Stopped with strategy") {
 		t.Fatalf("adopted observation failure = %#v", current)
 	}
 	select {
@@ -491,7 +486,7 @@ func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	scheduler.signalQueue()
-	waitAdoptedStatus(t, fixture.store, next.ID, model.RunFailed)
+	waitAdoptedStatus(t, fixture.store, next.ID, model.RunInterrupted)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -591,7 +586,7 @@ func TestAdoptionFailureNamesWorkflowAndIsolatesRefusal(t *testing.T) {
 					t.Fatal("refusal not reported on its run", current)
 				}
 			}
-			if lookupErr != nil || current.Status != wantStatus || current.SupersededBy != "" || len(jobs.deleted) != 0 {
+			if lookupErr != nil || current.Status != wantStatus || len(jobs.deleted) != 0 {
 				t.Fatalf("refused adoption changed Workflow or lost run result: %#v %v deleted=%v", current, lookupErr, jobs.deleted)
 			}
 		})
@@ -604,12 +599,12 @@ type refusingDeleteJobs struct {
 	calls    atomic.Int32
 }
 
-func (jobs *refusingDeleteJobs) Delete(ctx context.Context, name, id string) error {
+func (jobs *refusingDeleteJobs) Stop(ctx context.Context, name, id string) error {
 	jobs.calls.Add(1)
 	if jobs.refusals.Add(-1) >= 0 {
 		return errors.New("kube-apiserver temporarily unavailable")
 	}
-	return jobs.adoptingJobs.Delete(ctx, name, id)
+	return jobs.adoptingJobs.Stop(ctx, name, id)
 }
 
 // A cancel lands under an adopted Wait while the API refuses the deletion.
@@ -676,4 +671,15 @@ func TestAdoptedPreemptedObservationDeleteRefusalKeepsSchedulerAlive(t *testing.
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
+}
+
+func (jobs *refusingDeleteJobs) SettleCreate(ctx context.Context, name, id string, _ time.Time) (bool, error) {
+	if err := jobs.Stop(ctx, name, id); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (j *refusingDeleteJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
 }

@@ -101,6 +101,7 @@ func TestRCARevisionRetryRequiresSettledWorkAndNoTestFailure(t *testing.T) {
 				if err := scheduler.executeAndCleanup(t.Context(), run); err != nil {
 					t.Fatal(err)
 				}
+				scheduler.settleOneCreate(t.Context())
 				if len(jobs.deleted) != 1 || jobs.createCalls != 1 {
 					t.Fatal("did not exercise create then delete", jobs.createCalls, jobs.deleted)
 				}
@@ -122,14 +123,18 @@ func TestRCARevisionRetryRequiresSettledWorkAndNoTestFailure(t *testing.T) {
 				if err := fixture.store.CompleteObservedRunCancellation(t.Context(), cancellations[0]); err != nil {
 					t.Fatal(err)
 				}
-				done, err := scheduler.settleCreateAttempt(t.Context(), &pendingCreate{runID: run.ID, persisted: true, confirmed: true})
+				done, err := scheduler.settleCreateAttempt(t.Context(), t.Context(), &pendingCreate{runID: run.ID, persisted: true, confirmed: true})
 				if err != nil || !done {
 					t.Fatal(done, err)
 				}
 			}
 			current, err := fixture.store.Run(t.Context(), run.ID)
 			wantRetry := false
-			if err != nil || current.Status != model.RunFailed {
+			wantStatus := model.RunFailed
+			if kind == "submitted-write-failed" {
+				wantStatus = model.RunInterrupted
+			}
+			if err != nil || current.Status != wantStatus {
 				t.Fatal("settled infrastructure/test failure classification", current, err)
 			}
 			counts, err := fixture.store.CountRuns(t.Context())

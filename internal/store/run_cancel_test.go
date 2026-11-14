@@ -41,8 +41,8 @@ func TestCancelQueuedRunTerminalizesWithActorReasonAndAuditWithoutObligationOrIs
 	}
 	cancelled := result.Run
 	if cancelled.Status != model.RunInterrupted || cancelled.Phase != model.PhaseCancelled || !cancelled.Cancelled() ||
-		!cancelled.Preempted() || cancelled.Reason != "cancelled by dima@host: wrong branch" ||
-		cancelled.Error != cancelled.Reason || cancelled.FinishedAt == nil || cancelled.SupersededBy != "" {
+		!cancelled.Cancelled() || cancelled.Reason != "cancelled by dima@host: wrong branch" ||
+		cancelled.Error != cancelled.Reason || cancelled.FinishedAt == nil {
 		t.Fatalf("cancelled queued run = %#v", cancelled)
 	}
 	if result.PreviousState != model.RunQueued || len(result.Cancellations) != 0 {
@@ -82,7 +82,7 @@ func TestCancelTerminalRunIsAClearNoOpError(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.CancelRun(ctx, model.RunCancelRequest{RunID: cancelled.ID, Actor: "other@host", Reason: "again"})
-	if !errors.Is(err, ErrRunNotActive) || !errors.Is(err, ErrInvalidState) || !strings.Contains(err.Error(), "already cancelled") {
+	if err != nil {
 		t.Fatalf("second cancel = %v", err)
 	}
 	after, err := s.LatestAuditActionByType(ctx, "run.cancel", "run")
@@ -111,10 +111,8 @@ func TestCancelTerminalRunIsAClearNoOpError(t *testing.T) {
 	}
 }
 
-// A claimed run receives the supersede obligation with no successor, keeps the
-// Job name its owner published, and is never re-fired by owner restart
-// recovery: owner recovery selects only active runs.
-func TestCancelClaimedRunRecordsDeletionObligationAndIsNotRefiredAtRestart(t *testing.T) {
+// A claimed run retains its Stop obligation and Workflow name across restart.
+func TestCancelClaimedRunRecordsStopObligationAndIsNotRefiredAtRestart(t *testing.T) {
 	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
 	ctx := context.Background()
@@ -138,7 +136,7 @@ func TestCancelClaimedRunRecordsDeletionObligationAndIsNotRefiredAtRestart(t *te
 		t.Fatal(err)
 	}
 	if running.PreviousState != model.RunRunning || len(running.Cancellations) != 1 ||
-		running.Cancellations[0].WorkflowName != "oberth-job-running" || running.Cancellations[0].SupersededBy != "" {
+		running.Cancellations[0].WorkflowName != "oberth-job-running" {
 		t.Fatalf("running cancel = %#v", running)
 	}
 	waiting, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: withoutJob.ID, Actor: "dima@host"})
@@ -190,19 +188,23 @@ func TestCancelClaimedRunRecordsDeletionObligationAndIsNotRefiredAtRestart(t *te
 	}
 	assertNoOpenCIIssue(t, s, repo, "feature/running")
 	assertNoOpenCIIssue(t, s, repo, "feature/waiting")
+	refused := errors.New("cancel authority revoked")
+	if _, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: withJob.ID, Actor: "revoked", Authorize: func(model.Run) (string, error) { return "", refused }}); !errors.Is(err, refused) {
+		t.Fatalf("repeated Stop skipped current authority: %v", err)
+	}
 	// A newer push of the same branch is not superseding anything any more.
 	enqueued, err := s.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch,
 		Ref: "feature/running", SHA: strings.Repeat("c", 40), Actor: "pusher@host", Trigger: "branch"})
-	if err != nil || len(enqueued.Cancellations) != 0 {
-		t.Fatalf("newer push after cancel = %#v, %v", enqueued.Cancellations, err)
+	if err != nil || enqueued.Status != model.RunQueued {
+		t.Fatalf("newer push after cancel = %#v, %v", enqueued.Run, err)
 	}
-	if again, _ := s.Run(ctx, withJob.ID); again.SupersededBy != "" || !again.Cancelled() {
+	if again, _ := s.Run(ctx, withJob.ID); !again.Cancelled() {
 		t.Fatalf("supersede rewrote a cancelled run: %#v", again)
 	}
 }
 
 // A cancel that wins before the owner publishes a Job name is settled at
-// restart without a Kubernetes deletion, like a superseded one.
+// restart without a Kubernetes Stop.
 func TestRestartSettlesNoJobCancellationOfACancelledRun(t *testing.T) {
 	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
@@ -215,7 +217,7 @@ func TestRestartSettlesNoJobCancellationOfACancelledRun(t *testing.T) {
 	if _, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: run.ID, Actor: "dima@host"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CompleteSupersededRunCancellationWithoutJob(ctx, run.ID); err != nil {
+	if _, err := s.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunInterrupted, Phase: model.PhaseCancelled, Error: "cancelled by dima@host"}); err != nil {
 		t.Fatal(err)
 	}
 	if pending, err := s.PendingRunCancellations(ctx); err != nil || len(pending) != 0 {
@@ -268,8 +270,14 @@ func TestCancelPromotionRunFailsThePromotionAndBlocksPublication(t *testing.T) {
 	if cancelled.PromotionID != promotion.ID {
 		t.Fatalf("promotion cancel result = %#v", cancelled)
 	}
+	if pending, err := s.Promotion(ctx, promotion.ID); err != nil || pending.Status != model.PromotionPending {
+		t.Fatal("onExit finished promotion early", pending, err)
+	}
+	if _, err := s.FinishRun(ctx, enqueued.ID, model.RunResult{Status: model.RunFailed, Phase: model.PhaseCancelled, Error: "stopped by admin@host: bad merge"}); err != nil {
+		t.Fatal(err)
+	}
 	failed, err := s.Promotion(ctx, promotion.ID)
-	if err != nil || failed.Status != model.PromotionFailed || !strings.Contains(failed.Error, "cancelled by admin@host: bad merge") {
+	if err != nil || failed.Status != model.PromotionFailed || !strings.Contains(failed.Error, "stopped by admin@host: bad merge") {
 		t.Fatalf("promotion after cancel = %#v, %v", failed, err)
 	}
 	if _, err := s.BeginPublication(ctx, model.PublicationSpec{
@@ -342,30 +350,3 @@ func TestCancelRunAuthorizesTheCurrentRecord(t *testing.T) {
 
 // An owner whose deletion failed after a pass settled the obligation re-arms
 // it, so the next pass deletes the Workflow; an active run is never armed.
-func TestRearmRunCancellationReopensOnlyPreemptedRuns(t *testing.T) {
-	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
-	s := testStore(t, &now)
-	ctx := context.Background()
-	repo := createRepo(t, s)
-	run := cancelTestRun(t, s, repo, "feature/rearm", "a")
-	active := cancelTestRun(t, s, repo, "feature/active", "b")
-	if _, err := s.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: run.ID, Actor: "dima@host"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.CompleteSupersededRunCancellationWithoutJob(ctx, run.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.RearmRunCancellation(ctx, run.ID, "oberth-late-workflow"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.RearmRunCancellation(ctx, active.ID, "oberth-active"); err != nil {
-		t.Fatal(err)
-	}
-	pending, err := s.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 1 || pending[0].RunID != run.ID || pending[0].WorkflowName != "oberth-late-workflow" {
-		t.Fatalf("re-armed obligations = %#v, %v", pending, err)
-	}
-}

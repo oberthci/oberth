@@ -75,6 +75,7 @@ type UpgradeConfig struct {
 	// (upgrade_defaults.go); the operator's --values/--set still win.
 	defaultPins      []string
 	storedValuesFile string
+	deployedRevision string
 }
 
 // ErrPinnedKeyOverride is returned when a user --set or --values file
@@ -360,13 +361,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
-	if cfg.DryRun {
-		if err := prepareUpgradeDryRunValues(ctx, &cfg, deps); err != nil {
-			return result, err
-		}
-		return printUpgradeDryRun(w, cfg, result, retryFailed)
-	}
-
 	if err := requireUpgradeHelmVersion(ctx, deps); err != nil {
 		return result, err
 	}
@@ -404,6 +398,17 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
+	revision, err := deployedUpgradeRevision(ctx, cfg.Namespace, deps)
+	if err != nil {
+		return result, err
+	}
+	cfg.deployedRevision = revision
+	defaults, err := reconcileChangedDefaults(ctx, cfg, deps, revision, valuesYAML)
+	if err != nil {
+		return result, err
+	}
+	cfg.defaultPins = defaults.args
+	defaults.print(w)
 	prepared, err := prepareUpgradeValues(ctx, cfg, deps, chart, imageRef)
 	if err != nil {
 		return result, err
@@ -413,12 +418,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 	defer cleanupStored()
-	defaults, err := reconcileChangedDefaults(ctx, cfg, deps, prepared.revision, valuesYAML)
-	if err != nil {
-		return result, err
-	}
-	cfg.defaultPins = defaults.args
-	defaults.print(w)
 
 	compatibility := prepared.compatibility
 	pki := prepared.pki
@@ -435,11 +434,22 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	previewErr = printHelmValueChanges(ctx, deps, cfg.Namespace, previewRaw, prepared.revision)
 	var argoSecurity *upgradeArgoSecurity
 	if previewErr == nil {
-		argoSecurity, previewErr = planUpgradeArgoSecurityPreview(ctx, deps, previewRaw, cfg.ArgoSecurityDefaults)
+		reviewDeps := deps
+		if cfg.DryRun {
+			reviewDeps.Input, reviewDeps.IsTerminal = nil, nil
+		}
+		argoSecurity, previewErr = planUpgradeArgoSecurityPreview(ctx, reviewDeps, previewRaw, cfg.ArgoSecurityDefaults)
 	}
 	clear(previewRaw)
 	if previewErr != nil {
 		return result, previewErr
+	}
+
+	if cfg.DryRun {
+		if prepared.storedSnapshot != nil {
+			cfg.storedValuesFile = "<cleaned-stored-values>"
+		}
+		return printUpgradeDryRun(w, cfg, result, retryFailed)
 	}
 
 	if cfg.WaitIdle {

@@ -164,13 +164,10 @@ func trivyScanCache(template *wfv1.Template) string {
 }
 
 // trivyCacheBacked reports whether a Trivy scan keeps its database on a volume
-// another Pod can reach (#655). The per-Pod private scratch emptyDir is private.
+// another Pod can reach (#655). An authored per-Pod scratch emptyDir is private.
 func trivyCacheBacked(template *wfv1.Template, cache string) bool {
 	for _, c := range isolationContainers(template) {
 		for _, m := range c.VolumeMounts {
-			if m.Name == stepTmpVolumeName {
-				continue
-			}
 			root := strings.TrimSuffix(m.MountPath, "/")
 			if cache == root || strings.HasPrefix(cache, root+"/") {
 				return true

@@ -126,18 +126,17 @@ type serveOptions struct {
 	// Argo execution engine. Leaving argoNamespace empty leaves the engine
 	// off entirely, which is the default: every repository then runs on the
 	// Argo Workflow engine exactly as before.
-	argoNamespace                string
-	argoExecutorScratchSizeLimit string
-	argoPipelineAccount          string
-	argoCredentialedAccount      string
-	argoCISecretsAccount         string
-	argoExecutorAccount          string
-	argoVaultAddress             string
-	argoVaultCredentialedRole    string
-	argoVaultCISecretsRole       string
-	argoVaultCACert              string
-	argoReleaseWIFConfig         string
-	argoReleaseTagRoutesConfig   string
+	argoNamespace              string
+	argoPipelineAccount        string
+	argoCredentialedAccount    string
+	argoCISecretsAccount       string
+	argoExecutorAccount        string
+	argoVaultAddress           string
+	argoVaultCredentialedRole  string
+	argoVaultCISecretsRole     string
+	argoVaultCACert            string
+	argoReleaseWIFConfig       string
+	argoReleaseTagRoutesConfig string
 
 	argoWorkflowTTL int
 	// argoSourceStorageClass names the class for the per-run source claim the
@@ -252,7 +251,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 		options.pipelineNetworkPolicyEnabled = &enabled
 		return nil
 	})
-	flags.StringVar(&options.argoExecutorScratchSizeLimit, "argo-executor-scratch-size-limit", "1Gi", "per-Pod Argo executor scratch size limit (Kubernetes quantity)")
 	flags.StringVar(&options.argoSourceStorageClass, "argo-source-storage-class", "", "storage class for per-run pipeline source volumes (empty: cluster default)")
 	flags.StringVar(&options.argoPipelineAccount, "argo-pipeline-serviceaccount", "oberth-argo-pipeline", "ServiceAccount for pipeline templates without approved secrets; no Vault role, no token")
 	flags.StringVar(&options.argoCredentialedAccount, "argo-credentialed-serviceaccount", "oberth-argo-credentialed", "ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth")

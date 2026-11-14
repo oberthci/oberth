@@ -26,6 +26,9 @@ func displayFailureText(message string) string {
 
 func failedRunDisplayReason(run model.Run) string {
 	run.Error, _ = model.SplitArtifactCollectionDeadline(run.Error)
+	if run.Phase == model.PhaseCancelled {
+		return run.Error
+	}
 	if run.Phase == "infrastructure" && run.Error == model.ServerRestartReason && run.FailedStep == "" {
 		return model.ServerRestartReason
 	}

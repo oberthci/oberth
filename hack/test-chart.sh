@@ -561,7 +561,7 @@ if grep -q 'oberth-sync-limits\|--serialize-releases\|max-concurrent-jobs\|runti
 fi
 rm -f "$sync_manifest"
 # Removed values are refused by the schema at any value, stock or not.
-for removed in argo.executionPlacementConfigMap=retired argo.executionTargetConfigMap=retired argo.executionTargetCredentialsSecret=retired maxConcurrentJobs=0 argoSync.semaphores.kvm=1 admission.runtimeCapacity.enabled=true \
+for removed in argo.executorScratchSizeLimit=1Gi argo.executionPlacementConfigMap=retired argo.executionTargetConfigMap=retired argo.executionTargetCredentialsSecret=retired maxConcurrentJobs=0 argoSync.semaphores.kvm=1 admission.runtimeCapacity.enabled=true \
   admission.exclusiveClasses.kvm=1 admission.sizeWeights.XL=0 admission.maxHeadWait=20m \
   admission.declaredResources.ioRuns=0 admission.legacyResources.L.cpu_milli=1 gitBackend=cli gitcache.shadow=false \
   vm.kvm.enabled=false trustedTests.runtime=old argo.vmLauncherServiceAccount=old \
@@ -574,13 +574,6 @@ for removed in argo.executionPlacementConfigMap=retired argo.executionTargetConf
     exit 1
   fi
 done
-
-# Executor scratch keeps a safe default for reused values and accepts overrides.
-grep -q -- '--argo-executor-scratch-size-limit=1Gi' "$manifest"
-render --set argo.executorScratchSizeLimit=4Gi >"$argo_legacy_manifest"
-grep -q -- '--argo-executor-scratch-size-limit=4Gi' "$argo_legacy_manifest"
-render --set argo.executorScratchSizeLimit=null >"$argo_legacy_manifest"
-grep -q -- '--argo-executor-scratch-size-limit=1Gi' "$argo_legacy_manifest"
 
 # argojob's fail-closed per-repo ServiceAccount verification (issue #467):
 # the server Role in the pipeline namespace must grant read-only get on

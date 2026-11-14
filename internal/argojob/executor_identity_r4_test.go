@@ -18,7 +18,7 @@ import (
 )
 
 func TestExecutorIdentityAPIDefaultedHelpers(t *testing.T) {
-	for _, helper := range []corev1.Container{executorWaiterContainer(defaultSourceSeedImage, executorWaiterResources(false)), nonrootPrepareContainer(false, defaultSourceSeedImage), nonrootPrepareContainer(true, defaultSourceSeedImage)} {
+	for _, helper := range []corev1.Container{executorWaiterContainer(defaultSourceSeedImage, executorWaiterResources(false))} {
 		t.Run(helper.Name+"/"+string(rune(len(helper.VolumeMounts)+'0')), func(t *testing.T) {
 			actual := *helper.DeepCopy()
 			actual.ImagePullPolicy = corev1.PullAlways
@@ -81,7 +81,7 @@ func TestExecutorIdentityStrictHelperFields(t *testing.T) {
 			c.SecurityContext.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}
 		},
 	}
-	for _, helper := range []corev1.Container{executorWaiterContainer(defaultSourceSeedImage, executorWaiterResources(false)), nonrootPrepareContainer(false, defaultSourceSeedImage)} {
+	for _, helper := range []corev1.Container{executorWaiterContainer(defaultSourceSeedImage, executorWaiterResources(false))} {
 		t.Run(helper.Name, func(t *testing.T) {
 			for name, mutate := range mutations {
 				t.Run(name, func(t *testing.T) {
@@ -144,7 +144,7 @@ func TestExecutorIdentityRejectsResourceScratchAlias(t *testing.T) {
 func TestExecutorIdentityFullBuildControllerMerge(t *testing.T) {
 	for _, shape := range []string{"nonroot-container", "nonroot-script", "ordinary", "helpers"} {
 		t.Run(shape, func(t *testing.T) {
-			var wfSource = nonrootTestDocument
+			var wfSource = authoredNonrootDocument
 			if shape == "ordinary" || shape == "helpers" {
 				wfSource = greedyDocument
 			}
@@ -155,7 +155,7 @@ func TestExecutorIdentityFullBuildControllerMerge(t *testing.T) {
 			var pod *corev1.Pod
 			switch shape {
 			case "nonroot-container", "nonroot-script":
-				wf = nonrootBuiltFixture(t, shape == "nonroot-script")
+				wf = authoredNonrootFixture(t, shape == "nonroot-script")
 				fixture := "container-before-patch.json"
 				if shape == "nonroot-script" {
 					fixture = "script-before-patch.json"

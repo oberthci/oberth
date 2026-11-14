@@ -24,11 +24,12 @@ func (failure *identityObservationFailure) Error() string {
 func (failure *identityObservationFailure) Unwrap() error               { return failure.cause }
 func (failure *identityObservationFailure) InfrastructureFailure() bool { return !failure.hard }
 
-func TestExecutorIdentityFailureIsInfrastructureAndRunRetryApplies(t *testing.T) {
+func TestExecutorIdentityFailureStopsAsCancelledAndRunRetryApplies(t *testing.T) {
 	fixture := newControlFixture(t)
 	// Manual run_rerun remains available when the administrator disables automatic recovery.
 
 	fixture.jobs.waitErr = fmt.Errorf("observe: %w", &identityObservationFailure{cause: context.DeadlineExceeded})
+	fixture.jobs.stopResult = JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: fixture.jobs.waitErr.Error()}
 	source, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "identity-delivery", Repository: fixture.repo, Branch: "feature/identity", SHA: strings.Repeat("a", 40), Actor: "pusher"})
 	if err != nil {
 		t.Fatal(err)
@@ -40,11 +41,11 @@ func TestExecutorIdentityFailureIsInfrastructureAndRunRetryApplies(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed.Status != model.RunFailed || failed.Phase != "infrastructure" || failed.FailedStep != "" || !strings.Contains(failed.Error, "reason=deadline") {
+	if failed.Status != model.RunInterrupted || failed.Phase != model.PhaseCancelled || failed.FailedStep != "" || !strings.Contains(failed.Error, "reason=deadline") {
 		t.Fatalf("lost infrastructure cause: %+v", failed)
 	}
 	if len(fixture.jobs.deleted) != 1 {
-		t.Fatal("live Workflow was not deleted before recording infrastructure failure")
+		t.Fatal("live Workflow was not stopped before recording cancellation")
 	}
 	control := fixture.api(t)
 	control.runReruns = fixture.store
@@ -79,7 +80,7 @@ func TestExecutorIdentityFailureKeepsTerminalResultAndDeletionSafety(t *testing.
 				t.Fatal(lookupErr)
 			}
 			if deletionFails {
-				if err == nil || current.Status != model.RunRunning {
+				if err != nil || current.Status != model.RunRunning || !isPendingCreate(current) {
 					t.Fatalf("failed deletion permitted a retryable terminal state: %+v %v", current, err)
 				}
 			} else if err != nil || current.Phase != "test" || current.FailedStep != "unit" || current.Error != "assertion failed" || len(jobs.deleted) != 0 {
@@ -94,10 +95,11 @@ func TestExecutorIdentityFailureKeepsTerminalResultAndDeletionSafety(t *testing.
 	}
 }
 
-func TestExecutorIdentityValidationFailureStaysJob(t *testing.T) {
+func TestExecutorIdentityValidationFailureStopsAsCancelled(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/invalid-identity", strings.Repeat("c", 40))
 	jobs := &recoveryJobs{waitErr: &identityObservationFailure{cause: errors.New("invalid identity target"), hard: true}, terminalErr: ErrJobNotTerminal}
+	jobs.stopResult = JobResult{Status: model.RunFailed, Phase: "job", Error: jobs.waitErr.Error()}
 	if err := fixture.scheduler(t, jobs).executeAndCleanup(t.Context(), run); err != nil {
 		t.Fatal(err)
 	}
@@ -105,12 +107,12 @@ func TestExecutorIdentityValidationFailureStaysJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed.Status != model.RunFailed || failed.Phase != "job" || len(jobs.deleted) != 1 {
+	if failed.Status != model.RunInterrupted || failed.Phase != model.PhaseCancelled || len(jobs.deleted) != 1 {
 		t.Fatalf("validation failure was labelled infrastructure or left alive: %+v", failed)
 	}
 }
 
-func TestExecutorIdentityAdoptedFailureKeepsClassification(t *testing.T) {
+func TestExecutorIdentityAdoptedFailureStopsAsCancelled(t *testing.T) {
 	for _, hard := range []bool{false, true} {
 		t.Run(fmt.Sprintf("hard=%t", hard), func(t *testing.T) {
 			fixture := newRecoveryFixture(t)
@@ -118,6 +120,11 @@ func TestExecutorIdentityAdoptedFailureKeepsClassification(t *testing.T) {
 			fixture.setWorkflowName(t, run.ID, "adopted-identity")
 			run.WorkflowName = "adopted-identity"
 			jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{waitErr: &identityObservationFailure{cause: context.DeadlineExceeded, hard: hard}, terminalErr: ErrJobNotTerminal}}
+			phase := "infrastructure"
+			if hard {
+				phase = "job"
+			}
+			jobs.stopResult = JobResult{Status: model.RunFailed, Phase: phase, Error: jobs.waitErr.Error()}
 			scheduler := fixture.scheduler(t, jobs)
 			file, err := scheduler.logs.Create(run.ID)
 			if err != nil {
@@ -137,11 +144,7 @@ func TestExecutorIdentityAdoptedFailureKeepsClassification(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			phase := "infrastructure"
-			if hard {
-				phase = "job"
-			}
-			if failed.Status != model.RunFailed || failed.Phase != phase || len(jobs.deleted) != 1 {
+			if failed.Status != model.RunInterrupted || failed.Phase != model.PhaseCancelled || len(jobs.deleted) != 1 {
 				t.Fatalf("adoption overrode identity classification: %+v", failed)
 			}
 		})

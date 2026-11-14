@@ -117,9 +117,9 @@ func TestReleaseWIFBindsOnlyApprovedMainCapability(t *testing.T) {
 			if adc["audience"] != "//iam.googleapis.com/"+role.Provider || !strings.Contains(adc["service_account_impersonation_url"].(string), role.ServiceAccount) {
 				t.Fatalf("wrong ADC: %+v", adc)
 			}
-			if !strings.Contains(leaf.PodSpecPatch, `"$patch":"delete"`) || !strings.Contains(leaf.PodSpecPatch, "/mainctrfs/run/oberth-gar") {
-				t.Fatal("executor credential mirror not removed")
-			}
+			before := credentialWaitControllerShape(*main)
+			after := applyCredentialWaitPatch(t, before, leaf.PodSpecPatch)
+			assertNativeWaitCredentialMirrors(t, before.Containers[0], after.Containers[0])
 		})
 	}
 }

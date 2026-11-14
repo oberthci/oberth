@@ -16,8 +16,8 @@ import (
 // deadlines, pending creates and retry lineage. Registered once before any
 // connection opens; no schema objects depend on this read-only function.
 func init() {
-	sqlite.MustRegisterDeterministicScalarFunction("oberth_run_display_status", 6, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
-		values := make([]string, 5)
+	sqlite.MustRegisterDeterministicScalarFunction("oberth_run_display_status", 5, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		values := make([]string, 4)
 		for i := range values {
 			value, ok := args[i].(string)
 			if !ok {
@@ -25,8 +25,8 @@ func init() {
 			}
 			values[i] = value
 		}
-		run := model.Run{Status: model.RunStatus(values[0]), Phase: values[1], Reason: values[2], Error: values[3], SupersededBy: values[4]}
-		if started, ok := args[5].(int64); ok && started != 0 {
+		run := model.Run{Status: model.RunStatus(values[0]), Phase: values[1], Reason: values[2], Error: values[3]}
+		if started, ok := args[4].(int64); ok && started != 0 {
 			at := time.Unix(0, started)
 			run.StartedAt = &at
 		}
@@ -67,7 +67,7 @@ func runStatusRestriction(statuses model.RunStatusFilter) (string, []any, error)
 			durable["running"] = true
 		case "failed":
 			durable["failed"] = true
-		case "cancelled", "superseded":
+		case "cancelled":
 			durable["interrupted"] = true
 		case "passed":
 			durable["passed"] = true
@@ -83,5 +83,5 @@ func runStatusRestriction(statuses model.RunStatusFilter) (string, []any, error)
 	for _, status := range statuses {
 		args = append(args, status)
 	}
-	return ` AND runs.status IN (` + coarse + `) AND oberth_run_display_status(runs.status,runs.phase,runs.reason,runs.error,runs.superseded_by,runs.started_at IS NOT NULL) IN (` + strings.TrimSuffix(strings.Repeat("?,", len(statuses)), ",") + `)`, args, nil
+	return ` AND runs.status IN (` + coarse + `) AND oberth_run_display_status(runs.status,runs.phase,runs.reason,runs.error,runs.started_at IS NOT NULL) IN (` + strings.TrimSuffix(strings.Repeat("?,", len(statuses)), ",") + `)`, args, nil
 }

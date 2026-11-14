@@ -68,6 +68,9 @@ func TestUpgradePinsTLSOverridesOnlyForLivePKI(t *testing.T) {
 								}
 								return nil, nil
 							case "upgrade":
+								if slices.Contains(args, "--dry-run=server") {
+									return []byte(`{"config":{}}`), nil
+								}
 								applied = true
 								return nil, stop
 							}

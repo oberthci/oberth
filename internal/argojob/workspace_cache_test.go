@@ -93,8 +93,6 @@ func TestWorkspaceCacheMountsOnlyTheCache(t *testing.T) {
 					if !m.ReadOnly {
 						t.Errorf("source became writable: %+v", m)
 					}
-				case m.Name == stepTmpVolumeName && m.MountPath == "/tmp":
-					// The bounded per-Pod scratch every leaf gets.
 				default:
 					t.Errorf("cache leaf received unrequested mount %+v", m)
 				}
@@ -181,7 +179,7 @@ func TestWorkspaceCacheWithoutTierRootKeepsAuthoredCaches(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, m := range templateNamed(t, wf, "main").Container.VolumeMounts {
-		if m.Name != SourceVolumeName && m.Name != stepTmpVolumeName {
+		if m.Name != SourceVolumeName {
 			t.Errorf("unexpected mount %+v", m)
 		}
 	}

@@ -494,7 +494,7 @@ INSERT INTO runs(status, phase, reason, error) VALUES('running', 'running', '', 
 	}
 }
 
-func TestRunFIFOClaimSupersedeAndResolution(t *testing.T) {
+func TestNewPushKeepsEarlierRunAndFIFOResolution(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -527,8 +527,7 @@ func TestRunFIFOClaimSupersedeAndResolution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if interrupted.Status != model.RunInterrupted || interrupted.Phase != "interrupted" ||
-		interrupted.Reason != "superseded by newer run" || interrupted.SupersededBy != replacement.ID || interrupted.FinishedAt == nil {
+	if interrupted.Status != model.RunRunning || interrupted.FinishedAt != nil {
 		t.Fatalf("interrupted superseded run = %#v", interrupted)
 	}
 
@@ -737,8 +736,8 @@ func TestRestartRecoveryRetainsBranchWorkflows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if noJobRecovered.Status != model.RunFailed || noJobRecovered.FinishedAt == nil || noJobRecovered.SupersededBy != "" {
-		t.Fatalf("no-job recovered run = %#v, want failed under the same ID", noJobRecovered)
+	if noJobRecovered.Status != model.RunFailed || noJobRecovered.FinishedAt == nil {
+		t.Fatalf("no-job recovered run = %#v, want queued under the same ID", noJobRecovered)
 	}
 	recoveredRun, err := s.Run(ctx, noJobRun.ID)
 	if err != nil {
@@ -791,7 +790,7 @@ func TestRestartRecoveryFailsUnsubmittedTagRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunFailed || recovered.SupersededBy != "" || recovered.Error != model.ServerRestartReason {
+	if recovered.Status != model.RunFailed || recovered.Error != model.ServerRestartReason {
 		t.Fatalf("recovered tag run = %#v, want failed under the same ID", recovered)
 	}
 }
@@ -1253,74 +1252,6 @@ BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END`); err != nil {
 	}
 	if _, err := s.RenewIssueLock(ctx, issue.ID, "agent@host"); err != nil {
 		t.Fatalf("lock was not restored with rolled-back close: %v", err)
-	}
-}
-
-func TestSupersededRunCancellationPersistsAndLateWorkflowNameIsRetained(t *testing.T) {
-	ctx := context.Background()
-	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
-	path := filepath.Join(t.TempDir(), "oberth.db")
-	s, err := Open(ctx, path, Options{Now: func() time.Time { return now }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo := createRepo(t, s)
-	first, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/cancel", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	}
-	replacement, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/cancel", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(replacement.Cancellations) != 1 || replacement.Cancellations[0].RunID != first.ID || replacement.Cancellations[0].WorkflowName != "" {
-		t.Fatalf("enqueue cancellations = %#v", replacement.Cancellations)
-	}
-	if _, err := s.SetRunWorkflowName(ctx, first.ID, "job-late"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
-	s, err = Open(ctx, path, Options{Now: func() time.Time { return now }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	pending, err := s.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 1 || pending[0].WorkflowName != "job-late" || pending[0].SupersededBy != replacement.ID {
-		t.Fatalf("pending cancellations = %#v, %v", pending, err)
-	}
-	if err := s.CompleteRunCancellation(ctx, first.ID, "job-late"); err != nil {
-		t.Fatal(err)
-	}
-	pending, err = s.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 0 {
-		t.Fatalf("pending after completion = %#v, %v", pending, err)
-	}
-}
-
-func TestEnqueueReturnsKnownJobCancellation(t *testing.T) {
-	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
-	s := testStore(t, &now)
-	repo := createRepo(t, s)
-	ctx := context.Background()
-	first, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/known-job", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.SetRunWorkflowName(ctx, first.ID, "job-known"); err != nil {
-		t.Fatal(err)
-	}
-	replacement, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/known-job", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(replacement.Cancellations) != 1 || replacement.Cancellations[0].RunID != first.ID || replacement.Cancellations[0].WorkflowName != "job-known" {
-		t.Fatalf("known job cancellation = %#v", replacement.Cancellations)
 	}
 }
 
@@ -1885,7 +1816,7 @@ func TestOwnerRecoveryRetiresLegacyBranchRestartCancellation(t *testing.T) {
 	if _, err := s.MarkRunSubmissionStarted(context.Background(), run.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at) VALUES(?,?,'','owner_restart',?)`, run.ID, "old-owner-workflow", unixNano(now)); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,reason,created_at) VALUES(?,?,'owner_restart',?)`, run.ID, "old-owner-workflow", unixNano(now)); err != nil {
 		t.Fatal(err)
 	}
 	applyStopRestartMigration(t, s)
@@ -1896,7 +1827,7 @@ func TestOwnerRecoveryRetiresLegacyBranchRestartCancellation(t *testing.T) {
 		t.Fatalf("legacy restart deletion retained: %#v %v", pending, err)
 	}
 	current, err := s.Run(context.Background(), run.ID)
-	if err != nil || current.Status != model.RunRunning || current.SupersededBy != "" {
+	if err != nil || current.Status != model.RunRunning {
 		t.Fatalf("legacy recovery = %#v %v", current, err)
 	}
 }

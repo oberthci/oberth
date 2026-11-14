@@ -19,40 +19,11 @@ type rowScanner interface {
 const runColumns = `
 queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
-status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
+status, reason, queued_at, started_at, finished_at, created_at, updated_at,
 schedule_entry, issue_trailers, source_bindings, failure_cause, assist_requested, assisted, assist_record`
 
 // ErrRunCursorNotFound lets clients restart paging without exposing a missing run ID.
 var ErrRunCursorNotFound = fmt.Errorf("%w: cursor run no longer retained; restart from the first page", ErrNotFound)
-
-// RunsByIDs resolves successor runs for list presentation in one query.
-func (s *Store) RunsByIDs(ctx context.Context, ids []string) (map[string]model.Run, error) {
-	result := make(map[string]model.Run, len(ids))
-	if len(ids) == 0 {
-		return result, nil
-	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
-	}
-	rows, err := s.reader().QueryContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id IN (`+placeholders+`)`, args...) // #nosec G202 -- only placeholders are interpolated.
-	if err != nil {
-		return nil, fmt.Errorf("list runs by ID: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		run, err := scanRun(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan run by ID: %w", err)
-		}
-		result[run.ID] = run
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list runs by ID: %w", err)
-	}
-	return result, nil
-}
 
 func validateRunSpec(spec model.RunSpec) (model.RunSpec, error) {
 	if spec.RepoID <= 0 || !spec.RefKind.Valid() || strings.TrimSpace(spec.Ref) == "" ||
@@ -90,53 +61,6 @@ RETURNING `+runColumns,
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("insert run: %w", err)
 	}
-	var cancellations []model.RunCancellation
-	var supersededCount int64
-	// Supersession stays inside a branch and its schedule entry. Named
-	// schedules are independent of other entries and ordinary branch pushes.
-	// Promotion CI uses a
-	// synthetic branch-shaped ref, but it is an independent immutable attempt
-	// and must neither supersede nor be superseded by a client push. A pending
-	// publication also owns its run until the external mutation terminalizes;
-	// newer work stays queued behind that durable obligation.
-	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" {
-		rows, err := tx.QueryContext(ctx, `
-SELECT id, job_name, phase FROM runs
-WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_entry = ?
-  AND trigger != 'promotion'
-  AND NOT EXISTS (
-      SELECT 1 FROM publications
-      WHERE publications.run_id = runs.id AND publications.status = 'pending'
-  )
-  AND status IN ('queued', 'running') AND (status = 'running' OR job_name != '')
- ORDER BY queue_sequence`, id, spec.RepoID, spec.Ref, spec.ScheduleEntry)
-		if err != nil {
-			return model.EnqueueRunResult{}, fmt.Errorf("find running superseded runs: %w", err)
-		}
-		defer func() { _ = rows.Close() }()
-		for rows.Next() {
-			var cancellation model.RunCancellation
-			var phase string
-			if err := rows.Scan(&cancellation.RunID, &cancellation.WorkflowName, &phase); err != nil {
-				_ = rows.Close()
-				return model.EnqueueRunResult{}, fmt.Errorf("scan running superseded run: %w", err)
-			}
-			cancellation.SupersededBy = id
-			cancellation.Reason = "superseded"
-			if phase == "infrastructure-pending" {
-				cancellation.Reason = "owner_restart"
-			}
-			cancellation.CreatedAt = fromUnixNano(now)
-			cancellations = append(cancellations, cancellation)
-		}
-		if err := rows.Close(); err != nil {
-			return model.EnqueueRunResult{}, fmt.Errorf("close running superseded runs: %w", err)
-		}
-		if err := rows.Err(); err != nil {
-			return model.EnqueueRunResult{}, fmt.Errorf("list running superseded runs: %w", err)
-		}
-	}
-
 	admissionSequence := value.QueueSequence
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET admission_sequence = ? WHERE id = ?`, admissionSequence, id); err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("set run admission sequence: %w", err)
@@ -145,46 +69,7 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_e
 	if err := registerRunIssueWork(ctx, tx, value, now); err != nil {
 		return model.EnqueueRunResult{}, err
 	}
-	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" {
-		updated, err := tx.ExecContext(ctx, `
-UPDATE runs
-SET status = 'interrupted', phase = 'interrupted', reason = ?, superseded_by = ?,
-    finished_at = ?, updated_at = ?
-WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_entry = ?
-  AND trigger != 'promotion'
-  AND NOT EXISTS (
-      SELECT 1 FROM publications
-      WHERE publications.run_id = runs.id AND publications.status = 'pending'
-  )
-  AND status IN ('queued', 'running')`,
-			"superseded by newer run", id, now, now, id, spec.RepoID, spec.Ref, spec.ScheduleEntry)
-		if err != nil {
-			return model.EnqueueRunResult{}, fmt.Errorf("supersede earlier runs: %w", err)
-		}
-		supersededCount, err = updated.RowsAffected()
-		if err != nil {
-			return model.EnqueueRunResult{}, fmt.Errorf("count superseded runs: %w", err)
-		}
-		for _, cancellation := range cancellations {
-			// Upsert: a run superseded across a restart may already carry an
-			// owner_restart obligation (run_id is the primary key). The fresh
-			// supersede obligation re-arms completion (retaining late-create
-			// cleanup for infrastructure-pending runs) so the
-			// stranded Job is still deleted exactly once (issue #270).
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
-VALUES(?, ?, ?, ?, ?)
-ON CONFLICT(run_id) DO UPDATE SET
-    job_name = excluded.job_name,
-    superseded_by = excluded.superseded_by,
-    reason = excluded.reason,
-    created_at = excluded.created_at,
-    completed_at = NULL`, cancellation.RunID, cancellation.WorkflowName, cancellation.SupersededBy, cancellation.Reason, now); err != nil {
-				return model.EnqueueRunResult{}, fmt.Errorf("record run cancellation: %w", err)
-			}
-		}
-	}
-	return model.EnqueueRunResult{Run: value, Cancellations: cancellations, SupersededCount: supersededCount}, nil
+	return model.EnqueueRunResult{Run: value}, nil
 }
 
 func (s *Store) ClaimNextRun(ctx context.Context) (model.Run, error) {
@@ -228,14 +113,14 @@ func (s *Store) MarkRunSubmissionStarted(ctx context.Context, id string) (model.
 	now := unixNano(s.now())
 	value, err := scanRun(s.db.QueryRowContext(ctx, `
 UPDATE runs SET started_at = ?, updated_at = ?
-WHERE id = ? AND status = 'running' AND started_at IS NULL
+WHERE id = ? AND status = 'running' AND started_at IS NULL AND phase != 'cancelled'
 RETURNING `+runColumns, now, now, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		current, lookupErr := s.Run(ctx, id)
 		if lookupErr != nil {
 			return model.Run{}, lookupErr
 		}
-		if current.Preempted() {
+		if current.Cancelled() {
 			return current, nil
 		}
 		return model.Run{}, fmt.Errorf("%w: run is not awaiting submission", ErrInvalidState)
@@ -263,7 +148,7 @@ RETURNING `+runColumns, now, now, id))
 		if lookupErr != nil {
 			return model.Run{}, lookupErr
 		}
-		if current.Preempted() {
+		if current.Cancelled() {
 			return current, nil
 		}
 		return model.Run{}, fmt.Errorf("%w: run is not awaiting submission", ErrInvalidState)
@@ -592,10 +477,7 @@ func (s *Store) SetRunWorkflowName(ctx context.Context, id, workflowName string)
 	defer func() { _ = tx.Rollback() }()
 	value, err := scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs SET job_name = ?, updated_at = ?
-WHERE id = ? AND (
-    status IN ('queued', 'running') OR
-    (status = 'interrupted' AND (superseded_by != '' OR phase = 'cancelled'))
-)
+WHERE id = ? AND status IN ('queued','running')
 RETURNING `+runColumns, workflowName, unixNano(s.now()), id))
 	if errors.Is(err, sql.ErrNoRows) {
 		var exists int
@@ -610,13 +492,13 @@ RETURNING `+runColumns, workflowName, unixNano(s.now()), id))
 	if err != nil {
 		return model.Run{}, fmt.Errorf("set run job name: %w", err)
 	}
-	if value.Preempted() {
+	if value.Cancelled() {
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
-VALUES(?, ?, ?, 'superseded', ?)
+INSERT INTO run_cancellations(run_id, job_name, reason, created_at)
+VALUES(?, ?, 'cancelled', ?)
 ON CONFLICT(run_id) DO UPDATE SET job_name = excluded.job_name
-WHERE run_cancellations.completed_at IS NULL`, value.ID, workflowName, value.SupersededBy, unixNano(s.now())); err != nil {
-			return model.Run{}, fmt.Errorf("retain superseded run cancellation: %w", err)
+WHERE run_cancellations.completed_at IS NULL`, value.ID, workflowName, unixNano(s.now())); err != nil {
+			return model.Run{}, fmt.Errorf("retain run cancellation: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -627,7 +509,7 @@ WHERE run_cancellations.completed_at IS NULL`, value.ID, workflowName, value.Sup
 
 func (s *Store) PendingRunCancellations(ctx context.Context) ([]model.RunCancellation, error) {
 	rows, err := s.reader().QueryContext(ctx, `
-SELECT run_id, job_name, superseded_by, reason, created_at, completed_at
+SELECT run_id, job_name, reason, created_at, completed_at, terminate
 FROM run_cancellations WHERE completed_at IS NULL ORDER BY created_at, run_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list pending run cancellations: %w", err)
@@ -679,30 +561,6 @@ SELECT completed_at FROM run_cancellations WHERE run_id = ? AND job_name = ?`, r
 	return fmt.Errorf("%w: pending run cancellation", ErrInvalidState)
 }
 
-// CompleteSupersededRunCancellationWithoutJob closes the narrow race in which
-// a background task is superseded or cancelled after claim but exits before publishing
-// its deterministic Job name. Callers invoke this only after that exact background task has
-// returned; the durable predicates make every earlier or unrelated call a
-// no-op.
-func (s *Store) CompleteSupersededRunCancellationWithoutJob(ctx context.Context, runID string) error {
-	if strings.TrimSpace(runID) == "" {
-		return fmt.Errorf("%w: run ID is required", ErrInvalid)
-	}
-	if _, err := s.db.ExecContext(ctx, `
-UPDATE run_cancellations
-SET completed_at = ?
-WHERE run_id = ? AND job_name = '' AND completed_at IS NULL AND reason = 'superseded'
-  AND EXISTS (
-      SELECT 1 FROM runs
-      WHERE runs.id = run_cancellations.run_id
-        AND runs.status = 'interrupted'
-        AND (runs.superseded_by != '' OR runs.phase = 'cancelled')
-  )`, unixNano(s.now()), runID); err != nil {
-		return fmt.Errorf("complete superseded no-Job cancellation for run %s: %w", runID, err)
-	}
-	return nil
-}
-
 func (s *Store) FinishRun(ctx context.Context, id string, result model.RunResult) (model.Run, error) {
 	if strings.TrimSpace(id) == "" || !result.Status.Terminal() {
 		return model.Run{}, fmt.Errorf("%w: terminal run result is required", ErrInvalid)
@@ -739,18 +597,19 @@ func (s *Store) finishRunTx(ctx context.Context, tx *sql.Tx, id string, result m
 	if err != nil {
 		return model.Run{}, fmt.Errorf("load run for finish: %w", err)
 	}
-	if current.Trigger == "promotion" && result.Status == model.RunPassed {
+
+	if current.Trigger == "promotion" && result.Status == model.RunPassed && !current.Cancelled() {
 		return model.Run{}, fmt.Errorf("%w: passing promotion runs finalize through publication", ErrInvalidState)
 	}
 	value, err := scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs
-SET status = ?, phase = ?, reason = CASE WHEN ? THEN ? ELSE reason END,
+SET status = ?, phase = ?, reason = CASE WHEN ? THEN ? WHEN ? THEN '' ELSE reason END,
     tested_sha = CASE WHEN ? = '' THEN tested_sha ELSE ? END,
     base_sha = CASE WHEN ? = '' THEN base_sha ELSE ? END,
     failed_burn = ?, failed_step = ?, error = ?, failure_cause = ?, finished_at = ?, updated_at = ?
 WHERE id = ? AND status IN ('queued', 'running')
 RETURNING `+runColumns,
-		result.Status, phase, result.Status == model.RunInterrupted && phase == model.PhaseCancelled && strings.TrimSpace(result.Error) != "", result.Error,
+		result.Status, phase, phase == model.PhaseCancelled && strings.TrimSpace(result.Error) != "", result.Error, (current.Cancelled() || current.Phase == "infrastructure-pending") && result.Status == model.RunPassed,
 		result.TestedSHA, result.TestedSHA,
 		result.BaseSHA, result.BaseSHA,
 		result.FailedStage, result.FailedStep, result.Error, result.FailureCause, now, now, id))
@@ -768,25 +627,25 @@ RETURNING `+runColumns,
 		return model.Run{}, fmt.Errorf("finish run: %w", err)
 	}
 
+	// The terminal verdict proves Stop (including exit handlers) is finished.
+	if _, err := tx.ExecContext(ctx, `UPDATE run_cancellations SET completed_at=? WHERE run_id=? AND completed_at IS NULL`, now, id); err != nil {
+		return model.Run{}, err
+	}
 	if value.Trigger == "promotion" {
 		promotion, promotionErr := promotionByRunTx(ctx, tx, value.ID)
 		if promotionErr != nil {
 			return model.Run{}, fmt.Errorf("load promotion for terminal run: %w", promotionErr)
 		}
-		promotionStatus := model.PromotionFailed
-		switch value.Status {
-		case model.RunPassed:
-			// Defensive: FinishRun rejects RunPassed for promotion triggers
-			// above, so this case is unreachable from current callers. It
-			// exists as a safety net for any future caller path that may reach
-			// this switch with a passing status.
-			promotionStatus = model.PromotionPassed
-		case model.RunInterrupted:
-			promotionStatus = model.PromotionInterrupted
-		}
-		_, promotionErr = finishPromotionTx(ctx, tx, promotion, promotionStatus, value.ID, value.Error, now)
-		if promotionErr != nil {
-			return model.Run{}, promotionErr
+		if promotion.Status == model.PromotionPending {
+			promotionStatus := model.PromotionFailed
+			if value.Status == model.RunInterrupted && value.Phase != model.PhaseCancelled {
+				promotionStatus = model.PromotionInterrupted
+			}
+			if _, err := finishPromotionTx(ctx, tx, promotion, promotionStatus, value.ID, value.Error, now); err != nil {
+				return model.Run{}, err
+			}
+		} else if !current.Cancelled() || promotion.RunID != value.ID {
+			return model.Run{}, fmt.Errorf("%w: promotion is already terminal", ErrInvalidState)
 		}
 	} else {
 		if err := s.projectRunIssue(ctx, tx, value, result.FailureTail, now); err != nil {
@@ -817,7 +676,7 @@ func (s *Store) ListRecentRuns(ctx context.Context, filter model.RunListFilter) 
 	rows, err := s.reader().QueryContext(ctx, `
 SELECT `+runReadColumns+` FROM runs
 WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?) AND (? <= 0 OR queue_sequence < ?)
-  AND (? = 0 OR status NOT IN ('queued', 'running'))`+restriction+supersededRunRestriction(filter)+`
+  AND (? = 0 OR status NOT IN ('queued', 'running'))`+restriction+`
 ORDER BY queue_sequence DESC LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
 	if err != nil {
 		return nil, fmt.Errorf("list recent runs: %w", err)
@@ -887,7 +746,7 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 		// Keep the queue in the same effective-priority and FIFO order as ClaimNextRun.
 		rows, err := tx.QueryContext(ctx, `
 SELECT `+runReadColumns+` FROM runs
-WHERE (`+queuedRunSQL+`) AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+supersededRunRestriction(filter)+`
+WHERE (`+queuedRunSQL+`) AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
 ORDER BY `+priorityOrder+` LIMIT ?`, append(scopeArgs, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
 		queued, err := collect("queued", rows, err)
 		if err != nil {
@@ -897,7 +756,7 @@ ORDER BY `+priorityOrder+` LIMIT ?`, append(scopeArgs, MaxActiveRuns)...) // #no
 		rows, err = tx.QueryContext(ctx, `
 SELECT `+runReadColumns+` FROM runs
 WHERE status = 'running' AND started_at IS NOT NULL
-  AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+supersededRunRestriction(filter)+`
+  AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
 ORDER BY started_at DESC, id DESC LIMIT ?`, append(scopeArgs, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
 		running, err := collect("running", rows, err)
 		if err != nil {
@@ -920,7 +779,7 @@ ORDER BY started_at DESC, id DESC LIMIT ?`, append(scopeArgs, MaxActiveRuns)...)
 SELECT `+runReadColumns+` FROM runs
 WHERE status NOT IN ('queued', 'running')
   AND (? = '' OR `+runEndTimeSQL+` < ? OR (`+runEndTimeSQL+` = ? AND id < ?))
-  AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+supersededRunRestriction(filter)+`
+  AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
 ORDER BY `+runEndTimeSQL+` DESC, id DESC
 LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- fixed columns and parameterized restriction.
 	terminal, err := collect("terminal", rows, err)
@@ -1134,7 +993,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.QueueSequence, &value.AdmissionSequence, &value.ID, &value.RepoID, &value.RefKind, &value.Ref,
 		&value.SHA, &value.Actor, &release, &value.Trigger, &value.Phase, &value.WorkflowName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedStage, &value.FailedStep, &value.Error,
-		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
+		&value.Status, &value.Reason, &queued, &started, &finished,
 		&created, &updated, &value.ScheduleEntry, &issueTrailers, &sourceBindings, &value.FailureCause, &assistRequested, &assisted, &assistRecord,
 	}
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
@@ -1197,7 +1056,7 @@ func scanRunCancellation(row rowScanner) (model.RunCancellation, error) {
 	var value model.RunCancellation
 	var created int64
 	var completed sql.NullInt64
-	if err := scanRowNotFound(row, "RunCancellation", &value.RunID, &value.WorkflowName, &value.SupersededBy, &value.Reason, &created, &completed); err != nil {
+	if err := scanRowNotFound(row, "RunCancellation", &value.RunID, &value.WorkflowName, &value.Reason, &created, &completed, &value.Terminate); err != nil {
 		return model.RunCancellation{}, err
 	}
 	value.CreatedAt = fromUnixNano(created)

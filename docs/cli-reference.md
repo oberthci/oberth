@@ -1621,8 +1621,6 @@ Flags:
         ServiceAccount for CI templates with approved upstream-scoped secrets; its Vault role never carries release grants (default "oberth-argo-ci-secrets")
   -argo-credentialed-serviceaccount string
         ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth (default "oberth-argo-credentialed")
-  -argo-executor-scratch-size-limit string
-        per-Pod Argo executor scratch size limit (Kubernetes quantity) (default "1Gi")
   -argo-executor-serviceaccount string
         ServiceAccount for Argo's own executor containers; must differ from all pipeline identities (default "oberth-argo-executor")
   -argo-namespace string

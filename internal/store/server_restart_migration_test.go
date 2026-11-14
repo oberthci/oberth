@@ -57,7 +57,7 @@ func TestStopRestartMigrationPreservesWorkflowsAndUncertainCreates(t *testing.T)
 	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,reason,created_at)VALUES(?,?,'owner_restart',?)`, old.ID, "original-workflow", unixNano(now)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(testdb.PostExecutionTargetRemovalDowngrade); err != nil {
+	if _, err := s.db.Exec(testdb.PostWorkflowStopDowngrade + testdb.PostExecutionTargetRemovalDowngrade); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`-- Reconstruct the old column because this fixture rewinds past its drop migration.
@@ -108,7 +108,9 @@ func applyStopRestartMigration(t *testing.T, s *Store) {
 	t.Helper()
 	for _, migration := range migrations {
 		if migration.id == stopRestartMigrationID {
-			if _, err := s.db.Exec(migration.sql); err != nil {
+			const retiredColumns = `ALTER TABLE runs ADD COLUMN superseded_by TEXT NOT NULL DEFAULT ''; ALTER TABLE run_cancellations ADD COLUMN superseded_by TEXT NOT NULL DEFAULT '';`
+			const removeRetiredColumns = `ALTER TABLE runs DROP COLUMN superseded_by; ALTER TABLE run_cancellations DROP COLUMN superseded_by;`
+			if _, err := s.db.Exec(retiredColumns + migration.sql + removeRetiredColumns); err != nil {
 				t.Fatal(err)
 			}
 			return
