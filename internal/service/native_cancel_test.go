@@ -47,6 +47,9 @@ func TestReleaseCancelAndSecondBranchCancelUseNativeTerminate(t *testing.T) {
 				t.Fatalf("release cancel left a granted onExit runnable: native Terminate calls=%d", terminations)
 			}
 			if !release {
+				if !strings.Contains(first.Warning, "repeat cancel") || !strings.Contains(first.Warning, "Terminate; exit handlers will be skipped") {
+					t.Fatalf("first Stop acknowledgement omits escalation warning: %+v", first)
+				}
 				if terminations != 0 {
 					t.Fatal("first ordinary branch cancellation must run exit handlers")
 				}

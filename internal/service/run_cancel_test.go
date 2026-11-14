@@ -126,7 +126,7 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	fixture.assertNothingCreated(t)
 
 	response := mustRunCancel(t, fixture.control, cancelAdmin, map[string]any{"id": head.ID, "reason": "wrong size"})
-	if response.PreviousState != "waiting" || response.Warning != "" {
+	if response.PreviousState != "waiting" || !strings.Contains(response.Warning, "Terminate; exit handlers will be skipped") {
 		t.Fatalf("waiting cancel response = %#v", response)
 	}
 	if snapshot := fixture.scheduler.ownerForTest(head.QueueSequence); snapshot != nil {

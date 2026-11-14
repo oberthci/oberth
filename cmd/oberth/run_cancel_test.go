@@ -196,9 +196,17 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	if response.RunID != claimed.ID || response.PreviousState != "waiting" || response.Workflow != "pending" ||
-		response.CancelledBy != administrativeActor || response.Warning != "" || !json.Valid(raw) {
+		response.CancelledBy != administrativeActor || !strings.Contains(response.Warning, "Terminate; exit handlers will be skipped") || !json.Valid(raw) {
 		t.Fatalf("in-pod cancel = %#v (%s)", response, raw)
 	}
+	var firstOutput bytes.Buffer
+	if err := writeRunCancel(&firstOutput, response, raw, false); err != nil || !strings.Contains(firstOutput.String(), "repeat cancel while the run is active to use Argo Terminate; exit handlers will be skipped") {
+		t.Fatalf("first CLI Stop acknowledgement omits escalation warning: %q, %v", firstOutput.String(), err)
+	}
+	if !strings.Contains(string(raw), "Terminate; exit handlers will be skipped") {
+		t.Fatalf("JSON Stop acknowledgement omits escalation warning: %s", raw)
+	}
+
 	select {
 	case <-woken:
 	case <-time.After(testtimeout.Start(5 * time.Second)):
