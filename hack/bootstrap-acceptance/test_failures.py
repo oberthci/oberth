@@ -97,8 +97,17 @@ class FixtureIdentity(unittest.TestCase):
     def passes(self):
         return [dict(Package=package, Test=test, Action='pass') for package, test in ci.TESTS]
 
-    def check(self, events):
-        ci.require_pass_events('\n'.join(map(json.dumps, events)).encode())
+    def check(self, events, returncode=0):
+        ci.require_pass_events('\n'.join(map(json.dumps, events)).encode(), returncode)
+
+    def test_command_failure_is_not_attributed_to_a_missing_fixture(self):
+        for events in ([], self.passes()[:1], self.passes()):
+            with self.subTest(events=len(events)), self.assertRaises(Refused) as caught:
+                self.check(events, returncode=1)
+            failure = caught.exception
+            self.assertEqual((failure.stage, failure.check), ('rest-race', 'command-exit'))
+            self.assertIsNone(failure.package)
+            self.assertIsNone(failure.test)
 
     def test_names_under_another_package_cannot_satisfy_the_contract(self):
         events = self.passes()
@@ -119,7 +128,7 @@ class FixtureIdentity(unittest.TestCase):
         package, test = ci.TESTS[0]
         for identity in [dict(Package=package), dict(Package=package, Test=test + '/private-label')]:
             with self.subTest(identity=identity), self.assertRaises(Refused) as caught:
-                self.check(self.passes() + [identity | dict(Action='fail', Output='private output')])
+                self.check(self.passes() + [identity | dict(Action='fail', Output='private output')], returncode=1)
             line = diagnostic(caught.exception)
             self.assertIn('stage=rest-race', line)
             self.assertIn('package=' + package, line)

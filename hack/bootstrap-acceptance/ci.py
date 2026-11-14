@@ -225,7 +225,7 @@ CELL_BUDGET = 120
 FAILURE_SCAN_BUDGET = 10
 
 
-def require_pass_events(raw):
+def require_pass_events(raw, returncode):
     try:
         events = [json.loads(line) for line in raw.splitlines()]
     except ValueError:
@@ -242,6 +242,8 @@ def require_pass_events(raw):
                           package=package, test=safe_go_test(test))
         if action in ('pass', 'skip'):
             terminal[(package, test)] = action
+    if returncode:
+        raise Refused('race command failed', stage='rest-race', check='command-exit')
     for package, test in TESTS:
         if terminal.get((package, test)) != 'pass':
             raise Refused('required fixture did not pass', stage='fixture-events', check='required-fixture-pass',
@@ -287,9 +289,7 @@ def run_cell(probe, race_command):
     race_seconds = probe.race_finished - started
     probe.budget(CELL_BUDGET)
     signal.setitimer(signal.ITIMER_REAL, CELL_BUDGET)
-    require_pass_events(raw)
-    if probe.last_returncode:
-        raise Refused('race command failed', stage='rest-race', check='command-exit')
+    require_pass_events(raw, probe.last_returncode)
     values, inventoried = go_inventory(inventory)
     for package, name in TESTS:
         if package == INSTALLER_PACKAGE and name not in inventoried:

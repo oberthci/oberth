@@ -56,7 +56,7 @@ class ReleaseRuntimeControls(unittest.TestCase):
         from ci import TESTS, require_pass_events
         raw = '\n'.join(json.dumps({'Action': 'pass', 'Package': package, 'Test': name}) for package, name in TESTS[1:]).encode()
         with self.assertRaises(Refused) as failure:
-            require_pass_events(raw)
+            require_pass_events(raw, 0)
         self.assertEqual((failure.exception.package, failure.exception.test), TESTS[0])
 
     def test_decoded_go_output_is_scanned_across_event_boundaries(self):
