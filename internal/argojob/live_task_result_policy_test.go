@@ -257,13 +257,19 @@ func liveTaskResultCases(t *testing.T, cluster liveCluster, workflow, foreign *w
 func TestLiveWorkflowTaskResultPolicy(t *testing.T) {
 	cluster := requireLiveCluster(t)
 	installLiveTaskResultPolicy(t, cluster)
+	control, err := wfclientset.NewForConfig(cluster.restConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var workflows []*wfv1.Workflow
 	for _, name := range []string{"executor.r6-policy-own", "r6-policy-own"} {
 		wf, err := cluster.workflows.Create(t.Context(), &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: wfv1.WorkflowSpec{Entrypoint: "pause", Suspend: ptr.To(true), Templates: []wfv1.Template{{Name: "pause", Suspend: &wfv1.SuspendTemplate{}}}}}, metav1.CreateOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = cluster.workflows.Delete(context.Background(), wf.Name, metav1.DeleteOptions{}) })
+		t.Cleanup(func() {
+			_ = control.ArgoprojV1alpha1().Workflows(cluster.namespace).Delete(context.Background(), wf.Name, metav1.DeleteOptions{})
+		})
 		workflows = append(workflows, wf)
 	}
 	for i, account := range []string{"oberth-argo-executor", "r6-operator-capability", "r6-per-step"} {
