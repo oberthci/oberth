@@ -10,10 +10,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func readAcknowledgedIssue(t *testing.T, service *API, actor api.Actor, value any) api.IssueResponse {

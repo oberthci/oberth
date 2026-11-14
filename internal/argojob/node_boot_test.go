@@ -18,10 +18,10 @@ import (
 	ktesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
 
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestNodeRebootClassifiesOwnedUnknownTerminationAcrossResume(t *testing.T) {

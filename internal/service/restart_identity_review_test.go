@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/storetest"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 func TestStartupAdoptsNonReleaseTagWorkflow(t *testing.T) {

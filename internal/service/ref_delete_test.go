@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func deleteFixtureBranch(t *testing.T, f *groupFixture, repository model.Repository, ref string) {

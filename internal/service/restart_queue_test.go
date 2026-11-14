@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type waitingRestartJobs struct {

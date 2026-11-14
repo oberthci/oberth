@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestIssueReopenPreservesManualIssueAndVisibility(t *testing.T) {

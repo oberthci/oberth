@@ -10,9 +10,9 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/testdb"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )

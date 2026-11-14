@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/storetest"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // TestAccessListResolvesRepoSpelling is the #256 regression test: persisted

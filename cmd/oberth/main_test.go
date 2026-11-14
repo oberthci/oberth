@@ -22,9 +22,9 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/auth"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestParseServeOptionsRequiresSafeComposition(t *testing.T) {

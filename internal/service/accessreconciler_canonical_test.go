@@ -8,8 +8,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/storetest"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 func grantsConfigMap(rv, grants string) *corev1.ConfigMap {
