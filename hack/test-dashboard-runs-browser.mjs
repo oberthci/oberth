@@ -204,11 +204,11 @@ try {
     });
     await page.waitForFunction(()=>!state.attempts.get('head-main').refreshing);
     assert.equal(await page.evaluate(()=>document.activeElement===historyToggle && historyToggle.isConnected && historyTable===document.querySelector('#runHistory .runs-table') && historyTable.scrollLeft===historyLeft), true, 'unchanged poll preserves history nodes, focus and scroll');
-    older.status = 'passed';
+    older.status = older.display_status = 'passed';
     await page.evaluate(()=>route(true));
     await page.waitForFunction(()=>document.querySelector('#runHistory .trow[data-run-id="old-failed"] .pill').textContent.trim()==='passed');
     assert.equal(await page.evaluate(()=>document.activeElement===document.querySelector('#runHistory [data-action="toggle-attempts"]') && document.querySelector('#runHistory .runs-table').scrollLeft===historyLeft), true, 'changed poll refreshes status and restores focus/scroll');
-    older.status = 'failed';
+    older.status = older.display_status = 'failed';
     await page.locator('[data-action="refresh"]').click();
     await page.waitForFunction(()=>document.querySelector('#runHistory .trow[data-run-id="old-failed"] .pill').textContent.trim()==='failed');
     await page.locator('#runHistory [data-run-id="oldest"]').waitFor();
@@ -274,10 +274,10 @@ try {
   await direct.locator('[data-detail-run="head-main"]').waitFor();
   await direct.locator('[data-action="toggle-attempts"]').click();
   await direct.locator('#runHistory .trow[data-run-id="old-failed"]').waitFor();
-  older.status='passed';
+  older.status = older.display_status = 'passed';
   await direct.locator('[data-action="refresh"]').click();
   await direct.waitForFunction(()=>document.querySelector('#runHistory .trow[data-run-id="old-failed"] .pill').textContent.trim()==='passed');
-  older.status='failed';
+  older.status = older.display_status = 'failed';
   await direct.close();
   sharedNames=false; delayStatus=true;
   const cold = await browser.newPage();
