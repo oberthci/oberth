@@ -11,7 +11,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestRunGetRetainsBoundTerminationAndUnavailableHistory(t *testing.T) {
@@ -28,7 +27,7 @@ func TestRunGetRetainsBoundTerminationAndUnavailableHistory(t *testing.T) {
 		if name == "new" {
 			step.Termination = record
 		}
-		if _, err = storetest.PutStepResult(ctx, f.store, step); err != nil {
+		if _, err = putNativeStepFixture(ctx, f.store, step); err != nil {
 			t.Fatal(err)
 		}
 	}

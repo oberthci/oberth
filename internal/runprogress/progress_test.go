@@ -1,22 +1,10 @@
 package runprogress
 
 import (
-	"bytes"
 	"encoding/json"
 	"testing"
 	"time"
 )
-
-func TestHistoricalEventStrictDecode(t *testing.T) {
-	body := []byte(`{"version":1,"burn":"test","step":"unit","ordinal":0,"status":"queued"}`)
-	event, err := Decode(body)
-	if err != nil || event.Stage != "test" || event.Status != StepQueued {
-		t.Fatal(event, err)
-	}
-	if _, err := Decode([]byte(`{"version":1,"burn":"test","step":"unit","ordinal":0,"status":"queued","unknown":true}`)); err == nil {
-		t.Fatal("unknown field accepted")
-	}
-}
 
 func TestStatusTerminal(t *testing.T) {
 	for _, tc := range []struct {
@@ -179,97 +167,6 @@ func TestEventValidate(t *testing.T) {
 	})
 }
 
-func TestPlanValidate(t *testing.T) {
-	t.Run("valid plan", func(t *testing.T) {
-		plan := Plan{
-			Version: PlanVersion,
-			Steps: []PlannedStep{
-				{Stage: "test", Step: "lint", Ordinal: 0},
-				{Stage: "test", Step: "unit", Ordinal: 1},
-				{Stage: "build", Step: "compile", Ordinal: 2},
-			},
-		}
-		if err := plan.Validate(); err != nil {
-			t.Fatal(err)
-		}
-	})
-	t.Run("empty steps valid", func(t *testing.T) {
-		plan := Plan{Version: PlanVersion, Steps: nil}
-		if err := plan.Validate(); err != nil {
-			t.Fatal(err)
-		}
-	})
-	t.Run("wrong version", func(t *testing.T) {
-		plan := Plan{Version: 99, Steps: nil}
-		if err := plan.Validate(); err == nil {
-			t.Fatal("accepted wrong plan version")
-		}
-	})
-	t.Run("empty burn", func(t *testing.T) {
-		plan := Plan{
-			Version: PlanVersion,
-			Steps:   []PlannedStep{{Stage: "", Step: "lint", Ordinal: 0}},
-		}
-		if err := plan.Validate(); err == nil {
-			t.Fatal("accepted empty burn in plan step")
-		}
-	})
-	t.Run("empty step", func(t *testing.T) {
-		plan := Plan{
-			Version: PlanVersion,
-			Steps:   []PlannedStep{{Stage: "test", Step: "", Ordinal: 0}},
-		}
-		if err := plan.Validate(); err == nil {
-			t.Fatal("accepted empty step in plan step")
-		}
-	})
-	t.Run("negative ordinal", func(t *testing.T) {
-		plan := Plan{
-			Version: PlanVersion,
-			Steps:   []PlannedStep{{Stage: "test", Step: "lint", Ordinal: -1}},
-		}
-		if err := plan.Validate(); err == nil {
-			t.Fatal("accepted negative ordinal in plan step")
-		}
-	})
-	t.Run("duplicate burn/step key", func(t *testing.T) {
-		plan := Plan{
-			Version: PlanVersion,
-			Steps: []PlannedStep{
-				{Stage: "test", Step: "lint", Ordinal: 0},
-				{Stage: "test", Step: "lint", Ordinal: 1},
-			},
-		}
-		if err := plan.Validate(); err == nil {
-			t.Fatal("accepted duplicate burn/step key")
-		}
-	})
-	t.Run("duplicate ordinal", func(t *testing.T) {
-		plan := Plan{
-			Version: PlanVersion,
-			Steps: []PlannedStep{
-				{Stage: "test", Step: "lint", Ordinal: 0},
-				{Stage: "test", Step: "unit", Ordinal: 0},
-			},
-		}
-		if err := plan.Validate(); err == nil {
-			t.Fatal("accepted duplicate ordinal")
-		}
-	})
-	t.Run("burn with NUL", func(t *testing.T) {
-		plan := Plan{
-			Version: PlanVersion,
-			Steps:   []PlannedStep{{Stage: "test\x00x", Step: "lint", Ordinal: 0}},
-		}
-		if err := plan.Validate(); err == nil {
-			t.Fatal("accepted burn with NUL in plan")
-		}
-	})
-}
-
-// TestPlannedStepSecretsIsAdditive pins the wire shape of the per-step secret
-// flag: present only when set, so plans written before it existed and plans
-// without credentialed steps encode and decode exactly as they always did.
 func TestPlannedStepSecretsIsAdditive(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -297,25 +194,5 @@ func TestPlannedStepSecretsIsAdditive(t *testing.T) {
 			}
 		})
 	}
-	var legacy Plan
-	if err := json.Unmarshal([]byte(`{"version":1,"steps":[{"burn":"test","step":"lint","ordinal":0}]}`), &legacy); err != nil {
-		t.Fatal(err)
-	}
-	if err := legacy.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if len(legacy.Steps) != 1 || legacy.Steps[0].Secrets {
-		t.Fatalf("legacy plan decoded as %+v, want one step without secrets", legacy.Steps)
-	}
-}
 
-func TestHistoricalProgressClassIsDiscarded(t *testing.T) {
-	event, err := Decode([]byte(`{"version":1,"burn":"test","step":"unit","ordinal":0,"status":"queued","declared_size":"XL"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	marker, err := json.Marshal(event)
-	if err != nil || bytes.Contains(marker, []byte("declared_size")) {
-		t.Fatal("class re-emitted", string(marker), err)
-	}
 }

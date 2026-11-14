@@ -15,7 +15,6 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // #1213: the 8-character ID printed by push feedback must be directly usable.
@@ -99,7 +98,7 @@ func TestActiveRunLogsWithoutRetainedOutputArePending(t *testing.T) {
 			if _, err := fixture.logs.BuildIndex(run.ID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := storetest.PutStepResult(ctx, fixture.store, model.StepResult{NodeID: "release-build-variants.release-build-variants", RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants", Status: model.StepPassed}); err != nil {
+			if _, err := putNativeStepFixture(ctx, fixture.store, model.StepResult{NodeID: "release-build-variants.release-build-variants", RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants", Status: model.StepPassed}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := fixture.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed}); err != nil {

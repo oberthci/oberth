@@ -13,7 +13,6 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func readAcknowledgedIssue(t *testing.T, service *API, actor api.Actor, value any) api.IssueResponse {
@@ -227,7 +226,7 @@ func TestRunGetSummary(t *testing.T) {
 		if i == 1 {
 			status = model.StepFailed
 		}
-		_, err := storetest.PutStepResult(ctx, fixture.store, model.StepResult{NodeID: ("test") + "." + (name),
+		_, err := putNativeStepFixture(ctx, fixture.store, model.StepResult{NodeID: ("test") + "." + (name),
 			RunID: run.ID, Stage: "test", Step: name, Ordinal: i, Status: status,
 			StartedAt: &started, FinishedAt: &ended,
 		})

@@ -11,7 +11,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestScopedRunListUnknownPositionDoesNotInventQueueHead(t *testing.T) {
@@ -74,7 +73,7 @@ func TestRunListsObserveArgoWithoutDependingOnLocalStepHistory(t *testing.T) {
 			}
 			step := stepResult(model.StepPassed)
 			step.RunID = runs[3].ID
-			if _, err := storetest.PutStepResult(t.Context(), f.store, step); err != nil {
+			if _, err := putNativeStepFixture(t.Context(), f.store, step); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(f.root, "logs", runs[4].ID+".progress.jsonl"), []byte("corrupt progress\n"), 0600); err != nil {
