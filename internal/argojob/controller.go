@@ -351,13 +351,13 @@ func (controller *Controller) WaitResumed(ctx context.Context, name, runID strin
 }
 
 func (controller *Controller) wait(ctx context.Context, name, runID string, binding Adoption) (result Completion, retErr error) {
+	observeLogs, finishLogs := controller.containerLogCapture(ctx, runID)
+	defer finishLogs()
 	if controller.hub == nil {
 		return Completion{}, errors.New("argojob: shared Workflow watch is required")
 	}
 	wake, cancelWatch := controller.hub.Subscribe(name)
 	defer cancelWatch()
-	observeLogs, finishLogs := controller.containerLogCapture(ctx, runID)
-	defer finishLogs()
 	idle := controller.idleInterval
 	if idle <= 0 {
 		idle = waitIdleInterval

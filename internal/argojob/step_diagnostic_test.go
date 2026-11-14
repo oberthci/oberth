@@ -60,6 +60,12 @@ func TestStepDiagnosticExactCurrentMainAndReason(t *testing.T) {
 
 func TestStepDiagnosticRefusesUnboundOrAmbiguousCurrentTermination(t *testing.T) {
 	cases := map[string]func(*wfv1.Workflow, *wfv1.NodeStatus, *corev1.Pod){
+		"wrong-workflow-label": func(_ *wfv1.Workflow, _ *wfv1.NodeStatus, p *corev1.Pod) {
+			p.Labels["workflows.argoproj.io/workflow"] = "other"
+		},
+		"missing-workflow-label": func(_ *wfv1.Workflow, _ *wfv1.NodeStatus, p *corev1.Pod) {
+			delete(p.Labels, "workflows.argoproj.io/workflow")
+		},
 		"foreign-owner": func(_ *wfv1.Workflow, _ *wfv1.NodeStatus, p *corev1.Pod) { p.OwnerReferences[0].UID = "foreign" },
 		"foreign-run": func(w *wfv1.Workflow, _ *wfv1.NodeStatus, _ *corev1.Pod) {
 			w.Annotations[runIDAnnotation] = "secret-canary"

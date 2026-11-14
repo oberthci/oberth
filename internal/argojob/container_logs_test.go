@@ -277,22 +277,30 @@ func TestContainerLogDeadlineLeavesUnreadContainersForNextSnapshot(t *testing.T)
 }
 
 func TestContainerLogWaitErrorExplainsTrackedUncapturedEntries(t *testing.T) {
-	controller, store, workflow, pod := nativeContainerLogFixture(t)
-	workflow.Status.Phase = wfv1.WorkflowRunning
-	pod.Status = corev1.PodStatus{Phase: corev1.PodRunning}
-	node := workflow.Status.Nodes["node"]
-	node.Phase = wfv1.NodeRunning
-	workflow.Status.Nodes["node"] = node
-	if err := controller.ObserveContainerLogs(t.Context(), workflow, "run", []*corev1.Pod{pod}); err != nil {
-		t.Fatal(err)
-	}
-	workflow.Annotations[runIDAnnotation] = "foreign"
-	_, err := controller.Wait(t.Context(), workflow.Name, "run", io.Discard)
-	if err == nil {
-		t.Fatal("foreign Workflow did not end observation")
-	}
-	body, _, entry, err := store.ReadContainerLog(t.Context(), "run", "node", "main", runlog.Filter{})
-	if err != nil || !entry.Captured || !strings.Contains(string(body), "not captured: observation ended") {
-		t.Fatal(string(body), entry, err)
+	for _, mode := range []string{"identity", "missing-watch"} {
+		t.Run(mode, func(t *testing.T) {
+			controller, store, workflow, pod := nativeContainerLogFixture(t)
+			workflow.Status.Phase = wfv1.WorkflowRunning
+			pod.Status = corev1.PodStatus{Phase: corev1.PodRunning}
+			node := workflow.Status.Nodes["node"]
+			node.Phase = wfv1.NodeRunning
+			workflow.Status.Nodes["node"] = node
+			if err := controller.ObserveContainerLogs(t.Context(), workflow, "run", []*corev1.Pod{pod}); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "identity" {
+				workflow.Annotations[runIDAnnotation] = "foreign"
+			} else {
+				controller.hub = nil
+			}
+			_, err := controller.Wait(t.Context(), workflow.Name, "run", io.Discard)
+			if err == nil {
+				t.Fatal("invalid observation did not end wait")
+			}
+			body, _, entry, err := store.ReadContainerLog(t.Context(), "run", "node", "main", runlog.Filter{})
+			if err != nil || !entry.Captured || !strings.Contains(string(body), "not captured: observation ended") {
+				t.Fatal(string(body), entry, err)
+			}
+		})
 	}
 }
