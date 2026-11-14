@@ -21,6 +21,8 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 )
 
+var errContainerLogObservationIncomplete = errors.New("argojob: container copy observation deadline ended")
+
 type PodLogStream func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error)
 
 func (controller *Controller) WithContainerLogStore(store runlog.ContainerLogStore) *Controller {
@@ -113,6 +115,9 @@ func (controller *Controller) ObserveContainerLogs(ctx context.Context, workflow
 		if entry.Captured || entry.Pending || !containerLogDone(workflow, entry, pods) {
 			continue
 		}
+		if readCtx.Err() != nil && !workflow.Status.Phase.Completed() {
+			return errors.Join(result, errContainerLogObservationIncomplete)
+		}
 		claimed, err := controller.containerLogs.ReserveContainerLog(runID, entry)
 		if err != nil {
 			return errors.Join(result, err)
@@ -160,10 +165,8 @@ func (controller *Controller) recordMissingPodLogs(runID string, workflow *wfv1.
 }
 
 func (controller *Controller) storeContainerCopy(ctx context.Context, workflow *wfv1.Workflow, runID string, entry runlog.ContainerLog) error {
-	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	for attempt := 0; attempt < 2; attempt++ {
-		reader, err := controller.openBoundContainerLog(readCtx, workflow, entry, false)
+		reader, err := controller.openBoundContainerLog(ctx, workflow, entry, false)
 		if err == nil {
 			entry.Reader = reader
 			defer func() { _ = reader.Close() }()
@@ -173,7 +176,7 @@ func (controller *Controller) storeContainerCopy(ctx context.Context, workflow *
 			entry.Reason = "oberth: log unavailable: Pod or container log no longer exists"
 			break
 		}
-		if attempt == 0 && retryExecutorIdentityRead(err) && readCtx.Err() == nil {
+		if attempt == 0 && retryExecutorIdentityRead(err) && ctx.Err() == nil {
 			continue
 		}
 		entry.Reason = "oberth: log unavailable: container log could not be read"
@@ -298,7 +301,9 @@ func (controller *Controller) containerLogCapture(ctx context.Context, runID str
 				continue
 			}
 			if err := controller.ObserveContainerLogs(ctx, snapshot.workflow, runID, snapshot.pods); err != nil {
-				log.Printf("WARN: run=%s container log copy unavailable (class=%s)", strconv.Quote(runID), executorIdentityErrorClass(err))
+				if !errors.Is(err, errContainerLogObservationIncomplete) {
+					log.Printf("WARN: run=%s container log copy unavailable (class=%s)", strconv.Quote(runID), executorIdentityErrorClass(err))
+				}
 			} else {
 				previous = version
 			}

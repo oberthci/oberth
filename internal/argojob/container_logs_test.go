@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -208,4 +209,69 @@ func TestContainerLogCompressedNativeStatusDoesNotMutateCache(t *testing.T) {
 
 func (cache containerLogCache) Subscribe(string) (<-chan struct{}, func()) {
 	return make(chan struct{}), func() {}
+}
+
+func TestContainerLogDeadlineLeavesUnreadContainersForNextSnapshot(t *testing.T) {
+	for _, complete := range []bool{false, true} {
+		t.Run(fmt.Sprint(complete), func(t *testing.T) {
+			controller, store, workflow, pod := nativeContainerLogFixture(t)
+			controller.config.MaxRunLogBytes = 1 << 20
+			if !complete {
+				workflow.Status.Phase = wfv1.WorkflowRunning
+			}
+			pod.Spec.Containers = nil
+			for i := range 16 {
+				pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{Name: fmt.Sprintf("container-%02d", i)})
+			}
+			calls := 0
+			controller.WithContainerLogSource(func(ctx context.Context, _, _ string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
+				calls++
+				if calls == 1 {
+					<-ctx.Done()
+					return nil, ctx.Err()
+				}
+				return io.NopCloser(strings.NewReader("remaining output\n")), nil
+			}, func(context.Context, string, string) (*corev1.Pod, error) { return pod.DeepCopy(), nil })
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+			defer cancel()
+			err := controller.ObserveContainerLogs(ctx, workflow, "run", []*corev1.Pod{pod})
+			if complete && err != nil {
+				t.Fatal(err)
+			}
+			if !complete && !errors.Is(err, errContainerLogObservationIncomplete) {
+				t.Fatal("unfinished pass must remain retryable", err)
+			}
+			entries, err := store.ContainerLogs(t.Context(), "run")
+			if err != nil || len(entries) != 16 {
+				t.Fatal(entries, err)
+			}
+			for _, entry := range entries[1:] {
+				if complete {
+					if !entry.Captured || !strings.Contains(entry.Reason, "observation deadline ended") {
+						t.Fatal("final pass omitted deadline reason", entry)
+					}
+				} else if entry.Captured || entry.Pending || entry.Reason != "" {
+					t.Fatal("readable log was discarded", entry)
+				}
+			}
+			if err := controller.ObserveContainerLogs(t.Context(), workflow, "run", []*corev1.Pod{pod}); err != nil {
+				t.Fatal(err)
+			}
+			wantCalls := 16
+			if complete {
+				wantCalls = 1
+			}
+			if calls != wantCalls {
+				t.Fatal("unexpected copy count", calls, wantCalls)
+			}
+			if !complete {
+				for _, entry := range entries[1:] {
+					body, _, saved, err := store.ReadContainerLog(t.Context(), "run", entry.NodeID, entry.ContainerName, runlog.Filter{})
+					if err != nil || !saved.Captured || string(body) != "remaining output\n" {
+						t.Fatal("second snapshot lost readable log", string(body), saved, err)
+					}
+				}
+			}
+		})
+	}
 }
