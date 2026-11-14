@@ -9,6 +9,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/runlog"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 type cancellingReservationStore struct {
@@ -25,7 +26,7 @@ func (store cancellingReservationStore) ReserveContainerLog(runID string, entry 
 }
 
 func TestContainerLogCancellationBeforeOpenReleasesReservation(t *testing.T) {
-	for _, when := range []string{"reserved", "verify", "open", "after-open"} {
+	for _, when := range []string{"reserved", "verify", "open", "after-open", "after-open-error"} {
 		t.Run(when, func(t *testing.T) {
 			c, store, wf, pod := nativeContainerLogFixture(t)
 			ctx, cancel := context.WithCancel(t.Context())
@@ -44,6 +45,9 @@ func TestContainerLogCancellationBeforeOpenReleasesReservation(t *testing.T) {
 					cancel()
 					return nil, ctx.Err()
 				}
+				if when == "after-open-error" && verifies == 2 {
+					return nil, apierrors.NewTimeoutError("Pod verification unavailable", 1)
+				}
 				if when == "after-open" && verifies == 2 {
 					cancel()
 					return nil, ctx.Err()
@@ -53,7 +57,12 @@ func TestContainerLogCancellationBeforeOpenReleasesReservation(t *testing.T) {
 			if when == "reserved" {
 				c.containerLogs = cancellingReservationStore{ContainerLogStore: store, cancel: cancel}
 			}
-			if err := c.ObserveContainerLogs(ctx, wf, "run", []*corev1.Pod{pod}); !errors.Is(err, context.Canceled) {
+			err := c.ObserveContainerLogs(ctx, wf, "run", []*corev1.Pod{pod})
+			if when == "after-open-error" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if !errors.Is(err, context.Canceled) {
 				t.Fatal(err)
 			}
 			entries, err := store.ContainerLogs(t.Context(), "run")
@@ -61,7 +70,7 @@ func TestContainerLogCancellationBeforeOpenReleasesReservation(t *testing.T) {
 				t.Fatal(entries, err)
 			}
 			entry := entries[0]
-			if when == "after-open" {
+			if strings.HasPrefix(when, "after-open") {
 				if !entry.Captured {
 					t.Fatal("opened source lost immutable receipt", entry)
 				}
@@ -76,7 +85,7 @@ func TestContainerLogCancellationBeforeOpenReleasesReservation(t *testing.T) {
 			if err != nil || !entry.Captured {
 				t.Fatal(string(body), entry, err)
 			}
-			if when != "after-open" && string(body) != "copied once\n" {
+			if !strings.HasPrefix(when, "after-open") && string(body) != "copied once\n" {
 				t.Fatal("resumed copy unavailable", string(body))
 			}
 			want := 1

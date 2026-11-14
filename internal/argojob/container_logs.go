@@ -198,7 +198,7 @@ func (controller *Controller) storeContainerCopy(ctx, observerCtx context.Contex
 			entry.Reason = "oberth: log unavailable: Pod or container log no longer exists"
 			break
 		}
-		if attempt == 0 && retryExecutorIdentityRead(err) && ctx.Err() == nil {
+		if attempt == 0 && !opened && retryExecutorIdentityRead(err) && ctx.Err() == nil {
 			continue
 		}
 		entry.Reason = "oberth: log unavailable: container log could not be read"

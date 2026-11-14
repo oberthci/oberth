@@ -2,10 +2,11 @@ package service
 
 import (
 	"errors"
-	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runlog"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 )
 
 func TestSchedulerTerminalRereadKeepsOffloadedVerdictAndRows(t *testing.T) {
