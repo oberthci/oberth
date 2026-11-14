@@ -73,17 +73,17 @@ func TestUpgradeRefusesNewerLiveSchema(t *testing.T) {
 				return out, nil
 			}
 			if args[0] == "list" {
-				return json.Marshal([]helmRelease{{Name: "oberth", Namespace: "oberth", Status: "deployed", Chart: "oberth-0.22.7"}})
+				return json.Marshal([]helmRelease{{Name: "oberth", Namespace: "oberth", Status: "deployed", Chart: "oberth-0.22.8"}})
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
 		RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) { return []byte("18"), nil },
 	})
-	_, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.8", BinarySchemaVersion: 17, AllowDowngrade: true, DryRun: true}, deps)
+	_, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.7", BinarySchemaVersion: 17, AllowDowngrade: true, DryRun: true}, deps)
 	if err == nil || !strings.Contains(err.Error(), "--rollback") {
 		t.Fatalf("newer live schema: %v", err)
 	}
-	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.8", BinarySchemaVersion: 17, DryRun: true}, deps)
+	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.7", BinarySchemaVersion: 17, DryRun: true}, deps)
 	if err == nil || !strings.Contains(err.Error(), "--allow-downgrade") {
 		t.Fatalf("downgrade without the flag: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestUpgradeRefusesNewerLiveSchema(t *testing.T) {
 		return nil, errors.New("container not found")
 	}
 	refreshFixtureAdmin(&deps)
-	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.8", BinarySchemaVersion: 17, AllowDowngrade: true, DryRun: true}, deps)
+	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.7", BinarySchemaVersion: 17, AllowDowngrade: true, DryRun: true}, deps)
 	if err == nil || !strings.Contains(err.Error(), "could not be read") {
 		t.Fatalf("downgrade on an unknown schema: %v", err)
 	}
