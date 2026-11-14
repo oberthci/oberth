@@ -27,6 +27,9 @@ import (
 
 const executorTokenWaiter = "oberth-executor-token"
 
+// Give wait a head start reading Argo's shared template before main and sidecars; this is a margin, not a race proof.
+const executorWaitStartDelaySeconds int64 = 1
+
 // #nosec G101 -- fixed runtime path/command, not credential material.
 const executorTokenVolume = argoworkflow.ExecutorIdentityVolumeName
 
@@ -224,6 +227,9 @@ func setExecutorEnvironment(container map[string]any) {
 		}
 	}
 	container["env"] = env
+	if container["name"] == "wait" {
+		container["lifecycle"] = map[string]any{"postStart": map[string]any{"sleep": map[string]any{"seconds": executorWaitStartDelaySeconds}}}
+	}
 }
 
 func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context, wf *wfv1.Workflow, delivered map[types.UID]bool, unavailable func()) error {
@@ -412,6 +418,12 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 		}
 		if container.Name == executorTokenWaiter {
 			found = true
+		}
+		if !initializer && container.Name == "wait" && container.Image == argoworkflow.ExecutorImage {
+			expected := &corev1.Lifecycle{PostStart: &corev1.LifecycleHandler{Sleep: &corev1.SleepAction{Seconds: executorWaitStartDelaySeconds}}}
+			if !apiequality.Semantic.DeepEqual(container.Lifecycle, expected) {
+				return errors.New("executor wait start hook differs from the server patch")
+			}
 		}
 		scratchCounts := map[string]int{}
 		for _, mount := range container.VolumeMounts {
