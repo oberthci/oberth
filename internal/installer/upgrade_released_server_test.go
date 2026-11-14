@@ -67,8 +67,12 @@ func testReleasedServerUpgrade(t *testing.T, version string, noBackup bool) {
 	fixture.deps.Admin = remote
 	fixture.deps.RestConfig = &rest.Config{Host: server.URL}
 	fixture.deps.PollInterval = time.Millisecond
-	fixture.deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
-		t.Fatal("upgrade attempted server exec")
+	fixture.deps.RunCommand = func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
+		// The completed migration may report its reset through bounded Pod logs.
+		// No command runs inside the server, before or after the upgrade.
+		if name != "kubectl" || !slices.Contains(args, "logs") || slices.Contains(args, "exec") || !applied.Load() {
+			t.Fatal("upgrade attempted a command other than the post-upgrade log read", name, args)
+		}
 		return nil, nil
 	}
 	runHelm := fixture.deps.RunHelm

@@ -112,6 +112,11 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 				}
 				var discarded bytes.Buffer
 				onboard := onboardingDeps(t, pod, &discarded, strings.NewReader(""), false)
+				if fixture, ok := onboard.Admin.(fixtureAdmin); ok {
+					// This fixture starts with an admin, independently of forge state.
+					fixture.authenticated = func() bool { return true }
+					onboard.Admin = fixture
+				}
 				onboard.RunCommand = func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 					if strings.Contains(strings.Join(args, " "), "admin read-file /run/oberth-identities/upstream/id_ed25519.pub") {
 						return []byte(keyLine), nil
