@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"golang.org/x/mod/semver"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/internal/client"
 )
@@ -79,8 +81,10 @@ func checkUpgradeVerificationConnection(ctx context.Context, cfg UpgradeConfig, 
 		if err != nil {
 			return err
 		}
-		// A failed release with no Running Pod must remain repairable.
-		if pod == nil {
+		// A failed release with no Ready Running Pod must remain repairable.
+		if pod == nil || !slices.ContainsFunc(pod.Status.Conditions, func(condition corev1.PodCondition) bool {
+			return condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue
+		}) {
 			return nil
 		}
 	}

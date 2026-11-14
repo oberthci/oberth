@@ -129,6 +129,43 @@ func upgradePreflightPod(name string, phase corev1.PodPhase) *corev1.Pod {
 	}
 }
 
+func TestUpgradeConfiguredAdminRepairsWithoutReadyPod(t *testing.T) {
+	for _, ready := range []corev1.ConditionStatus{corev1.ConditionFalse, corev1.ConditionUnknown, ""} {
+		t.Run(string(ready), func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			for _, name := range []string{"OBERTH_MCP_URL", "OBERTH_TOKEN_COMMAND", "OBERTH_CLIENT_CERT", "OBERTH_CLIENT_KEY", "OBERTH_CA_CERT"} {
+				t.Setenv(name, "")
+			}
+			server := httptest.NewServer(http.NotFoundHandler())
+			server.Close()
+			t.Setenv("OBERTH_BASE_URL", server.URL)
+			t.Setenv("OBERTH_TOKEN", "fixture")
+			f := newUpgradeFixture(t, "0.22.7", "0.22.8", "99")
+			f.deps.Admin = nil
+			f.deps.RestConfig = nil
+			f.deps.ClientConfigRoot = func() (string, error) { return t.TempDir(), nil }
+			pod := upgradePreflightPod("crashlooping-server", corev1.PodRunning)
+			pod.Status.Conditions[0].Status = ready
+			if ready == "" {
+				pod.Status.Conditions = nil
+			}
+			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "oberth", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}}}}
+			if _, err := f.deps.KubeClient.CoreV1().Pods(DefaultNamespace).Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			selected, err := runningAdminPod(t.Context(), Config{Namespace: DefaultNamespace}, f.deps)
+			if err != nil || selected == nil || selected.Name != pod.Name {
+				t.Fatal("transport must still select the non-Ready Running Pod", selected, err)
+			}
+			writes, stop := stopUpgradeAtHelmWrite(&f.deps)
+			_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.8", BinarySchemaVersion: 99, Namespace: DefaultNamespace, NoBackup: true, RecordDir: t.TempDir()}, f.deps)
+			if *writes != 1 || !errors.Is(err, stop) {
+				t.Fatal("non-Ready Running Pod blocked forward repair", *writes, err)
+			}
+		})
+	}
+}
+
 func TestUpgradePreflightPodObservationErrors(t *testing.T) {
 	for _, kind := range []string{"multiple Running Pods", "Pod list error"} {
 		t.Run(kind, func(t *testing.T) {
