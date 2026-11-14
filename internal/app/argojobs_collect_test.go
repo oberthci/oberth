@@ -59,10 +59,12 @@ func TestArgoCollectPreservesNativeVerdictAndUnfinishedNodes(t *testing.T) {
 					n.StartedAt = metav1.Time{}
 					wf.Status.Nodes["unfinished"] = n
 				}
+				wf.Status.Phase = wfv1.WorkflowFailed
 				if succeeded {
+					wf.Status.Phase = wfv1.WorkflowSucceeded
 					delete(wf.Status.Nodes, "failed")
 				}
-				completion := argojob.Completion{Name: wf.Name, Terminal: true, Succeeded: succeeded, Phase: "Failed", Reason: "original workflow failure", Steps: argojob.StepResults(wf), NodeSteps: argojob.NodeStepResults(wf, nil)}
+				completion := argojob.Completion{Name: wf.Name, Terminal: true, Succeeded: succeeded, Phase: string(wf.Status.Phase), Reason: "original workflow failure", Steps: argojob.StepResults(wf), NodeSteps: argojob.NodeStepResults(wf, nil)}
 				if !succeeded {
 					completion.FailedStage, completion.FailedStep = "verify", "verify"
 				}
@@ -91,7 +93,7 @@ func TestArgoCollectPreservesNativeVerdictAndUnfinishedNodes(t *testing.T) {
 				if finished.Status != expected || finished.Phase == "collect" {
 					t.Fatalf("failure replaced by collection or success: %+v", finished)
 				}
-				if !succeeded && (finished.FailedStage != "verify" || finished.FailedStep != "failed" || finished.Error != "original workflow failure") {
+				if !succeeded && (finished.FailedStage != "wf" || finished.FailedStep != "failed" || finished.Error != "original workflow failure") {
 					t.Fatalf("failure evidence changed: %+v", finished)
 				}
 				if succeeded && (finished.Error != "" || finished.FailedStep != "") {
@@ -152,4 +154,8 @@ func (j *collectJobs) Delete(ctx context.Context, name, runID string) error {
 }
 func (j *collectJobs) TerminalResult(ctx context.Context, name string) (service.JobResult, error) {
 	return j.adapter.TerminalResult(ctx, name)
+}
+
+func (collectGit) RemoteRef(context.Context, string, string) (string, bool, error) {
+	return strings.Repeat("a", 40), true, nil
 }

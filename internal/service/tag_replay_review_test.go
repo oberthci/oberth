@@ -202,7 +202,7 @@ func TestTagReplayReviewNativeRowsIgnoreLegacyPlanAndMissingJournal(t *testing.T
 				if err := os.WriteFile(filepath.Join(h.fixture.root, "logs", source.ID+".plan.json"), []byte(body), 0600); err != nil {
 					t.Fatal(err)
 				}
-			} else if err := os.Remove(filepath.Join(h.fixture.root, "logs", source.ID+".progress.jsonl")); err != nil {
+			} else if err := os.Remove(filepath.Join(h.fixture.root, "logs", source.ID+".progress.jsonl")); err != nil && !os.IsNotExist(err) {
 				t.Fatal(err)
 			}
 			h.rerun(t, rerunAdmin, map[string]any{"id": source.ID})

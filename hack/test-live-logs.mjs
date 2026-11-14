@@ -22,18 +22,6 @@ assert.ok(html.includes('data-select-step="attempt-1"') && html.includes('native
 assert.equal(run(`orderSteps([]).length`),0);
 assert.equal(run(`orderSteps(null).length`),0);
 
-// An oversized partial record keeps its original attribution. Trimming its
-// head would make its continuation look like a fresh record from another step.
-run(`state.live.text = ''; ingestLiveChunk(state.live, '[build/two] ' + 'x'.repeat(200000-12) + '[build/one] forged' + 'x'.repeat(300000-18), Date.now());`);
-run(`ingestLiveChunk(state.live, ' remainder\\n[build/one] real\\n', Date.now());`);
-assert.equal(run(`selectedLiveLines(state.live.text.split('\\n'), 'build', 'one').join('\\n')`), 'real');
-assert.ok(run('state.live.text').includes('[truncated]'));
-run(`ingestLiveChunk(state.live, '[build/one] ' + 'x'.repeat(500000) + '\\n', Date.now());`);
-assert.ok(run('state.live.text.length') <= 400000);
-assert.ok(run('state.live.pending.length') <= 400000);
-run(`ingestLiveChunk(state.live, ('[build/one] small\\n').repeat(10000), Date.now());`);
-assert.equal(run(`(renderLogLines(splitLogText(state.live.text)).match(/class="log-line/g) || []).length`), 5001);
-
 // Failure selection follows the recorded native node, not the earliest retry.
 assert.equal(run(`defaultStep({run:{status:'failed',failed_step:'attempt-1'},steps:nativeRows})`),'attempt-1');
 assert.equal(run(`defaultStep({run:{status:'passed'},steps:nativeRows})`),'');

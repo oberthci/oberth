@@ -1454,8 +1454,8 @@ func waitForFixtureRunStatus(t *testing.T, fixture *controlFixture, runID string
 
 func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 	fixture := newControlFixture(t,
-		JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "first red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
-		JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "second red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
+		JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "test.unit", Error: "first red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
+		JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "test.unit", Error: "second red", Steps: []model.StepResult{stepResult(model.StepFailed)}},
 		JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}},
 	)
 	ctx := context.Background()
@@ -1514,7 +1514,7 @@ func TestSchedulerUpdatesOneCIIssueAcrossRedRedGreen(t *testing.T) {
 		if status.Repo != "oberth" || status.Ref != "main" || status.SHA != sha || status.RunID == "" || status.Stages["test"] == "" {
 			t.Fatalf("wire status after run %d = %#v", index, status)
 		}
-		if index < 2 && (status.Status != "failed" || status.FailedStep != "unit" || status.ExitCode == nil || *status.ExitCode != 1 || status.Issue == nil || *status.Issue != issueID || status.Stages["test"] != "failed") {
+		if index < 2 && (status.Status != "failed" || status.FailedStep != "test.unit" || status.ExitCode == nil || *status.ExitCode != 1 || status.Issue == nil || *status.Issue != issueID || status.Stages["test"] != "failed") {
 			t.Fatalf("red wire status = %#v", status)
 		}
 		if index == 2 && (status.Status != "delivered" || status.Issue != nil || status.Stages["test"] != "passed") {
@@ -1638,6 +1638,7 @@ func TestLogsReturnOnlyOneNamedStep(t *testing.T) {
 	if err := fixture.scheduler.ProcessNext(ctx); err != nil {
 		t.Fatal(err)
 	}
+	seedNativeLogCopies(t, fixture)
 	value, err := fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "logs",
 		json.RawMessage(`{"sha":"`+sha+`","step":"unit"}`))
 	if err != nil {
@@ -1672,6 +1673,7 @@ func TestDashboardRunDetailAndLogViewsAreReadOnly(t *testing.T) {
 	if err := fixture.scheduler.ProcessNext(ctx); err != nil {
 		t.Fatal(err)
 	}
+	seedNativeLogCopies(t, fixture)
 	issue, err := fixture.store.OpenCIIssue(ctx, fixture.repo.ID, "main")
 	if err != nil {
 		t.Fatal(err)
@@ -1825,6 +1827,9 @@ func TestActiveMCPAndDashboardLogsReadCurrentStepRange(t *testing.T) {
 		Version: runprogress.Version, Stage: "release", Step: "advance-stable-aliases", Ordinal: 0,
 		Status: runprogress.StepRunning, StartedAt: &started,
 	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.logs.StoreContainerLog(enqueued.ID, runlog.ContainerLog{NodeID: "release.advance-stable-aliases", PodUID: "active-pod", ContainerName: "main", Main: true, Reader: strings.NewReader("[release/advance-stable-aliases] $ publish alias\n[release/advance-stable-aliases] publishing current digest\n")}, 1<<20); err != nil {
 		t.Fatal(err)
 	}
 	control := fixture.api(t)
@@ -4196,5 +4201,22 @@ func TestPublishIssueKindDistinguishesPublishFromCodeFailure(t *testing.T) {
 	_, closedErr := fixture.store.OpenCIIssue(context.Background(), fixture.repo.ID, "main")
 	if !errors.Is(closedErr, store.ErrNotFound) {
 		t.Fatalf("issue after retry = %v, want ErrNotFound (closed)", closedErr)
+	}
+}
+
+// Native reader fixtures supply a stored copy independently of aggregate bytes.
+func seedNativeLogCopies(t *testing.T, fixture *controlFixture) {
+	t.Helper()
+	runID := fixture.jobs.createdCI[0].Run.ID
+	rows, err := fixture.store.StepResults(t.Context(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		body := fmt.Sprintf("[%s/%s] output for %s\n", row.Stage, row.Step, row.Status)
+		entry := runlog.ContainerLog{NodeID: row.NodeID, PodUID: "fixture-" + row.NodeID, ContainerName: "main", Main: true, Stage: row.Stage, Step: row.Step, Reader: strings.NewReader(body)}
+		if err := fixture.logs.StoreContainerLog(runID, entry, 1<<20); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

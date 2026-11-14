@@ -300,6 +300,7 @@ func TestNoRetryStrategyIsUnchanged(t *testing.T) {
 	}
 
 	failed := budgetTestWorkflow()
+	failed.Status.Phase = wfv1.WorkflowFailed
 	node := failed.Status.Nodes["unit-pod"]
 	node.Phase = wfv1.NodeFailed
 	failed.Status.Nodes["unit-pod"] = node
@@ -509,11 +510,8 @@ func TestDAGRetryWithExitHook(t *testing.T) {
 				t.Fatalf("hook treated as an attempt: %+v", hook)
 			}
 			completion := completionFor(workflow)
-			if completion.Succeeded != (final == wfv1.NodeSucceeded) {
-				t.Fatalf("completion success = %v, final attempt = %s", completion.Succeeded, final)
-			}
-			if final == wfv1.NodeFailed && (completion.FailedStage != "address" || completion.FailedStep != "check") {
-				t.Fatalf("failure = %s/%s, want address/check", completion.FailedStage, completion.FailedStep)
+			if !completion.Succeeded || completion.FailedStage != "" || completion.FailedStep != "" {
+				t.Fatalf("Argo Succeeded with tolerated retry failure acquired failed identity: %+v", completion)
 			}
 		})
 	}

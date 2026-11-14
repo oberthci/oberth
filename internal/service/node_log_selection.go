@@ -61,6 +61,9 @@ func selectLogNode(rows []model.StepResult, stage, wanted string) (model.StepRes
 	}
 	sort.Strings(ids)
 	sort.Strings(stages)
+	if wanted == "" {
+		return model.StepResult{}, fmt.Errorf("%w: step is required unless burn %q has exactly one loggable node; choose Argo node ID (%s)", ErrInvalidInput, stage, strings.Join(ids, ", "))
+	}
 	return model.StepResult{}, fmt.Errorf("%w: step %q matches burns: %s; specify burn or an Argo node ID (%s)", ErrInvalidInput, wanted, strings.Join(stages, ", "), strings.Join(ids, ", "))
 }
 

@@ -37,6 +37,7 @@ func TestNativeFinalCaptureIncludesRunningContainers(t *testing.T) {
 			}
 			if mode == "cancel" {
 				wf.Spec.Shutdown = wfv1.ShutdownStrategyStop
+				wf.Status.Message = "Stopped with strategy 'Stop'"
 			}
 			if mode == "unhealthy" {
 				c.hub = unhealthyLogCache{containerLogCache{workflow: wf, pods: []*corev1.Pod{pod}}}
@@ -141,6 +142,7 @@ func TestNativeCompletedAdoptionCapturesLogsAndRetiresIdentity(t *testing.T) {
 			if stopped {
 				wf.Status.Phase = wfv1.WorkflowFailed
 				wf.Spec.Shutdown = wfv1.ShutdownStrategyStop
+				wf.Status.Message = "Stopped with strategy 'Stop'"
 			}
 			config := testConfig()
 			config.Namespace = wf.Namespace

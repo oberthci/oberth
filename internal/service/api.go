@@ -1254,6 +1254,12 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, sta
 		}
 	}
 	if stage == "" && step == "" {
+		for _, row := range steps {
+			if loggableNode(row) {
+				availablePairs = append(availablePairs, row.Stage+"/"+row.Step)
+			}
+		}
+		sort.Strings(availablePairs)
 		return nil, fmt.Errorf("%w: no failed step; specify a step or Argo node ID", ErrInvalidInput)
 	}
 	selected, err := selectLogNode(steps, stage, step)
@@ -1811,20 +1817,20 @@ func (service *API) stepLogResponse(ctx context.Context, run model.Run, steps []
 	if err != nil {
 		return LogResponse{}, err
 	}
-	if run.Status.Terminal() && row.Termination != nil && !row.Termination.Available && row.Termination.Unavailable == "not-executed" {
-		if err := service.purgedEvidence(ctx, run, "logs"); err != nil {
-			return LogResponse{}, err
-		}
-		body, meta, err := runlog.FilterBytes(nil, filter.WithContext(ctx))
+	body, meta, err := service.readSelectedNodeLog(ctx, run, row, filter)
+	notExecuted := run.Status.Terminal() && row.Termination != nil && !row.Termination.Available && row.Termination.Unavailable == "not-executed"
+	// A diagnostic cannot hide retained bytes, including a zero-match filtered view.
+	if notExecuted && ((err == nil && len(body) == 0 && meta.Bytes == 0) || errors.Is(err, os.ErrNotExist)) {
+		body, meta, err = runlog.FilterBytes(nil, filter.WithContext(ctx))
 		if err != nil {
 			return LogResponse{}, err
 		}
 		response := newLogResponse(run.ID, row.Stage, row.Step, body, meta)
+		response.NodeID = row.NodeID
 		response.Note = "step was not executed; no log recorded"
 		response.RunError = run.Error
 		return response, nil
 	}
-	body, meta, err := service.readSelectedNodeLog(ctx, run, row, filter)
 	if err != nil {
 		return LogResponse{}, fmt.Errorf("read bounded run log: %w", err)
 	}

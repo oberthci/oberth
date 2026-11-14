@@ -656,7 +656,7 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 	want := map[string][]string{
 		"status":              {"ref", "repo"},
 		"logs":                {"byte_offset", "container", "containers", "context", "limit", "node_id", "offset", "pattern", "raw", "repo", "sha", "step", "tail"},
-		"run_get":             {"id", "summary"},
+		"run_get":             {"id", "step_limit", "step_offset", "summary"},
 		"run_list":            {"before", "held", "latest", "limit", "own", "ref", "ref_glob", "repo", "status", "superseded", "view"},
 		"artifact_get":        {"context", "id", "limit", "name", "offset", "pattern", "tail"},
 		"run_rerun":           {"assist", "force", "id", "reason"},
