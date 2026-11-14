@@ -17,6 +17,10 @@ spec:
   matchConditions:
     - name: pipeline-serviceaccounts
       expression: {{ printf "request.namespace == %s && request.userInfo.username.startsWith(%s)" (.Values.argo.namespace | toJson) ((printf "system:serviceaccount:%s:" .Values.argo.namespace) | toJson) | quote }}
+    # Argo's controller deletes a fulfilled Workflow's results (DeleteCollection);
+    # whoever may update Workflows here can already rewrite any run.
+    - name: delete-by-non-workflow-writers
+      expression: "request.operation != 'DELETE' || !authorizer.group('argoproj.io').resource('workflows').namespace(request.namespace).check('update').allowed()"
   variables:
     - name: result
       expression: "request.operation == 'DELETE' ? oldObject : object"

@@ -79,17 +79,28 @@ func renderNativeAdmissionProbe(t *testing.T, file, suffix string) nativeAdmissi
 	return p
 }
 
-// The rendered CEL runs unchanged. Only its external RBAC service is stubbed
-// to deny; the live API test covers the actual authorizer and administrator.
+// The rendered CEL runs unchanged. Only its external RBAC service is stubbed:
+// it denies unless the activation's authorizer carries allowed=true; the live
+// API test covers the actual authorizer and administrator.
 func admissionAuthorizerDenyStub() []cel.EnvOption {
 	options := []cel.EnvOption{cel.Variable("authorizer", cel.DynType)}
 	for _, name := range []string{"group", "resource", "namespace", "name", "check"} {
 		options = append(options, cel.Function(name, cel.MemberOverload("admission_authz_"+name, []*cel.Type{cel.DynType, cel.StringType}, cel.DynType, cel.BinaryBinding(func(receiver, _ ref.Val) ref.Val { return receiver }))))
 	}
-	return append(options, cel.Function("allowed", cel.MemberOverload("admission_authz_allowed", []*cel.Type{cel.DynType}, cel.BoolType, cel.UnaryBinding(func(ref.Val) ref.Val { return types.False }))))
+	return append(options, cel.Function("allowed", cel.MemberOverload("admission_authz_allowed", []*cel.Type{cel.DynType}, cel.BoolType, cel.UnaryBinding(func(receiver ref.Val) ref.Val {
+		decision, ok := receiver.Value().(map[string]any)
+		allowed := ok && decision["allowed"] == true
+		return types.Bool(allowed)
+	}))))
 }
 
 func (p nativeAdmissionProbe) accepts(t *testing.T, request map[string]any, object, old any) bool {
+	t.Helper()
+	return p.acceptsAuthorized(t, request, object, old, false)
+}
+
+// acceptsAuthorized evaluates the policy with every authorizer check answering allowed.
+func (p nativeAdmissionProbe) acceptsAuthorized(t *testing.T, request map[string]any, object, old any, allowed bool) bool {
 	t.Helper()
 	jsonValue := func(value any) any {
 		body, err := json.Marshal(value)
@@ -103,7 +114,7 @@ func (p nativeAdmissionProbe) accepts(t *testing.T, request map[string]any, obje
 		return result
 	}
 	variables := map[string]any{}
-	activation := map[string]any{"request": request, "object": jsonValue(object), "oldObject": jsonValue(old), "variables": variables, "authorizer": map[string]any{}}
+	activation := map[string]any{"request": request, "object": jsonValue(object), "oldObject": jsonValue(old), "variables": variables, "authorizer": map[string]any{"allowed": allowed}}
 	for _, program := range p.conditions {
 		value, _, err := program.Eval(activation)
 		if err != nil {
