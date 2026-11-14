@@ -117,7 +117,7 @@ elif args[:1] == ["test"] and args[-1] == ".":
     assert "TestReviewerShutdownEscalationKeepsCompletedStop" in proof
     with open(os.environ["TEST_GO_PROOF_ARGS"], "w") as output:
         json.dump(args, output)
-    print("ISOLATED_PROOF_OUTPUT")
+    print(json.dumps(dict(Action="pass", Package="github.com/oberthci/oberth/hack/argo-shutdown-races")) if "-json" in args else "ISOLATED_PROOF_OUTPUT")
     if os.path.exists(os.path.join(os.environ["TEST_UPSTREAM_MODULE"], "fail-proof")):
         raise SystemExit(37)
 elif args[:1] == ["test"]:
@@ -133,10 +133,14 @@ else:
 	env := func(argsFile, proofFile string) []string {
 		return append(os.Environ(), "PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"), "TEST_PACKAGE_LIST="+packageFile, "TEST_GO_ARGS="+argsFile, "TEST_GO_PROOF_ARGS="+proofFile, "TEST_UPSTREAM_MODULE="+upstream)
 	}
-	for _, group := range []string{"service", "gitcache", "rest"} {
-		t.Run(group, func(t *testing.T) {
-			argsFile, proofFile := filepath.Join(root, group+".json"), filepath.Join(root, group+"-proof.json")
+	for _, name := range []string{"service", "gitcache", "rest", "rest-json"} {
+		group, jsonEvents := strings.TrimSuffix(name, "-json"), strings.HasSuffix(name, "-json")
+		t.Run(name, func(t *testing.T) {
+			argsFile, proofFile := filepath.Join(root, name+".json"), filepath.Join(root, name+"-proof.json")
 			command := exec.Command("python3", "-I", "-S", "-B", ".oberth/test-packages.py", group)
+			if jsonEvents {
+				command.Args = append(command.Args, "--json")
+			}
 			command.Dir = repositoryRoot(t)
 			command.Env = env(argsFile, proofFile)
 			var stdout, stderr strings.Builder
@@ -145,7 +149,11 @@ else:
 			if err := command.Run(); err != nil {
 				t.Fatalf("launch %s: %v\n%s", group, err, stderr.String())
 			}
-			if stdout.String() != "ROOT_GROUP_OUTPUT\n" {
+			wantOutput := "ROOT_GROUP_OUTPUT\n"
+			if jsonEvents {
+				wantOutput = "{\"Action\": \"pass\", \"Package\": \"github.com/oberthci/oberth/hack/argo-shutdown-races\"}\n" + wantOutput
+			}
+			if stdout.String() != wantOutput {
 				t.Fatal("proof output contaminated package events", stdout.String())
 			}
 			output, err := os.ReadFile(argsFile)
@@ -164,6 +172,9 @@ else:
 				timeout = "-timeout=55m"
 			}
 			want := []string{"test", "-race", "-gcflags=modernc.org/sqlite/...=-race=false", "-gcflags=modernc.org/libc/...=-race=false", "-v", "-count=1", "-parallel=2", "-p=2", timeout}
+			if jsonEvents {
+				want[4] = "-json"
+			}
 			for _, pkg := range packages {
 				owner := "rest"
 				for _, dedicated := range []string{"store", "service", "gitcache"} {
@@ -193,21 +204,35 @@ else:
 				t.Fatal(err)
 			}
 			proofWant := []string{"test", "-mod=mod", "-race", "-gcflags=modernc.org/sqlite/...=-race=false", "-gcflags=modernc.org/libc/...=-race=false", "-count=1", "-p=2", "-timeout=3m", "-v", "."}
-			if !reflect.DeepEqual(proofArgs, proofWant) || !strings.Contains(stderr.String(), "ISOLATED_PROOF_OUTPUT") {
+			if jsonEvents {
+				proofWant[8] = "-json"
+			}
+			if !reflect.DeepEqual(proofArgs, proofWant) || (!jsonEvents && !strings.Contains(stderr.String(), "ISOLATED_PROOF_OUTPUT")) || (jsonEvents && stderr.Len() != 0) {
 				t.Fatal("upstream race checks/output lost", proofArgs, stderr.String())
 			}
 		})
 	}
 	t.Run("upstream proof failure prevents package success", func(t *testing.T) {
 		argsFile, proofFile := filepath.Join(root, "failed-root.json"), filepath.Join(root, "failed-proof.json")
-		command := exec.Command("python3", "-I", "-S", "-B", ".oberth/test-packages.py", "rest")
+		command := exec.Command("python3", "-I", "-S", "-B", ".oberth/test-packages.py", "rest", "--json")
 		command.Dir = repositoryRoot(t)
 		command.Env = env(argsFile, proofFile)
 		if err := os.WriteFile(filepath.Join(upstream, "fail-proof"), nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if output, err := command.CombinedOutput(); err == nil {
-			t.Fatal("failed proof did not fail rest group", string(output))
+		var stdout, stderr strings.Builder
+		command.Stdout, command.Stderr = &stdout, &stderr
+		if err := command.Run(); err == nil {
+			t.Fatal("failed proof did not fail rest group", stdout.String(), stderr.String())
+		}
+		var event map[string]string
+		for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+			if err := json.Unmarshal([]byte(line), &event); err != nil {
+				t.Fatal("proof failure contaminated JSON events", err)
+			}
+		}
+		if event["Action"] != "fail" || event["Package"] != "github.com/oberthci/oberth/hack/argo-shutdown-races" {
+			t.Fatal("proof failure lost package identity", stdout.String())
 		}
 		if _, err := os.Stat(proofFile); err != nil {
 			t.Fatal("failing proof was not executed", err)

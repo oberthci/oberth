@@ -82,7 +82,8 @@ func TestReviewerStopRacePreservesGenuineFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Logf("pinned Argo patch after terminal failure: status=%s phase=%s error=%q", result.Status, result.Phase, result.Error)
-			if result.Status != model.RunFailed || result.FailedStage != "main" || result.FailedStep != "main" || result.Error != got.Status.Message || strings.Contains(result.Error, "Workflow stopped") {
+			// The failed node belongs to the native root DAG boundary, named race.
+			if result.Status != model.RunFailed || result.FailedStage != wf.Name || result.FailedStep != "main" || result.Error != got.Status.Message || strings.Contains(result.Error, "Workflow stopped") {
 				t.Fatalf("genuine terminal failure mislabeled after late %s patch: %+v", strategy, result)
 			}
 		})

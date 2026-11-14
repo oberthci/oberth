@@ -48,7 +48,8 @@ func (client *scriptedWorkflowClient) Get(context.Context, string, metav1.GetOpt
 // only logs, so a re-attributed attempt cannot pass unnoticed.
 type failingTimingRecorder struct {
 	*store.Store
-	errs []error
+	errs         []error
+	stepRecorded func()
 }
 
 func (r *failingTimingRecorder) RecordWorkflowTiming(ctx context.Context, value model.WorkflowTiming) error {
@@ -63,6 +64,8 @@ func (r *failingTimingRecorder) RecordStepTimings(ctx context.Context, values []
 	err := r.Store.RecordStepTimings(ctx, values)
 	if err != nil {
 		r.errs = append(r.errs, err)
+	} else if r.stepRecorded != nil {
+		r.stepRecorded()
 	}
 	return err
 }
@@ -146,10 +149,12 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	running.Status.Nodes[second.ID] = runningSecond
 	config := Config{Namespace: terminal.Namespace, MaxRunLogBytes: 1 << 20}
 
-	recorder := &failingTimingRecorder{Store: db}
 	ownerCtx, stop := context.WithCancel(ctx)
 	defer stop()
-	owner := &Controller{workflows: &scriptedWorkflowClient{states: []*wfv1.Workflow{running}, exhausted: stop}, kube: fake.NewClientset(firstPod.DeepCopy()), config: config, idleInterval: time.Millisecond, timings: recorder}
+	// Stop this owner after durable step retention, independent of how quickly
+	// the watch feeder reads another snapshot on a loaded race-test host.
+	recorder := &failingTimingRecorder{Store: db, stepRecorded: stop}
+	owner := &Controller{workflows: &scriptedWorkflowClient{states: []*wfv1.Workflow{running}}, kube: fake.NewClientset(firstPod.DeepCopy()), config: config, idleInterval: time.Millisecond, timings: recorder}
 	if _, err = withWaitTestHub(t, owner).Wait(ownerCtx, terminal.Name, run.ID, io.Discard); err == nil {
 		t.Fatal("pre-restart owner observed a terminal Workflow")
 	}
