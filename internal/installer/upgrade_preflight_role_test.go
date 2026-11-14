@@ -26,8 +26,8 @@ func TestUpgradeAdminRolePreflight(t *testing.T) {
 		name, detail string
 		status       int
 	}{
-		{"scoped token", "scoped-admin@host requires an unscoped admin identity", http.StatusForbidden},
-		{"non-admin token", "reader@host requires an unscoped admin identity", http.StatusForbidden},
+		{"scoped token", "requires an unscoped admin identity", http.StatusForbidden},
+		{"non-admin token", "requires an unscoped admin identity", http.StatusForbidden},
 		{"unscoped admin", "", http.StatusOK},
 		{"rejected token", "invalid token", http.StatusUnauthorized},
 		{"missing API", "missing", http.StatusNotFound},
@@ -77,8 +77,8 @@ func testUpgradeAdminRolePreflight(t *testing.T, status int, detail string) {
 	if status != 0 && requests.Load() != 1 {
 		t.Fatal("preflight must make exactly one read-only admin call", requests.Load())
 	}
-	if status == http.StatusForbidden && (!strings.Contains(err.Error(), "this client is not an unscoped admin of this server") || !strings.Contains(err.Error(), detail)) {
-		t.Fatal("role refusal lost server identity or advice", err)
+	if status == http.StatusForbidden && (!strings.Contains(err.Error(), "this client is not an unscoped admin of this server") || !strings.Contains(err.Error(), detail) || !strings.Contains(err.Error(), "locally configured identity: bearer token")) {
+		t.Fatal("role refusal lost server detail, local identity or advice", err)
 	}
 	if err != nil && strings.Contains(err.Error(), "configure it with") {
 		t.Fatal("live error reported as missing configuration", err)
