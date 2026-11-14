@@ -61,13 +61,6 @@ func (client *persistedWorkflowClient) Patch(_ context.Context, _ string, kind t
 	}
 	return next, err
 }
-func (client *custodyWorkflows) Patch(_ context.Context, _ string, kind types.PatchType, data []byte, _ metav1.PatchOptions, _ ...string) (*wfv1.Workflow, error) {
-	next, err := applyWorkflowStopTestPatch(client.object, kind, data)
-	if err == nil {
-		client.object = next
-	}
-	return next, err
-}
 func (unusedWorkflows) Patch(context.Context, string, types.PatchType, []byte, metav1.PatchOptions, ...string) (*wfv1.Workflow, error) {
 	panic("Patch must not reach the Workflow client without a source volume")
 }
