@@ -59,7 +59,7 @@ func TestUpgradePreviousReleaseStoredValuesAndDryRunSchema(t *testing.T) {
 					if out, ok := testUpgradeArgoSecurityPreflight(args); ok {
 						return out, nil
 					}
-					return raw, nil
+					return bytes.Clone(raw), nil
 				case "upgrade":
 					if !slices.Contains(args, "--dry-run=server") || !slices.Contains(args, "--no-hooks") {
 						t.Fatalf("upgrade preview attempted a write: %v", args)
