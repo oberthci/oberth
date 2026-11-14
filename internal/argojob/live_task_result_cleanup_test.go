@@ -49,6 +49,16 @@ func TestLiveArgoTaskResultCleanupUnderPolicy(t *testing.T) {
 	if !completion.Succeeded {
 		t.Fatalf("Workflow did not succeed: phase=%s reason=%s", completion.Phase, completion.Reason)
 	}
+	// Real holders match the structural holder check, so settling retired them.
+	holders, err := cluster.kube.CoreV1().Pods(cluster.namespace).List(ctx, metav1.ListOptions{LabelSelector: "oberth.ci/role=executor-identity"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, holder := range holders.Items {
+		if len(holder.OwnerReferences) == 1 && holder.OwnerReferences[0].Name == name && holder.DeletionTimestamp == nil {
+			t.Fatalf("settled Workflow kept executor identity holder %s", holder.Name)
+		}
+	}
 	argo, err := wfclientset.NewForConfig(cluster.restConfig)
 	if err != nil {
 		t.Fatal(err)

@@ -520,7 +520,8 @@ func (controller *Controller) retireIdentityPod(ctx context.Context, wf *wfv1.Wo
 		return err
 	}
 	for _, pod := range holders.Items {
-		if len(pod.OwnerReferences) != 1 || pod.OwnerReferences[0].UID != wf.UID || pod.OwnerReferences[0].Kind != "Workflow" || pod.OwnerReferences[0].Controller == nil || !*pod.OwnerReferences[0].Controller {
+		// Only the holder shape matches: one scheduling gate and the single identity container, both fixed at creation.
+		if len(pod.Spec.SchedulingGates) != 1 || len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Name != "identity" || len(pod.OwnerReferences) != 1 || pod.OwnerReferences[0].UID != wf.UID || pod.OwnerReferences[0].Kind != "Workflow" || pod.OwnerReferences[0].Controller == nil || !*pod.OwnerReferences[0].Controller {
 			continue
 		}
 		if serviceAccount != "" && pod.Spec.ServiceAccountName != serviceAccount {
