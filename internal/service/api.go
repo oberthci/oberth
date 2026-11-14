@@ -1630,8 +1630,8 @@ func runDisplayReason(run model.Run) string {
 
 func (service *API) presentationRun(ctx context.Context, run model.Run) model.Run {
 	if run.Status.Terminal() && run.FailedStep != "" && run.FailedNode == nil && service.history != nil {
-		if rows, err := service.history.StepResults(ctx, run.ID); err == nil {
-			run = run.WithFailedNode(rows)
+		if row, err := service.history.StepResult(ctx, run.ID, run.FailedStep); err == nil {
+			run = run.WithFailedNode([]model.StepResult{row})
 		}
 	}
 	visible := presentationRunAt(run, service.schedulingClock().Now())

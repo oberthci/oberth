@@ -422,6 +422,13 @@ func (history scopedHistory) StepResults(ctx context.Context, runID string) ([]m
 	return history.inner.StepResults(ctx, runID)
 }
 
+func (history scopedHistory) StepResult(ctx context.Context, runID, nodeID string) (model.StepResult, error) {
+	if _, err := history.Run(ctx, runID); err != nil {
+		return model.StepResult{}, err
+	}
+	return history.inner.StepResult(ctx, runID, nodeID)
+}
+
 type scopedRepositories struct {
 	inner RepositoryReader
 	scope *repoScope

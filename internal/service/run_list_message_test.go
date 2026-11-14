@@ -1,12 +1,27 @@
 package service
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 )
+
+type selectedNodeHistory struct {
+	RunHistory
+	queries int
+}
+
+func (history *selectedNodeHistory) StepResults(context.Context, string) ([]model.StepResult, error) {
+	panic("failure presentation must not load the full native node tree")
+}
+
+func (history *selectedNodeHistory) StepResult(ctx context.Context, runID, nodeID string) (model.StepResult, error) {
+	history.queries++
+	return history.RunHistory.StepResult(ctx, runID, nodeID)
+}
 
 func TestRunListMessageContract(t *testing.T) {
 	now := time.Now()
@@ -160,10 +175,15 @@ func TestNativeFailedNodeDisplayAcrossListHintAndAssist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	history := &selectedNodeHistory{RunHistory: f.api.history}
+	f.api.history = history
 	shown := f.api.presentationRun(ctx, run)
 	list, err := f.api.presentationRuns(ctx, []model.Run{run})
 	if err != nil || len(list) != 1 {
 		t.Fatal(list, err)
+	}
+	if history.queries != 2 {
+		t.Fatal("failure display did not select one row per run", history.queries)
 	}
 	for _, visible := range []model.Run{shown, list[0]} {
 		if visible.FailedStep != row.NodeID || visible.DisplayReason != "build (retry 1) failed" {

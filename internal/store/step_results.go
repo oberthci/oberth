@@ -175,6 +175,10 @@ func (s *Store) StepResults(ctx context.Context, runID string) ([]model.StepResu
 	return stepResultsFrom(ctx, s.reader(), runID)
 }
 
+func (s *Store) StepResult(ctx context.Context, runID, nodeID string) (model.StepResult, error) {
+	return scanStepResult(s.reader().QueryRowContext(ctx, `SELECT `+stepResultColumns+` FROM step_results WHERE run_id = ? AND node_id = ?`, runID, nodeID))
+}
+
 func stepResultsFrom(ctx context.Context, database interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, runID string) ([]model.StepResult, error) {
