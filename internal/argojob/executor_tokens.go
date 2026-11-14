@@ -421,7 +421,8 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 		}
 		if !initializer && container.Name == "wait" && container.Image == argoworkflow.ExecutorImage {
 			expected := &corev1.Lifecycle{PostStart: &corev1.LifecycleHandler{Sleep: &corev1.SleepAction{Seconds: executorWaitStartDelaySeconds}}}
-			if !apiequality.Semantic.DeepEqual(container.Lifecycle, expected) {
+			// Kubelet starts regular containers in list order, so the margin needs wait first.
+			if position != len(pod.Spec.InitContainers) || !apiequality.Semantic.DeepEqual(container.Lifecycle, expected) {
 				return errors.New("executor wait start hook differs from the server patch")
 			}
 		}

@@ -2,8 +2,6 @@ package argojob
 
 import (
 	"encoding/json"
-	"reflect"
-	"strings"
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -12,7 +10,7 @@ import (
 
 func TestExecutorIdentityRejectsWaitStartHookDrift(t *testing.T) {
 	for _, shape := range []string{"container", "resource-with-logs"} {
-		for _, mutation := range []string{"missing", "zero", "longer", "exec", "pre-stop", "extra-action"} {
+		for _, mutation := range []string{"missing", "zero", "longer", "exec", "pre-stop", "extra-action", "not-first"} {
 			t.Run(shape+"/"+mutation, func(t *testing.T) {
 				c, _, pod, _ := executorRetryFixture(t)
 				pod.Spec = executorEnvironmentPod(t, shape, "wait", nil)
@@ -40,6 +38,14 @@ func TestExecutorIdentityRejectsWaitStartHookDrift(t *testing.T) {
 						container.Lifecycle.PostStart.HTTPGet = &corev1.HTTPGetAction{Path: "/"}
 					}
 				}
+				if mutation == "not-first" {
+					// Exact hook, but kubelet would start main before wait.
+					containers := pod.Spec.Containers
+					if len(containers) < 2 || containers[0].Name != "wait" {
+						t.Fatalf("fixture lacks wait first: %d containers", len(containers))
+					}
+					pod.Spec.Containers = append(append([]corev1.Container{}, containers[1:]...), containers[0])
+				}
 				if err := validateExecutorTokenTarget(pod, c.config.SourceSeedImage, shape != "container"); err == nil {
 					t.Fatal("modified wait start hook accepted")
 				}
@@ -65,63 +71,6 @@ func TestExecutorWaitStartHookPatch(t *testing.T) {
 		}
 	}
 	t.Fatal("wait lacks native one-second postStart sleep")
-}
-
-// waitStartHookPatch is the exact serialized form the server patch gives wait.
-const waitStartHookPatch = `"lifecycle":{"postStart":{"sleep":{"seconds":1}}},`
-
-// withoutWaitStartHookPatch requires the current server patch to carry the
-// wait start hook exactly once per wait entry and removes it, so captures that
-// predate the hook still compare on every other field.
-func withoutWaitStartHookPatch(t *testing.T, patch string) string {
-	t.Helper()
-	if !strings.Contains(patch, `"name":"wait"`) {
-		return patch
-	}
-	if strings.Count(patch, waitStartHookPatch) != 1 {
-		t.Fatalf("server patch lacks the exact wait start hook: %s", patch)
-	}
-	return strings.Replace(patch, waitStartHookPatch, "", 1)
-}
-
-func withoutWorkflowWaitStartHook(t *testing.T, wf *wfv1.Workflow) {
-	t.Helper()
-	for i := range wf.Spec.Templates {
-		wf.Spec.Templates[i].PodSpecPatch = withoutWaitStartHookPatch(t, wf.Spec.Templates[i].PodSpecPatch)
-	}
-}
-
-// withoutCurrentWaitStartHook strips the hook from a Pod built by the current
-// server patch: wait's lifecycle and the hook inside ARGO_TEMPLATE's patch.
-func withoutCurrentWaitStartHook(t *testing.T, pod *corev1.Pod) {
-	t.Helper()
-	expected := &corev1.Lifecycle{PostStart: &corev1.LifecycleHandler{Sleep: &corev1.SleepAction{Seconds: executorWaitStartDelaySeconds}}}
-	for _, containers := range [][]corev1.Container{pod.Spec.InitContainers, pod.Spec.Containers} {
-		for i := range containers {
-			c := &containers[i]
-			if c.Name == "wait" {
-				if !reflect.DeepEqual(c.Lifecycle, expected) {
-					t.Fatalf("current wait lacks the exact start hook: %+v", c.Lifecycle)
-				}
-				c.Lifecycle = nil
-			}
-			for j := range c.Env {
-				if c.Env[j].Name != "ARGO_TEMPLATE" {
-					continue
-				}
-				var template wfv1.Template
-				if err := json.Unmarshal([]byte(c.Env[j].Value), &template); err != nil {
-					t.Fatal(err)
-				}
-				template.PodSpecPatch = withoutWaitStartHookPatch(t, template.PodSpecPatch)
-				body, err := json.Marshal(template)
-				if err != nil {
-					t.Fatal(err)
-				}
-				c.Env[j].Value = string(body)
-			}
-		}
-	}
 }
 
 // withCapturedWaitStartHook models only the new server patch on an Argo Pod
