@@ -154,7 +154,10 @@ class PreambleFailureDiagnostics(unittest.TestCase):
         runner = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(runner)
         errors = [subprocess.CalledProcessError(1, ['private-argv'], output='private-output'),
-                  OSError('private-path'), ValueError('private-output'), KeyError('private-key')]
+                  OSError('private-path'), ValueError('private-output'), KeyError('private-key'),
+                  RuntimeError('private-runtime'),
+                  subprocess.TimeoutExpired(['private-argv'], 1, output='private-output'),
+                  Exception('private-generic')]
         for error in errors:
             output, stderr = io.StringIO(), io.StringIO()
             with self.subTest(error=type(error).__name__), \

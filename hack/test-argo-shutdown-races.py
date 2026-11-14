@@ -50,7 +50,7 @@ def main():
     args = parser.parse_args()
     try:
         run(args.json)
-    except (subprocess.CalledProcessError, OSError, ValueError, KeyError):
+    except Exception:
         if args.json:
             # Setup/build failures may have no Go test event. Publish only the
             # owning fixture package, never captured output or exception text.
