@@ -119,6 +119,20 @@ def plan_fixture(probe, cli):
                         'metadata': {'name': name + '-node', 'annotations': {'k3s.io/node-args': '["server"]'}},
                         'status': {'nodeInfo': {'architecture': 'amd64', 'kubeletVersion': 'v1.34.3+k3s1'},
                                    'conditions': [{'type': 'Ready', 'status': 'True' if nodes_ready else 'False'}]}}]}
+                if path.split('?', 1)[0] == '/apis/apps/v1/namespaces/oberth-argo/deployments':
+                    return 200, {'apiVersion': 'apps/v1', 'kind': 'DeploymentList', 'items': [{
+                        'metadata': {'name': 'workflow-controller'},
+                        'spec': {'template': {'spec': {'containers': [{
+                            'name': 'workflow-controller', 'command': ['workflow-controller'],
+                            'args': ['--configmap', 'fixture-controller-config']}]}}}}]}
+                if path == '/api/v1/namespaces/oberth-argo/configmaps/fixture-controller-config':
+                    security = {'allowPrivilegeEscalation': False, 'privileged': False,
+                                'capabilities': {'drop': ['ALL']},
+                                'seccompProfile': {'type': 'RuntimeDefault'}}
+                    return 200, {'apiVersion': 'v1', 'kind': 'ConfigMap',
+                        'metadata': {'name': 'fixture-controller-config'}, 'data': {'config': json.dumps({
+                            'mainContainer': {'securityContext': security},
+                            'executor': {'securityContext': security}})}}
                 if path == '/apis/storage.k8s.io/v1/storageclasses':
                     return 200, {'apiVersion': 'storage.k8s.io/v1', 'kind': 'StorageClassList', 'items': [{
                         'metadata': {'name': 'fixture-storage', 'annotations': {
@@ -141,6 +155,9 @@ def plan_fixture(probe, cli):
         # The loopback API refuses every attempted mutation before its body.
         (tools / 'release-state').write_text('existing')
         (tools / 'helm').write_text("#!/usr/bin/python3\nimport json\nfrom pathlib import Path\nimport sys\nargs = sys.argv[1:]\nflags = {}\nfor key in ('--kubeconfig', '--kube-context'):\n    if args.count(key) != 1:\n        sys.exit(98)\n    index = args.index(key)\n    if index + 1 == len(args):\n        sys.exit(98)\n    flags[key] = args[index + 1]\n    del args[index:index + 2]\nif flags['--kube-context'] not in ('selected', 'other') or not Path(flags['--kubeconfig']).is_file():\n    sys.exit(98)\nexisting = Path(__file__).with_name('release-state').read_text() == 'existing'\nif args == ['list', '-n', 'oberth', '-o', 'json', '--deployed', '--failed', '--pending', '--superseded', '--uninstalling', '--uninstalled']:\n    print(json.dumps([{'name': 'oberth', 'namespace': 'oberth', 'status': 'deployed', 'chart': 'oberth-0.21.10'}] if existing else []))\nelif args == ['list', '-n', 'oberth-argo', '-o', 'json', '--deployed', '--failed', '--pending', '--superseded', '--uninstalling', '--uninstalled']:\n    print(json.dumps([{'name': 'argo-workflows', 'namespace': 'oberth-argo', 'status': 'deployed', 'chart': 'argo-workflows-1.0.24'}] if existing else []))\nelif existing and args == ['get', 'values', 'argo-workflows', '-n', 'oberth-argo', '--all', '-o', 'json']:\n    print(json.dumps({'controller': {'parallelism': 17, 'namespaceParallelism': 5}}))\nelif existing and args == ['get', 'values', 'argo-workflows', '-n', 'oberth-argo', '-o', 'json']:\n    print(json.dumps({'executor': {'resources': {'requests': {'cpu': '75m'}}}}))\nelif existing and args == ['get', 'values', 'oberth', '-n', 'oberth', '--all', '-o', 'json']:\n    print(json.dumps({'networkPolicy': {'enabled': True}}))\nelse:\n    sys.exit(99)\n")
+        # The plan checks prerequisite presence; all cluster reads use the API.
+        # Refuse every invocation rather than exposing the host's kubectl.
+        (tools / 'kubectl').write_text('#!/bin/sh\nexit 99\n')
         for tool in tools.iterdir():
             tool.chmod(0o700)
         probe.env['PATH'] = str(tools) + os.pathsep + probe.env['PATH']
@@ -166,6 +183,10 @@ def plan_fixture(probe, cli):
                 raise Refused('operator executor resources were not preserved in review',
                               check='executor-resources-review')
             observed = requests[context][counts[context]:]
+            paths = {path.split('?', 1)[0] for _, path in observed}
+            if not {'/apis/apps/v1/namespaces/oberth-argo/deployments',
+                    '/api/v1/namespaces/oberth-argo/configmaps/fixture-controller-config'} <= paths:
+                raise Refused('plan did not read the live controller configuration', check='argo-security-reads')
             assert_no_mutations(observed)
         # Keep the production CLI's nonzero failed-plan diagnostic covered.
         nodes_ready = False

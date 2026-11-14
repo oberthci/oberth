@@ -165,7 +165,7 @@ func TestExecutorIdentityPostExecRevalidatesAndRetiresBoundToken(t *testing.T) {
 			if !errors.As(err, &failure) || failure.InfrastructureFailure() != (change == "read-error") || delivered[pod.UID] {
 				t.Fatalf("post-exec identity uncertainty accepted/mislabelled: %v", err)
 			}
-			_, err = controller.kube.CoreV1().Pods(wf.Namespace).Get(t.Context(), controller.identityPodName(wf.UID, controller.config.ExecutorServiceAccount), metav1.GetOptions{})
+			_, err = controller.kube.CoreV1().Pods(wf.Namespace).Get(t.Context(), controller.identityPodName(wf, controller.config.ExecutorServiceAccount), metav1.GetOptions{})
 			if !apierrors.IsNotFound(err) {
 				t.Fatalf("bound token lifetime Pod retained: %v", err)
 			}
