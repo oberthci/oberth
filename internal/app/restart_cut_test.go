@@ -24,7 +24,7 @@ type restartReadController struct {
 	readEvents       []runprogress.Event
 }
 
-func (c *restartReadController) WaitResumed(_ context.Context, name, runID string, _ io.Writer, _ []runprogress.Event, _ int64, binding argojob.Adoption) (argojob.Completion, error) {
+func (c *restartReadController) WaitResumed(_ context.Context, name, runID string, _ io.Writer, binding argojob.Adoption) (argojob.Completion, error) {
 	if name != c.request.Name || runID != c.request.RunID || !reflect.DeepEqual(binding, c.binding) {
 		panic("adoption identity lost")
 	}
@@ -68,7 +68,7 @@ func TestRestartCutArgoJobsMapsInterruptionAndKeepsFallbackBinding(t *testing.T)
 			if found, err := jobs.Adopt(t.Context(), run); err != nil || !found {
 				t.Fatal(found, err)
 			}
-			result, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard, nil, 0)
+			result, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard)
 			if mode == "normal" {
 				if err != nil || result.Status != model.RunInterrupted || result.Phase != "interrupted" || result.FailedStep != "" || len(jobs.intents) != 0 {
 					t.Fatal("interruption mapping failed", result, err)
@@ -107,7 +107,7 @@ func TestRestartCutArgoJobsMapsInterruptionAndKeepsFallbackBinding(t *testing.T)
 
 var _ service.JobAdopter = (*ArgoJobs)(nil)
 
-func TestRestartCutFallbackOwnsJournalAndNewlyObservedExit(t *testing.T) {
+func TestRestartCutFallbackOwnsNewlyObservedExit(t *testing.T) {
 	start := time.Now().UTC()
 	finish := start.Add(time.Second)
 	completion := argojob.Completion{Name: "workflow", Terminal: true, FailedStage: "build", FailedStep: "test", Steps: []argojob.StepResult{{NodeID: "build-test-node", Stage: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 2, ExitCodeKnown: true, StartedAt: &start, FinishedAt: &finish}}}
@@ -117,19 +117,17 @@ func TestRestartCutFallbackOwnsJournalAndNewlyObservedExit(t *testing.T) {
 	if found, err := jobs.Adopt(t.Context(), run); err != nil || !found {
 		t.Fatal(found, err)
 	}
-	retained := []runprogress.Event{{Version: runprogress.Version, Stage: "build", Step: "test", Ordinal: 0, Status: runprogress.StepRunning, StartedAt: &start}}
 	savedStart, savedFinish := start, finish
-	result, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard, retained, 0)
+	result, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard)
 	if err != nil || result.Reobserve == nil || len(jobs.intents) != 0 {
 		t.Fatal("successful Wait lost fallback binding", result, err)
 	}
-	retained[0].Stage = "foreign"
 	start = start.Add(time.Hour)
 	finish = finish.Add(time.Hour)
 	if _, err := result.Reobserve(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(c.readEvents) != 2 || c.readEvents[0].Stage != "build" || !c.readEvents[0].StartedAt.Equal(savedStart) || c.readEvents[1].ExitCode != 2 || !c.readEvents[1].StartedAt.Equal(savedStart) || !c.readEvents[1].FinishedAt.Equal(savedFinish) {
+	if len(c.readEvents) != 1 || c.readEvents[0].Stage != "build" || c.readEvents[0].ExitCode != 2 || !c.readEvents[0].StartedAt.Equal(savedStart) || !c.readEvents[0].FinishedAt.Equal(savedFinish) {
 		t.Fatal("fallback evidence aliased or discarded", c.readEvents)
 	}
 }
@@ -148,7 +146,7 @@ func TestRestartCutR2PartialRunningObservationAllowsTerminalCut(t *testing.T) {
 	if found, err := jobs.Adopt(t.Context(), run); err != nil || !found {
 		t.Fatal(found, err)
 	}
-	result, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard, nil, 0)
+	result, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard)
 	if !errors.Is(err, failure) || result.Reobserve == nil || collector.calls != 0 {
 		t.Fatal("partial read lost bound fallback or collected live artifacts", result, err, collector.calls)
 	}

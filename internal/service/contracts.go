@@ -15,7 +15,6 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
-	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -332,7 +331,7 @@ type LogStore interface {
 	ReadRunLog(context.Context, string, runlog.Filter) ([]byte, runlog.Meta, error)
 	ReadContainerLog(context.Context, string, string, string, runlog.Filter) ([]byte, runlog.Meta, runlog.ContainerLog, error)
 	OpenStoredContainerLog(context.Context, string, string, string) (io.ReadCloser, error)
-	Resume(string) (*os.File, []runprogress.Event, int64, error)
+	Resume(string) (*os.File, error)
 	Create(string) (*os.File, error)
 	BuildIndex(string) (runlog.Index, error)
 	ReadFiltered(string, string, string, runlog.Filter) ([]byte, runlog.Meta, error)
@@ -409,12 +408,12 @@ var ErrAdoptionRefused = errors.New("service: Workflow refused for adoption")
 // JobAdopter restores observation of an existing Workflow without submitting it.
 // found=false means the Workflow is absent; ownership and API failures are errors,
 // and a Workflow that exists but must not be adopted wraps ErrAdoptionRefused.
-// WaitResumed uses the durable progress journal and the retained byte count.
+// WaitResumed observes the adopted Workflow using its verified binding.
 // On error it returns a nonzero result only if the exact Workflow was terminal.
 // WorkflowNamespace names where the engine's Workflows live, for operator messages.
 type JobAdopter interface {
 	Adopt(context.Context, model.Run) (bool, error)
-	WaitResumed(context.Context, string, io.Writer, []runprogress.Event, int64) (JobResult, error)
+	WaitResumed(context.Context, string, io.Writer) (JobResult, error)
 	WorkflowNamespace() string
 }
 

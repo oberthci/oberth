@@ -82,7 +82,7 @@ func nativeLogIdentityTree(failed string) (*wfv1.Workflow, []*corev1.Pod) {
 		if node.ID == "set-pod" {
 			names = []corev1.Container{{Name: "build"}, {Name: "lint"}, {Name: "wait"}}
 		}
-		pods = append(pods, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("opaque-%d", len(pods)), Namespace: wf.Namespace, UID: types.UID("pod-" + node.ID), Annotations: map[string]string{"workflows.argoproj.io/node-id": node.ID, "workflows.argoproj.io/node-name": node.Name}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{Containers: names}, Status: corev1.PodStatus{Phase: corev1.PodSucceeded}})
+		pods = append(pods, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("opaque-%d", len(pods)), Namespace: wf.Namespace, UID: types.UID("pod-" + node.ID), Labels: map[string]string{"workflows.argoproj.io/workflow": wf.Name}, Annotations: map[string]string{"workflows.argoproj.io/node-id": node.ID, "workflows.argoproj.io/node-name": node.Name}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{Containers: names}, Status: corev1.PodStatus{Phase: corev1.PodSucceeded}})
 	}
 	return wf, pods
 }

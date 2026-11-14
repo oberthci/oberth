@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runprogress"
 )
 
 type pendingCreateJobs struct {
@@ -40,7 +39,7 @@ func (j *pendingCreateJobs) Adopt(ctx context.Context, run model.Run) (bool, err
 	return false, nil
 }
 func (*pendingCreateJobs) WorkflowNamespace() string { return "test-argo" }
-func (j *pendingCreateJobs) WaitResumed(ctx context.Context, name string, out io.Writer, _ []runprogress.Event, _ int64) (JobResult, error) {
+func (j *pendingCreateJobs) WaitResumed(ctx context.Context, name string, out io.Writer) (JobResult, error) {
 	return j.Wait(ctx, name, out)
 }
 

@@ -21,7 +21,6 @@ import (
 	"github.com/oberthci/oberth/internal/liveness"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
-	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -877,11 +876,9 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 }
 
 type runObservation struct {
-	file     *os.File
-	request  *WorkflowRequest
-	events   []runprogress.Event
-	retained int64
-	adopted  bool
+	file    *os.File
+	request *WorkflowRequest
+	adopted bool
 }
 
 // observeRun shares step persistence, publication and issue projection between
@@ -907,7 +904,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	var jobResult JobResult
 	var waitErr error
 	if observation.adopted {
-		jobResult, waitErr = scheduler.jobs.(JobAdopter).WaitResumed(ctx, workflowName, progressLog, observation.events, observation.retained)
+		jobResult, waitErr = scheduler.jobs.(JobAdopter).WaitResumed(ctx, workflowName, progressLog)
 	} else {
 		jobResult, waitErr = scheduler.jobs.Wait(ctx, workflowName, progressLog)
 	}

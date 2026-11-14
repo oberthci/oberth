@@ -327,7 +327,29 @@ func (controller *Controller) containerLogCapture(ctx context.Context, runID str
 		}
 		snapshots <- snapshot
 	}
-	return observe, func() { close(snapshots); <-joined }
+	return observe, func() {
+		close(snapshots)
+		<-joined
+		controller.finishContainerLogs(runID)
+	}
+}
+
+// The copy task has joined, so tracked entries without a copy can be explained
+// even when identity or delivery errors ended Wait before Workflow completion.
+func (controller *Controller) finishContainerLogs(runID string) {
+	entries, err := controller.containerLogs.ContainerLogs(context.Background(), runID)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.Captured {
+				continue
+			}
+			entry.Reason = "oberth: not captured: observation ended"
+			err = errors.Join(err, controller.containerLogs.StoreContainerLog(runID, entry, controller.config.MaxRunLogBytes))
+		}
+	}
+	if err != nil {
+		log.Printf("WARN: run=%s container log finalization unavailable (class=%s)", strconv.Quote(runID), executorIdentityErrorClass(err))
+	}
 }
 
 // Real watch objects always have resource versions. Fixtures without them are

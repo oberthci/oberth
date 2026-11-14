@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
 )
@@ -29,8 +28,7 @@ type adoptingJobs struct {
 	adopted        []string
 	created        int
 	releaseCreated int
-	resumed        []runprogress.Event
-	retained       int64
+	resumed        bool
 }
 
 func (jobs *adoptingJobs) Adopt(_ context.Context, run model.Run) (bool, error) {
@@ -58,9 +56,9 @@ func (jobs *adoptingJobs) CreateRelease(context.Context, WorkflowRequest) error 
 	return nil
 }
 
-func (jobs *adoptingJobs) WaitResumed(ctx context.Context, name string, output io.Writer, events []runprogress.Event, retained int64) (JobResult, error) {
+func (jobs *adoptingJobs) WaitResumed(ctx context.Context, name string, output io.Writer) (JobResult, error) {
 	jobs.mu.Lock()
-	jobs.resumed, jobs.retained = events, retained
+	jobs.resumed = true
 	jobs.mu.Unlock()
 	return jobs.Wait(ctx, name, output)
 }
@@ -173,7 +171,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			if err != nil || len(steps) != 1 {
 				t.Fatalf("steps = %#v, %v", steps, err)
 			}
-			if jobs.created != 0 || len(jobs.deleted) != 0 || len(jobs.adopted) != 1 || jobs.retained != int64(len("[test/unit] before restart\n")) || len(jobs.resumed) != 0 {
+			if jobs.created != 0 || len(jobs.deleted) != 0 || len(jobs.adopted) != 1 || !jobs.resumed {
 				t.Fatalf("adoption did not preserve intent/logs: %#v", jobs)
 			}
 			scheduler.submissions.mu.Lock()

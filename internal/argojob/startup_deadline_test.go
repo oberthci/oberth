@@ -61,7 +61,7 @@ func TestPendingWorkloadHasNoServerStartupDeadline(t *testing.T) {
 				if hashErr != nil {
 					t.Fatal(hashErr)
 				}
-				_, err = withWaitTestHub(t, controller).WaitResumed(ctx, wf.Name, "run", io.Discard, nil, 0, Adoption{UID: wf.UID, Identity: wf.Annotations[identityAnnotation], SpecSHA256: digest})
+				_, err = withWaitTestHub(t, controller).WaitResumed(ctx, wf.Name, "run", io.Discard, Adoption{UID: wf.UID, Identity: wf.Annotations[identityAnnotation], SpecSHA256: digest})
 				want := 15 * time.Minute
 				if !errors.Is(err, context.DeadlineExceeded) || time.Since(begin) != want {
 					t.Fatalf("startup deadline: elapsed=%s want=%s, error=%v", time.Since(begin), want, err)

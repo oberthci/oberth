@@ -17,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -98,7 +97,7 @@ func TestAdoptedWaitRidesOutTransientReadFailures(t *testing.T) {
 	}
 	client := &flakyWorkflowClient{staticWorkflowClient: staticWorkflowClient{workflow: wf}, failures: 3}
 	controller := &Controller{workflows: client, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, idleInterval: time.Millisecond}
-	completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, request.RunID, io.Discard, nil, 0, binding)
+	completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, request.RunID, io.Discard, binding)
 	if err != nil || !completion.Succeeded || client.reads <= 3 {
 		t.Fatalf("transient read failure ended adopted Wait: %#v %v reads=%d", completion, err, client.reads)
 	}
@@ -107,7 +106,7 @@ func TestAdoptedWaitRidesOutTransientReadFailures(t *testing.T) {
 	controller = &Controller{workflows: client, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, idleInterval: time.Millisecond}
 	timeout, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
-	completion, err = withWaitTestHub(t, controller).WaitResumed(timeout, wf.Name, request.RunID, io.Discard, nil, 0, binding)
+	completion, err = withWaitTestHub(t, controller).WaitResumed(timeout, wf.Name, request.RunID, io.Discard, binding)
 	if !errors.Is(err, context.DeadlineExceeded) || completion.Name != "" || client.reads < 2 {
 		t.Fatalf("persistent read failure = %#v %v reads=%d", completion, err, client.reads)
 	}
@@ -126,11 +125,8 @@ func TestAdoptedWaitRestoresProgressWithoutReadingPodLogs(t *testing.T) {
 		t.Fatalf("adopt: %v %v", found, err)
 	}
 	steps := fixtureStepResults(wf)
-	event := func(step StepResult) runprogress.Event {
-		return runprogress.Event{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt}
-	}
 	var output bytes.Buffer
-	completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, request.RunID, &output, []runprogress.Event{event(steps[0])}, 100, binding)
+	completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, request.RunID, &output, binding)
 	if err != nil || !completion.Succeeded || len(completion.Steps) != 2 {
 		t.Fatalf("resumed completion = %#v, %v", completion, err)
 	}
@@ -138,7 +134,7 @@ func TestAdoptedWaitRestoresProgressWithoutReadingPodLogs(t *testing.T) {
 		t.Fatalf("duplicate replay: calls=%v output=%s", calls, output.String())
 	}
 	output.Reset()
-	_, err = withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, request.RunID, &output, []runprogress.Event{event(steps[0]), event(steps[1])}, 200, binding)
+	_, err = withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, request.RunID, &output, binding)
 	if err != nil || output.Len() != 0 || calls[steps[1].PodName] != 0 {
 		t.Fatalf("second resume replayed completed steps: %v %s %v", err, output.String(), calls)
 	}
@@ -161,7 +157,7 @@ func TestAdoptedWaitRefusesReplacedWorkflow(t *testing.T) {
 		case "spec":
 			wf.Spec.Templates[3].Container.Image = "foreign-image"
 		}
-		if _, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, request.RunID, io.Discard, nil, 0, binding); err == nil {
+		if _, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, request.RunID, io.Discard, binding); err == nil {
 			t.Fatalf("Workflow replacement accepted: %s", mutation)
 		}
 	}

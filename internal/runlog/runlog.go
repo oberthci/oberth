@@ -146,17 +146,17 @@ func (store *Store) Create(runID string) (*os.File, error) {
 
 // Resume opens retained bytes for append without reading retired progress files.
 // A run can have a Workflow even if the owner stopped before its first log write.
-func (store *Store) Resume(runID string) (*os.File, []runprogress.Event, int64, error) {
+func (store *Store) Resume(runID string) (*os.File, error) {
 	file, err := store.openRunLog(runID, os.O_CREATE|os.O_APPEND|os.O_RDWR)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("resume run log: %w", err)
+		return nil, fmt.Errorf("resume run log: %w", err)
 	}
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		_ = file.Close()
-		return nil, nil, 0, errors.New("resumed run log must be a regular file")
+		return nil, errors.New("resumed run log must be a regular file")
 	}
-	return file, nil, info.Size(), nil
+	return file, nil
 }
 
 func (store *Store) BuildIndex(runID string) (Index, error) {

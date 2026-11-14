@@ -597,15 +597,15 @@ func (jobs *ArgoJobs) WorkflowNamespace() string {
 	return jobs.controller.Namespace()
 }
 
-func (jobs *ArgoJobs) WaitResumed(ctx context.Context, name string, destination io.Writer, events []runprogress.Event, retained int64) (service.JobResult, error) {
-	return jobs.wait(ctx, name, destination, events, retained)
+func (jobs *ArgoJobs) WaitResumed(ctx context.Context, name string, destination io.Writer) (service.JobResult, error) {
+	return jobs.wait(ctx, name, destination)
 }
 
 func (jobs *ArgoJobs) Wait(ctx context.Context, name string, destination io.Writer) (service.JobResult, error) {
-	return jobs.wait(ctx, name, destination, nil, 0)
+	return jobs.wait(ctx, name, destination)
 }
 
-func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writer, events []runprogress.Event, retained int64) (service.JobResult, error) {
+func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writer) (service.JobResult, error) {
 	jobs.mu.Lock()
 	intent, ok := jobs.intents[name]
 	jobs.mu.Unlock()
@@ -613,7 +613,7 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 		return service.JobResult{}, fmt.Errorf("app: no in-process intent for Workflow %s", name)
 	}
 	defer jobs.forget(name, intent.runID)
-	if retained == 0 {
+	if intent.adoption == nil {
 		for _, source := range intent.sources {
 			if _, err := fmt.Fprintf(destination, "source %s@%s mounted read-only at %s\n", source.Repository, source.Commit, source.Path); err != nil {
 				return service.JobResult{}, err
@@ -626,12 +626,12 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 
 	if intent.adoption != nil {
 		controller, ok := jobs.controller.(interface {
-			WaitResumed(context.Context, string, string, io.Writer, []runprogress.Event, int64, argojob.Adoption) (argojob.Completion, error)
+			WaitResumed(context.Context, string, string, io.Writer, argojob.Adoption) (argojob.Completion, error)
 		})
 		if !ok {
 			return service.JobResult{}, errors.New("app: controller cannot resume adopted Workflow")
 		}
-		completion, err = controller.WaitResumed(ctx, name, intent.runID, destination, events, retained, *intent.adoption)
+		completion, err = controller.WaitResumed(ctx, name, intent.runID, destination, *intent.adoption)
 	} else {
 		completion, err = jobs.controller.Wait(ctx, name, intent.runID, destination)
 	}
@@ -641,7 +641,7 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 			TerminalStateResumed(context.Context, string, string, argojob.Adoption, []runprogress.Event) (*argojob.Completion, error)
 		}); ok {
 			binding := *intent.adoption
-			retainedEvents := append([]runprogress.Event(nil), events...)
+			var retainedEvents []runprogress.Event
 			// Keep a real exit from this observation if a later fallback snapshot
 			// loses the exit field; a log/index error must not erase a test failure.
 			for _, step := range completion.Steps {

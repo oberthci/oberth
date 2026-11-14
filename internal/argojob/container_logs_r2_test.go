@@ -157,7 +157,7 @@ func TestNativeCompletedAdoptionCapturesLogsAndRetiresIdentity(t *testing.T) {
 				if node.Type != wfv1.NodeTypePod {
 					continue
 				}
-				pods = append(pods, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "opaque-" + node.ID, Namespace: wf.Namespace, UID: types.UID(node.ID), Annotations: map[string]string{"workflows.argoproj.io/node-id": node.ID, "workflows.argoproj.io/node-name": node.Name}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}}, Status: corev1.PodStatus{Phase: corev1.PodSucceeded}})
+				pods = append(pods, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "opaque-" + node.ID, Namespace: wf.Namespace, UID: types.UID(node.ID), Labels: map[string]string{"workflows.argoproj.io/workflow": wf.Name}, Annotations: map[string]string{"workflows.argoproj.io/node-id": node.ID, "workflows.argoproj.io/node-name": node.Name}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}}, Status: corev1.PodStatus{Phase: corev1.PodSucceeded}})
 			}
 			c := &Controller{workflows: &staticWorkflowClient{workflow: wf}, kube: kube, config: config, hub: containerLogCache{workflow: wf, pods: pods}, containerLogs: store, idleInterval: time.Millisecond}
 			kube.PrependReactor("create", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
@@ -184,7 +184,7 @@ func TestNativeCompletedAdoptionCapturesLogsAndRetiresIdentity(t *testing.T) {
 			if err != nil || !found {
 				t.Fatal(binding, found, err)
 			}
-			result, err := c.WaitResumed(t.Context(), wf.Name, request.RunID, io.Discard, nil, 0, binding)
+			result, err := c.WaitResumed(t.Context(), wf.Name, request.RunID, io.Discard, binding)
 			if err != nil || result.Succeeded == stopped || result.OperatorStopped != stopped || reads != len(pods) {
 				t.Fatal(result, reads, err)
 			}

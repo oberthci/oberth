@@ -78,7 +78,7 @@ func nativeStepPods(workflow *wfv1.Workflow, pods []*corev1.Pod) map[string]*cor
 	}
 	ambiguous := map[string]bool{}
 	for _, pod := range pods {
-		if pod == nil || pod.UID == "" || pod.Namespace != workflow.Namespace {
+		if pod == nil || pod.UID == "" || pod.Namespace != workflow.Namespace || pod.Labels["workflows.argoproj.io/workflow"] != workflow.Name {
 			continue
 		}
 		id := pod.Annotations["workflows.argoproj.io/node-id"]

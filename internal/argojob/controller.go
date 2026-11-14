@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"sync"
 	"time"
 
@@ -340,21 +339,18 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 // Wait supervises native Workflow watch observations, retaining node history
 // and plain container output as the run proceeds.
 func (controller *Controller) Wait(ctx context.Context, name, runID string, destination io.Writer) (Completion, error) {
-	return controller.wait(ctx, name, runID, destination, nil, 0, Adoption{})
+	return controller.wait(ctx, name, runID, Adoption{})
 }
 
-// WaitResumed observes an adopted Workflow with its verified binding and retained exit observations.
-func (controller *Controller) WaitResumed(ctx context.Context, name, runID string, destination io.Writer, events []runprogress.Event, retained int64, binding Adoption) (Completion, error) {
+// WaitResumed observes an adopted Workflow with its verified binding.
+func (controller *Controller) WaitResumed(ctx context.Context, name, runID string, destination io.Writer, binding Adoption) (Completion, error) {
 	if binding.UID == "" {
 		binding.RestartedAt = time.Time{}
 	}
-	return controller.wait(ctx, name, runID, destination, events, retained, binding)
+	return controller.wait(ctx, name, runID, binding)
 }
 
-func (controller *Controller) wait(ctx context.Context, name, runID string, destination io.Writer, events []runprogress.Event, retained int64, binding Adoption) (result Completion, retErr error) {
-	if retained < 0 {
-		return Completion{}, errors.New("argojob: invalid retained log size")
-	}
+func (controller *Controller) wait(ctx context.Context, name, runID string, binding Adoption) (result Completion, retErr error) {
 	if controller.hub == nil {
 		return Completion{}, errors.New("argojob: shared Workflow watch is required")
 	}
@@ -362,15 +358,6 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	defer cancelWatch()
 	observeLogs, finishLogs := controller.containerLogCapture(ctx, runID)
 	defer finishLogs()
-	reporter := newProgressReporter(destination)
-	for _, event := range events {
-		if err := event.Validate(); err != nil {
-			return Completion{}, err
-		}
-		reporter.reported[event.Stage+"/"+event.Step] = event.Status
-		reporter.ordinals[event.Stage+"/"+event.Step] = event.Ordinal
-		reporter.ordinalOwners[event.Ordinal] = event.Stage + "/" + event.Step
-	}
 	idle := controller.idleInterval
 	if idle <= 0 {
 		idle = waitIdleInterval
@@ -493,13 +480,10 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				controller.retainWorkflowTiming(ctx, settled)
 				completion := completionFor(settled)
 				completion.ObservationComplete = completion.ObservationComplete && completeRead
-				completion.Steps = reporter.order(completion.Steps)
 				preserveObservedExitCodes(&completion, workflow)
-				preserveRecordedExitCodes(&completion, events)
 				controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
 				observeLogs(settled)
 				completion.classifyRestartCut()
-				reporter.finish(destination)
 				if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
 					return completion, fmt.Errorf("retire executor identity: %w", err)
 				}
@@ -507,10 +491,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				return completion, nil
 			}
 			if eventDriven {
-				controller.recordWatchedTimings(ctx, workflow, reporter, timed, &boundTiming)
-			}
-			if eventDriven {
-				controller.observeStepProgress(ctx, workflow, reporter, destination)
+				controller.recordWatchedTimings(ctx, workflow, timed, &boundTiming)
 			}
 			break
 		}
@@ -558,7 +539,7 @@ func (controller *Controller) confirmWatchedCompletion(ctx context.Context, obse
 	return settled, completeRead, nil
 }
 
-func (controller *Controller) recordWatchedTimings(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, timed map[string]bool, boundTiming *bool) {
+func (controller *Controller) recordWatchedTimings(ctx context.Context, workflow *wfv1.Workflow, timed map[string]bool, boundTiming *bool) {
 	if controller.timings == nil {
 		return
 	}
@@ -567,7 +548,7 @@ func (controller *Controller) recordWatchedTimings(ctx context.Context, workflow
 		*boundTiming = true
 	}
 	observation := Completion{}
-	for _, step := range reporter.order(StepResults(workflow)) {
+	for _, step := range StepResults(workflow) {
 		if terminal(step.Status) && !timed[step.NodeID] {
 			observation.Steps = append(observation.Steps, step)
 		}
@@ -606,13 +587,6 @@ func (controller *Controller) verifyOwnership(workflow *wfv1.Workflow, runID str
 		return fmt.Errorf("argojob: Workflow %s belongs to run %s, not %s", workflow.Name, observed, runID)
 	}
 	return nil
-}
-
-// Status bookkeeping remains independent of native container bytes.
-func (controller *Controller) observeStepProgress(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, destination io.Writer) {
-	for _, step := range controller.observedStepAttempts(ctx, workflow) {
-		reporter.observe(destination, step)
-	}
 }
 
 func (controller *Controller) TerminalState(ctx context.Context, name string) (*Completion, error) {
@@ -709,146 +683,6 @@ func (controller *Controller) Cancel(ctx context.Context, name, runID string) er
 		return fmt.Errorf("argojob: delete Workflow %s: %w", name, err)
 	}
 	return nil
-}
-
-// progressReporter turns repeated status observations into the monotonic
-// event stream the run log expects: each step reports queued, then running,
-// then exactly one terminal event, never a repeat and never a regression.
-//
-// A retried step has one key but several Argo nodes, one per attempt. The
-// reporter remembers which node it last reported for each key and which nodes
-// it has already reported terminal, so a later attempt is reported as a new
-// run of the step even when it finished between two polls, and an earlier
-// attempt is never reported twice.
-type progressReporter struct {
-	mu            sync.Mutex
-	reported      map[string]runprogress.Status
-	node          map[string]string
-	done          map[string]bool
-	replayed      map[string]bool
-	ordinals      map[string]int
-	ordinalOwners map[int]string
-}
-
-func newProgressReporter(destination io.Writer) *progressReporter {
-	_ = destination
-	return &progressReporter{
-		reported:      map[string]runprogress.Status{},
-		node:          map[string]string{},
-		done:          map[string]bool{},
-		replayed:      map[string]bool{},
-		ordinals:      map[string]int{},
-		ordinalOwners: map[int]string{},
-	}
-}
-
-// assignOrdinal requires reporter.mu. Journal assignments survive adoption;
-// newly named keys take an unused slot instead of displacing a sibling.
-func (reporter *progressReporter) assignOrdinal(step StepResult) StepResult {
-	key := step.Stage + "/" + step.Step
-	if ordinal, exists := reporter.ordinals[key]; exists {
-		step.Ordinal = ordinal
-	} else {
-		// Retain journal assignments across adoption, including old keys that
-		// no longer occur in the Workflow. A newly canonicalized retry key
-		// must never take a surviving sibling's durable ordinal.
-		if _, used := reporter.ordinalOwners[step.Ordinal]; used {
-			step.Ordinal = 0
-			for {
-				if _, used := reporter.ordinalOwners[step.Ordinal]; !used {
-					break
-				}
-				step.Ordinal++
-			}
-		}
-		reporter.ordinals[key] = step.Ordinal
-		reporter.ordinalOwners[step.Ordinal] = key
-	}
-	return step
-}
-
-// order applies the same assignments to durable results and timing evidence
-// as to progress markers, so completion cannot renumber an adopted run.
-func (reporter *progressReporter) order(steps []StepResult) []StepResult {
-	reporter.mu.Lock()
-	defer reporter.mu.Unlock()
-	for i := range steps {
-		steps[i] = reporter.assignOrdinal(steps[i])
-	}
-	sort.SliceStable(steps, func(i, j int) bool { return steps[i].Ordinal < steps[j].Ordinal })
-	return steps
-}
-
-// observe records a step's newly seen state and reports whether the caller
-// should now replay its log (true only on the transition into a terminal
-// state, so a log is written exactly once).
-func (reporter *progressReporter) observe(destination io.Writer, step StepResult) bool {
-	reporter.mu.Lock()
-	defer reporter.mu.Unlock()
-	key := step.Stage + "/" + step.Step
-	step = reporter.assignOrdinal(step)
-	if step.NodeID != "" && reporter.done[step.NodeID] {
-		// This attempt's terminal state is already in the run log.
-		return false
-	}
-	previous, seen := reporter.reported[key]
-	if seen && step.NodeID != "" && reporter.node[key] != "" && reporter.node[key] != step.NodeID {
-		// Another Argo node under the same key: a different retry attempt.
-		// Report it from the start, as a step seen for the first time.
-		seen = false
-	}
-	if seen && !step.Superseded && terminal(previous) && terminal(step.Status) &&
-		(previous != step.Status || (step.Attempt != "" && reporter.node[key] == "")) {
-		// One node never changes its terminal state, so the step's current
-		// row ending differently from what was reported is a later attempt.
-		// For a retry with no restored node identity, replay the final attempt
-		// even if its status matches: the stored status may be an older attempt.
-		// This is what a reporter restored after a restart (#1172) sees:
-		// it knows the key's last status but not which node produced it.
-		seen = false
-	}
-	if seen && !advances(previous, step.Status) {
-		// A retry attempt can restart a step that was previously terminal.
-		// When a previously terminal step reports a non-terminal status,
-		// that is a new attempt: reset tracking and let it flow through.
-		if terminal(previous) && !terminal(step.Status) {
-			// New retry attempt — fall through to emit.
-		} else {
-			if terminal(step.Status) && step.NodeID != "" {
-				// Already reported, possibly before a restart restored
-				// the reporter: never report this attempt again.
-				reporter.done[step.NodeID] = true
-			}
-			return false
-		}
-	}
-	reporter.reported[key] = step.Status
-	if step.NodeID != "" {
-		reporter.node[key] = step.NodeID
-		if terminal(step.Status) {
-			reporter.done[step.NodeID] = true
-		}
-	}
-	return terminal(step.Status)
-}
-
-func advances(previous, next runprogress.Status) bool {
-	return rank(next) > rank(previous)
-}
-
-func rank(status runprogress.Status) int {
-	switch status {
-	case runprogress.StepQueued:
-		return 0
-	case runprogress.StepRunning:
-		return 1
-	default:
-		return 2
-	}
-}
-
-func (reporter *progressReporter) finish(destination io.Writer) {
-	_ = destination
 }
 
 func specIdentity(workflow *wfv1.Workflow) (string, error) {

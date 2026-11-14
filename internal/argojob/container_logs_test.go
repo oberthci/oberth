@@ -42,7 +42,7 @@ func (containerLogCache) UnhealthySince() (time.Time, bool) { return time.Time{}
 func nativeContainerLogFixture(t *testing.T) (*Controller, *runlog.Store, *wfv1.Workflow, *corev1.Pod) {
 	t.Helper()
 	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "workflow", Namespace: "pipeline", UID: "workflow-uid", Annotations: map[string]string{runIDAnnotation: "run"}}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowSucceeded, Nodes: wfv1.Nodes{"node": {ID: "node", Name: "workflow.task", Type: wfv1.NodeTypePod, Phase: wfv1.NodeSucceeded}}}}
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "opaque-pod-name", Namespace: "pipeline", UID: "pod-uid", Annotations: map[string]string{"workflows.argoproj.io/node-id": "node", "workflows.argoproj.io/node-name": "workflow.task"}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: workflow.Name, UID: workflow.UID, Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}}, Status: corev1.PodStatus{Phase: corev1.PodSucceeded, ContainerStatuses: []corev1.ContainerStatus{{Name: "main", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}}}}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "opaque-pod-name", Namespace: "pipeline", UID: "pod-uid", Labels: map[string]string{"workflows.argoproj.io/workflow": workflow.Name}, Annotations: map[string]string{"workflows.argoproj.io/node-id": "node", "workflows.argoproj.io/node-name": "workflow.task"}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: workflow.Name, UID: workflow.UID, Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}}, Status: corev1.PodStatus{Phase: corev1.PodSucceeded, ContainerStatuses: []corev1.ContainerStatus{{Name: "main", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}}}}}
 	store, err := runlog.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -273,5 +273,26 @@ func TestContainerLogDeadlineLeavesUnreadContainersForNextSnapshot(t *testing.T)
 				}
 			}
 		})
+	}
+}
+
+func TestContainerLogWaitErrorExplainsTrackedUncapturedEntries(t *testing.T) {
+	controller, store, workflow, pod := nativeContainerLogFixture(t)
+	workflow.Status.Phase = wfv1.WorkflowRunning
+	pod.Status = corev1.PodStatus{Phase: corev1.PodRunning}
+	node := workflow.Status.Nodes["node"]
+	node.Phase = wfv1.NodeRunning
+	workflow.Status.Nodes["node"] = node
+	if err := controller.ObserveContainerLogs(t.Context(), workflow, "run", []*corev1.Pod{pod}); err != nil {
+		t.Fatal(err)
+	}
+	workflow.Annotations[runIDAnnotation] = "foreign"
+	_, err := controller.Wait(t.Context(), workflow.Name, "run", io.Discard)
+	if err == nil {
+		t.Fatal("foreign Workflow did not end observation")
+	}
+	body, _, entry, err := store.ReadContainerLog(t.Context(), "run", "node", "main", runlog.Filter{})
+	if err != nil || !entry.Captured || !strings.Contains(string(body), "not captured: observation ended") {
+		t.Fatal(string(body), entry, err)
 	}
 }

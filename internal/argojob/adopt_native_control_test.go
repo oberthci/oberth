@@ -41,7 +41,7 @@ func TestAdoptedNativeControlsPreserveRecoveryIdentity(t *testing.T) {
 			}
 			wf.Spec.Suspend = nil
 			wf.Status.Phase = wfv1.WorkflowSucceeded
-			completion, err := withWaitTestHub(t, c).WaitResumed(t.Context(), wf.Name, request.RunID, io.Discard, nil, 0, binding)
+			completion, err := withWaitTestHub(t, c).WaitResumed(t.Context(), wf.Name, request.RunID, io.Discard, binding)
 			if err != nil || !completion.Succeeded {
 				t.Fatal("native control after restart lost completion", completion, err)
 			}

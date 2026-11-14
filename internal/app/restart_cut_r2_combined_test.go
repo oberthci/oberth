@@ -28,7 +28,7 @@ func TestRestartCutR2CombinedKeepsRunningEvidenceAndTerminalFallback(t *testing.
 	if found, err := jobs.Adopt(t.Context(), run); err != nil || !found {
 		t.Fatal(found, err)
 	}
-	observed, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard, nil, 0)
+	observed, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard)
 	if !errors.Is(err, failure) || !observed.ObservedStepStart || observed.Reobserve == nil || collector.calls != 0 || len(jobs.intents) != 0 {
 		t.Fatal("running evidence lost or live artifacts collected", observed, err, collector.calls)
 	}
