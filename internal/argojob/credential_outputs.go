@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -120,26 +121,34 @@ func credentialSharedOutputError(t *wfv1.Template, output string) error {
 	return fmt.Errorf("argojob: credentialed template %q cannot use %s because another container of the Pod can redirect what Argo reads", t.Name, output)
 }
 
-// Argo enables result capture by finding a task/step alias's outputs.result
-// reference. Check the whole Workflow, including expressions and inline calls;
-// another step's unrelated result must not disqualify this template.
+// Argo enables result capture by scanning the invoking parent template for the
+// step/task alias. Visit every invocation in the Workflow, including inline
+// calls, without confusing aliases reused by unrelated parent templates.
 func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
-	body, err := json.Marshal(wf)
-	if err != nil {
-		return true
-	}
-	// JSON escapes double quotes used by expression map indexing.
-	text := strings.ReplaceAll(string(body), `\"`, `"`)
 	found := false
-	check := func(name, template string, inline *wfv1.Template) {
-		if inline != target && (target.Name == "" || (template != target.Name && !strings.Contains(template, "{{"))) {
+	walkTemplates(wf, func(parent *wfv1.Template) {
+		if found || (parent.DAG == nil && len(parent.Steps) == 0) {
 			return
 		}
-		alias := regexp.QuoteMeta(name)
-		reference := regexp.MustCompile(`(?:steps|tasks)(?:\.` + alias + `|\[\s*['"]` + alias + `['"]\s*\])\.outputs\.result\b`)
-		found = found || reference.MatchString(text)
-	}
-	walkTemplates(wf, func(parent *wfv1.Template) {
+		body, err := credentialResultScope(parent, wf.Spec.TemplateDefaults)
+		if err != nil {
+			found = true
+			return
+		}
+		// JSON escapes double quotes used by expression map indexing.
+		text := strings.ReplaceAll(string(body), `\"`, `"`)
+		prefix := "steps"
+		if parent.DAG != nil {
+			prefix = "tasks"
+		}
+		check := func(name, template string, inline *wfv1.Template) {
+			if inline != target && (target.Name == "" || (template != target.Name && !strings.Contains(template, "{{"))) {
+				return
+			}
+			alias := regexp.QuoteMeta(name)
+			reference := regexp.MustCompile(prefix + `(?:\.` + alias + `|\[\s*['"]` + alias + `['"]\s*\])\.outputs\.result\b`)
+			found = found || reference.MatchString(text)
+		}
 		for _, group := range parent.Steps {
 			for _, step := range group.Steps {
 				check(step.Name, step.Template, step.Inline)
@@ -152,4 +161,29 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 		}
 	})
 	return found
+}
+
+// Argo's result-reference scan sees the parent after native defaults merging.
+// Exclude inapplicable template types exactly as mergedTemplateDefaultsInto does.
+func credentialResultScope(parent, defaults *wfv1.Template) ([]byte, error) {
+	body, err := json.Marshal(parent)
+	if err != nil || defaults == nil {
+		return body, err
+	}
+	applicable := defaults.DeepCopy()
+	v := reflect.ValueOf(applicable).Elem()
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Type().Field(i)
+		if field.Type.Kind() != reflect.Pointer || field.Type.Elem().Kind() != reflect.Struct {
+			continue
+		}
+		if t := wfv1.TemplateType(field.Name); t.IsValid() && t != parent.GetType() {
+			v.Field(i).Set(reflect.Zero(v.Field(i).Type()))
+		}
+	}
+	base, err := json.Marshal(applicable)
+	if err != nil {
+		return nil, err
+	}
+	return strategicpatch.StrategicMergePatch(base, body, wfv1.Template{})
 }

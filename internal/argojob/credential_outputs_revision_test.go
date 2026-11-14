@@ -180,8 +180,8 @@ func TestCredentialOtherContainersResultReferencesRefused(t *testing.T) {
 					} else {
 						parent.Steps = []wfv1.ParallelSteps{{Steps: []wfv1.WorkflowStep{{Name: "alias", Template: name, Inline: inline}}}}
 					}
-					// A reference outside the parent must still be refused.
-					wf.Annotations = map[string]string{"reference": "{{=" + fmt.Sprintf(reference, prefix) + "}}"}
+					// Argo scans every field of the invoking parent.
+					parent.Metadata.Annotations = map[string]string{"reference": "{{=" + fmt.Sprintf(reference, prefix) + "}}"}
 					for _, cloud := range []bool{false, true} {
 						granted := map[*wfv1.Template]bool{leaf: !cloud}
 						var identities []*wfv1.Template
@@ -201,7 +201,7 @@ func TestCredentialOtherContainersResultReferencesRefused(t *testing.T) {
 
 func TestCredentialOtherContainerOutputControls(t *testing.T) {
 	for _, shape := range []string{"sidecar", "containerSet"} {
-		for _, control := range []string{"no-outputs", "literal-parameter", "unrelated-result", "single-container", "ungranted-path", "ungranted-result", "init-only"} {
+		for _, control := range []string{"no-outputs", "literal-parameter", "unrelated-result", "reused-alias", "single-container", "ungranted-path", "ungranted-result", "init-only"} {
 			t.Run(shape+"/"+control, func(t *testing.T) {
 				target := wfv1.Template{Name: "credential-leaf", Container: &corev1.Container{Image: "example.invalid/main"}}
 				credentialOtherContainer(&target, shape)
@@ -212,7 +212,11 @@ func TestCredentialOtherContainerOutputControls(t *testing.T) {
 				case "literal-parameter":
 					leaf.Outputs.Parameters = []wfv1.Parameter{{Name: "literal", Value: wfv1.AnyStringPtr("value")}}
 				case "unrelated-result":
-					wf.Annotations = map[string]string{"ref": "{{tasks.other.outputs.result}}"}
+					wf.Spec.Templates[1].Metadata.Annotations = map[string]string{"ref": "{{tasks.other.outputs.result}}"}
+				case "reused-alias":
+					wf.Spec.Templates = append(wf.Spec.Templates, wfv1.Template{Name: "unrelated-parent", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "alias", Template: "ungranted"}}}, Metadata: wfv1.Metadata{Annotations: map[string]string{"ref": "{{tasks.alias.outputs.result}}"}}})
+					leaf = &wf.Spec.Templates[0]
+					granted = map[*wfv1.Template]bool{leaf: true}
 				case "single-container", "init-only":
 					leaf.Sidecars = nil
 					if leaf.ContainerSet != nil {
@@ -222,13 +226,13 @@ func TestCredentialOtherContainerOutputControls(t *testing.T) {
 						leaf.InitContainers = []wfv1.UserContainer{{Container: corev1.Container{Name: "init"}}}
 					}
 					leaf.Outputs.Parameters = []wfv1.Parameter{{Name: "result", ValueFrom: &wfv1.ValueFrom{Path: "/root-result"}}}
-					wf.Annotations = map[string]string{"ref": "{{tasks.alias.outputs.result}}"}
+					wf.Spec.Templates[1].Metadata.Annotations = map[string]string{"ref": "{{tasks.alias.outputs.result}}"}
 				case "ungranted-path":
 					granted[leaf] = false
 					leaf.Outputs.Parameters = []wfv1.Parameter{{Name: "result", ValueFrom: &wfv1.ValueFrom{Path: "relative-result"}}}
 				case "ungranted-result":
 					granted[leaf] = false
-					wf.Annotations = map[string]string{"ref": "{{tasks.alias.outputs.result}}"}
+					wf.Spec.Templates[1].Metadata.Annotations = map[string]string{"ref": "{{tasks.alias.outputs.result}}"}
 				}
 				if err := validateCredentialOutputPaths(wf, granted, nil); err != nil {
 					t.Fatalf("safe combination refused: %v", err)
@@ -288,5 +292,20 @@ func TestCredentialOtherContainersResultBuildRefused(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCredentialOtherContainersInheritedResultRefused(t *testing.T) {
+	leaf := wfv1.Template{Name: "credential-leaf", Container: &corev1.Container{Image: "example.invalid/main"}}
+	credentialOtherContainer(&leaf, "sidecar")
+	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{leaf, {Name: "parent", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "alias", Template: leaf.Name}}}}}, TemplateDefaults: &wfv1.Template{Outputs: wfv1.Outputs{Parameters: []wfv1.Parameter{{Name: "forward", ValueFrom: &wfv1.ValueFrom{Parameter: "{{tasks.alias.outputs.result}}"}}}}}}}
+	granted := map[*wfv1.Template]bool{&wf.Spec.Templates[0]: true}
+	if err := validateCredentialOutputPaths(wf, granted, nil); err == nil || !strings.Contains(err.Error(), "another container of the Pod can redirect what Argo reads") {
+		t.Fatalf("inherited result read admitted: %v", err)
+	}
+	// A leaf declaration overrides the inherited parent reference natively.
+	wf.Spec.Templates[1].Outputs.Parameters = []wfv1.Parameter{{Name: "forward", ValueFrom: &wfv1.ValueFrom{Parameter: "{{tasks.unrelated.outputs.result}}"}}}
+	if err := validateCredentialOutputPaths(wf, granted, nil); err != nil {
+		t.Fatalf("overridden inherited reference refused: %v", err)
 	}
 }
