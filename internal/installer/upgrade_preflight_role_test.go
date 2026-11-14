@@ -84,17 +84,26 @@ func testUpgradeAdminRolePreflight(t *testing.T, status int, detail string) {
 		t.Fatal("live error reported as missing configuration", err)
 	}
 	requests.Store(0)
+	var workflowReads atomic.Int32
+	withUpgradeWorkflowAPI(t, &f.deps, func(w http.ResponseWriter, r *http.Request) {
+		workflowReads.Add(1)
+		if r.Method != http.MethodGet || r.URL.Path != "/apis/argoproj.io/v1alpha1/namespaces/oberth-argo/workflows" || r.URL.Query().Get("labelSelector") != "oberth.ci/run" {
+			t.Error("unexpected idle observation", r.Method, r.URL)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(upgradeWorkflowList()))
+	})
 	writes, stop := stopUpgradeAtHelmWrite(&f.deps)
 	dir := t.TempDir()
 	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.8", BinarySchemaVersion: 99, Namespace: DefaultNamespace, NoBackup: true, RecordDir: dir}, f.deps)
 	if allowed {
-		if *writes != 1 || !errors.Is(err, stop) {
-			t.Fatal("permitted preflight did not reach Helm write", *writes, err)
+		if *writes != 1 || !errors.Is(err, stop) || workflowReads.Load() != 1 {
+			t.Fatal("permitted preflight did not wait before Helm write", *writes, workflowReads.Load(), err)
 		}
 		return
 	}
-	if err == nil || *writes != 0 || status != 0 && requests.Load() != 1 {
-		t.Fatal("failed admin probe escaped pre-write refusal", *writes, requests.Load(), err)
+	if err == nil || *writes != 0 || workflowReads.Load() != 0 || status != 0 && requests.Load() != 1 {
+		t.Fatal("failed admin probe escaped pre-wait refusal", *writes, requests.Load(), workflowReads.Load(), err)
 	}
 	for _, action := range kube.Actions() {
 		if slices.Contains([]string{"create", "update", "patch", "delete"}, action.GetVerb()) {
@@ -158,7 +167,8 @@ func TestUpgradeConfiguredAdminRepairsWithoutReadyPod(t *testing.T) {
 				t.Fatal("transport must still select the non-Ready Running Pod", selected, err)
 			}
 			writes, stop := stopUpgradeAtHelmWrite(&f.deps)
-			_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.8", BinarySchemaVersion: 99, Namespace: DefaultNamespace, NoBackup: true, RecordDir: t.TempDir()}, f.deps)
+			// This fixture has no Kubernetes REST configuration; the bypass is explicit.
+			_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.22.8", BinarySchemaVersion: 99, Namespace: DefaultNamespace, NoBackup: true, NoWaitIdle: true, RecordDir: t.TempDir()}, f.deps)
 			if *writes != 1 || !errors.Is(err, stop) {
 				t.Fatal("non-Ready Running Pod blocked forward repair", *writes, err)
 			}

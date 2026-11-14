@@ -186,6 +186,10 @@ func TestUpgradeMissingCurrentAdminAPIGivesRetryCommand(t *testing.T) {
 	}
 	f := newUpgradeFixture(t, "0.22.7", "0.22.8", "99")
 	f.deps.Admin = remote
+	withUpgradeWorkflowAPI(t, &f.deps, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(upgradeWorkflowList()))
+	})
 	if _, err := f.deps.KubeClient.CoreV1().Pods(DefaultNamespace).Create(t.Context(), upgradePreflightPod("server", corev1.PodRunning), metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
