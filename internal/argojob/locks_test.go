@@ -110,6 +110,32 @@ func TestLockFactsWaiterOnlyWhileWaiting(t *testing.T) {
 	}
 }
 
+// A step waiting for a lock points to lock status once, after the native
+// detail; a step of the same run that holds the lock does not.
+func TestLockWaitingStepPointsToLockStatus(t *testing.T) {
+	t.Parallel()
+	rows := cancelledLocks(t)
+	i := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == "waiting-heavy-stop" })
+	plan := admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "e", Name: "e"}, {Path: "f", Name: "f"}}}
+	const hint = "Run oberth lock status to see who holds it."
+	for id, n := range rows[i].Status.Nodes {
+		n.Message = "Waiting for lock. Lock status: 0/2"
+		rows[i].Status.Nodes[id] = n
+	}
+	out := project(t, argojob.Projection{Plan: plan, Workflow: &rows[i]})
+	for _, s := range out.Steps {
+		waiting := s.DisplayReason == "waiting for a lock"
+		if waiting != (s.Path == "f") || strings.Contains(s.Detail, hint) != waiting || waiting && s.Detail != "Waiting for lock. Lock status: 0/2\n"+hint {
+			t.Fatalf("step %s: reason %q detail %q", s.Path, s.DisplayReason, s.Detail)
+		}
+	}
+	for _, n := range out.Nodes {
+		if strings.Contains(n.Message, hint) {
+			t.Fatal("native node message changed", n)
+		}
+	}
+}
+
 // Terminate marks a run that was waiting for a workflow-level lock Succeeded;
 // it is reported cancelled, never passed. Stop leaves it queued for the lock.
 func TestTerminatedLockWaiterIsCancelledNotPassed(t *testing.T) {

@@ -150,6 +150,7 @@ func projectAttempt(row *projected, in projectionInput, n wf.NodeStatus) {
 	row.step.Status, row.step.DisplayReason, row.step.Detail, row.class = nodeStatus(n.Phase), d.reason, d.detail, d.class
 	if n.SynchronizationStatus != nil && n.SynchronizationStatus.Waiting != "" {
 		row.step.DisplayReason = reasonLock
+		row.step.Detail = strings.TrimSpace(row.step.Detail + "\n" + detailLockStatus)
 	}
 	if row.step.StartedAt == nil {
 		row.step.StartedAt = timePointer(n.StartedAt.Time)

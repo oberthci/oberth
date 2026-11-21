@@ -38,6 +38,9 @@ const (
 	reasonPassed      = "passed"
 	reasonRunning     = "running"
 	reasonExit        = "exited with code %d"
+
+	// detailLockStatus closes the detail of a step waiting for a lock.
+	detailLockStatus = "Run oberth lock status to see who holds it."
 )
 
 type diagnosis struct {
