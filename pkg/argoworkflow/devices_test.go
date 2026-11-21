@@ -231,6 +231,26 @@ func TestDeviceFindingPathCannotForgeARefusalLine(t *testing.T) {
 	requireCode(t, err, "resource_name")
 }
 
+// Only a page size follows the hugepages prefix; a domain makes the name an
+// extended resource that a device plugin could register.
+func TestHugepagesLookalikesNeedADeviceGrant(t *testing.T) {
+	t.Parallel()
+	for _, name := range []corev1.ResourceName{"hugepages-x.example.com/kvm", "hugepages-", "hugepages-1Gi/kvm"} {
+		w := simpleWorkflow()
+		w.Spec.Templates[0].Container.Resources = corev1.ResourceRequirements{Limits: corev1.ResourceList{name: resource.MustParse("2Mi")}}
+		_, err := Prepare(t.Context(), requestFor(t, w), Policy{}, identityHooks())
+		findings := admissionFindings(t, err)
+		if len(findings) != 1 || findings[0].Code != "device" || findings[0].Path != fmt.Sprintf(`spec.templates["main"].container.resources[%q]`, name) {
+			t.Fatal(name, findings)
+		}
+	}
+	for _, name := range []corev1.ResourceName{"hugepages-2Mi", "hugepages-1Gi"} {
+		if !standardResource(name) {
+			t.Fatal("page size refused", name)
+		}
+	}
+}
+
 // An inline step has no name, and a "*" grant would cover every step of the
 // file, so an inline device request is refused with no grant command.
 func TestInlineDeviceRequestIsRefusedWithoutAGrantCommand(t *testing.T) {

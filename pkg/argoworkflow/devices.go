@@ -19,7 +19,9 @@ func standardResource(name corev1.ResourceName) bool {
 	case corev1.ResourceCPU, corev1.ResourceMemory, corev1.ResourceEphemeralStorage:
 		return true
 	}
-	return strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix)
+	size, hugepages := strings.CutPrefix(string(name), corev1.ResourceHugePagesPrefix)
+	// A page size has no domain: hugepages-x.example.com/kvm is an extended resource.
+	return hugepages && size != "" && !strings.Contains(size, "/")
 }
 
 // devices requires an exact repository, file and step grant for each extended
