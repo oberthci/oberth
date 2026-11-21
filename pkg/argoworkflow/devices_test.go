@@ -1,6 +1,8 @@
 package argoworkflow
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -65,7 +67,7 @@ func TestUngrantedDeviceRequestIsRefusedWithItsGrantCommand(t *testing.T) {
 				at := deviceCarrier(&w.Spec.Templates[0], carrier, deviceResources(form))
 				_, err := Prepare(t.Context(), requestFor(t, w), Policy{}, identityHooks())
 				findings := admissionFindings(t, err)
-				want := `spec.templates["main"]` + at + ".resources[" + kvm + "]"
+				want := `spec.templates["main"]` + at + `.resources["` + kvm + `"]`
 				if len(findings) != 1 || findings[0].Path != want || findings[0].Code != "device" || !findings[0].Installation || findings[0].Command != kvmCommand(".oberth/build.yaml", "main") {
 					t.Fatal(findings)
 				}
@@ -144,7 +146,7 @@ func TestDefaultDeviceRequestNeedsEachStepGrant(t *testing.T) {
 	w.Spec.TemplateDefaults = &wfv1.Template{Container: &corev1.Container{Resources: deviceResources("limits")}}
 	_, err := Prepare(t.Context(), requestFor(t, w), Policy{}, identityHooks())
 	findings := admissionFindings(t, err)
-	if len(findings) != 1 || findings[0].Path != `spec.templates["main"].container.resources[`+kvm+"]" || findings[0].Command != kvmCommand(".oberth/build.yaml", "main") {
+	if len(findings) != 1 || findings[0].Path != `spec.templates["main"].container.resources["`+kvm+`"]` || findings[0].Command != kvmCommand(".oberth/build.yaml", "main") {
 		t.Fatal(findings)
 	}
 	r := requestFor(t, w)
@@ -201,4 +203,30 @@ func TestDeviceAnnotationsAreRefusedInEveryPodMetadata(t *testing.T) {
 	if _, err := Prepare(t.Context(), requestFor(t, w), Policy{}, identityHooks()); err != nil {
 		t.Fatal("ordinary annotation refused", err)
 	}
+}
+
+// A pushed resource name cannot add a line, and so a forged finding or
+// command, to the refusal an administrator reads.
+func TestDeviceFindingPathCannotForgeARefusalLine(t *testing.T) {
+	t.Parallel()
+	forged := corev1.ResourceName(kvm + "\nspec.fake: forged; oberth access allow --kind device 'a/b/c' 'f' 's' 'n'")
+	long := corev1.ResourceName("example.test/" + strings.Repeat("d", maxResourceNameBytes))
+	for name, want := range map[corev1.ResourceName]string{
+		forged: fmt.Sprintf(`spec.templates["main"].container.resources[%q]`, forged),
+		long:   `spec.templates["main"].container.resources`,
+	} {
+		w := simpleWorkflow()
+		w.Spec.Templates[0].Container.Resources = corev1.ResourceRequirements{Limits: corev1.ResourceList{name: resource.MustParse("1")}}
+		_, err := Prepare(t.Context(), requestFor(t, w), Policy{}, identityHooks())
+		findings := admissionFindings(t, err)
+		if len(findings) != 1 || findings[0].Path != want || findings[0].Command != "" || strings.Count(err.Error(), "\n") != 0 || len(err.Error()) > 1024 {
+			t.Fatalf("%q: %v", err.Error(), findings)
+		}
+	}
+	w := simpleWorkflow()
+	w.Spec.Templates[0].Container.Resources = corev1.ResourceRequirements{Limits: corev1.ResourceList{long: resource.MustParse("1")}}
+	r := requestFor(t, w)
+	r.Grants = []admissioncontract.GrantEvidence{clusterGrant("main", "device", string(long))}
+	_, err := Prepare(t.Context(), r, Policy{}, identityHooks())
+	requireCode(t, err, "resource_name")
 }

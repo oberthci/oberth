@@ -1,6 +1,7 @@
 package argoworkflow
 
 import (
+	"fmt"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -36,9 +37,16 @@ func (g *graph) devices(c *corev1.Container, n *node, where string) {
 		names[name] = true
 	}
 	for _, name := range sortedKeys(names) {
-		if standardResource(name) || g.granted(n, deviceGrant, string(name), "") {
-			continue
+		switch {
+		case standardResource(name):
+		case len(name) > maxResourceNameBytes:
+			g.refuse(where+".resources", "resource_name")
+		case !g.granted(n, deviceGrant, string(name), ""):
+			g.missingGrant(n, deviceGrant, string(name), fmt.Sprintf("%s.resources[%q]", where, name))
 		}
-		g.missingGrant(n, deviceGrant, string(name), where+".resources["+string(name)+"]")
 	}
 }
+
+// maxResourceNameBytes is the longest qualified resource name: a 253-byte
+// domain, a slash and a 63-byte name. A longer name never reaches a finding path.
+const maxResourceNameBytes = 317
