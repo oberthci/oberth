@@ -61,28 +61,33 @@ func exampleIssueList(issues []model.Issue) apicontract.HandlerFunc[apicontract.
 					selected = append(selected, v)
 				}
 			}
-			start, end := 0, len(selected)
-			for i, v := range selected {
-				if q.Before > 0 && v.ID >= q.Before {
-					start = i + 1
-				}
-				if q.After > 0 && v.ID > q.After {
-					end = i + 1
-				}
-			}
-			if q.After > 0 {
-				start = max(0, end-q.Limit)
-			}
-			page.Issues = append(page.Issues, selected[start:min(end, start+q.Limit)]...)
-			page.Total, page.Offset = len(selected), start
-			if n := len(page.Issues); n > 0 && start > 0 {
-				page.NextAfter = page.Issues[0].ID
-			}
-			if n := len(page.Issues); n > 0 && start+n < len(selected) {
-				page.NextBefore = page.Issues[n-1].ID
-			}
+			examplePage(&page, selected, q)
 			return page, nil
 		}, nil
+	}
+}
+
+// examplePage cuts the newest-first selection at the request's cursor.
+func examplePage(page *apicontract.IssuePage, selected []model.Issue, q apicontract.IssueListArgs) {
+	start, end := 0, len(selected)
+	for i, v := range selected {
+		if q.Before > 0 && v.ID >= q.Before {
+			start = i + 1
+		}
+		if q.After > 0 && v.ID > q.After {
+			end = i + 1
+		}
+	}
+	if q.After > 0 {
+		start = max(0, end-q.Limit)
+	}
+	page.Issues = append(page.Issues, selected[start:min(end, start+q.Limit)]...)
+	page.Total, page.Offset = len(selected), start
+	if n := len(page.Issues); n > 0 && start > 0 {
+		page.NextAfter = page.Issues[0].ID
+	}
+	if n := len(page.Issues); n > 0 && start+n < len(selected) {
+		page.NextBefore = page.Issues[n-1].ID
 	}
 }
 
