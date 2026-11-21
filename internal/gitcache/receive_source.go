@@ -45,7 +45,9 @@ func (
 	}
 	env := []string{"GIT_OBJECT_DIRECTORY=" + quarantine, "GIT_ALTERNATE_OBJECT_DIRECTORIES=" + strconv.Quote(objects)}
 	scoped := &Cache{
+		ctx:       c.ctx,
 		budgets:   c.budgets,
+		clones:    c.clones,
 		config:    c.config,
 		gates:     c.gates,
 		rootLock:  c.rootLock,

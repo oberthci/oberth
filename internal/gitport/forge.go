@@ -14,6 +14,22 @@ const (
 // receive holds the public refs; the forge may already have the commit.
 const ReceivePendingID = "receive-pending"
 
+const (
+	CloneUnfinishedReason = "First clone did not finish in time."
+	CloneUnfinishedRemedy = "It continues on the server, so try again in a few minutes; a clone that failed starts again then."
+)
+
+// CloneUnfinishedError means the forge answered but the first clone was
+// still running when the caller's deadline passed; the clone continues.
+type CloneUnfinishedError struct{ Cause error }
+
+func (*CloneUnfinishedError) Reason() string  { return CloneUnfinishedReason }
+func (*CloneUnfinishedError) Remedy() string  { return CloneUnfinishedRemedy }
+func (e *CloneUnfinishedError) Error() string { return e.Reason() + " " + e.Remedy() }
+func (e *CloneUnfinishedError) Unwrap() error {
+	return publicerr.New(publicerr.Unavailable, e.Reason(), e.Remedy(), e.Cause)
+}
+
 const EmptyForgeReason = "The forge repository has no commit."
 const EmptyForgeRemedy = "Push a first commit to the forge, then retry."
 

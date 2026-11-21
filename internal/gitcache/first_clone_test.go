@@ -1,0 +1,119 @@
+package gitcache_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/gitcache/gittest"
+	"github.com/oberthci/oberth/internal/gitport"
+	"github.com/oberthci/oberth/internal/publicerr"
+)
+
+// slowForge makes every clone wait at a gate the test opens, the way a large
+// first clone keeps transferring after its caller's deadline. It returns the
+// release function and the file that counts started clones.
+func slowForge(t *testing.T, f *gittest.Fixture, cfg *gitcache.Config) (func(), string) {
+	t.Helper()
+	dir := t.TempDir()
+	gate, log, script := filepath.Join(dir, "gate"), filepath.Join(dir, "clones"), filepath.Join(dir, "git")
+	if err := syscall.Mkfifo(gate, 0600); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf("#!/bin/sh\nfor a do\n  if [ \"$a\" = clone ]; then\n    echo clone >> '%s'\n    read _ < '%s'\n    break\n  fi\ndone\nexec '%s' \"$@\"\n", log, gate, f.Binary)
+	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Binary = script
+	release := func() {
+		w, err := os.OpenFile(gate, os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = w.WriteString("\n")
+		if err = errors.Join(err, w.Close()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return release, log
+}
+
+func shortInit(t *testing.T, c *gitcache.Cache) error {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	return c.Init(ctx, gittest.Repository)
+}
+
+func TestFirstCloneOutlivesItsCallerAndAnnouncesItsRefs(t *testing.T) {
+	f := gittest.New(t)
+	cfg := reviewConfig(t, f)
+	release, log := slowForge(t, f, &cfg)
+	announced := make(chan []gitcache.RefUpdate, 1)
+	cfg.RefChanged = func(_ context.Context, repo string, updates []gitcache.RefUpdate) {
+		if repo == gittest.Repository {
+			announced <- updates
+		}
+	}
+	c := reviewNew(t, cfg)
+	for range 2 {
+		err := shortInit(t, c)
+		var unfinished *gitport.CloneUnfinishedError
+		if !errors.As(err, &unfinished) || publicerr.Classify(err).Reason() != gitport.CloneUnfinishedReason || publicerr.Permanent(err) {
+			t.Fatal("a clone past its caller's deadline was not reported as unfinished", err)
+		}
+		if strings.Contains(err.Error(), gitport.ForgeReason) {
+			t.Fatal("an answering forge was reported unreachable", err)
+		}
+	}
+	release()
+	updates := <-announced
+	if !slices.Contains(updates, gitcache.RefUpdate{Ref: "refs/heads/main", NewSHA: f.Commit}) {
+		t.Fatal("the finished clone did not announce its refs", updates)
+	}
+	if err := c.Init(t.Context(), gittest.Repository); err != nil {
+		t.Fatal(err)
+	}
+	started, err := os.ReadFile(log)
+	if err != nil || strings.Count(string(started), "clone") != 1 {
+		t.Fatal("callers did not share one first clone", string(started), err)
+	}
+}
+
+func TestFirstCloneThatEndsInTimeAnnouncesNothing(t *testing.T) {
+	f := gittest.New(t)
+	cfg := reviewConfig(t, f)
+	announced := 0
+	cfg.RefChanged = func(context.Context, string, []gitcache.RefUpdate) { announced++ }
+	c := reviewNew(t, cfg)
+	if err := c.Init(t.Context(), gittest.Repository); err != nil || announced != 0 {
+		t.Fatal("a waited-for clone was announced or failed", announced, err)
+	}
+}
+
+func TestCloseEndsARunningFirstClone(t *testing.T) {
+	f := gittest.New(t)
+	cfg := reviewConfig(t, f)
+	_, _ = slowForge(t, f, &cfg)
+	c, err := gitcache.New(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = shortInit(t, c); err == nil {
+		t.Fatal("a gated clone finished")
+	}
+	if err = c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(filepath.Join(cfg.Root, "origin", "team", "widget.git", "HEAD")); !os.IsNotExist(err) {
+		t.Fatal("a clone ended by Close was published", err)
+	}
+}

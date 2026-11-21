@@ -16,7 +16,7 @@ func TestForgeRefusalIsShortAndKeepsNativeDetailPrivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldest := time.Duration(1<<63 - 1).Round(time.Second).String()
-	for text, bound := range map[string]int{ForgeStatusReason: 40, EmptyForgeReason: 40, EmptyForgeRemedy: 120, ForgeReason: 40, ForgeRemedy: 120, ForgeOperatorRemedy: 120, ForgeCacheNotice + oldest + ".": 80} {
+	for text, bound := range map[string]int{ForgeStatusReason: 40, EmptyForgeReason: 40, EmptyForgeRemedy: 120, ForgeReason: 40, ForgeRemedy: 120, ForgeOperatorRemedy: 120, CloneUnfinishedReason: 40, CloneUnfinishedRemedy: 120, ForgeCacheNotice + oldest + ".": 80} {
 		if len(text) > bound || strings.Contains(text, "...") {
 			t.Fatal("message exceeds budget", len(text), text)
 		}

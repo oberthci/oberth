@@ -37,6 +37,18 @@ func TestHonestRepositoryProbesContract(t *testing.T) {
 	}
 }
 
+func TestProbeOfUnfinishedFirstCloneSaysSo(t *testing.T) {
+	t.Parallel()
+	git := fake.Git{Remote: func(context.Context, string, string) (gitport.Ref, error) {
+		return gitport.Ref{}, &gitport.CloneUnfinishedError{Cause: context.DeadlineExceeded}
+	}}
+	c := app.Checks{Git: git, Deadline: context.WithTimeout}
+	result := c.CheckRepository(context.Background(), app.ProbeKey{Repository: request().Repository})
+	if result.Reason != gitport.CloneUnfinishedReason || result.Detail == "" {
+		t.Fatal("an unfinished first clone was reported as another failure", result)
+	}
+}
+
 func TestProbeDeadlineActuallyCancelsTransportAtFifteenSeconds(t *testing.T) {
 	t.Parallel()
 	clock := newDeadlineClock()

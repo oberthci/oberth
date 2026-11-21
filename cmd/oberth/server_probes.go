@@ -49,6 +49,11 @@ func (a serverAdministration) ProbeRepository(ctx context.Context, r stateport.R
 	if result.Reason == gitport.EmptyForgeReason {
 		return publicerr.New(publicerr.InvalidInput, gitport.EmptyForgeReason, gitport.EmptyForgeRemedy, nil)
 	}
+	if result.Reason == gitport.CloneUnfinishedReason {
+		problem := publicerr.New(publicerr.Unavailable, gitport.CloneUnfinishedReason, gitport.CloneUnfinishedRemedy, nil)
+		problem.Context = []string{"Repository: " + r.Canonical}
+		return problem
+	}
 	if result.Detail != "" {
 		reason := repositoryProbeFailureReason
 		remedy := "Check the upstream address, identity and host pins, then retry."

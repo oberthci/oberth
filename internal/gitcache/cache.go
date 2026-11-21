@@ -71,6 +71,7 @@ type Cache struct {
 	replayProblems map[string]string
 	objectEnv      []string
 	budgets        gitBudgets
+	clones         *firstClones
 	hookDigest     [sha256.Size]byte
 	// Receive boundaries permit deterministic fault injection.
 	receivePrepared, receiveReturned func()
@@ -111,6 +112,7 @@ func New(ctx context.Context, config Config) (*Cache, error) {
 	}
 	cache := &Cache{
 		budgets:  defaultGitBudgets(),
+		clones:   &firstClones{running: map[string]*firstClone{}},
 		config:   config,
 		rootLock: owner,
 		gates:    &repositoryGates{repos: make(map[string]chan struct{})},
@@ -143,8 +145,13 @@ func prepareCachePaths(config Config) error {
 	return nil
 }
 
-// Close releases root ownership after the caller has stopped all requests.
-func (c *Cache) Close() error { c.stopDelivery(); return c.rootLock.Close() }
+// Close releases root ownership after the caller has stopped all requests;
+// it ends running first clones and waits for them before releasing it.
+func (c *Cache) Close() error {
+	c.stopDelivery()
+	c.clones.wait.Wait()
+	return c.rootLock.Close()
+}
 
 func (c *Cache) path(repository string) (string, error) {
 	r, err := reponame.ParseRepository(repository)
@@ -154,30 +161,27 @@ func (c *Cache) path(repository string) (string, error) {
 	return filepath.Join(c.config.Root, r.Upstream, r.Organization, r.Name+".git"), nil
 }
 
-// Init materializes only the canonical bare layout.
+// Init materializes only the canonical bare layout. A first clone from the
+// upstream outlives a caller deadline shorter than it needs (awaitClone).
 func (c *Cache) Init(ctx context.Context, repository string) error {
 	p, err := c.path(repository)
 	if err != nil {
 		return err
+	}
+	ready, err := c.initialized(ctx, p)
+	if err != nil || ready {
+		return err
+	}
+	if c.config.Upstream != nil {
+		return c.awaitClone(ctx, repository, p)
 	}
 	slot := c.repositoryGate(p + "/init")
 	if err = acquireContext(ctx, slot); err != nil {
 		return err
 	}
 	defer func() { <-slot }()
-
 	if _, err = os.Stat(filepath.Join(p, "HEAD")); err == nil {
-		if err = c.lock(ctx, p); err != nil {
-			return err
-		}
-		defer c.unlock(p)
-		_, err = c.capture(ctx, command{dir: p, args: []string{"rev-parse", "--is-bare-repository"}}, 64)
-		return err
-	} else if !os.IsNotExist(err) {
-		return unavailable("initialize", err)
-	}
-	if c.config.Upstream != nil {
-		return c.clone(ctx, repository, p)
+		return nil
 	}
 	staging := p + ".staging"
 	if err = os.RemoveAll(staging); err != nil {
@@ -194,6 +198,26 @@ func (c *Cache) Init(ctx context.Context, repository string) error {
 		return err
 	}
 	return c.publishClone(ctx, staging, p)
+}
+
+// initialized reports whether p holds the bare layout and checks it when so.
+func (c *Cache) initialized(ctx context.Context, p string) (bool, error) {
+	slot := c.repositoryGate(p + "/init")
+	if err := acquireContext(ctx, slot); err != nil {
+		return false, err
+	}
+	defer func() { <-slot }()
+	if _, err := os.Stat(filepath.Join(p, "HEAD")); os.IsNotExist(err) {
+		return false, nil
+	} else if err != nil {
+		return false, unavailable("initialize", err)
+	}
+	if err := c.lock(ctx, p); err != nil {
+		return true, err
+	}
+	defer c.unlock(p)
+	_, err := c.capture(ctx, command{dir: p, args: []string{"rev-parse", "--is-bare-repository"}}, 64)
+	return true, err
 }
 
 func (c *Cache) clone(ctx context.Context, repository, p string) error {

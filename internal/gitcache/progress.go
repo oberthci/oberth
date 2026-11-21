@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-type gitBudgets struct{ idle, local, transfer, cleanup time.Duration }
+type gitBudgets struct{ idle, local, transfer, cleanup, firstClone time.Duration }
 
 func defaultGitBudgets() gitBudgets {
-	return gitBudgets{idle: time.Minute, local: 10 * time.Minute, transfer: time.Hour, cleanup: time.Minute}
+	return gitBudgets{idle: time.Minute, local: 10 * time.Minute, transfer: time.Hour, cleanup: time.Minute, firstClone: firstCloneBound}
 }
 func transferCommand(args []string) bool {
 	switch nativeOperation(args) {
