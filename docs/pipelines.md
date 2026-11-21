@@ -137,15 +137,14 @@ through [grant operations](operations.md#grants-and-secrets).
 
 Ordinary containers need no capability grant, but a resource beyond `cpu`, `memory`,
 `ephemeral-storage` and `hugepages-*`, such as `devices.kubevirt.io/kvm`, is a host device: it needs
-the exact `--kind device` grant that admission prints for its step. A resource template, including a
-virtual machine, needs an administrator-approved capability: namespace, executor account, resource
-kind and allowed actions for that workflow. Copy [resource.yaml](examples/resource.yaml) to
-`.oberth/build.yaml` and [resource-capability.json](examples/resource-capability.json) to
-`resource-capability.json`. This build creates a ConfigMap in `build-resources`; its capability
-permits only `create` on that kind/namespace with account `resource-writer`. The cluster
-administrator first creates the namespace and, in the pipeline namespace, that account (not the
-normal pipeline account) with RBAC for ConfigMaps in `build-resources`. The grant command creates
-none of these. As Oberth administrator, approve and inspect the exact repository:
+the exact `--kind device` grant that admission prints for its named step. A resource template needs
+an administrator-approved capability: namespace, executor account, resource kind and allowed actions
+for that workflow. Copy [resource.yaml](examples/resource.yaml) to `.oberth/build.yaml` and
+[resource-capability.json](examples/resource-capability.json) to `resource-capability.json`. This
+build creates a ConfigMap in `build-resources`; its capability permits only `create` on that
+kind/namespace with account `resource-writer`. The cluster administrator first creates that
+namespace and, in the pipeline namespace, that separate account with RBAC for ConfigMaps in
+`build-resources`. Granting creates none of these. As Oberth administrator, approve and inspect:
 
 ```sh
 oberth workflow capability grant --repo <repo> \
@@ -155,8 +154,9 @@ oberth workflow capability get <repo> --json
 
 Admission selects the account; do not author `serviceAccountName`. After the example, the cluster
 administrator deletes the generated `build-note-` ConfigMap. Owner references cannot clean up across
-namespaces; use exit handlers there. A declaration grants no node access, server namespace or
-another repo's data; never bypass refusals with branch infrastructure keys.
+namespaces; use exit handlers there. A capability over a Pod-creating kind (Pod, Job, virtual
+machine) runs any Pod in that namespace, bounded only by its Pod Security and the account's RBAC;
+Oberth's own namespaces are never a target. Never bypass refusals with branch infrastructure keys.
 
 ## Build tags and release tags
 

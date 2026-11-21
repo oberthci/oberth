@@ -37,6 +37,20 @@ func TestDocumentationStorageAndPlanContract(t *testing.T) {
 	}
 }
 
+// Resource checks cover only the manifest envelope, so the guide must not
+// promise that a Pod-creating capability stays off the node.
+func TestDocumentationStatesThePodCapabilityLimit(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile("../../docs/pipelines.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(strings.Fields(string(raw)), " ")
+	if !strings.Contains(text, "A capability over a Pod-creating kind (Pod, Job, virtual machine) runs any Pod in that namespace, bounded only by its Pod Security and the account's RBAC") || strings.Contains(text, "grants no node access") {
+		t.Fatal("pipeline guide misstates what a Pod-creating capability allows")
+	}
+}
+
 func TestDocumentationReleaseAccountNameRule(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("../../docs/releasing.md")
