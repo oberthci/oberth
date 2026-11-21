@@ -29,11 +29,12 @@ func (s *Service) removeRepository(ctx context.Context, caller apicontract.Calle
 		}
 		// Revoked rows can retain values after a failed delete; removal retries them.
 		grant.Revoke = true
-		incomplete, err := s.changeGrant(ctx, caller, grant, action.Reason)
+		// Schedules of a repository being removed need no re-admission.
+		outcome, err := s.changeGrant(ctx, caller, grant, action.Reason)
 		if err != nil {
 			return err
 		}
-		if incomplete {
+		if outcome.incomplete {
 			return refuse(repositoryRevocationPending)
 		}
 		revoked = true

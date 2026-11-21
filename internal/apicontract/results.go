@@ -114,6 +114,8 @@ type Grant struct {
 	Step   string `json:"step"`
 	Path   string `json:"path"`
 	Status string `json:"status"`
+	// Warning names follow-up work a saved grant change did not finish.
+	Warning string `json:"warning,omitempty"`
 }
 type GrantPage struct {
 	Grants []Grant `json:"grants"`
@@ -262,6 +264,8 @@ type Capability struct {
 	Namespace      string         `json:"namespace" required:"true"`
 	ServiceAccount string         `json:"service_account" required:"true"`
 	ResourceKinds  []ResourceKind `json:"resource_kinds,omitempty"`
+	// Warning names follow-up work a saved grant did not finish; never stored.
+	Warning string `json:"warning,omitempty"`
 }
 type ResourceKind struct {
 	APIVersion string   `json:"api_version" required:"true"`

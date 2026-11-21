@@ -124,17 +124,21 @@ func TestSuspensionDoesNotReadPauseIntentOrCatalogue(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			listings := 1
 			if authority {
-				err = c.AuthorityChanged(t.Context(), func(ctx context.Context) error {
+				listings = 0
+				var unsynced error
+				unsynced, err = c.AuthorityChanged(t.Context(), f.repo.Qualified, func(ctx context.Context) error {
 					if catalogs != 0 || pauses != 0 || !f.objectAt(ctx, f.repo, "nightly").Spec.Suspend {
 						t.Fatal("fence read intent or published before suspension", catalogs, pauses)
 					}
 					return nil
 				})
+				err = errors.Join(err, unsynced)
 			} else {
 				err = c.SyncAll(t.Context())
 			}
-			if err != nil || pauses != 0 || catalogs != 1 || !f.object(f.repo, "nightly").Spec.Suspend {
+			if err != nil || pauses != 0 || catalogs != listings || !f.object(f.repo, "nightly").Spec.Suspend {
 				t.Fatal("unreadable intent blocked unconditional suspension", catalogs, pauses, err)
 			}
 		})

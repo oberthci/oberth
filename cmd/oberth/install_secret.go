@@ -28,7 +28,12 @@ func (w installationSecretWriter) PutSecret(ctx context.Context, r installer.Sec
 		_, outputErr := io.WriteString(w.out, message)
 		return errors.Join(err, outputErr)
 	}
-	if _, err := io.WriteString(w.out, "Secret access granted.\n"); err != nil {
+	// A saved grant stores the value; its schedule follow-up is its own line.
+	granted := "Secret access granted.\n"
+	if grant.Warning != "" {
+		granted += grant.Warning + "\n"
+	}
+	if _, err := io.WriteString(w.out, granted); err != nil {
 		return err
 	}
 	_, err := w.remote.PutSecret(ctx, apicontract.SecretPutArgs{Repo: r.Repo, Workflow: r.File, Step: r.Step, Secret: r.Path}, value)

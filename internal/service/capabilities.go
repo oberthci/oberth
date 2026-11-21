@@ -47,7 +47,8 @@ func (s *Service) PrepareWorkflowCapabilityGrant(ctx context.Context, c apicontr
 	}
 	c.Actor = a
 	return bounded(func(ctx context.Context) (apicontract.Capability, error) {
-		_, err := s.changeGrant(ctx, c, stateport.GrantChange{Kind: stateport.GrantCapability, Repository: r.Canonical, Capability: capabilityJSON(v)}, q.Reason)
+		outcome, err := s.changeGrant(ctx, c, stateport.GrantChange{Kind: stateport.GrantCapability, Repository: r.Canonical, Capability: capabilityJSON(v)}, q.Reason)
+		v.Warning = outcome.warning(r.Canonical)
 		return v, err
 	}), nil
 }
@@ -62,11 +63,7 @@ func (s *Service) PrepareWorkflowCapabilityRevoke(ctx context.Context, c apicont
 	}
 	c.Actor = a
 	return bounded(func(ctx context.Context) (apicontract.Receipt, error) {
-		incomplete, err := s.changeGrant(ctx, c, stateport.GrantChange{Kind: stateport.GrantCapability, Repository: r.Canonical, Revoke: true}, q.Reason)
-		out := apicontract.Receipt{ID: r.Canonical, State: "revoked"}
-		if incomplete {
-			out.Warning = warningAuthorityIncomplete
-		}
-		return out, err
+		outcome, err := s.changeGrant(ctx, c, stateport.GrantChange{Kind: stateport.GrantCapability, Repository: r.Canonical, Revoke: true}, q.Reason)
+		return apicontract.Receipt{ID: r.Canonical, State: "revoked", Warning: outcome.warning(r.Canonical)}, err
 	}), nil
 }

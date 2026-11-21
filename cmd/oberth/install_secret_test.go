@@ -58,6 +58,28 @@ func assertSecretPutGrantSequence(t *testing.T, refused bool) {
 	assertSecretPutOutput(t, out.String(), diagnostic.String(), map[bool]string{false: "stored", true: "grant-refused"}[refused])
 }
 
+func TestSecretPutStoresWhenGrantIsSavedButSchedulesDidNotSync(t *testing.T) {
+	bindings := fake.Bindings()
+	warning := "Saved, but this repository's schedules did not sync and stay paused; see oberth schedule list --repo origin/team/widget"
+	bindings.AccessAllow.Handler = &fake.Handler[apicontract.AccessAllowArgs, apicontract.Grant]{Value: apicontract.Grant{Status: "approved", Warning: warning}}
+	writes := 0
+	bindings.SecretPut.Handler = apicontract.HandlerFunc[apicontract.SecretPutArgs, apicontract.Receipt](func(_ context.Context, _ apicontract.Caller, q apicontract.SecretPutArgs) (apicontract.Call[apicontract.Receipt], error) {
+		return func(context.Context) (apicontract.Receipt, error) {
+			writes++
+			return apicontract.Receipt{ID: q.Secret, State: "stored"}, nil
+		}, nil
+	})
+	app, out, diagnostic := fixture(t, bindings)
+	app.in = strings.NewReader("private-fixture")
+	code := app.run(t.Context(), []string{"secret", "put", "--repo", "origin/team/widget", "--file", ".oberth/build.yaml", "--step", "build", "registry/key"})
+	if code != 0 || writes != 1 {
+		t.Fatal("a saved grant did not store the value", code, writes, diagnostic.String())
+	}
+	if !strings.Contains(out.String(), "Secret access granted.\n"+warning+"\nSecret stored for the approved step.\n") {
+		t.Fatal("schedule follow-up is not its own line", out.String())
+	}
+}
+
 func TestSecretPutReportsGrantWhenStoreRefuses(t *testing.T) {
 	bindings := fake.Bindings()
 	bindings.SecretPut.Handler = &fake.Handler[apicontract.SecretPutArgs, apicontract.Receipt]{Error: publicerr.New(publicerr.Unavailable, "Storage refused.", "Unseal the store, then retry.", nil)}

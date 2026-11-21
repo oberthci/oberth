@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path"
 	"strings"
 
@@ -46,26 +47,45 @@ func grantGiven(q apicontract.AccessAllowArgs) func(string) bool {
 	values := map[string]string{"repo": q.Repo, "workflow": q.Workflow, "step": q.Step, "secret": q.Secret, "audience": q.Audience, "claim": q.Claim, "tier": q.Tier}
 	return func(name string) bool { return values[name] != "" }
 }
-func (s *Service) changeGrant(ctx context.Context, c apicontract.Caller, g stateport.GrantChange, reason string) (bool, error) {
+// grantOutcome is what followed a grant change that was saved: incomplete
+// means it was not applied (a revocation stays committed), unsynced means it
+// was applied but its repository's schedules were not re-admitted.
+type grantOutcome struct{ incomplete, unsynced bool }
+
+// warning is the separate line a saved change shows; empty when all applied.
+func (o grantOutcome) warning(repo string) string {
+	switch {
+	case o.incomplete:
+		return warningAuthorityIncomplete
+	case o.unsynced:
+		return fmt.Sprintf(warningSchedulesPaused, repo)
+	}
+	return ""
+}
+
+// changeGrant succeeds or fails on its own work: saving and publishing the
+// grant. The schedule reconciliation that follows is reported in the outcome.
+func (s *Service) changeGrant(ctx context.Context, c apicontract.Caller, g stateport.GrantChange, reason string) (grantOutcome, error) {
 	// Revocation commits its exact tuple even if another tuple prevents rebuild.
 	// Publish's callback and the resulting generation are protected by C10's fence.
 	if g.Revoke || g.Dismiss {
 		snapshot, err := s.c.People.Grants.ChangeGrant(ctx, s.peopleAction(c.Actor, "authority.changed", reason, g.Repository), g)
 		if err != nil {
-			return false, err
+			return grantOutcome{}, err
 		}
-		publishErr := s.c.People.Publication.Publish(ctx, func(context.Context) (stateport.AuthoritySnapshot, error) { return snapshot, nil })
+		unsynced, publishErr := s.c.People.Publication.Publish(ctx, g.Repository, func(context.Context) (stateport.AuthoritySnapshot, error) { return snapshot, nil })
+		outcome := grantOutcome{incomplete: publishErr != nil, unsynced: unsynced != nil}
 		if g.Revoke && g.Kind == stateport.GrantStorePath {
 			if err := s.deleteSecret(ctx, c.Actor, g); err != nil {
-				return publishErr != nil, err
+				return outcome, err
 			}
 		}
-		return publishErr != nil, nil
+		return outcome, nil
 	}
-	err := s.c.People.Publication.Publish(ctx, func(ctx context.Context) (stateport.AuthoritySnapshot, error) {
+	unsynced, err := s.c.People.Publication.Publish(ctx, g.Repository, func(ctx context.Context) (stateport.AuthoritySnapshot, error) {
 		return s.c.People.Grants.ChangeGrant(ctx, s.peopleAction(c.Actor, "authority.changed", reason, g.Repository), g)
 	})
-	return false, err
+	return grantOutcome{unsynced: unsynced != nil}, err
 }
 func (s *Service) prepareAccess(ctx context.Context, c apicontract.Caller, q apicontract.AccessAllowArgs, revoke bool) (apicontract.Call[apicontract.Grant], error) {
 	action := "access_allow"
@@ -95,15 +115,15 @@ func (s *Service) prepareAccess(ctx context.Context, c apicontract.Caller, q api
 			}
 			defer release()
 		}
-		incomplete, err := s.changeGrant(ctx, c, g, q.Reason)
+		outcome, err := s.changeGrant(ctx, c, g, q.Reason)
 		status := "approved"
 		if revoke {
 			status = "revoked"
 		}
-		if incomplete {
+		if outcome.incomplete {
 			status = reasonAuthorityIncomplete
 		}
-		return apicontract.Grant{ID: grantID(g), Repo: g.Repository, File: g.File, Step: g.Step, Path: g.Path, Status: status}, err
+		return apicontract.Grant{ID: grantID(g), Repo: g.Repository, File: g.File, Step: g.Step, Path: g.Path, Status: status, Warning: outcome.warning(g.Repository)}, err
 	}), nil
 }
 func grantID(g stateport.GrantChange) string {
@@ -120,11 +140,7 @@ func (s *Service) PrepareAccessRevoke(ctx context.Context, c apicontract.Caller,
 	}
 	return func(ctx context.Context) (apicontract.Receipt, error) {
 		g, err := call(ctx)
-		v := apicontract.Receipt{ID: g.ID, State: g.Status}
-		if g.Status == reasonAuthorityIncomplete {
-			v.Warning = warningAuthorityIncomplete
-		}
-		return v, err
+		return apicontract.Receipt{ID: g.ID, State: g.Status, Warning: g.Warning}, err
 	}, nil
 }
 func (s *Service) PrepareAccessDismiss(ctx context.Context, c apicontract.Caller, q apicontract.AccessDismissArgs) (apicontract.Call[apicontract.Receipt], error) {
@@ -143,15 +159,11 @@ func (s *Service) PrepareAccessDismiss(ctx context.Context, c apicontract.Caller
 	g.Dismiss = true
 	c.Actor = a
 	return bounded(func(ctx context.Context) (apicontract.Receipt, error) {
-		incomplete, err := s.changeGrant(ctx, c, g, q.Reason)
+		outcome, err := s.changeGrant(ctx, c, g, q.Reason)
 		if err != nil {
 			return apicontract.Receipt{}, err
 		}
-		v := apicontract.Receipt{ID: grantID(g), State: "dismissed"}
-		if incomplete {
-			v.Warning = warningAuthorityIncomplete
-		}
-		return v, nil
+		return apicontract.Receipt{ID: grantID(g), State: "dismissed", Warning: outcome.warning(g.Repository)}, nil
 	}), nil
 }
 func (s *Service) grantPage(ctx context.Context, c apicontract.Caller, q apicontract.AccessListArgs, action string) (apicontract.Call[apicontract.GrantPage], error) {

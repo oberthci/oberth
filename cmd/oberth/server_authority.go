@@ -56,6 +56,6 @@ func (o *serverOwners) account(ctx context.Context, name string) error {
 
 type authorityPublication struct{ owner *serverOwners }
 
-func (p authorityPublication) Publish(ctx context.Context, apply func(context.Context) (stateport.AuthoritySnapshot, error)) error {
-	return p.owner.c.schedules.AuthorityChanged(ctx, func(ctx context.Context) error { _, err := apply(ctx); return err })
+func (p authorityPublication) Publish(ctx context.Context, repository string, apply func(context.Context) (stateport.AuthoritySnapshot, error)) (unsynced, err error) {
+	return p.owner.c.schedules.AuthorityChanged(ctx, repository, func(ctx context.Context) error { _, err := apply(ctx); return err })
 }

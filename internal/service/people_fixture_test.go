@@ -68,20 +68,27 @@ func (p *adminStoreAdapter) RecordAdministration(ctx context.Context, a statepor
 	return p.Store.RecordAdministration(ctx, a, v)
 }
 
+// testAuthorityPublication applies the change; Unsynced is the schedule
+// reconciliation failure it reports after a successful publication, and
+// Repositories records the repository each publication named.
 type testAuthorityPublication struct {
-	Fence    func(context.Context, func(context.Context) (stateport.AuthoritySnapshot, error)) error
-	Snapshot stateport.AuthoritySnapshot
+	Fence        func(context.Context, func(context.Context) (stateport.AuthoritySnapshot, error)) error
+	Snapshot     stateport.AuthoritySnapshot
+	Unsynced     error
+	Repositories []string
 }
 
-func (p *testAuthorityPublication) Publish(ctx context.Context, apply func(context.Context) (stateport.AuthoritySnapshot, error)) error {
+func (p *testAuthorityPublication) Publish(ctx context.Context, repository string, apply func(context.Context) (stateport.AuthoritySnapshot, error)) (unsynced, err error) {
+	p.Repositories = append(p.Repositories, repository)
 	if p.Fence != nil {
-		return p.Fence(ctx, apply)
+		return nil, p.Fence(ctx, apply)
 	}
 	v, e := apply(ctx)
-	if e == nil {
-		p.Snapshot = v.Clone()
+	if e != nil {
+		return nil, e
 	}
-	return e
+	p.Snapshot = v.Clone()
+	return p.Unsynced, nil
 }
 
 type testClusterPolicy struct {

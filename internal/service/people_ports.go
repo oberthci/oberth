@@ -40,10 +40,12 @@ type Issuer interface {
 	Issue(string, []byte, time.Duration) ([]byte, *x509.Certificate, error)
 }
 
-// AuthorityPublication owns C10's wide barrier. Apply must run exactly once under
-// that barrier and publish the returned effective snapshot before releasing it.
+// AuthorityPublication owns C10's barrier for the named repository. Apply must
+// run exactly once under that barrier and publish the returned effective
+// snapshot before releasing it. err means the change was not published;
+// unsynced means it was, but that repository's schedules were not re-admitted.
 type AuthorityPublication interface {
-	Publish(context.Context, func(context.Context) (stateport.AuthoritySnapshot, error)) error
+	Publish(ctx context.Context, repository string, apply func(context.Context) (stateport.AuthoritySnapshot, error)) (unsynced, err error)
 }
 type GrantStore interface {
 	ChangeGrant(context.Context, stateport.Action, stateport.GrantChange) (stateport.AuthoritySnapshot, error)
