@@ -57,7 +57,8 @@ func buildScript(t *testing.T, dir string, values map[string]string) ([]byte, er
 	defer cancel()
 	command := exec.CommandContext(ctx, "bash", "hack/release-bytes.sh", "reproduce")
 	command.Dir = dir
-	command.Env = append(os.Environ(), "PATH="+filepath.Join(dir, "bin")+":"+os.Getenv("PATH"), "VERSION=v1.2.3", "GOTMPDIR="+filepath.Join(dir, "scratch"), "BUILD_LOG="+filepath.Join(dir, "build.log"), "RELEASE_CACHE_A="+filepath.Join(dir, "cache-first"), "RELEASE_CACHE_B="+filepath.Join(dir, "cache-second"))
+	command.Env = scriptEnv("PATH="+filepath.Join(dir, "bin")+":"+os.Getenv("PATH"), "VERSION=v1.2.3", "GOTMPDIR="+filepath.Join(dir, "scratch"), "BUILD_LOG="+filepath.Join(dir, "build.log"),
+		"RELEASE_DIR="+filepath.Join(dir, "dist"), "RELEASE_BASE="+filepath.Join(dir, "base-image"), "RELEASE_CACHE_A="+filepath.Join(dir, "cache-first"), "RELEASE_CACHE_B="+filepath.Join(dir, "cache-second"))
 	for key, value := range values {
 		command.Env = append(command.Env, key+"="+value)
 	}

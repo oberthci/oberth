@@ -18,7 +18,7 @@ func releaseScript(t *testing.T, operation string, values map[string]string) ([]
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "bash", "../../hack/release.sh", operation)
-	command.Env = os.Environ()
+	command.Env = scriptEnv()
 	for key, value := range values {
 		command.Env = append(command.Env, key+"="+value)
 	}
@@ -31,7 +31,7 @@ func releaseEnvironment(t *testing.T) map[string]string {
 	if err := os.WriteFile(token, []byte("fixture"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return map[string]string{"VERSION": "v1.2.3", "RELEASE_ORIGIN": releaseverify.Origin, "RELEASE_EXCHANGE_URL": "https://identity.example.test", "RELEASE_TOKEN_FILE": token, "RELEASE_PRIVATE": filepath.Join(dir, "private"), "RELEASE_SHARED": filepath.Join(dir, "shared"), "RELEASE_VERIFY_DIR": filepath.Join(dir, "verify"), "RELEASE_AUDIENCE": "publish"}
+	return map[string]string{"VERSION": "v1.2.3", "RELEASE_ORIGIN": releaseverify.Origin, "RELEASE_EXCHANGE_URL": "https://identity.example.test", "RELEASE_TOKEN_FILE": token, "RELEASE_PRIVATE": filepath.Join(dir, "private"), "RELEASE_SHARED": filepath.Join(dir, "shared"), "RELEASE_VERIFY_DIR": filepath.Join(dir, "verify"), "RELEASE_AUDIENCE": "publish", "RELEASE_DIR": filepath.Join(dir, "dist"), "RELEASE_TOOL": filepath.Join(dir, "oberth-release")}
 }
 func TestReleaseScriptRefusals(t *testing.T) {
 	for _, tc := range []struct{ name, key, value, reason string }{

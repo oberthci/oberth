@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -13,7 +12,7 @@ func TestSigningClosesCallerInputAndOverridesAmbientPassword(t *testing.T) {
 	env["COSIGN_PASSWORD"] = "ambient-password"
 	command := exec.CommandContext(t.Context(), "bash", "../../hack/release.sh", "sign")
 	command.Stdin = strings.NewReader("caller input must not reach signing\n")
-	command.Env = os.Environ()
+	command.Env = scriptEnv()
 	for key, value := range env {
 		command.Env = append(command.Env, key+"="+value)
 	}
@@ -25,7 +24,7 @@ func TestSigningClosesCallerInputAndOverridesAmbientPassword(t *testing.T) {
 func TestSignerStandInRefusesUnsetPasswordWithDeviceInput(t *testing.T) {
 	env := signingEnvironment(t)
 	command := exec.CommandContext(t.Context(), env["SIGNER"], "sign-blob", "--key", env["EXPECTED_KEY"], "--bundle", filepath.Join(env["RELEASE_DIR"], "bundle"))
-	for _, value := range os.Environ() {
+	for _, value := range scriptEnv() {
 		if !strings.HasPrefix(value, "COSIGN_PASSWORD=") {
 			command.Env = append(command.Env, value)
 		}

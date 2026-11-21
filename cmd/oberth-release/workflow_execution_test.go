@@ -71,7 +71,7 @@ func executeWorkflowTemplate(t *testing.T, wf *wfv1.Workflow, template *wfv1.Tem
 	if err != nil {
 		t.Fatal(err)
 	}
-	command.Env = append(os.Environ(), "PATH="+filepath.Join(dir, "bin")+":"+os.Getenv("PATH"), "BASE_TEST_BINARY="+binary)
+	command.Env = scriptEnv("PATH="+filepath.Join(dir, "bin")+":"+os.Getenv("PATH"), "BASE_TEST_BINARY="+binary)
 	for _, base := range []*wfv1.Template{wf.Spec.TemplateDefaults, template} {
 		for _, env := range base.Container.Env {
 			if env.Value != "" {
