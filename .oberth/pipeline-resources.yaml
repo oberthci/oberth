@@ -1,0 +1,75 @@
+# Replace every REPLACE_WITH_* value before applying this file.
+# Use the installation's pipeline namespace and writable cache storage.
+# Import the reviewed guest disk into its prepared volume separately; this file
+# binds that existing volume and does not create or populate a guest disk.
+# The single build workflow needs the VM API and this repository capability,
+# including for push CI. Replace <repo> and the executor account, then run as admin:
+# oberth workflow capability grant --repo '<repo>' --capability '{
+#   "namespace": "oberth-walk",
+#   "service_account": "REPLACE_WITH_VM_EXECUTOR_ACCOUNT",
+#   "resource_kinds": [{
+#     "api_version": "kubevirt.io/v1", "kind": "VirtualMachineInstance",
+#     "actions": ["create", "delete"]
+#   }]
+# }'
+# Verify with: oberth workflow capability get '<repo>'
+# Before the first push, store and grant the private names policy as admin:
+# oberth secret put --repo '<repo>' --file .oberth/build.yaml --step lint-and-guards-pass \
+#   oberth/policy/names < <private-names-file>
+# The policy is a delivered secret file, never a plain object in this manifest.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: build-cache
+  namespace: REPLACE_WITH_PIPELINE_NAMESPACE
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: REPLACE_WITH_CACHE_STORAGE_CLASS
+  resources:
+    requests: {storage: REPLACE_WITH_CACHE_SIZE}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: release-cache
+  namespace: REPLACE_WITH_PIPELINE_NAMESPACE
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: REPLACE_WITH_CACHE_STORAGE_CLASS
+  resources:
+    requests: {storage: REPLACE_WITH_CACHE_SIZE}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oberth-sync-limits
+  namespace: REPLACE_WITH_PIPELINE_NAMESPACE
+data:
+  go: REPLACE_WITH_GO_PARALLELISM
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: release-config
+  namespace: REPLACE_WITH_PIPELINE_NAMESPACE
+data:
+  origin: REPLACE_WITH_HTTPS_RELEASE_ORIGIN
+  publishExchange: REPLACE_WITH_HTTPS_PUBLISH_EXCHANGE
+  finalizeExchange: REPLACE_WITH_HTTPS_FINALIZE_EXCHANGE
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oberth-walk
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: oberth-walk-vm
+  namespace: oberth-walk
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: ''
+  volumeName: REPLACE_WITH_PREPARED_WALK_VOLUME
+  resources:
+    requests: {storage: REPLACE_WITH_WALK_SIZE}

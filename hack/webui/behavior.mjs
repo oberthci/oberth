@@ -1,0 +1,269 @@
+import {check,pause,deadline} from './cdp.mjs';
+
+async function burst(client){
+ await client.loaded('/runs','.runs a.row');await pause(20);
+ const result=await client.evaluate(`(async()=>{
+  const original=fetch,view=screen,calls=[],reads=[],timers=[];
+  let head=0,pending,active=0,maximum=0,rearmedDuringRead=false;
+  const reply=request=>{const after=request.params.arguments.after_id||0,next=Math.min(head,after+(request.params.arguments.limit||100));return new Response(JSON.stringify({result:{isError:false,structuredContent:{events:Array.from({length:next-after},(_,i)=>({id:after+i+1})),next_after_id:next,has_more:next<head}}}));};
+  window.fetch=(path,options)=>{
+   const request=path==='/mcp'?JSON.parse(options.body):null;
+   calls.push({path,at:performance.now()});
+   if(!request||request.params.name!=='events_wait'){if(path.startsWith('/api/runs?'))reads.push(performance.now());return original(path,options);}
+   rearmedDuringRead ||= Boolean(view.reading);active++;maximum=Math.max(maximum,active);
+   return new Promise((resolve,reject)=>{
+    const abort=()=>{active--;reject(new DOMException('Aborted','AbortError'));};
+    const finish=()=>{options.signal.removeEventListener('abort',abort);active--;pending=null;resolve(reply(request));};
+    options.signal.addEventListener('abort',abort,{once:true});
+    if(head>(request.params.arguments.after_id||0))finish();else pending=finish;
+   });
+  };
+  try{
+   view.cursor=0;view.waiting.abort();
+   for(let i=0;i<200;i++)timers.push(setTimeout(()=>{head=i+1;pending?.();},i*5));
+   await new Promise(resolve=>setTimeout(resolve,3300));
+   return {events:head,cursor:view.cursor,requests:calls.length,reads:reads.length,spacings:reads.slice(1).map((at,i)=>at-reads[i]),maximum,rearmedDuringRead};
+  }finally{timers.forEach(clearTimeout);view.controller.abort();window.fetch=original;}
+ })()`);
+ check(result.events===200&&result.cursor===200,'burst did not consume all 200 events');
+ check(result.requests<=6,'burst exceeded six requests '+JSON.stringify(result));
+ check(result.maximum===1&&!result.rearmedDuringRead,'wait rearmed before its read finished');
+ check(result.spacings.every(value=>value>=999.5),'view reads are less than one second apart');
+ return result;
+}
+
+async function hidden(client){
+ await client.loaded('/runs','.runs a.row');await pause(20);
+ const hidden=await client.evaluate(`(()=>{
+  const view=screen;window.uiHidden={reads:0,waits:0,aborts:0,original:fetch};
+  window.fetch=(path,options)=>{if(path.startsWith('/api/runs?'))uiHidden.reads++;if(path==='/mcp'&&JSON.parse(options.body).params.name==='events_wait')uiHidden.waits++;return uiHidden.original(path,options);};
+  view.waiting.signal.addEventListener('abort',()=>uiHidden.aborts++);
+  Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));
+  return {aborted:view.waiting.signal.aborted};
+ })()`);
+ await pause(250);
+ const quiet=await client.evaluate(`({reads:uiHidden.reads,waits:uiHidden.waits,aborts:uiHidden.aborts})`);
+ check(hidden.aborted&&quiet.aborts===1,'hidden tab did not abort its wait');
+ check(quiet.reads===0&&quiet.waits===0,'hidden tab sent requests');
+ await client.evaluate(`Object.defineProperty(document,'hidden',{configurable:true,get:()=>false});document.dispatchEvent(new Event('visibilitychange'))`);
+ await pause(1100);
+ const visible=await client.evaluate(`(()=>{const result={reads:uiHidden.reads,waits:uiHidden.waits};screen.controller.abort();window.fetch=uiHidden.original;delete document.hidden;return result;})()`);
+ check(visible.reads===1&&visible.waits===1,'visible tab did not resume with one read and wait');
+ return {quiet,visible};
+}
+
+async function idleAndRecovery(client){
+ await client.loaded('/runs','.runs a.row');await pause(20);
+ const idle=await client.evaluate(`(async()=>{
+  const original=fetch,view=screen;let waits=0,reads=0;
+  window.fetch=async(path,options)=>{
+   if(path.startsWith('/api/runs?'))reads++;
+   if(path!=='/mcp'||JSON.parse(options.body).params.name!=='events_wait')return original(path,options);
+   waits++;
+   if(waits<=3){await new Promise(resolve=>setTimeout(resolve,200));return new Response(JSON.stringify({result:{isError:false,structuredContent:{events:[],next_after_id:17,timed_out:true}}}));}
+   return new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));
+  };
+  try{view.waiting.abort();await new Promise(resolve=>setTimeout(resolve,1400));return {reads,waits,cursor:view.cursor};}
+  finally{view.controller.abort();window.fetch=original;}
+ })()`);
+ check(idle.reads===0&&idle.waits===4&&idle.cursor===17,'empty timeouts triggered a read or lost the cursor');
+ await client.loaded('/runs','.runs a.row');await pause(20);
+ await client.evaluate(`(()=>{
+  const original=fetch,view=screen;window.uiRecovery={original,waits:0};
+  window.fetch=async(path,options)=>{
+   if(path.startsWith('/api/runs?'))return new Response(JSON.stringify({reason:'Read unavailable.',remedy:'Retry the read.'}),{status:503});
+   if(path!=='/mcp')return original(path,options);
+   uiRecovery.waits++;
+   if(uiRecovery.waits===1)return new Response(JSON.stringify({reason:'Live unavailable.',remedy:'Retry the wait.'}),{status:503,headers:{'Retry-After':'1'}});
+   if(uiRecovery.waits===2)return new Response(JSON.stringify({result:{isError:false,structuredContent:{events:[],next_after_id:18}}}));
+   return new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));
+  };
+  view.waiting.abort();
+ })()`);
+ await pause(100);
+ check((await client.evaluate(`notice.textContent`)).includes('Live updates stopped.'),'live failure was not shown');
+ await pause(1200);
+ const recovered=await client.evaluate(`(()=>{const result={notice:notice.textContent,waits:uiRecovery.waits};screen.controller.abort();window.fetch=uiRecovery.original;return result;})()`);
+ check(recovered.waits===3&&recovered.notice==='','recovered observation retained a stale error');
+ return {idle,recovered};
+}
+
+async function actions(client,label,path,tool){
+ await client.loaded(path,'.steps a.row');await pause(20);
+ await client.evaluate(`(()=>{
+  const original=fetch,confirm=window.confirm;window.uiAction={original,confirm,calls:0,waiting:0,label:${JSON.stringify(label)}};
+  window.confirm=()=>true;const read=screen.read;screen.read=async()=>{await read();await new Promise(resolve=>uiAction.finishRead=resolve);};
+  window.fetch=(path,options)=>{
+   if(path==='/mcp'&&JSON.parse(options.body).params.name===${JSON.stringify(tool)})uiAction.calls++;
+   if(path.startsWith('/api/runs/')&&path.includes('view=dashboard')&&uiAction.calls){uiAction.waiting++;return new Promise(resolve=>uiAction.release=()=>resolve(original(path,options)));}
+   return original(path,options);
+  };
+  uiAction.button=Array.from(document.querySelectorAll('main button')).find(node=>node.textContent===uiAction.label);uiAction.button.click();
+ })()`);
+ await pause(250);
+ const second=await client.evaluate(`(()=>{const disabled=uiAction.button.disabled;Array.from(document.querySelectorAll('main button')).find(node=>node.textContent===uiAction.label).click();return {disabled,calls:uiAction.calls};})()`);
+ check(second.disabled&&second.calls===1,tool+' is not double-click safe at 250 ms');
+ await pause(1000);
+ const blocked=await client.evaluate(`({waiting:uiAction.waiting,disabled:Array.from(document.querySelectorAll('main button')).find(node=>node.textContent===uiAction.label).disabled})`);
+ check(blocked.waiting===1&&blocked.disabled,tool+' enabled before its reread completed');
+ await client.evaluate(`uiAction.release()`);await pause(150);
+ const rebuilt=await client.evaluate(`(()=>{const button=Array.from(document.querySelectorAll('main button')).find(node=>node.textContent===uiAction.label);button.click();return {different:button!==uiAction.button,disabled:button.disabled,reading:Boolean(screen.reading),calls:uiAction.calls,atEnd:Boolean(uiAction.finishRead)};})()`);
+ check(rebuilt.atEnd&&rebuilt.different&&rebuilt.reading&&rebuilt.disabled&&rebuilt.calls===1,tool+' rebuilt an enabled button before its reread finished');
+ await client.evaluate(`uiAction.finishRead()`);await pause(150);
+ const refreshed=await client.evaluate(`(()=>{const result={calls:uiAction.calls,oldDisabled:uiAction.button.disabled,newDisabled:Array.from(document.querySelectorAll('main button')).find(node=>node.textContent===uiAction.label).disabled};window.fetch=uiAction.original;window.confirm=uiAction.confirm;return result;})()`);
+ check(refreshed.calls===1&&refreshed.oldDisabled&&!refreshed.newDisabled,tool+' did not release only the fresh toolbar');
+ return {second,blocked,rebuilt,refreshed};
+}
+
+async function offline(client){
+ await client.loaded('/runs','.runs a.row');await pause(20);
+ const result=await client.evaluate(`(async()=>{
+  const original=fetch,view=screen;let maximum=0,reads=0,waits=0;
+  const count=()=>{maximum=Math.max(maximum,notice.textContent.split(copy.network[0]).length-1);};
+  const observer=new MutationObserver(count);observer.observe(notice,{subtree:true,childList:true});
+  window.fetch=async path=>{if(path==='/mcp')waits++;else reads++;throw Object.assign(new TypeError('offline'),{retry:25});};
+  try{view.lastRead=-Infinity;view.waiting.abort();await new Promise(resolve=>setTimeout(resolve,1150));count();return {maximum,reads,waits,notice:notice.textContent};}
+  finally{view.controller.abort();window.fetch=original;observer.disconnect();}
+ })()`);
+ check(result.reads>=2&&result.waits>=2,'offline check missed the read/wait retry cycle '+JSON.stringify(result));
+ check(result.maximum===1&&result.notice.split('Oberth is not reachable.').length===2,'offline notice appeared more than once');
+ return result;
+}
+
+async function confirmationAndFetch(client){
+ await client.loaded('/runs/33333333','.steps a.row');await pause(20);
+ const result=await client.evaluate(`(async()=>{
+  const original=fetch,confirmOriginal=confirm;let calls=0,confirmations=0;
+  const options=uiFetches.filter(item=>item.path.startsWith('/api/')||item.path==='/mcp');
+  window.fetch=(path,opts)=>{if(path==='/mcp'&&JSON.parse(opts.body).params.name==='run_cancel')calls++;return original(path,opts);};
+  window.confirm=()=>{confirmations++;return false;};
+  try{Array.from(document.querySelectorAll('main button')).find(node=>node.textContent==='Cancel').click();await new Promise(resolve=>setTimeout(resolve,100));return {calls,confirmations,options};}
+  finally{window.fetch=original;window.confirm=confirmOriginal;}
+ })()`);
+ check(result.confirmations===1&&result.calls===0,'cancel bypassed its declined confirmation');
+ check(result.options.length>=3&&result.options.every(item=>item.credentials==='same-origin'&&item.redirect==='error'&&item.authorization),'fetch credentials or redirect settings changed');
+ return result;
+}
+
+async function refusedRerun(client){
+ await client.loaded('/runs/77777777','.steps a.row');await pause(20);
+ const findings='refs/heads/topic .oberth/build.yaml spec.templates["build"].container.image: <script>window.uiInjected=1</script> image is outside the allowed registries.\n  fix: Use an image under an allowed prefix.';
+ const result=await client.evaluate(`(async()=>{
+  const original=fetch;
+  window.fetch=(path,options)=>{
+   if(path==='/mcp'&&JSON.parse(options.body).params.name==='run_rerun'){
+    const refusal={code:'invalid_input',reason:'pipeline admission failed',remedy:'Fix every reported finding, then push again.',context:[${JSON.stringify(findings)}]};
+    return Promise.resolve(new Response(JSON.stringify({jsonrpc:'2.0',id:1,result:{isError:true,content:[{type:'text',text:JSON.stringify(refusal)}]}}),{headers:{'Content-Type':'application/json'}}));
+   }
+   return original(path,options);
+  };
+  try{
+   Array.from(document.querySelectorAll('main button')).find(node=>node.textContent==='Rerun').click();
+   await new Promise(resolve=>setTimeout(resolve,150));
+   return {text:notice.textContent,listed:Array.from(notice.querySelectorAll('pre')).map(node=>node.textContent),scripts:notice.querySelectorAll('script').length,injected:window.uiInjected===1};
+  }finally{window.fetch=original;}
+ })()`);
+ check(result.text.includes('pipeline admission failed')&&result.listed.length===1&&result.listed[0]===findings,'refused rerun hid its findings '+JSON.stringify(result));
+ check(result.scripts===0&&!result.injected,'refused rerun findings were interpreted as markup');
+ return result;
+}
+
+async function logAppend(client){
+ const result=await client.evaluate(`(()=>{
+  const regions={output:h('pre'),status:h('div')};resetLog(regions,'x'.repeat(1048576));
+  const original=TextEncoder.prototype.encode;let largest=0,encoded=0;
+  TextEncoder.prototype.encode=function(text){const bytes=original.call(this,text);largest=Math.max(largest,bytes.length);encoded+=bytes.length;return bytes;};
+  try{for(let i=0;i<128;i++)appendLive(regions,'y');}
+  finally{TextEncoder.prototype.encode=original;}
+  return {largest,encoded,bytes:original.call(new TextEncoder(),regions.output.textContent).length,nodes:regions.output.childNodes.length,ends:regions.output.textContent.endsWith('y'.repeat(128))};
+ })()`);
+ check(result.bytes===1048576&&result.ends,'live tail is not complete at its byte bound');
+ check(result.largest<=4096&&result.encoded<=4096*128+128&&result.nodes<=260,'live append reprocessed the retained buffer');
+ return result;
+}
+
+async function signout(client){
+ await client.loaded('/runs','.runs a.row');
+ await deadline('load after sign-out',async()=>{const ready=client.nextEvent('Page.loadEventFired');await client.evaluate(`document.querySelector('#signout').click()`);await ready;});await pause(100);
+ const result=await client.evaluate(`({hasToken:localStorage.getItem('oberth.token')!==null,form:!signin.hidden,mainHidden:main.hidden,notice:notice.textContent})`);
+ check(!result.hasToken,'sign-out retained the bearer token');
+ check(result.form&&result.mainHidden&&result.notice==='', 'first visit did not show a quiet sign-in form');
+ await client.evaluate(`localStorage.setItem('oberth.token','invalid');route()`);
+ await pause(100);
+ check((await client.evaluate(`notice.textContent`)).includes('credentials'), 'invalid credentials did not show their refusal');
+ await client.evaluate(`localStorage.setItem('oberth.token',${JSON.stringify(client.token)})`);
+ return result;
+}
+
+async function inspectHolds(client){
+ await client.loaded('/runs/33333333','.steps a.row');
+ const known=await client.evaluate(`document.querySelector('main').textContent`);
+ check(known.includes('held since ')&&known.includes('about 600s left')&&known.includes('Release'),'live hold timing missing');
+ check(!known.includes('Continue'),'removed continue action visible');
+ await client.loaded('/runs/22222222','.steps a.row');
+ const unknown=await client.evaluate(`document.querySelector('main').textContent`);
+ check(unknown.includes('availability unknown')&&unknown.includes('Release'),'reachable hold hidden by native failure');
+ check(!unknown.includes('about 600s left')&&!unknown.includes('held since '),'unknown availability guessed timing');
+ const failed=await client.evaluate(`(async()=>{
+ const original=fetch;
+ window.fetch=(path,options)=>path==='/mcp'&&JSON.parse(options.body).params.name==='run_hold_list'?Promise.reject(new Error('native unavailable')):original(path,options);
+ try { await screen.read();return {text:main.textContent,steps:document.querySelectorAll('.steps a.row').length}; }
+ finally { window.fetch=original; }
+ })()`);
+ check(failed.text.includes('hold availability unknown')&&failed.steps>0,'hold failure hid the run page');
+ return {known:true,unknown:true,failedList:true};
+}
+
+async function nativeIssues(client){
+ const results=[];
+ for(const [id,summary] of [[45,'manual · 1 occurrence'],[46,'manual · 2 occurrences']]){
+  await client.loaded('/issues/'+id,'main h2');
+  const result=await client.evaluate(`(()=>{
+   const region=document.querySelector('main > .issues');
+   return {summary:Array.from(region.querySelectorAll('p')).find(node=>node.textContent.startsWith('manual · '))?.textContent,
+    body:region.querySelector('pre').textContent,imported:Boolean(region.querySelector('.imported-source')),
+    strayNull:Array.from(region.childNodes).some(node=>node.nodeType===Node.TEXT_NODE&&node.textContent==='null')};
+  })()`);
+  check(result.summary===summary,'native issue occurrence count is not grammatical');
+  check(!result.imported&&!result.strayNull,'native issue acquired imported-source or null text');
+  check(result.body==='null','authored null text was hidden');
+  results.push(result);
+ }
+ return results;
+}
+
+async function importedIssue(client){
+ await client.loaded('/issues/42','.imported-source ol li');
+ const result=await client.evaluate(`(()=>{
+  const source=document.querySelector('.imported-source');
+  return {text:source.textContent,entries:Array.from(source.querySelectorAll('ol li')).map(node=>node.textContent),injected:source.querySelectorAll('script').length};
+ })()`);
+ check(result.text.includes('Imported source')&&result.text.includes('Opened by source author')&&result.text.includes('Original closer: source closer'),'source attribution missing');
+ check(result.text.includes('2026-11-16T14:00:00Z')&&result.text.includes('2026-11-16T13:00:00Z'),'source timestamps missing');
+ check(result.entries.length===2&&result.entries[0].includes('first source editor')&&result.entries[0].includes('First continued text <script>plain source</script>')&&result.entries[1].includes('second source editor')&&result.entries[1].includes('Second source entry'),'source history order or text changed');
+ check(result.injected===0,'source history was interpreted as markup');
+ await client.loaded('/issues/43','.imported-source');
+ const open=await client.evaluate(`document.querySelector('.imported-source').textContent`);
+ check(open.includes('Opened by source author')&&!open.includes('Original closer:'),'never-closed source acquired a closer');
+ await client.loaded('/issues/44','.imported-source');
+ const unknown=await client.evaluate(`document.querySelector('.imported-source').textContent`);
+ check(unknown.includes('Original closer: unknown'),'closed source lost its unknown-closer attribution');
+ return {...result,open,unknown};
+}
+
+export async function behavior(client){
+ const result={burst:await burst(client),visibility:await hidden(client),observation:await idleAndRecovery(client)};
+ result.importedIssue=await importedIssue(client);
+ result.nativeIssues=await nativeIssues(client);
+ result.offline=await offline(client);
+ result.promote=await actions(client,'Promote','/runs/77777777','promote');
+ result.release=await actions(client,'Release','/runs/33333333','run_hold_abandon');
+ result.holds=await inspectHolds(client);
+
+ result.confirmation=await confirmationAndFetch(client);
+ result.refusedRerun=await refusedRerun(client);
+ result.logs=await logAppend(client);
+ result.signout=await signout(client);
+ client.checkFatal();
+ return result;
+}

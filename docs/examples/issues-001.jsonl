@@ -1,0 +1,2 @@
+{"count":1}
+{"id":17,"upstream":"team","title":"Task","body":"Original task text.","state":"closed","created_at":"2021-01-02T03:04:05Z","updated_at":"2021-01-04T03:04:05Z","closed_at":"2021-01-04T03:04:05Z","author":"Original author","closer":"Original closer","history":[{"kind":"comment","at":"2021-01-03T03:04:05Z","author":"Original commenter","text":"Checked the fix."},{"kind":"state","at":"2021-01-04T03:04:05Z","author":"Original closer","state":"closed"}],"kind":"manual","work_status":"todo","occurrences":1}

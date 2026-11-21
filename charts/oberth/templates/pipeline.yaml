@@ -1,0 +1,48 @@
+{{- if .Values.pipeline.createNamespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.pipeline.namespace }}
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+{{- end }}
+{{- if .Values.policies.egress }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oberth-egress
+  namespace: {{ .Values.pipeline.namespace }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+      ports:
+        - {protocol: TCP, port: 8445}
+        - {protocol: TCP, port: 8200}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
+            matchLabels: {app: oberth}
+      ports:
+        - {protocol: TCP, port: 2222}
+    - to: [{podSelector: {}}]
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [169.254.0.0/16]
+        - ipBlock:
+            cidr: '::/0'
+            except: ['fe80::/10']
+{{- end }}

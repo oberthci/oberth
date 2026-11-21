@@ -1,0 +1,92 @@
+{
+  "kind": "CronWorkflow",
+  "apiVersion": "argoproj.io/v1alpha1",
+  "metadata": {
+    "name": "oberth-cron-7-2a3b62b53ddb9f167b63d222",
+    "namespace": "ci",
+    "uid": "parent-1",
+    "resourceVersion": "1",
+    "creationTimestamp": "2026-11-16T00:00:00Z",
+    "labels": {
+      "app.kubernetes.io/managed-by": "oberth",
+      "workflows.argoproj.io/controller-instanceid": "frontdoor"
+    }
+  },
+  "spec": {
+    "workflowSpec": {
+      "templates": [
+        {
+          "name": "main",
+          "inputs": {},
+          "outputs": {},
+          "metadata": {},
+          "container": {
+            "name": "",
+            "image": "image@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "command": [
+              "true"
+            ],
+            "resources": {}
+          }
+        }
+      ],
+      "entrypoint": "main",
+      "arguments": {
+        "parameters": [
+          {
+            "name": "oberth-schedule",
+            "value": "nightly"
+          },
+          {
+            "name": "oberth-trigger",
+            "value": "schedule"
+          },
+          {
+            "name": "oberth-ref",
+            "value": "refs/heads/main"
+          },
+          {
+            "name": "oberth-sha",
+            "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "workflowMetadata": {
+        "labelsFrom": {
+          "oberth.ci/run": {
+            "expression": "workflow.name"
+          }
+        }
+      }
+    },
+    "startingDeadlineSeconds": 86400,
+    "successfulJobsHistoryLimit": 2147483647,
+    "failedJobsHistoryLimit": 2147483647,
+    "timezone": "UTC",
+    "workflowMetadata": {
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "7",
+        "oberth.ci/sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "oberth.ci/tier": "ci",
+        "oberth.ci/trigger": "ci",
+        "workflows.argoproj.io/controller-instanceid": "frontdoor"
+      },
+      "annotations": {
+        "oberth.ci/admission": "913028ab4d36c80b573a3ec142e7b1a0d75976defc9c414b803f4112e52f04f5",
+        "oberth.ci/ref": "refs/heads/main"
+      }
+    },
+    "schedules": [
+      "0 3 * * *"
+    ]
+  },
+  "status": {
+    "active": null,
+    "lastScheduledTime": null,
+    "conditions": null,
+    "succeeded": 0,
+    "failed": 0,
+    "phase": ""
+  }
+}

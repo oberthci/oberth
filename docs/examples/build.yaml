@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: build-
+spec:
+  entrypoint: source-archive-written
+  activeDeadlineSeconds: 600
+  templates:
+    - name: source-archive-written
+      inputs:
+        artifacts:
+          - name: source
+            path: /work/src
+            mode: 0755
+            plugin:
+              name: oberth
+              key: '{{workflow.parameters.oberth-source}}'
+              configuration: '{"version":1,"kind":"main"}'
+      volumes:
+        - name: output
+          emptyDir: {}
+      container:
+        image: example.test/team/build:1
+        workingDir: /work/src
+        command: [sh, -eu, -c]
+        args:
+          - |
+            printf 'trigger %s\n' "$TRIGGER"
+            git -c safe.directory=/work/src rev-parse HEAD
+            tar -cf /work/output/source.tar --exclude=.git .
+        env:
+          - name: TRIGGER
+            value: '{{workflow.parameters.oberth-trigger}}'
+        volumeMounts:
+          - name: output
+            mountPath: /work/output

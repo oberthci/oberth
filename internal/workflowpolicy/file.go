@@ -1,0 +1,77 @@
+package workflowpolicy
+
+import (
+	"path"
+	"strings"
+)
+
+const (
+	BuildFile    = ".oberth/build.yaml"
+	ReleaseFile  = ".oberth/release.yaml"
+	MaxFileBytes = 1024
+)
+
+// InvalidError names the policy field that cannot establish an exact selection.
+type InvalidError struct {
+	Path   string
+	reason string
+	detail string
+}
+
+func (e *InvalidError) Error() string {
+	return e.Path + ": " + e.Reason() + ". " + e.Remedy() + " " + e.detail
+}
+
+func (e *InvalidError) Reason() string {
+	if e.reason == "" {
+		return "policy selection is incomplete"
+	}
+	return e.reason
+}
+
+func (e *InvalidError) Remedy() string {
+	switch e.Path {
+	case "file":
+		return "Use an exact clean repository-relative workflow file."
+	case "ref":
+		return "Select a bare tag with its durable tag kind."
+	case "repo":
+		return "Use the registered upstream/org/repository name."
+	case "routes", "pattern":
+		return "Configure bounded, distinct tag patterns that select one release file."
+	case "step":
+		return "Use the exact native step selector from the plan."
+	case "path":
+		return "Use an exact public credential path without wildcards or traversal."
+	case "audience":
+		return "Use the exact audience approved by the grant."
+	}
+	return "Correct the named policy entry and retry."
+}
+
+// ValidateFile accepts only an exact clean repository-relative path. No
+// wildcard, normalization, or inferred workflow is allowed in a grant key.
+func ValidateFile(file string) error {
+	if len(file) == 0 || len(file) > MaxFileBytes || path.IsAbs(file) || path.Clean(file) != file {
+		return &InvalidError{Path: "file", reason: "requires an exact clean repository-relative file"}
+	}
+	for _, segment := range strings.Split(file, "/") {
+		if segment == "." || segment == ".." || segment == "" {
+			return &InvalidError{Path: "file", reason: "reserved or empty path segment"}
+		}
+	}
+	if !policyAlphabet(file) {
+		return &InvalidError{Path: "file", reason: "requires ASCII letters, digits, dot, underscore, hyphen or slash"}
+	}
+	return nil
+}
+
+func policyAlphabet(value string) bool {
+	for _, c := range value {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("._/-", c) {
+			continue
+		}
+		return false
+	}
+	return true
+}

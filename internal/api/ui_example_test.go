@@ -1,0 +1,164 @@
+package api_test
+
+import (
+	"context"
+	"errors"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/api/fake"
+	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/logcontract"
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/stepmodel"
+)
+
+// TestUIExampleServer serves fixed examples only when explicitly invoked.
+// OBERTH_UI_EXAMPLE=127.0.0.1:8099 go test ./internal/api -run '^TestUIExampleServer$' -v
+func TestUIExampleServer(t *testing.T) {
+	address := os.Getenv("OBERTH_UI_EXAMPLE")
+	if address == "" {
+		t.Skip("set OBERTH_UI_EXAMPLE to serve fixed examples")
+	}
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := uiExample(t)
+	server := &http.Server{Handler: f.server.Handler(), ReadHeaderTimeout: 5 * time.Second}
+	ctx, stop := signal.NotifyContext(t.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() { <-ctx.Done(); _ = server.Close() }()
+	t.Log("Fixed examples at http://" + listener.Addr().String() + "/runs")
+	if err := server.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
+		t.Fatal(err)
+	}
+}
+
+func uiExample(t *testing.T) *fixture {
+	t.Helper()
+	at := time.Date(2026, 11, 16, 14, 0, 0, 0, time.UTC)
+	end := at.Add(48 * time.Second)
+	sha := "1234567890abcdef1234567890abcdef12345678"
+	steps := []stepmodel.RunStep{
+		{Path: "z-checkout", Name: "checkout", Status: stepmodel.StepPassed, StartedAt: &at, FinishedAt: &end},
+		{Path: "y-build", Name: "build", Status: stepmodel.StepPassed, CredentialIntent: true, StartedAt: &at, FinishedAt: &end},
+		{Path: "x-test", Name: "test", Status: stepmodel.StepFailed, StartedAt: &at, FinishedAt: &end, AttemptCount: 2, DisplayReason: "test failed: exit 2", Detail: "The test command exited with code 2.", Attempts: []stepmodel.StepAttempt{{NodeID: "attempt-one", Status: stepmodel.StepFailed}, {NodeID: "attempt-two", Status: stepmodel.StepFailed}}, Logs: []stepmodel.LogSelector{{NodeID: "attempt-two", Container: "main"}}},
+		{Path: "w-publish", Name: "publish", Status: stepmodel.StepPending},
+	}
+	runs := []stepmodel.RunSummary{
+		{ID: "11111111", Repo: "origin/team/api", Ref: "main", Status: stepmodel.RunPassed, CreatedAt: at, StartedAt: &at, FinishedAt: &end, CommitSHA: &sha, ObjectSHA: sha},
+		{ID: "22222222", Repo: "origin/team/api", Ref: "fix-login", Status: stepmodel.RunFailed, DisplayReason: "test failed: exit 2", CreatedAt: at, StartedAt: &at, FinishedAt: &end, CommitSHA: &sha, ObjectSHA: sha},
+		{ID: "33333333", Repo: "origin/team/web", Ref: "feature/search", Status: stepmodel.RunRunning, DisplayReason: "waiting for an available build node soon", CreatedAt: at, StartedAt: &at, CommitSHA: &sha, ObjectSHA: sha},
+		{ID: "44444444", Repo: "origin/team/web", Ref: "main", Status: stepmodel.RunQueued, DisplayReason: "waiting for execution", CreatedAt: at, ObjectSHA: sha},
+	}
+	for index := range runs {
+		runs[index].ID = strings.Repeat(runs[index].ID, 4)
+		runs[index].Steps = steps
+		runs[index].LogicalStepCounts = stepmodel.LogicalStepCounts{Total: 4, Exact: true, Passed: 2, Failed: 1, Pending: 1}
+	}
+	return setup(t, func(c *api.Config, b *apicontract.Bindings) {
+		c.Runtime.Now = testNow
+		if token := os.Getenv("OBERTH_UI_TOKEN"); token != "" {
+			c.Auth = exampleAuth{Authenticator: c.Auth, token: token}
+		}
+		b.RunList.Handler = &fake.Handler[apicontract.RunListArgs, apicontract.RunPage]{Value: apicontract.RunPage{Runs: runs}}
+		b.RunGet.Handler = apicontract.HandlerFunc[apicontract.RunGetArgs, stepmodel.RunSummary](func(_ context.Context, _ apicontract.Caller, args apicontract.RunGetArgs) (apicontract.Call[stepmodel.RunSummary], error) {
+			return func(context.Context) (stepmodel.RunSummary, error) {
+				for _, run := range runs {
+					if strings.HasPrefix(run.ID, args.ID) {
+						return run, nil
+					}
+				}
+				fallback := runs[1]
+				fallback.ID = args.ID
+				if args.ID == "77777777" {
+					fallback = runs[0]
+					fallback.ID = args.ID
+					fallback.Ref = "feature/pass"
+				}
+				return fallback, nil
+			}, nil
+		})
+		b.RepoList.Handler = &fake.Handler[apicontract.RepoListArgs, apicontract.RepoPage]{Value: apicontract.RepoPage{Repositories: []apicontract.Repository{{Repo: runs[0].Repo, DefaultBranch: "main", BranchCount: new(3), LatestRun: &runs[0]}, {Repo: runs[2].Repo, DefaultBranch: "main", LatestRun: &runs[2]}}}}
+		b.RunLogs.Handler = &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{Value: apicontract.LogResult{Content: "Running the authored test command\nFAIL pkg/check 0.40s\nexpected status 200, received 500\n<script>this is log text</script>\n", Meta: logcontract.Meta{ScanComplete: true, BytesExact: true}}}
+		b.RunRerun.Handler = &fake.Handler[apicontract.RunRerunArgs, apicontract.Receipt]{Value: apicontract.Receipt{ID: "55555555"}}
+		refused := publicerr.New(publicerr.Conflict, "This run cannot be cancelled.", "Read the current run.", nil)
+		refused.Detail = "complete server detail"
+		b.RunCancel.Handler = &fake.Handler[apicontract.RunCancelArgs, apicontract.Receipt]{Error: refused}
+		b.RunHoldList.Handler = exampleHoldList(end)
+		b.EventsWait.Handler = apicontract.HandlerFunc[apicontract.EventsWaitArgs, apicontract.EventResult](func(_ context.Context, _ apicontract.Caller, _ apicontract.EventsWaitArgs) (apicontract.Call[apicontract.EventResult], error) {
+			return func(ctx context.Context) (apicontract.EventResult, error) {
+				<-ctx.Done()
+				return apicontract.EventResult{TimedOut: true}, ctx.Err()
+			}, nil
+		})
+		issue := model.Issue{ID: 42, Title: "Flaky test in pkg/check", Body: "The check sometimes returns a different status.\n\nExpected: status 200.\nObserved: status 500.\n\nReproduce with the authored test command, then inspect its complete output.", State: model.IssueOpen, Kind: model.IssueManual, WorkStatus: model.IssueActive, Upstream: "origin", Repo: runs[0].Repo, Branch: "fix-login", Occurrences: 4, Stale: true, CreatedAt: at, UpdatedAt: end, Lock: &model.IssueLock{Owner: "editor", ExpiresAt: end}}
+		issue.Imported = &model.IssueImportSource{SetSHA256: strings.Repeat("a", 64), Count: 1}
+		issue.Author, issue.Closer = "source author", "source closer"
+		issue.SourceClosedAt = new(at.Add(-time.Hour))
+		issue.History = []model.IssueHistory{
+			{Kind: "append", At: at, Author: "first source editor", Text: "First continued text <script>plain source</script>"},
+			{Kind: "comment", At: at.Add(-time.Hour), Author: "second source editor", Text: "Second source entry"},
+		}
+		b.IssueGet.Handler = exampleImportedIssue(issue)
+		issue.Body = ""
+		issue.History = nil
+		b.IssueList.Handler = &fake.Handler[apicontract.IssueListArgs, apicontract.IssuePage]{Value: apicontract.IssuePage{Issues: []model.Issue{issue}}}
+		c.Views.Counts.Handler = &fake.Handler[apicontract.Empty, apicontract.RunCounts]{Value: apicontract.RunCounts{Queued: 1, Running: 2, Passed: 140, Failed: 9, Cancelled: 3}}
+		b.SystemStatus.Handler = &fake.Handler[apicontract.SystemStatusArgs, apicontract.SystemStatus]{Value: apicontract.SystemStatus{Ready: true, Version: "1"}}
+		c.Views.Containers.Handler = &fake.Handler[apicontract.IDArgs, apicontract.ContainerPage]{Value: apicontract.ContainerPage{Containers: []apicontract.Container{{NodeID: "attempt-one", Container: "main"}, {NodeID: "attempt-two", Container: "main"}}}}
+	})
+}
+
+type exampleAuth struct {
+	api.Authenticator
+	token string
+}
+
+func (a exampleAuth) Bearer(ctx context.Context, token string) (apicontract.Caller, error) {
+	if token == a.token {
+		token = "valid"
+	}
+	return a.Authenticator.Bearer(ctx, token)
+}
+
+func exampleHoldList(at time.Time) apicontract.HandlerFunc[apicontract.RunHoldListArgs, apicontract.HoldPage] {
+	return func(_ context.Context, _ apicontract.Caller, q apicontract.RunHoldListArgs) (apicontract.Call[apicontract.HoldPage], error) {
+		return func(context.Context) (apicontract.HoldPage, error) {
+			rows := []model.LiveHold{}
+			if strings.HasPrefix(q.ID, "33333333") || strings.HasPrefix(q.ID, "22222222") {
+				rows = append(rows, model.LiveHold{HeldNotice: model.HeldNotice{RunID: q.ID, Step: "test", NodeID: "node", PodUID: "pod-uid", HeldSince: at.Add(-time.Hour), TTLSeconds: 1200}, PodName: "held-pod", RemainingMS: 600000, AvailabilityUnknown: strings.HasPrefix(q.ID, "22222222")})
+			}
+			return apicontract.HoldPage{Holds: rows}, nil
+		}, nil
+	}
+}
+
+func exampleImportedIssue(issue model.Issue) apicontract.HandlerFunc[apicontract.IssueGetArgs, model.Issue] {
+	return func(_ context.Context, _ apicontract.Caller, q apicontract.IssueGetArgs) (apicontract.Call[model.Issue], error) {
+		v := issue.Clone()
+		if q.ID == 45 || q.ID == 46 {
+			v.ID, v.Title, v.Body = q.ID, "Native issue", "null"
+			v.Occurrences = q.ID - 44
+			v.Imported, v.History, v.SourceClosedAt = nil, nil, nil
+			v.Author, v.Closer = "", ""
+		}
+		if q.ID == 43 || q.ID == 44 {
+			v.ID = q.ID
+			v.Closer = ""
+		}
+		if q.ID == 43 {
+			v.SourceClosedAt = nil
+		}
+		return func(context.Context) (model.Issue, error) { return v, nil }, nil
+	}
+}

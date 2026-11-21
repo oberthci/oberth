@@ -1,0 +1,36 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "oberth.clusterName" (list . "task-results") }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [argoproj.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [workflowtaskresults]
+  matchConditions:
+    - name: pipeline-accounts
+      expression: {{ printf "request.userInfo.username.startsWith(%q)" (printf "system:serviceaccount:%s:" .Values.pipeline.namespace) | quote }}
+  variables:
+    - name: pod
+      expression: "has(request.userInfo.extra) && 'authentication.kubernetes.io/pod-name' in request.userInfo.extra && dyn(request.userInfo.extra['authentication.kubernetes.io/pod-name']) != null && size(request.userInfo.extra['authentication.kubernetes.io/pod-name']) == 1 ? request.userInfo.extra['authentication.kubernetes.io/pod-name'][0] : ''"
+    - name: mine
+      expression: "([object] + (request.operation == 'UPDATE' ? [oldObject] : [])).all(r, r != null && has(r.metadata.name) && has(r.metadata.labels) && 'workflows.argoproj.io/workflow' in r.metadata.labels && (variables.pod == r.metadata.labels['workflows.argoproj.io/workflow'] ? r.metadata.name == variables.pod : variables.pod.startsWith(r.metadata.labels['workflows.argoproj.io/workflow'] + '-') && r.metadata.name == r.metadata.labels['workflows.argoproj.io/workflow'] + '-' + variables.pod.split('-')[size(variables.pod.split('-')) - 1]))"
+  validations:
+    - expression: {{ printf "has(request.namespace) && request.namespace == %q && variables.pod != '' && variables.mine" .Values.pipeline.namespace | quote }}
+      message: a step writes only its own Pod's task result
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "oberth.clusterName" (list . "task-results") }}
+spec:
+  policyName: {{ include "oberth.clusterName" (list . "task-results") }}
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .Values.pipeline.namespace }}

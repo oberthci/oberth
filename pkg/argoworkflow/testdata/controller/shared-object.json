@@ -1,0 +1,37 @@
+{
+  "metadata": {
+    "name": "shared",
+    "namespace": "ci",
+    "uid": "uid",
+    "resourceVersion": "1"
+  },
+  "spec": {
+    "templates": [
+      {
+        "name": "work",
+        "inputs": {},
+        "outputs": {},
+        "metadata": {},
+        "container": {
+          "name": "",
+          "image": "image",
+          "resources": {},
+          "command": [
+            "true"
+          ]
+        }
+      }
+    ],
+    "arguments": {},
+    "templateDefaults": {
+      "inputs": {},
+      "outputs": {},
+      "metadata": {},
+      "container": {
+        "name": "",
+        "workingDir": "/provider",
+        "resources": {}
+      }
+    }
+  }
+}

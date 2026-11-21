@@ -1,0 +1,153 @@
+nodePorts:
+  https: 30443
+  ssh: 30022
+sharedWorkflowDefinitions: []
+imageRepository: oberthci/oberth
+imageDigest: unset
+sourcePluginImageRepository: oberthci/oberth-source-plugin
+sourcePluginImageDigest: unset
+targetSchema: 6
+runs:
+  parallel: 4
+policies:
+  floor: true
+  egress: true
+pipeline:
+  createNamespace: true
+  namespace: oberth-runs
+database:
+  file: /var/lib/oberth/oberth.db
+secretStore:
+  bundled: true
+  address: https://oberth-store.oberth.svc:8200
+  kv_mount: oberth
+  auth_mount: kubernetes
+  writer_role: oberth-writer
+  audience: oberth-store
+  caSecret: oberth-store-tls
+logs:
+  run_limit_bytes: 67108864
+schedules:
+  max_entries: 256
+assist:
+  ttl_seconds: 1200
+adminPublicKeySHA256: ''
+server:
+  version: 1
+  public:
+    url: https://localhost:30443
+    ssh_port: 30022
+  listen:
+    https: :8443
+    ssh: :2222
+    source: :8445
+    health: :8081
+  protocol:
+    schema_identity: oberth-schema-v1
+    audit_domain: oberth-audit-v2
+  runtime:
+    git_binary: /usr/bin/git
+    source_timeout_seconds: 60
+    admission_timeout_seconds: 30
+    source_client_burst: 96
+    receive_max_input_bytes: 1073741824
+    default_branch: refs/heads/main
+    image_prefixes: []
+    source_policy: {}
+    release_routes: {}
+    controller_namespace: oberth
+    controller_configmap: oberth-controller-config
+    source_configmap: oberth-source
+    source:
+      endpoint: https://oberth-source.oberth.svc:8445
+      server_name: oberth.oberth.svc
+      ca_pem: ''
+storage:
+  size: 10Gi
+  tmp: 2Gi
+argoNative:
+  createAggregateRoles: false
+  fullnameOverride: oberth-controller
+  namespaceOverride: oberth
+  crds:
+    full: false
+  images:
+    pullPolicy: IfNotPresent
+  controller:
+    workflowDefaults: {}
+    securityContext:
+      seccompProfile:
+        type: RuntimeDefault
+    image:
+      registry: quay.io
+      repository: argoproj/workflow-controller
+      tag: v4.0.8@sha256:7a156419f80285859fc8f859927b6cc249f0d128e161e080dc17fca8fcbbceb6
+    rbac:
+      create: false
+    serviceAccount:
+      create: true
+      name: oberth-controller
+    extraArgs: [--namespaced, --managed-namespace=oberth-runs]
+    configMap:
+      create: false
+      name: oberth-controller-config
+    workflowNamespaces:
+    - oberth-runs
+    clusterWorkflowTemplates:
+      enabled: false
+  executor:
+    image:
+      registry: quay.io
+      repository: argoproj/argoexec
+      tag: v4.0.8@sha256:86a965d7eea176959351156e24f3a2fa8d8e342e477ef425009af95a12e3fe87
+  workflow:
+    serviceAccount:
+      create: false
+    rbac:
+      create: false
+  server:
+    enabled: false
+storeNative:
+  fullnameOverride: oberth-store
+  global:
+    tlsDisable: false
+  injector:
+    enabled: false
+  server:
+    statefulSet:
+      securityContext:
+        container:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
+          seccompProfile:
+            type: RuntimeDefault
+    image:
+      registry: docker.io
+      repository: openbao/openbao
+      tag: 2.7.2@sha256:5046911075e137e154ce49ab051502f4ec7cf367d484ae4a4dce665d9b90561f
+    readinessProbe:
+      path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+    updateStrategyType: RollingUpdate
+    extraEnvironmentVars:
+      BAO_CACERT: /etc/store-tls/ca.crt
+    volumes:
+    - name: tmp
+      emptyDir: {}
+    - name: tls
+      secret:
+        secretName: oberth-store-tls
+    volumeMounts:
+    - name: tmp
+      mountPath: /tmp
+    - name: tls
+      mountPath: /etc/store-tls
+      readOnly: true
+    standalone:
+      enabled: true
+      config: "ui = false\nlistener \"tcp\" {\n  address = \"[::]:8200\"\n  tls_cert_file = \"/etc/store-tls/tls.crt\"\n  tls_key_file = \"/etc/store-tls/tls.key\"\n}\nstorage \"raft\" { path = \"/openbao/data\" }\ndisable_mlock = true\n"
+    dataStorage:
+      size: 10Gi
+  ui:
+    enabled: false

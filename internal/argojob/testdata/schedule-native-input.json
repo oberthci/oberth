@@ -1,0 +1,119 @@
+{
+  "kind": "Workflow",
+  "apiVersion": "argoproj.io/v1alpha1",
+  "metadata": {
+    "name": "oberth-cron-1-2a3b62b53ddb9f167b63d222-123",
+    "namespace": "ci",
+    "uid": "child-uid",
+    "resourceVersion": "1",
+    "creationTimestamp": "2026-01-01T00:00:00Z",
+    "labels": {
+      "oberth.ci/engine": "argo",
+      "oberth.ci/repo": "1",
+      "oberth.ci/sha": "72fd58bba146894dd89a3b570e18f9582bec6a48",
+      "oberth.ci/tier": "ci",
+      "oberth.ci/trigger": "ci",
+      "pipeline": "authored",
+      "workflows.argoproj.io/cron-workflow": "oberth-cron-1-2a3b62b53ddb9f167b63d222"
+    },
+    "annotations": {
+      "oberth.ci/admission": "5a80706ef518de44db8f53f8acfbbf8fb4d19d8747e961284d9ab23b3ba726c5",
+      "oberth.ci/ref": "refs/heads/{{workflow.name}}",
+      "oberth.ci/spec-identity": "9f0b5f7b96603f284b5457ad0e943e6ee8e042defc52d6b5e29e1b0cca00e29e",
+      "workflows.argoproj.io/scheduled-time": "2026-01-01T00:00:00Z"
+    },
+    "ownerReferences": [
+      {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "CronWorkflow",
+        "name": "oberth-cron-1-2a3b62b53ddb9f167b63d222",
+        "uid": "parent-1",
+        "controller": true,
+        "blockOwnerDeletion": true
+      }
+    ]
+  },
+  "spec": {
+    "templates": [
+      {
+        "name": "build",
+        "inputs": {},
+        "outputs": {},
+        "metadata": {},
+        "container": {
+          "name": "",
+          "image": "oberth.ci/build:1",
+          "command": [
+            "true"
+          ],
+          "resources": {}
+        },
+        "serviceAccountName": "oberth-argo-ci-origin-team-widget-3ad80af3b0b9100ee127",
+        "automountServiceAccountToken": false,
+        "executor": {
+          "serviceAccountName": "oberth-argo-ci-origin-team-widget-3ad80af3b0b9100ee127"
+        }
+      }
+    ],
+    "entrypoint": "build",
+    "arguments": {
+      "parameters": [
+        {
+          "name": "oberth-schedule",
+          "value": "nightly"
+        },
+        {
+          "name": "oberth-trigger",
+          "value": "schedule"
+        },
+        {
+          "name": "oberth-ref",
+          "value": "refs/heads/{{workflow.name}}"
+        },
+        {
+          "name": "oberth-sha",
+          "value": "72fd58bba146894dd89a3b570e18f9582bec6a48"
+        }
+      ]
+    },
+    "serviceAccountName": "oberth-argo-ci-origin-team-widget-3ad80af3b0b9100ee127",
+    "automountServiceAccountToken": false,
+    "executor": {
+      "serviceAccountName": "oberth-argo-ci-origin-team-widget-3ad80af3b0b9100ee127"
+    },
+    "podSpecPatch": "{\"volumes\":[{\"name\":\"exec-sa-token\",\"projected\":{\"sources\":[{\"serviceAccountToken\":{\"expirationSeconds\":3600,\"path\":\"token\"}},{\"configMap\":{\"name\":\"kube-root-ca.crt\",\"items\":[{\"key\":\"ca.crt\",\"path\":\"ca.crt\"}]}},{\"downwardAPI\":{\"items\":[{\"path\":\"namespace\",\"fieldRef\":{\"apiVersion\":\"v1\",\"fieldPath\":\"metadata.namespace\"}}]}}]},\"secret\":null}]}",
+    "podMetadata": {
+      "annotations": {
+        "note": "pod"
+      },
+      "labels": {
+        "authored": "pod",
+        "oberth.ci/run": "{{workflow.name}}"
+      }
+    },
+    "workflowMetadata": {
+      "labels": {
+        "authored": "workflow",
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/sha": "72fd58bba146894dd89a3b570e18f9582bec6a48",
+        "oberth.ci/tier": "ci",
+        "oberth.ci/trigger": "ci"
+      },
+      "annotations": {
+        "note": "workflow",
+        "oberth.ci/ref": "refs/heads/{{workflow.name}}",
+        "oberth.ci/run-id": "{{workflow.name}}"
+      },
+      "labelsFrom": {
+        "oberth.ci/run": {
+          "expression": "workflow.name"
+        }
+      }
+    }
+  },
+  "status": {
+    "startedAt": null,
+    "finishedAt": null
+  }
+}

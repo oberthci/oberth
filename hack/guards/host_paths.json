@@ -1,0 +1,12 @@
+{
+  "prefixes": [
+    "agent/"
+  ],
+  "files": [
+    ".{host}-plugin/marketplace.json"
+  ],
+  "sections": {
+    "README.md": "Agent plugins",
+    "docs/install.md": "Agent plugins"
+  }
+}

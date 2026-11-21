@@ -1,0 +1,217 @@
+{
+  "phase": "Succeeded",
+  "startedAt": "2026-11-18T05:48:02Z",
+  "finishedAt": "2026-11-18T05:48:02Z",
+  "progress": "1/1",
+  "nodes": {
+    "run-f020d94cd246bcdf09c77afc0e5b020d": {
+      "id": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "name": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "displayName": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "type": "Pod",
+      "templateName": "build",
+      "templateScope": "local/run-f020d94cd246bcdf09c77afc0e5b020d",
+      "phase": "Succeeded",
+      "startedAt": "2026-11-18T05:48:02Z",
+      "finishedAt": "2026-11-18T05:48:02Z",
+      "progress": "1/1",
+      "resourcesDuration": {
+        "cpu": 0,
+        "memory": 2
+      },
+      "outputs": {
+        "exitCode": "0"
+      },
+      "taskResultSynced": true
+    }
+  },
+  "conditions": [
+    {
+      "type": "PodRunning",
+      "status": "False"
+    },
+    {
+      "type": "Completed",
+      "status": "True"
+    }
+  ],
+  "resourcesDuration": {
+    "cpu": 0,
+    "memory": 2
+  },
+  "artifactRepositoryRef": {
+    "default": true,
+    "artifactRepository": {}
+  },
+  "artifactGCStatus": {
+    "notSpecified": true
+  },
+  "knownLimit": {
+    "initial": {
+      "id": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "name": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "displayName": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "type": "Pod",
+      "templateName": "build",
+      "templateScope": "local/run-f020d94cd246bcdf09c77afc0e5b020d",
+      "phase": "Pending",
+      "startedAt": "2026-11-18T05:48:02Z",
+      "finishedAt": null,
+      "progress": "0/1",
+      "taskResultSynced": true
+    },
+    "unobserved": {
+      "id": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "name": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "displayName": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "type": "Pod",
+      "templateName": "build",
+      "templateScope": "local/run-f020d94cd246bcdf09c77afc0e5b020d",
+      "phase": "Pending",
+      "startedAt": "2026-11-18T05:48:02Z",
+      "finishedAt": null,
+      "progress": "0/1",
+      "taskResultSynced": true
+    },
+    "firstPod": {
+      "metadata": {
+        "name": "run-f020d94cd246bcdf09c77afc0e5b020d",
+        "namespace": "oberth-runs",
+        "uid": "probe-restart-write-failed-1",
+        "annotations": {
+          "kubectl.kubernetes.io/default-container": "main",
+          "workflows.argoproj.io/node-id": "run-f020d94cd246bcdf09c77afc0e5b020d",
+          "workflows.argoproj.io/node-name": "run-f020d94cd246bcdf09c77afc0e5b020d"
+        },
+        "ownerReferences": [
+          {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Workflow",
+            "name": "run-f020d94cd246bcdf09c77afc0e5b020d",
+            "uid": "workflow-uid",
+            "controller": true,
+            "blockOwnerDeletion": true
+          }
+        ]
+      },
+      "status": {
+        "phase": "Running",
+        "containerStatuses": [
+          {
+            "name": "wait",
+            "state": {
+              "running": {
+                "startedAt": "2026-11-18T05:48:01Z"
+              }
+            },
+            "lastState": {},
+            "ready": true,
+            "restartCount": 0,
+            "image": "",
+            "imageID": ""
+          },
+          {
+            "name": "main",
+            "state": {
+              "running": {
+                "startedAt": "2026-11-18T05:48:01Z"
+              }
+            },
+            "lastState": {},
+            "ready": true,
+            "restartCount": 0,
+            "image": "",
+            "imageID": ""
+          }
+        ]
+      }
+    },
+    "replacementPod": {
+      "metadata": {
+        "name": "run-f020d94cd246bcdf09c77afc0e5b020d",
+        "namespace": "oberth-runs",
+        "uid": "probe-restart-write-failed-2",
+        "annotations": {
+          "kubectl.kubernetes.io/default-container": "main",
+          "workflows.argoproj.io/node-id": "run-f020d94cd246bcdf09c77afc0e5b020d",
+          "workflows.argoproj.io/node-name": "run-f020d94cd246bcdf09c77afc0e5b020d"
+        },
+        "ownerReferences": [
+          {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Workflow",
+            "name": "run-f020d94cd246bcdf09c77afc0e5b020d",
+            "uid": "workflow-uid",
+            "controller": true,
+            "blockOwnerDeletion": true
+          }
+        ]
+      },
+      "status": {
+        "phase": "Succeeded",
+        "containerStatuses": [
+          {
+            "name": "wait",
+            "state": {
+              "terminated": {
+                "exitCode": 0,
+                "startedAt": "2026-11-18T05:48:01Z",
+                "finishedAt": "2026-11-18T05:48:02Z"
+              }
+            },
+            "lastState": {},
+            "ready": false,
+            "restartCount": 0,
+            "image": "",
+            "imageID": ""
+          },
+          {
+            "name": "main",
+            "state": {
+              "terminated": {
+                "exitCode": 0,
+                "startedAt": "2026-11-18T05:48:01Z",
+                "finishedAt": "2026-11-18T05:48:02Z"
+              }
+            },
+            "lastState": {},
+            "ready": false,
+            "restartCount": 0,
+            "image": "",
+            "imageID": ""
+          }
+        ]
+      }
+    },
+    "attempted": {
+      "id": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "name": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "displayName": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "type": "Pod",
+      "templateName": "build",
+      "templateScope": "local/run-f020d94cd246bcdf09c77afc0e5b020d",
+      "phase": "Pending",
+      "message": "Pod auto-restarting due to Evicted: synthetic status loss",
+      "startedAt": "2026-11-18T05:48:02Z",
+      "finishedAt": null,
+      "progress": "0/1",
+      "taskResultSynced": true,
+      "failedPodRestarts": 1,
+      "restartingPodUID": "probe-restart-write-failed-1"
+    },
+    "recovered": {
+      "id": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "name": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "displayName": "run-f020d94cd246bcdf09c77afc0e5b020d",
+      "type": "Pod",
+      "templateName": "build",
+      "templateScope": "local/run-f020d94cd246bcdf09c77afc0e5b020d",
+      "phase": "Pending",
+      "startedAt": "2026-11-18T05:48:02Z",
+      "finishedAt": null,
+      "progress": "0/1",
+      "taskResultSynced": true
+    },
+    "deleteUID": "probe-restart-write-failed-1"
+  }
+}

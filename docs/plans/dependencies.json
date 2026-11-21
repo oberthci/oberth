@@ -1,0 +1,1755 @@
+{
+  "version": 2,
+  "product_command": "cmd/oberth",
+  "production_commands": [
+    "cmd/oberth",
+    "cmd/oberth-source-plugin",
+    "cmd/oberth-release",
+    "cmd/oberth-store-backup"
+  ],
+  "paths": "module-relative; p/** includes p and descendants; exact p matches only p; @Cn expands components[Cn]; @components and @components:except:Cn expand owners; @shared expands shared. Deny wins; package_allow overrides component allow. Shared package edges use shared_dependencies. Cross-package local edges (including same-owner edges) require allow membership, except executable-to-own-package edges explicitly listed. Tests may additionally use test package metadata/test_allow and fixture_only; production may not import test-support packages. C12/C14 server imports are empty. The effective intended production permission graph must be acyclic; leaf package_allow entries prevent imports of their consumers. Harness trees test/** and hack/** are not components: within-tree subpackage imports are allowed, product imports require explicit test_allow or fixture_only grants, and product-to-harness imports are denied. Test support is inferred directly below an owned parent from test_support names/suffix; it inherits that parent and its test permissions, with imports restricted to eligible tests or other support. Symbol restrictions apply only to non-test files. shared lists the pinned contract packages; packages.kind distinguishes pure shared values from runtime contract adapters. Component requirements wait while only pinned contract packages are present.",
+  "components": {
+    "C1": [
+      "internal/api/**"
+    ],
+    "C2": [
+      "internal/service/**",
+      "internal/clientcert/issuer/**"
+    ],
+    "C3": [
+      "internal/app/**"
+    ],
+    "C4": [
+      "pkg/argoworkflow/**"
+    ],
+    "C5": [
+      "internal/argojob/**",
+      "internal/argowatch/**"
+    ],
+    "C6": [
+      "internal/sourcedelivery/**",
+      "internal/sourceplugin/**",
+      "internal/gitcache/**",
+      "cmd/oberth-source-plugin/**",
+      "internal/gitssh/**",
+      "internal/sshserver/**"
+    ],
+    "C7": [
+      "internal/store/**",
+      "cmd/oberth-store-backup/**"
+    ],
+    "C8": [
+      "internal/runlog/**"
+    ],
+    "C9": [
+      "internal/installer/**",
+      "internal/setuptui/**",
+      "internal/secretstore/**",
+      "internal/kubeconfig/**"
+    ],
+    "C10": [
+      "internal/cronsync/**",
+      "internal/schedule/**"
+    ],
+    "C11": [
+      "cmd/oberth/**",
+      "internal/client/**",
+      "internal/restartretry/**"
+    ],
+    "C12": [
+      "agent/**"
+    ],
+    "C13": [
+      "internal/releaseverify/**",
+      "cmd/oberth-release/**"
+    ],
+    "C14": [
+      "docs/**"
+    ]
+  },
+  "shared": [
+    "internal/strictjson",
+    "internal/actor",
+    "internal/reponame",
+    "internal/sourcecontract",
+    "internal/runtimeconfig",
+    "internal/publicerr",
+    "internal/admissioncontract",
+    "internal/stepmodel",
+    "internal/gitport",
+    "internal/nativebinding",
+    "internal/stateport",
+    "internal/model",
+    "internal/gitoid",
+    "internal/boundedio",
+    "internal/clientcert",
+    "internal/identityname",
+    "internal/pushretry",
+    "internal/workflowpolicy",
+    "internal/executoridentity",
+    "internal/containerimage",
+    "internal/staticgit",
+    "internal/restartretry",
+    "internal/apicontract",
+    "internal/logcontract"
+  ],
+  "allow": {
+    "C1": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/clientcert",
+      "internal/model",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runlog",
+      "internal/sourcedelivery",
+      "internal/stepmodel",
+      "internal/strictjson",
+      "internal/apicontract",
+      "internal/logcontract",
+      "internal/stateport"
+    ],
+    "C2": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/apicontract",
+      "internal/clientcert",
+      "internal/clientcert/issuer",
+      "internal/gitport",
+      "internal/identityname",
+      "internal/logcontract",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/pushretry",
+      "internal/reponame",
+      "internal/stateport",
+      "internal/stepmodel",
+      "internal/strictjson",
+      "internal/workflowpolicy"
+    ],
+    "C3": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/boundedio",
+      "internal/clientcert",
+      "internal/gitoid",
+      "internal/gitport",
+      "internal/identityname",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/service",
+      "internal/sourcecontract",
+      "internal/stateport",
+      "internal/stepmodel",
+      "internal/workflowpolicy",
+      "pkg/argoworkflow",
+      "internal/apicontract"
+    ],
+    "C4": [
+      "internal/admissioncontract",
+      "internal/gitoid",
+      "internal/identityname",
+      "internal/model",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stepmodel",
+      "internal/workflowpolicy",
+      "pkg/argoworkflow/defaults",
+      "pkg/argoworkflow/specsize",
+      "internal/strictjson"
+    ],
+    "C5": [
+      "internal/admissioncontract",
+      "internal/argowatch",
+      "internal/containerimage",
+      "internal/gitoid",
+      "internal/identityname",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runlog",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stateport",
+      "internal/stepmodel",
+      "pkg/argoworkflow",
+      "pkg/argoworkflow/defaults"
+    ],
+    "C6": [
+      "internal/admissioncontract",
+      "internal/boundedio",
+      "internal/containerimage",
+      "internal/gitcache",
+      "internal/gitoid",
+      "internal/gitport",
+      "internal/gitssh",
+      "internal/model",
+      "internal/publicerr",
+      "internal/pushretry",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/sourcedelivery",
+      "internal/sourceplugin",
+      "internal/sshserver",
+      "internal/stepmodel",
+      "internal/strictjson",
+      "pkg/argoworkflow/defaults",
+      "pkg/argoworkflow/specsize"
+    ],
+    "C7": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/boundedio",
+      "internal/gitoid",
+      "internal/identityname",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/pushretry",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stateport",
+      "internal/stepmodel",
+      "internal/store",
+      "internal/workflowpolicy"
+    ],
+    "C8": [
+      "internal/publicerr",
+      "internal/logcontract"
+    ],
+    "C9": [
+      "internal/actor",
+      "internal/apicontract",
+      "internal/boundedio",
+      "internal/client",
+      "internal/clientcert",
+      "internal/clientcert/issuer",
+      "internal/containerimage",
+      "internal/identityname",
+      "internal/installer",
+      "internal/kubeconfig",
+      "internal/model",
+      "internal/publicerr",
+      "internal/releaseverify",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/secretstore",
+      "internal/stateport",
+      "internal/strictjson",
+      "internal/workflowpolicy"
+    ],
+    "C10": [
+      "internal/admissioncontract",
+      "internal/gitport",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/schedule",
+      "internal/sourcecontract",
+      "internal/stepmodel",
+      "pkg/argoworkflow"
+    ],
+    "C11": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/api",
+      "internal/app",
+      "internal/argojob",
+      "internal/argowatch",
+      "internal/boundedio",
+      "internal/client",
+      "internal/clientcert",
+      "internal/clientcert/issuer",
+      "internal/containerimage",
+      "internal/cronsync",
+      "internal/gitcache",
+      "internal/gitoid",
+      "internal/gitport",
+      "internal/gitssh",
+      "internal/identityname",
+      "internal/installer",
+      "internal/kubeconfig",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/pushretry",
+      "internal/releaseverify",
+      "internal/reponame",
+      "internal/restartretry",
+      "internal/runlog",
+      "internal/runtimeconfig",
+      "internal/schedule",
+      "internal/secretstore",
+      "internal/service",
+      "internal/setuptui",
+      "internal/sourcecontract",
+      "internal/sourcedelivery",
+      "internal/sshserver",
+      "internal/stateport",
+      "internal/staticgit",
+      "internal/stepmodel",
+      "internal/store",
+      "internal/workflowpolicy",
+      "pkg/argoworkflow",
+      "pkg/argoworkflow/defaults",
+      "pkg/argoworkflow/specsize",
+      "internal/apicontract",
+      "internal/logcontract",
+      "internal/strictjson"
+    ],
+    "C12": [],
+    "C13": [
+      "internal/admissioncontract",
+      "internal/boundedio",
+      "internal/containerimage",
+      "internal/gitoid",
+      "internal/releaseverify",
+      "internal/secretstore",
+      "internal/staticgit",
+      "internal/stepmodel",
+      "internal/workflowpolicy"
+    ],
+    "C14": []
+  },
+  "rules": [
+    {
+      "id": 1,
+      "from": [
+        "@components:except:C11"
+      ],
+      "to": [
+        "cmd/oberth/**"
+      ],
+      "effect": "deny"
+    },
+    {
+      "id": 2,
+      "from": [
+        "@C2",
+        "@C3",
+        "@C4",
+        "@C5",
+        "@C6",
+        "@C7",
+        "@C8",
+        "@C10"
+      ],
+      "to": [
+        "internal/api/**"
+      ],
+      "effect": "deny"
+    },
+    {
+      "id": 3,
+      "from": [
+        "@C2"
+      ],
+      "to": [
+        "@components:except:C2"
+      ],
+      "effect": "deny"
+    },
+    {
+      "id": 4,
+      "from": [
+        "@C3",
+        "@C5",
+        "@C10",
+        "@C11"
+      ],
+      "to": [
+        "pkg/argoworkflow/**"
+      ],
+      "effect": "allow_if_listed",
+      "symbols": {
+        "C3": [
+          "Prepare",
+          "Policy",
+          "AdmissionError",
+          "ValidateNativeSchema"
+        ],
+        "C5": [
+          "ValidateNativeSchema",
+          "Template"
+        ],
+        "C10": [
+          "ValidateNativeSchema"
+        ],
+        "C11": [
+          "ValidateNativeSchema",
+          "Decode",
+          "Prepare",
+          "Policy",
+          "AdmissionError"
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "from": [
+        "@C5"
+      ],
+      "to": [
+        "internal/service/**",
+        "internal/app/**",
+        "internal/installer/**",
+        "internal/setuptui/**",
+        "internal/cronsync/**",
+        "internal/schedule/**",
+        "internal/cron/**"
+      ],
+      "effect": "deny"
+    },
+    {
+      "id": 6,
+      "from": [
+        "@C2",
+        "@C3",
+        "@C10"
+      ],
+      "to": [
+        "internal/gitcache/**"
+      ],
+      "effect": "deny"
+    },
+    {
+      "id": 7,
+      "from": [
+        "@C7"
+      ],
+      "to": [
+        "@C1",
+        "@C2",
+        "@C3",
+        "@C5",
+        "@C6",
+        "@C8",
+        "@C9",
+        "@C10",
+        "@C11"
+      ],
+      "effect": "deny"
+    },
+    {
+      "id": 8,
+      "from": [
+        "@C1"
+      ],
+      "to": [
+        "internal/runlog"
+      ],
+      "effect": "allow_if_listed",
+      "symbols": {
+        "*": [
+          "Filter",
+          "Meta"
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "from": [
+        "@C3"
+      ],
+      "to": [
+        "internal/cronsync/**",
+        "internal/installer/**"
+      ],
+      "effect": "deny"
+    },
+    {
+      "id": 10,
+      "from": [
+        "@shared"
+      ],
+      "to": [
+        "@components"
+      ],
+      "effect": "deny"
+    },
+    {
+      "id": 11,
+      "from": [
+        "@C9"
+      ],
+      "to": [
+        "internal/client",
+        "internal/stateport"
+      ],
+      "effect": "allow_if_listed"
+    },
+    {
+      "id": 12,
+      "from": [
+        "@C12",
+        "@C14"
+      ],
+      "to": [
+        "@components"
+      ],
+      "effect": "deny"
+    },
+    {
+      "id": 13,
+      "from": [
+        "**"
+      ],
+      "to": [
+        "pkg/pipeline/**",
+        "internal/runprogress/**",
+        "internal/recordjson/**",
+        "internal/artifacts/**",
+        "internal/sourceport/**"
+      ],
+      "effect": "deny",
+      "transitive": true
+    },
+    {
+      "id": 14,
+      "from": [
+        "@components",
+        "@shared"
+      ],
+      "to": [
+        "test/**",
+        "hack/**"
+      ],
+      "effect": "deny"
+    },
+    {
+      "id": 15,
+      "from": [
+        "@components:except:C4",
+        "@shared",
+        "pkg/argoworkflow/defaults/**",
+        "pkg/argoworkflow/specsize/**"
+      ],
+      "to": [
+        "internal/admissioncontract"
+      ],
+      "effect": "allow_if_listed",
+      "symbols": {
+        "*": [
+          "AccountEvidence",
+          "EvidenceState",
+          "Finding",
+          "GrantEvidence",
+          "IdentityEvidence",
+          "IdentityRequest",
+          "MaxCapabilityKinds",
+          "MaxDocumentBytes",
+          "MaxNestingDepth",
+          "MaxPinnedDestinations",
+          "MaxPlanBytes",
+          "MaxPlanEntries",
+          "MaxPlannerVisits",
+          "MaxScheduleEntryBytes",
+          "MaxSecretPaths",
+          "MaxSourceSpecBytes",
+          "Mode",
+          "ModeInspect",
+          "ModeSubmit",
+          "Plan",
+          "PlanEntry",
+          "PrepareHooks",
+          "PrepareRequest",
+          "PreparedAdmission",
+          "PreparedView",
+          "SealError",
+          "StateLiveRequired",
+          "StateUnknown",
+          "StateVerified",
+          "TemplateSnapshot",
+          "TransformInput"
+        ],
+        "C3": [
+          "ReleaseFacts",
+          "IsReleaseParameter"
+        ],
+        "C5": [
+          "ChildSpecDigest",
+          "ScheduleParent"
+        ],
+        "C11": [
+          "ReleaseFacts"
+        ]
+      }
+    }
+  ],
+  "fixture_only": [
+    {
+      "from": [
+        "hack/upgrade-e2e/fixture/**"
+      ],
+      "to": [
+        "internal/store",
+        "internal/model",
+        "pkg/argoworkflow",
+        "internal/testdb",
+        "internal/storetest"
+      ],
+      "build_scope": "disposable fixture and its tests only"
+    },
+    {
+      "from": [
+        "hack/testdata/**"
+      ],
+      "to": [
+        "internal/app",
+        "internal/argojob",
+        "pkg/argoworkflow",
+        "pkg/argoworkflow/defaults"
+      ],
+      "build_scope": "named compiler-overlay fixture only"
+    }
+  ],
+  "packages": {
+    "internal/strictjson": {
+      "owner": "C1",
+      "kind": "shared",
+      "contents": "Bounded standard-library JSON decoding to typed values and public errors; callers own input reads",
+      "consumers": [
+        "C1",
+        "C2",
+        "C4",
+        "C6",
+        "C9",
+        "C11"
+      ]
+    },
+    "internal/actor": {
+      "owner": "C2",
+      "kind": "shared",
+      "contents": "Actor fields/tags below; authenticated identity and scope values",
+      "consumers": [
+        "C1",
+        "C2",
+        "C3",
+        "C7",
+        "C9",
+        "C11"
+      ]
+    },
+    "internal/reponame": {
+      "owner": "C6",
+      "kind": "shared",
+      "contents": "Pure canonical repository path, bare repository name and upstream-name validation",
+      "consumers": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C9",
+        "C10",
+        "C11"
+      ]
+    },
+    "internal/sourcecontract": {
+      "owner": "C6",
+      "kind": "shared",
+      "contents": "Pure revision, descriptor, binding and receipt values and canonical JSON encoding; C6 owns encoding and C4 consumes it",
+      "consumers": [
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C10",
+        "C11"
+      ]
+    },
+    "internal/runtimeconfig": {
+      "owner": "C4",
+      "kind": "shared",
+      "contents": "WorkflowDefaultsSnapshot and SourcePluginConfig values only; C6 reviews registration fields",
+      "consumers": [
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C9",
+        "C10",
+        "C11"
+      ]
+    },
+    "internal/publicerr": {
+      "owner": "C2",
+      "kind": "shared",
+      "contents": "Public typed errors/reason/remedy; whole-tree classification",
+      "consumers": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C8",
+        "C9",
+        "C10",
+        "C11"
+      ]
+    },
+    "internal/admissioncontract": {
+      "owner": "C4",
+      "kind": "shared",
+      "contents": "Prepared-result views, plan, evidence and document-limit values",
+      "consumers": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C10",
+        "C11",
+        "C13"
+      ]
+    },
+    "internal/stepmodel": {
+      "owner": "C4",
+      "kind": "shared",
+      "contents": "Step/status/attempt/count/failure/retry values; C5 and C2 contribute by review",
+      "consumers": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C10",
+        "C11",
+        "C13"
+      ]
+    },
+    "internal/gitport": {
+      "owner": "C6",
+      "kind": "shared",
+      "contents": "Context-bearing Git port and typed errors",
+      "consumers": [
+        "C2",
+        "C3",
+        "C6",
+        "C10",
+        "C11"
+      ]
+    },
+    "internal/nativebinding": {
+      "owner": "C5",
+      "kind": "shared",
+      "contents": "Native run/child ownership and label/proof values; C10 reviews",
+      "consumers": [
+        "C2",
+        "C3",
+        "C5",
+        "C7",
+        "C10",
+        "C11"
+      ]
+    },
+    "internal/stateport": {
+      "owner": "C7",
+      "kind": "shared",
+      "contents": "Pure run, acceptance, branch deletion, native evidence, query and event values and their shared contracts; snapshot, backup and offline-restore ports; C7 owns the archive format",
+      "consumers": [
+        "C1",
+        "C2",
+        "C3",
+        "C5",
+        "C7",
+        "C9",
+        "C11"
+      ]
+    },
+    "internal/model": {
+      "owner": "C2",
+      "kind": "shared",
+      "contents": "Pure history, event, request, trigger, invitation, issue, issue patch and issue filter values",
+      "consumers": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C9",
+        "C10",
+        "C11"
+      ]
+    },
+    "internal/gitoid": {
+      "owner": "C6",
+      "kind": "shared",
+      "contents": "Pure Git object identifier parsing",
+      "consumers": [
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C11",
+        "C13"
+      ]
+    },
+    "internal/boundedio": {
+      "owner": "C6",
+      "kind": "shared",
+      "contents": "Pure in-memory bounded byte buffer/counters; no producer callbacks or external reads/writes",
+      "consumers": [
+        "C3",
+        "C6",
+        "C7",
+        "C9",
+        "C11",
+        "C13"
+      ]
+    },
+    "internal/clientcert": {
+      "owner": "C1",
+      "kind": "shared",
+      "contents": "Pure certificate parsing/verification with supplied time; issuance/entropy lives in clientcert/issuer",
+      "consumers": [
+        "C1",
+        "C2",
+        "C3",
+        "C9",
+        "C11"
+      ]
+    },
+    "internal/identityname": {
+      "owner": "C4",
+      "kind": "shared",
+      "contents": "Pure deterministic identity naming",
+      "consumers": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C7",
+        "C9",
+        "C11"
+      ]
+    },
+    "internal/pushretry": {
+      "owner": "C2",
+      "kind": "shared",
+      "contents": "Pure publication retry values and backoff calculation",
+      "consumers": [
+        "C2",
+        "C6",
+        "C7",
+        "C11"
+      ]
+    },
+    "internal/workflowpolicy": {
+      "owner": "C4",
+      "kind": "shared",
+      "contents": "Pure route/file/grant policy values, no orchestration",
+      "consumers": [
+        "C2",
+        "C3",
+        "C4",
+        "C7",
+        "C9",
+        "C11",
+        "C13"
+      ]
+    },
+    "internal/executoridentity": {
+      "owner": "C5",
+      "kind": "shared",
+      "contents": "Marked for deletion with native hooks; no importer on main outside its own tests; Pod-bound tokens use native mounts",
+      "consumers": []
+    },
+    "internal/containerimage": {
+      "owner": "C5",
+      "kind": "shared",
+      "contents": "Pure image references and constants",
+      "consumers": [
+        "C5",
+        "C6",
+        "C9",
+        "C11",
+        "C13"
+      ]
+    },
+    "internal/restartretry": {
+      "owner": "C11",
+      "kind": "runtime",
+      "contents": "Idempotent public-client reconnect budgets and timer waits",
+      "consumers": [
+        "C11"
+      ]
+    },
+    "internal/staticgit": {
+      "owner": "C13",
+      "kind": "shared",
+      "contents": "Pure packaging records, byte-slice validation and SBOM byte formatting; callers perform writes",
+      "consumers": [
+        "C11",
+        "C13"
+      ]
+    },
+    "internal/gitssh": {
+      "owner": "C6",
+      "kind": "runtime",
+      "contents": "Pinned native Git SSH subprocess transport",
+      "consumers": [
+        "C6",
+        "C11"
+      ]
+    },
+    "internal/sshserver": {
+      "owner": "C6",
+      "kind": "runtime",
+      "contents": "SSH ingress lifecycle and injected authenticated actions",
+      "consumers": [
+        "C6",
+        "C11"
+      ]
+    },
+    "internal/secretstore": {
+      "owner": "C9",
+      "kind": "runtime",
+      "contents": "C9 credential fetch/setup client and secretstore_plan, secretstore_sync_receipt, secretstore_verify; plan via admin access, receipt via admin audit, verify locally",
+      "consumers": [
+        "C9",
+        "C11",
+        "C13"
+      ]
+    },
+    "internal/client": {
+      "owner": "C11",
+      "kind": "runtime",
+      "contents": "Narrow public administration/API client and explicit DTOs; no server handlers",
+      "consumers": [
+        "C9",
+        "C11"
+      ]
+    },
+    "internal/kubeconfig": {
+      "owner": "C9",
+      "kind": "runtime",
+      "contents": "Private config-file loading and target lifetime",
+      "consumers": [
+        "C9",
+        "C11"
+      ]
+    },
+    "internal/releaseverify": {
+      "owner": "C13",
+      "kind": "runtime",
+      "contents": "Bounded signed-release fetch and verification client",
+      "consumers": [
+        "C9",
+        "C11",
+        "C13"
+      ]
+    },
+    "internal/testdb": {
+      "owner": "C7",
+      "kind": "test_only",
+      "contents": "Fixture/testing helpers; never production imports",
+      "consumers": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C9",
+        "C10",
+        "C11",
+        "C13"
+      ]
+    },
+    "internal/storetest": {
+      "owner": "C7",
+      "kind": "test_only",
+      "contents": "Fixture/testing helpers; never production imports",
+      "consumers": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C9",
+        "C10",
+        "C11",
+        "C13"
+      ]
+    },
+    "internal/clientcert/issuer": {
+      "owner": "C2",
+      "kind": "runtime",
+      "contents": "Certificate authority generation/signing with entropy and time; C2 owns issuance policy",
+      "consumers": [
+        "C2",
+        "C9",
+        "C11"
+      ]
+    },
+    "internal/service": {
+      "owner": "C2",
+      "kind": "runtime",
+      "contents": "Service decisions, scope, history, transactional events and publication retry policy",
+      "consumers": [
+        "C3",
+        "C11"
+      ]
+    },
+    "internal/app": {
+      "owner": "C3",
+      "kind": "runtime",
+      "contents": "Pre-receive admission, Keep/Create/bind, recovery, on-demand grants and host trust",
+      "consumers": [
+        "C11"
+      ]
+    },
+    "pkg/argoworkflow": {
+      "owner": "C4",
+      "kind": "runtime",
+      "contents": "Sole authored Workflow admission, preparation and bounded immutable plan",
+      "consumers": [
+        "C3",
+        "C5",
+        "C10",
+        "C11"
+      ]
+    },
+    "pkg/argoworkflow/defaults": {
+      "owner": "C4",
+      "kind": "runtime",
+      "contents": "Pure native Workflow default values",
+      "consumers": [
+        "C11",
+        "C4",
+        "C5",
+        "C6"
+      ]
+    },
+    "pkg/argoworkflow/specsize": {
+      "owner": "C4",
+      "kind": "runtime",
+      "contents": "Pure source-consuming native spec size calculation",
+      "consumers": [
+        "C4",
+        "C6",
+        "C11"
+      ]
+    },
+    "internal/argojob": {
+      "owner": "C5",
+      "kind": "runtime",
+      "contents": "Native hooks, one Create/adoption, typed observations, bound logs and holds",
+      "consumers": [
+        "C11"
+      ]
+    },
+    "internal/argowatch": {
+      "owner": "C5",
+      "kind": "runtime",
+      "contents": "Two namespace-scoped native informers, health and change notifications",
+      "consumers": [
+        "C5",
+        "C11"
+      ]
+    },
+    "internal/schedule": {
+      "owner": "C10",
+      "kind": "runtime",
+      "contents": "Strict schedule declarations and numeric native cron parsing in one package",
+      "consumers": [
+        "C10",
+        "C11"
+      ]
+    },
+    "internal/cronsync": {
+      "owner": "C10",
+      "kind": "runtime",
+      "contents": "Synchronous parent reconciliation, wide authority fence and child proof",
+      "consumers": [
+        "C11"
+      ]
+    },
+    "internal/gitcache": {
+      "owner": "C6",
+      "kind": "runtime",
+      "contents": "Canonical Git cache, keep refs, receive receipts and fenced ref mechanics",
+      "consumers": [
+        "C6",
+        "C11"
+      ]
+    },
+    "internal/sourcedelivery": {
+      "owner": "C6",
+      "kind": "runtime",
+      "contents": "Exact recorded-run source authorization and bounded HTTPS transfer",
+      "consumers": [
+        "C1",
+        "C6",
+        "C11"
+      ]
+    },
+    "internal/sourceplugin": {
+      "owner": "C6",
+      "kind": "runtime",
+      "contents": "Artifact plugin with verified staging and deadline-bounded restart waiting",
+      "consumers": [
+        "C6"
+      ]
+    },
+    "internal/apicontract": {
+      "owner": "C1",
+      "kind": "shared",
+      "contents": "Pure tool contract: one exact input and one result type per tool, caller, handler and binding values, the tool declaration table and the authority classes with their lookup",
+      "consumers": [
+        "C1",
+        "C9",
+        "C2",
+        "C11",
+        "C3"
+      ]
+    },
+    "internal/logcontract": {
+      "owner": "C8",
+      "kind": "shared",
+      "contents": "Pure log read values: selector, read request, filter and window facts",
+      "consumers": [
+        "C1",
+        "C2",
+        "C8",
+        "C11"
+      ]
+    }
+  },
+  "shared_per_component": {
+    "C1": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/apicontract",
+      "internal/clientcert",
+      "internal/logcontract",
+      "internal/model",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/stateport",
+      "internal/stepmodel",
+      "internal/strictjson"
+    ],
+    "C2": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/apicontract",
+      "internal/clientcert",
+      "internal/gitport",
+      "internal/identityname",
+      "internal/logcontract",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/pushretry",
+      "internal/reponame",
+      "internal/stateport",
+      "internal/stepmodel",
+      "internal/strictjson",
+      "internal/workflowpolicy"
+    ],
+    "C3": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/apicontract",
+      "internal/boundedio",
+      "internal/clientcert",
+      "internal/gitoid",
+      "internal/gitport",
+      "internal/identityname",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stateport",
+      "internal/stepmodel",
+      "internal/workflowpolicy"
+    ],
+    "C4": [
+      "internal/admissioncontract",
+      "internal/gitoid",
+      "internal/identityname",
+      "internal/model",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stepmodel",
+      "internal/strictjson",
+      "internal/workflowpolicy"
+    ],
+    "C5": [
+      "internal/admissioncontract",
+      "internal/containerimage",
+      "internal/gitoid",
+      "internal/identityname",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stateport",
+      "internal/stepmodel"
+    ],
+    "C6": [
+      "internal/admissioncontract",
+      "internal/boundedio",
+      "internal/containerimage",
+      "internal/gitoid",
+      "internal/gitport",
+      "internal/model",
+      "internal/publicerr",
+      "internal/pushretry",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stepmodel",
+      "internal/strictjson"
+    ],
+    "C7": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/boundedio",
+      "internal/gitoid",
+      "internal/identityname",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/pushretry",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stateport",
+      "internal/stepmodel",
+      "internal/workflowpolicy"
+    ],
+    "C8": [
+      "internal/logcontract",
+      "internal/publicerr"
+    ],
+    "C9": [
+      "internal/actor",
+      "internal/apicontract",
+      "internal/boundedio",
+      "internal/clientcert",
+      "internal/containerimage",
+      "internal/identityname",
+      "internal/model",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/stateport",
+      "internal/strictjson",
+      "internal/workflowpolicy"
+    ],
+    "C10": [
+      "internal/admissioncontract",
+      "internal/gitport",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stepmodel"
+    ],
+    "C11": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/apicontract",
+      "internal/boundedio",
+      "internal/clientcert",
+      "internal/containerimage",
+      "internal/gitoid",
+      "internal/gitport",
+      "internal/identityname",
+      "internal/logcontract",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/pushretry",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stateport",
+      "internal/staticgit",
+      "internal/stepmodel",
+      "internal/strictjson",
+      "internal/workflowpolicy"
+    ],
+    "C12": [],
+    "C13": [
+      "internal/admissioncontract",
+      "internal/boundedio",
+      "internal/containerimage",
+      "internal/gitoid",
+      "internal/staticgit",
+      "internal/stepmodel",
+      "internal/workflowpolicy"
+    ],
+    "C14": []
+  },
+  "package_allow": {
+    "internal/store": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/boundedio",
+      "internal/gitoid",
+      "internal/identityname",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/pushretry",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stateport",
+      "internal/stepmodel",
+      "internal/workflowpolicy"
+    ],
+    "internal/sourceplugin": [
+      "internal/sourcecontract",
+      "internal/strictjson",
+      "internal/gitoid",
+      "internal/sourcedelivery"
+    ],
+    "internal/strictjson": [
+      "internal/publicerr"
+    ],
+    "internal/argowatch": [],
+    "pkg/argoworkflow/defaults": [],
+    "pkg/argoworkflow/specsize": [],
+    "internal/gitssh": [
+      "internal/publicerr"
+    ],
+    "internal/gitcache": [
+      "internal/admissioncontract",
+      "internal/boundedio",
+      "internal/containerimage",
+      "internal/gitoid",
+      "internal/gitport",
+      "internal/gitssh",
+      "internal/model",
+      "internal/publicerr",
+      "internal/pushretry",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/sourcedelivery",
+      "internal/stepmodel",
+      "internal/strictjson"
+    ],
+    "internal/sourcedelivery": [
+      "internal/admissioncontract",
+      "internal/boundedio",
+      "internal/containerimage",
+      "internal/gitoid",
+      "internal/gitport",
+      "internal/model",
+      "internal/publicerr",
+      "internal/pushretry",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stepmodel",
+      "internal/strictjson"
+    ],
+    "internal/sshserver": [
+      "internal/admissioncontract",
+      "internal/boundedio",
+      "internal/containerimage",
+      "internal/gitcache",
+      "internal/gitoid",
+      "internal/gitport",
+      "internal/model",
+      "internal/publicerr",
+      "internal/pushretry",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stepmodel",
+      "internal/strictjson"
+    ],
+    "internal/kubeconfig": [],
+    "internal/secretstore": [
+      "internal/publicerr",
+      "internal/runtimeconfig",
+      "internal/workflowpolicy",
+      "internal/model"
+    ],
+    "internal/client": [
+      "internal/clientcert",
+      "internal/model",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/restartretry",
+      "internal/stepmodel",
+      "internal/apicontract"
+    ],
+    "internal/restartretry": [],
+    "internal/schedule": [
+      "internal/model",
+      "internal/publicerr",
+      "internal/sourcecontract"
+    ],
+    "internal/releaseverify": [
+      "internal/boundedio",
+      "internal/gitoid",
+      "internal/staticgit"
+    ],
+    "internal/app": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/boundedio",
+      "internal/clientcert",
+      "internal/gitoid",
+      "internal/gitport",
+      "internal/identityname",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/service",
+      "internal/sourcecontract",
+      "internal/stateport",
+      "internal/stepmodel",
+      "internal/workflowpolicy",
+      "pkg/argoworkflow",
+      "internal/apicontract"
+    ],
+    "pkg/argoworkflow": [
+      "internal/admissioncontract",
+      "internal/gitoid",
+      "internal/identityname",
+      "internal/model",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stepmodel",
+      "internal/workflowpolicy",
+      "pkg/argoworkflow/defaults",
+      "pkg/argoworkflow/specsize",
+      "internal/strictjson"
+    ],
+    "internal/argojob": [
+      "internal/admissioncontract",
+      "internal/argowatch",
+      "internal/containerimage",
+      "internal/gitoid",
+      "internal/identityname",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runlog",
+      "internal/runtimeconfig",
+      "internal/sourcecontract",
+      "internal/stateport",
+      "internal/stepmodel",
+      "pkg/argoworkflow",
+      "pkg/argoworkflow/defaults"
+    ],
+    "internal/cronsync": [
+      "internal/admissioncontract",
+      "internal/gitport",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/reponame",
+      "internal/runtimeconfig",
+      "internal/schedule",
+      "internal/sourcecontract",
+      "internal/stepmodel",
+      "pkg/argoworkflow"
+    ],
+    "cmd/oberth-release": [
+      "internal/releaseverify",
+      "internal/staticgit",
+      "internal/workflowpolicy"
+    ]
+  },
+  "shared_dependencies": {
+    "internal/strictjson": [
+      "internal/publicerr"
+    ],
+    "internal/actor": [],
+    "internal/reponame": [],
+    "internal/sourcecontract": [
+      "internal/gitoid",
+      "internal/publicerr",
+      "internal/runtimeconfig",
+      "internal/model",
+      "internal/reponame"
+    ],
+    "internal/runtimeconfig": [],
+    "internal/publicerr": [],
+    "internal/admissioncontract": [
+      "internal/model",
+      "internal/sourcecontract",
+      "internal/runtimeconfig",
+      "internal/stepmodel",
+      "internal/gitoid",
+      "internal/publicerr",
+      "internal/identityname"
+    ],
+    "internal/stepmodel": [],
+    "internal/gitport": [
+      "internal/sourcecontract",
+      "internal/publicerr",
+      "internal/gitoid",
+      "internal/reponame"
+    ],
+    "internal/nativebinding": [
+      "internal/sourcecontract",
+      "internal/gitoid"
+    ],
+    "internal/stateport": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/model",
+      "internal/nativebinding",
+      "internal/publicerr",
+      "internal/pushretry",
+      "internal/stepmodel"
+    ],
+    "internal/model": [
+      "internal/actor",
+      "internal/publicerr"
+    ],
+    "internal/gitoid": [],
+    "internal/boundedio": [],
+    "internal/clientcert": [],
+    "internal/identityname": [],
+    "internal/pushretry": [],
+    "internal/workflowpolicy": [
+      "internal/reponame",
+      "internal/identityname"
+    ],
+    "internal/executoridentity": [],
+    "internal/containerimage": [],
+    "internal/staticgit": [],
+    "internal/restartretry": [],
+    "internal/apicontract": [
+      "internal/actor",
+      "internal/admissioncontract",
+      "internal/logcontract",
+      "internal/model",
+      "internal/publicerr",
+      "internal/stepmodel",
+      "internal/stateport"
+    ],
+    "internal/logcontract": []
+  },
+  "test_allow": {
+    "internal/sshserver": [
+      "internal/gitssh"
+    ],
+    "cmd/oberth": [
+      "internal/sourceplugin"
+    ],
+    "internal/storetest": [
+      "internal/store",
+      "internal/model",
+      "internal/actor",
+      "internal/stateport"
+    ],
+    "internal/testdb": [
+      "internal/store"
+    ],
+    "internal/boundedio": [
+      "internal/publicerr"
+    ],
+    "internal/clientcert": [
+      "internal/publicerr"
+    ],
+    "internal/identityname": [
+      "internal/publicerr"
+    ],
+    "internal/reponame": [
+      "internal/publicerr"
+    ],
+    "internal/stepmodel": [
+      "internal/publicerr"
+    ],
+    "internal/workflowpolicy": [
+      "internal/publicerr"
+    ],
+    "internal/stateport": [
+      "internal/reponame"
+    ],
+    "internal/store": [
+      "pkg/argoworkflow"
+    ],
+    "internal/app": [
+      "internal/store",
+      "internal/gitcache/gittest",
+      "internal/argojob",
+      "internal/argojob/fake"
+    ],
+    "internal/argojob": [
+      "internal/app",
+      "internal/service",
+      "internal/gitcache/gittest",
+      "internal/store",
+      "internal/cronsync",
+      "internal/cronsync/fake",
+      "internal/gitport",
+      "internal/schedule"
+    ],
+    "cmd/oberth-source-plugin": [
+      "internal/nativebinding",
+      "internal/stateport",
+      "internal/store"
+    ],
+    "internal/service": [
+      "internal/client",
+      "internal/store",
+      "pkg/argoworkflow",
+      "internal/sourcecontract",
+      "internal/secretstore",
+      "internal/secretstore/fake",
+      "internal/api",
+      "internal/api/fake"
+    ],
+    "internal/client": [
+      "internal/actor",
+      "internal/api",
+      "internal/api/fake",
+      "internal/apicontract"
+    ],
+    "cmd/oberth-release": [
+      "internal/admissioncontract",
+      "internal/model",
+      "internal/sourcecontract",
+      "pkg/argoworkflow"
+    ],
+    "docs": [
+      "cmd/oberth",
+      "internal/apicontract",
+      "pkg/argoworkflow"
+    ],
+    "internal/installer": [
+      "internal/argojob/argojobtest"
+    ]
+  },
+  "retired": [
+    ".",
+    "internal/artifacts/**",
+    "internal/auth/**",
+    "internal/cron/**",
+    "internal/holdfs",
+    "internal/integration/**",
+    "internal/invite/**",
+    "internal/liveness/**",
+    "internal/mdnsdial/**",
+    "internal/recordjson/**",
+    "internal/redact/**",
+    "internal/runprogress/**",
+    "internal/sourceport/**",
+    "internal/testtimeout/**",
+    "pkg/pipeline/**"
+  ],
+  "reference_packages": [
+    ".",
+    "agent",
+    "cmd/oberth",
+    "cmd/oberth-source-plugin",
+    "cmd/oberth-store-backup",
+    "hack/static-git-metadata",
+    "hack/static-git-scan-receipt",
+    "hack/static-git-scanner",
+    "hack/testdata/bootstrap-admission",
+    "hack/testdata/helper-mounts",
+    "hack/testdata/native-pod-metadata",
+    "hack/testdata/semaphore-failures",
+    "hack/upgrade-e2e/fixture",
+    "internal/api",
+    "internal/app",
+    "internal/argojob",
+    "internal/argowatch",
+    "internal/artifacts",
+    "internal/auth",
+    "internal/boundedio",
+    "internal/client",
+    "internal/clientcert",
+    "internal/containerimage",
+    "internal/cron",
+    "internal/cronsync",
+    "internal/executoridentity",
+    "internal/gitcache",
+    "internal/gitoid",
+    "internal/gitssh",
+    "internal/holdfs",
+    "internal/identityname",
+    "internal/installer",
+    "internal/integration",
+    "internal/invite",
+    "internal/kubeconfig",
+    "internal/liveness",
+    "internal/mdnsdial",
+    "internal/model",
+    "internal/pushretry",
+    "internal/recordjson",
+    "internal/redact",
+    "internal/releaseverify",
+    "internal/restartretry",
+    "internal/runlog",
+    "internal/runprogress",
+    "internal/schedule",
+    "internal/secretstore",
+    "internal/service",
+    "internal/setuptui",
+    "internal/sourcedelivery",
+    "internal/sourceplugin",
+    "internal/sshserver",
+    "internal/staticgit",
+    "internal/store",
+    "internal/storetest",
+    "internal/testdb",
+    "internal/testtimeout",
+    "internal/workflowpolicy",
+    "pkg/argoworkflow",
+    "pkg/argoworkflow/defaults",
+    "pkg/argoworkflow/specsize",
+    "pkg/pipeline"
+  ],
+  "harness": {
+    "trees": [
+      "test/**",
+      "hack/**"
+    ]
+  }
+}

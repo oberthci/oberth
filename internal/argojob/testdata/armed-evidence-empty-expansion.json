@@ -1,0 +1,52 @@
+{
+  "phase": "Succeeded",
+  "startedAt": "2026-11-18T04:41:12Z",
+  "finishedAt": "2026-11-18T04:41:12Z",
+  "progress": "0/0",
+  "nodes": {
+    "run-2189c50eed79aace7fe2925101d9f045": {
+      "id": "run-2189c50eed79aace7fe2925101d9f045",
+      "name": "run-2189c50eed79aace7fe2925101d9f045",
+      "displayName": "run-2189c50eed79aace7fe2925101d9f045",
+      "type": "DAG",
+      "templateName": "pipeline",
+      "templateScope": "local/run-2189c50eed79aace7fe2925101d9f045",
+      "phase": "Succeeded",
+      "startedAt": "2026-11-18T04:41:12Z",
+      "finishedAt": "2026-11-18T04:41:12Z",
+      "children": [
+        "run-2189c50eed79aace7fe2925101d9f045-2552489319"
+      ],
+      "outboundNodes": [
+        "run-2189c50eed79aace7fe2925101d9f045-2552489319"
+      ]
+    },
+    "run-2189c50eed79aace7fe2925101d9f045-2552489319": {
+      "id": "run-2189c50eed79aace7fe2925101d9f045-2552489319",
+      "name": "run-2189c50eed79aace7fe2925101d9f045.build",
+      "displayName": "build",
+      "type": "Skipped",
+      "templateName": "build",
+      "templateScope": "local/run-2189c50eed79aace7fe2925101d9f045",
+      "phase": "Skipped",
+      "boundaryID": "run-2189c50eed79aace7fe2925101d9f045",
+      "message": "Skipped, empty params",
+      "startedAt": "2026-11-18T04:41:12Z",
+      "finishedAt": "2026-11-18T04:41:12Z",
+      "nodeFlag": {}
+    }
+  },
+  "conditions": [
+    {
+      "type": "Completed",
+      "status": "True"
+    }
+  ],
+  "artifactRepositoryRef": {
+    "default": true,
+    "artifactRepository": {}
+  },
+  "artifactGCStatus": {
+    "notSpecified": true
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "kind": "Workflow",
+  "apiVersion": "argoproj.io/v1alpha1",
+  "metadata": {},
+  "spec": {
+    "templates": [
+      {
+        "name": "main",
+        "inputs": {},
+        "outputs": {},
+        "metadata": {},
+        "dag": {
+          "tasks": [
+            {
+              "name": "ref",
+              "arguments": {},
+              "templateRef": {
+                "name": "shared",
+                "template": "work"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "leaf",
+        "inputs": {},
+        "outputs": {},
+        "metadata": {},
+        "container": {
+          "name": "",
+          "image": "example.test/image:1",
+          "command": [
+            "true"
+          ],
+          "resources": {}
+        }
+      }
+    ],
+    "entrypoint": "main",
+    "arguments": {},
+    "templateDefaults": {
+      "inputs": {},
+      "outputs": {},
+      "metadata": {},
+      "container": {
+        "name": "",
+        "workingDir": "/consumer",
+        "resources": {}
+      }
+    }
+  },
+  "status": {
+    "startedAt": null,
+    "finishedAt": null
+  }
+}

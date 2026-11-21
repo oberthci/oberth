@@ -1,0 +1,152 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oberth
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: oberth-data
+  namespace: {{ .Release.Namespace }}
+  annotations: {helm.sh/resource-policy: keep}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.storage.size | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oberth-server
+  namespace: {{ .Release.Namespace }}
+data:
+  server.json: {{ include "oberth.server" . | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oberth
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: oberth}
+  template:
+    metadata:
+      labels: {app: oberth}
+      annotations:
+        checksum/config: {{ include "oberth.server" . | sha256sum | quote }}
+        checksum/ca: {{ .Values.server.runtime.source.ca_pem | sha256sum | quote }}
+        checksum/admin: {{ .Values.adminPublicKeySHA256 | quote }}
+    spec:
+      serviceAccountName: oberth
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: server
+          image: {{ (include "oberth.image" .) | quote }}
+          imagePullPolicy: {{ contains "@sha256:" (include "oberth.image" .) | ternary "IfNotPresent" "Always" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            runAsNonRoot: true
+            seccompProfile: {type: RuntimeDefault}
+            readOnlyRootFilesystem: true
+          command: [/usr/local/bin/oberth]
+          args: [serve, --config, /etc/oberth/config/server.json]
+          ports:
+            - {name: https, containerPort: 8443}
+            - {name: ssh, containerPort: 2222}
+            - {name: source, containerPort: 8445}
+            - {name: health, containerPort: 8081}
+          readinessProbe:
+            initialDelaySeconds: 0
+            httpGet: {path: /readyz, port: 8081, scheme: HTTP}
+          livenessProbe:
+            initialDelaySeconds: 0
+            httpGet: {path: /livez, port: 8081, scheme: HTTP}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/oberth}
+            - {name: config, mountPath: /etc/oberth/config, readOnly: true}
+            - {name: ca, mountPath: /etc/oberth/ca, readOnly: true}
+            - {name: ssh, mountPath: /etc/oberth/ssh, readOnly: true}
+            - {name: forge, mountPath: /etc/oberth/forge, readOnly: true}
+            - {name: admin, mountPath: /etc/oberth/admin, readOnly: true}
+            - {name: store-ca, mountPath: /etc/oberth/store, readOnly: true}
+            - {name: store-token, mountPath: /var/run/secrets/secretstore, readOnly: true}
+            - {name: runtime, mountPath: /run/oberth}
+            - {name: tmp, mountPath: /tmp}
+
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: oberth-data}
+        - name: config
+          configMap: {name: oberth-server}
+        - name: admin
+          secret:
+            secretName: oberth-admin
+            defaultMode: 0440
+            items: [{key: admin.pub, path: admin.pub}, {key: push.pub, path: push.pub}]
+        - name: ca
+          secret:
+            secretName: oberth-ca
+            defaultMode: 0440
+            items: [{key: tls.crt, path: tls.crt}, {key: tls.key, path: tls.key}]
+        - name: ssh
+          secret:
+            secretName: oberth-ssh-host
+            defaultMode: 0440
+            items: [{key: key, path: key}]
+        - name: forge
+          secret:
+            secretName: oberth-forge-key
+            defaultMode: 0440
+            items: [{key: key, path: key}]
+        - name: store-ca
+          secret:
+            secretName: {{ .Values.secretStore.caSecret | quote }}
+            defaultMode: 0440
+            items: [{key: ca.crt, path: ca.crt}]
+        - name: store-token
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken:
+                  audience: {{ .Values.secretStore.audience | quote }}
+                  path: token
+
+        - name: runtime
+          emptyDir: {medium: Memory}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.storage.tmp | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oberth
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: NodePort
+  selector: {app: oberth}
+  ports:
+    - {name: https, port: 8443, targetPort: https, nodePort: {{ .Values.nodePorts.https }}}
+    - {name: ssh, port: 2222, targetPort: ssh, nodePort: {{ .Values.nodePorts.ssh }}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oberth-source
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector: {app: oberth}
+  ports:
+    - {name: source, port: 8445, targetPort: source}

@@ -1,0 +1,83 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: oberth-controller
+  namespace: {{ .Values.pipeline.namespace }}
+rules:
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [create, get, list, watch, update, patch, delete]
+  - apiGroups: ['']
+    resources: [pods/exec]
+    verbs: [create]
+  - apiGroups: [argoproj.io]
+    resources: [workflows, workflows/finalizers, workflowtasksets, workflowtasksets/finalizers, workflowtasksets/status, workflowartifactgctasks]
+    verbs: [create, get, list, watch, update, patch, delete]
+  - apiGroups: [argoproj.io]
+    resources: [workflowtaskresults, workflowtaskresults/finalizers]
+    verbs: [list, watch, deletecollection]
+  - apiGroups: ['']
+    resources: [serviceaccounts]
+    verbs: [get, list]
+  - apiGroups: ['']
+    resources: [configmaps]
+    verbs: [get, list, watch]
+  - apiGroups: [argoproj.io]
+    resources: [workflowtemplates, workflowtemplates/finalizers]
+    verbs: [get, list, watch]
+  - apiGroups: [argoproj.io]
+    resources: [cronworkflows, cronworkflows/finalizers]
+    verbs: [get, list, watch, update, patch, delete]
+  - apiGroups: ['']
+    resources: [persistentvolumeclaims, persistentvolumeclaims/finalizers]
+    verbs: [create, update, delete, get]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [create, get, delete]
+  - apiGroups: ['']
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: oberth-controller
+  namespace: {{ .Values.pipeline.namespace }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: oberth-controller}
+subjects:
+  - kind: ServiceAccount
+    name: oberth-controller
+    namespace: {{ include "oberth.argoNamespace" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: oberth-controller-config
+  namespace: {{ include "oberth.argoNamespace" . }}
+rules:
+  - apiGroups: ['']
+    resources: [configmaps]
+    resourceNames: [{{ .Values.server.runtime.controller_configmap }}]
+    verbs: [get]
+  # This namespace's ConfigMaps contain no secrets; the reload check omits a resource name.
+  - apiGroups: ['']
+    resources: [configmaps]
+    verbs: [list, watch]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [workflow-controller, workflow-controller-lease]
+    verbs: [get, watch, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: oberth-controller-config
+  namespace: {{ include "oberth.argoNamespace" . }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: oberth-controller-config}
+subjects:
+  - kind: ServiceAccount
+    name: oberth-controller
+    namespace: {{ include "oberth.argoNamespace" . }}

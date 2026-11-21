@@ -1,0 +1,10 @@
+{
+  "name": "oberth",
+  "version": "0.24.0",
+  "description": "Oberth runs above the prompt, a run table, pinned completion notices and the connection skill.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "executable": { "type": "string", "title": "Verified executable", "description": "Absolute verified executable path printed by oberth join." },
+    "profile": { "type": "string", "title": "Uplink profile", "description": "Uplink profile in the agent tools line from oberth join; defaults to OBERTH_PROFILE." }
+  }
+}

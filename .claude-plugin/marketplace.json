@@ -1,0 +1,7 @@
+{
+  "name": "oberthci",
+  "owner": { "name": "Oberth" },
+  "plugins": [
+    { "name": "oberth", "source": "./agent", "description": "Oberth run box, run tools and connection skill." }
+  ]
+}

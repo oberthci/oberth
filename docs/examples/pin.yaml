@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: pin-
+spec:
+  entrypoint: pin-has-no-git-dir
+  activeDeadlineSeconds: 600
+  templates:
+    - name: pin-has-no-git-dir
+      inputs:
+        artifacts:
+          - name: library
+            path: /work/sources/library
+            mode: 0755
+            plugin:
+              name: oberth
+              key: '{{workflow.parameters.oberth-source}}'
+              configuration: >-
+                {"version":1,"kind":"pin","repository":"forge/team/library",
+                "commit":"cccccccccccccccccccccccccccccccccccccccc"}
+      container:
+        image: example.test/team/build:1
+        workingDir: /work/sources/library
+        command: [sh, -eu, -c]
+        args: ['test ! -e .git; find . -type f']

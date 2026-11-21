@@ -1,0 +1,118 @@
+{
+  "kind": "Workflow",
+  "apiVersion": "argoproj.io/v1alpha1",
+  "metadata": {
+    "name": "run-f25a700e00b7d9969ce0accdf7610c06",
+    "namespace": "ci",
+    "labels": {
+      "oberth.ci/engine": "argo",
+      "oberth.ci/repo": "1",
+      "oberth.ci/run": "run-0000000000000001",
+      "oberth.ci/sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "oberth.ci/trigger": "branch",
+      "pipeline": "authored",
+      "workflows.argoproj.io/controller-instanceid": "frontdoor"
+    },
+    "annotations": {
+      "note": "authored",
+      "oberth.ci/ref": "refs/heads/topic",
+      "oberth.ci/run-id": "run-0000000000000001",
+      "oberth.ci/spec-identity": "1ad298090f46a0cbc3e5b57e8d0eac98bbf1484bdeaa8b4d5ed42b0c09381503"
+    }
+  },
+  "spec": {
+    "templates": [
+      {
+        "name": "build",
+        "inputs": {
+          "artifacts": [
+            {
+              "name": "source",
+              "path": "/work/src",
+              "mode": 493,
+              "plugin": {
+                "name": "oberth",
+                "configuration": "{\"version\":1,\"kind\":\"main\"}",
+                "key": "{{workflow.parameters.oberth-source}}"
+              }
+            }
+          ]
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "value",
+              "valueFrom": {
+                "path": "/scratch/value"
+              }
+            }
+          ]
+        },
+        "metadata": {},
+        "container": {
+          "name": "",
+          "image": "example.test/build:1",
+          "command": [
+            "true"
+          ],
+          "workingDir": "/work/src",
+          "env": [
+            {
+              "name": "GIT_CONFIG_COUNT",
+              "value": "1"
+            },
+            {
+              "name": "GIT_CONFIG_KEY_0",
+              "value": "safe.directory"
+            },
+            {
+              "name": "GIT_CONFIG_VALUE_0",
+              "value": "/work/src"
+            }
+          ],
+          "resources": {},
+          "volumeMounts": [
+            {
+              "name": "scratch",
+              "mountPath": "/scratch"
+            }
+          ]
+        },
+        "serviceAccountName": "oberth-argo-ci-forge-org-repo-29207b457f2a4667542e",
+        "automountServiceAccountToken": false,
+        "executor": {
+          "serviceAccountName": "oberth-argo-ci-forge-org-repo-29207b457f2a4667542e"
+        }
+      }
+    ],
+    "entrypoint": "build",
+    "arguments": {
+      "parameters": [
+        {
+          "name": "oberth-source",
+          "value": "run-0000000000000001"
+        },
+        {
+          "name": "oberth-trigger",
+          "value": "branch"
+        }
+      ]
+    },
+    "serviceAccountName": "oberth-argo-ci-forge-org-repo-29207b457f2a4667542e",
+    "automountServiceAccountToken": false,
+    "executor": {
+      "serviceAccountName": "oberth-argo-ci-forge-org-repo-29207b457f2a4667542e"
+    },
+    "volumes": [
+      {
+        "name": "scratch",
+        "emptyDir": {}
+      }
+    ],
+    "podSpecPatch": "{\"volumes\":[{\"name\":\"exec-sa-token\",\"projected\":{\"sources\":[{\"serviceAccountToken\":{\"expirationSeconds\":3600,\"path\":\"token\"}},{\"configMap\":{\"name\":\"kube-root-ca.crt\",\"items\":[{\"key\":\"ca.crt\",\"path\":\"ca.crt\"}]}},{\"downwardAPI\":{\"items\":[{\"path\":\"namespace\",\"fieldRef\":{\"apiVersion\":\"v1\",\"fieldPath\":\"metadata.namespace\"}}]}}]},\"secret\":null}]}"
+  },
+  "status": {
+    "startedAt": null,
+    "finishedAt": null
+  }
+}

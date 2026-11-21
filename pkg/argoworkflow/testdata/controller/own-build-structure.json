@@ -1,0 +1,1001 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "Workflow",
+  "spec": {
+    "entrypoint": "ci",
+    "templates": [
+      {
+        "name": "ci",
+        "dag": {
+          "tasks": [
+            {
+              "name": "setup",
+              "template": "setup"
+            },
+            {
+              "name": "generic-names",
+              "template": "generic-names"
+            },
+            {
+              "name": "contract-guard",
+              "template": "contract-guard"
+            },
+            {
+              "name": "lint",
+              "template": "lint",
+              "depends": "setup"
+            },
+            {
+              "name": "test-store",
+              "template": "test-store",
+              "depends": "setup"
+            },
+            {
+              "name": "test-service",
+              "template": "test-service",
+              "depends": "setup"
+            },
+            {
+              "name": "test-rest",
+              "template": "test-rest",
+              "depends": "setup"
+            },
+            {
+              "name": "build-static-git-runtime",
+              "template": "build-static-git-runtime",
+              "depends": "setup"
+            },
+            {
+              "name": "test-static-git-runtime",
+              "template": "test-static-git-runtime",
+              "depends": "build-static-git-runtime"
+            },
+            {
+              "name": "test-gitcache",
+              "template": "test-gitcache",
+              "depends": "setup"
+            },
+            {
+              "name": "test-archive-history",
+              "template": "test-archive-history",
+              "depends": "setup"
+            },
+            {
+              "name": "test-openbao",
+              "template": "test-openbao",
+              "depends": "setup"
+            },
+            {
+              "name": "security",
+              "template": "security",
+              "depends": "setup"
+            },
+            {
+              "name": "shellcheck",
+              "template": "shellcheck",
+              "depends": "setup"
+            },
+            {
+              "name": "chart",
+              "template": "chart",
+              "depends": "setup"
+            },
+            {
+              "name": "chart-unittest",
+              "template": "chart-unittest",
+              "depends": "setup"
+            },
+            {
+              "name": "test-chart-schema",
+              "template": "test-chart-schema",
+              "depends": "setup"
+            },
+            {
+              "name": "test-make-entrypoints",
+              "template": "test-make-entrypoints",
+              "depends": "setup"
+            },
+            {
+              "name": "test-release-prune-contract",
+              "template": "test-release-prune-contract",
+              "depends": "setup"
+            },
+            {
+              "name": "release-diagnostic",
+              "template": "release-diagnostic",
+              "depends": "setup"
+            },
+            {
+              "name": "verify-publisher-tools",
+              "template": "verify-publisher-tools",
+              "depends": "setup"
+            },
+            {
+              "name": "build-amd64",
+              "template": "build-amd64",
+              "depends": "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract"
+            },
+            {
+              "name": "build-arm64",
+              "template": "build-arm64",
+              "depends": "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract"
+            },
+            {
+              "name": "build-darwin-amd64",
+              "template": "build-darwin-amd64",
+              "depends": "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract"
+            },
+            {
+              "name": "build-darwin-arm64",
+              "template": "build-darwin-arm64",
+              "depends": "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract"
+            }
+          ]
+        }
+      },
+      {
+        "name": "generic-names",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "contract-guard",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "setup",
+        "steps": [
+          [
+            {
+              "name": "tools-dir",
+              "template": "tools-dir"
+            }
+          ],
+          [
+            {
+              "name": "link-go",
+              "template": "link-go"
+            }
+          ],
+          [
+            {
+              "name": "install-golangci-lint",
+              "template": "install-golangci-lint"
+            }
+          ],
+          [
+            {
+              "name": "install-deadcode",
+              "template": "install-deadcode"
+            }
+          ],
+          [
+            {
+              "name": "install-helm",
+              "template": "install-helm"
+            }
+          ],
+          [
+            {
+              "name": "fetch-helm-unittest",
+              "template": "fetch-helm-unittest"
+            }
+          ],
+          [
+            {
+              "name": "verify-helm-unittest",
+              "template": "verify-helm-unittest"
+            }
+          ],
+          [
+            {
+              "name": "install-helm-unittest",
+              "template": "install-helm-unittest"
+            }
+          ],
+          [
+            {
+              "name": "fetch-shellcheck",
+              "template": "fetch-shellcheck"
+            }
+          ],
+          [
+            {
+              "name": "verify-shellcheck",
+              "template": "verify-shellcheck"
+            }
+          ],
+          [
+            {
+              "name": "decompress-shellcheck",
+              "template": "decompress-shellcheck"
+            }
+          ],
+          [
+            {
+              "name": "install-shellcheck",
+              "template": "install-shellcheck"
+            }
+          ],
+          [
+            {
+              "name": "resource-guard",
+              "template": "resource-guard"
+            }
+          ]
+        ]
+      },
+      {
+        "name": "tools-dir",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "link-go",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "install-golangci-lint",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "install-deadcode",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "install-helm",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "fetch-helm-unittest",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "verify-helm-unittest",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "install-helm-unittest",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "fetch-shellcheck",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "verify-shellcheck",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "decompress-shellcheck",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "install-shellcheck",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "shellcheck",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "lint",
+        "steps": [
+          [
+            {
+              "name": "vet",
+              "template": "vet"
+            }
+          ],
+          [
+            {
+              "name": "golangci-lint-run",
+              "template": "golangci-lint-run"
+            }
+          ],
+          [
+            {
+              "name": "deadcode",
+              "template": "deadcode"
+            }
+          ]
+        ]
+      },
+      {
+        "name": "vet",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "golangci-lint-run",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "deadcode",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "test-store",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "test-service",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "test-rest",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "test-gitcache",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "build-static-git-runtime",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "test-static-git-runtime",
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "test-archive-history",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "security",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "chart",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "chart-unittest",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "test-chart-schema",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "test-make-entrypoints",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "test-release-prune-contract",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "build-amd64",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "build-arm64",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "build-darwin-amd64",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "build-darwin-arm64",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-diagnostic",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "verify-publisher-tools",
+        "steps": [
+          [
+            {
+              "name": "vpt-build-and-fetch",
+              "template": "vpt-build-and-fetch"
+            },
+            {
+              "name": "vpt-copy-trivy",
+              "template": "vpt-copy-trivy"
+            }
+          ],
+          [
+            {
+              "name": "vpt-verify",
+              "template": "vpt-verify"
+            }
+          ]
+        ]
+      },
+      {
+        "name": "vpt-build-and-fetch",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "vpt-copy-trivy",
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "vpt-verify",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "test-openbao",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "resource-guard",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      }
+    ]
+  }
+}

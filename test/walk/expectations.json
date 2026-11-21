@@ -1,0 +1,115 @@
+{
+  "install": {
+    "when": "failure",
+    "description": "The exact install verification or resume command",
+    "required": [
+      "oberth (?:install[^\\n]*(?:--verify|--resume-secrets-file)|upstream add[^\\n]+)"
+    ]
+  },
+  "login": {
+    "when": "failure",
+    "description": "Renew or configure the current client identity",
+    "required": [
+      "oberth client (?:renew|redeem|repository)"
+    ]
+  },
+  "connect": {
+    "when": "failure",
+    "description": "Verify the named upstream or bind the repository",
+    "required": [
+      "oberth (?:upstream add|client repository)[^\\n]+"
+    ]
+  },
+  "onboard": {
+    "when": "failure",
+    "description": "Redeem or bind the invited client using a concrete command",
+    "required": [
+      "oberth client (?:redeem|repository)[^\\n]+"
+    ]
+  },
+  "push": {
+    "when": "always",
+    "description": "An exact run URL to watch after an ordinary push",
+    "required": [
+      "watch:\\s*{base}/runs/[0-9a-f]{8,32}"
+    ]
+  },
+  "live-logs": {
+    "when": "failure",
+    "description": "Read or wait for the exact active run",
+    "required": [
+      "oberth (?:log|run wait)\\s+{run_id}\\b"
+    ]
+  },
+  "build": {
+    "when": "failure",
+    "description": "Read the failing run's own diagnostics",
+    "required": [
+      "oberth log\\s+{run_id}\\b"
+    ]
+  },
+  "retained-logs": {
+    "when": "failure",
+    "description": "Read the exact retained run",
+    "required": [
+      "oberth log\\s+{run_id}\\b"
+    ]
+  },
+  "promote": {
+    "when": "failure",
+    "description": "Inspect or retry the named promotion",
+    "required": [
+      "oberth promotion (?:retry|create)[^\\n]+"
+    ]
+  },
+  "grant": {
+    "when": "failure",
+    "description": "Request the exact grant and reconcile its identity",
+    "required": [
+      "oberth (?:access allow|secretstore sync)[^\\n]*"
+    ]
+  },
+  "release": {
+    "when": "failure",
+    "description": "Inspect the release or correct its exact grant",
+    "required": [
+      "oberth (?:log|access allow|run wait)\\s+[^\\n]+"
+    ]
+  },
+  "invalid-yaml": {
+    "when": "always",
+    "description": "Name both offenders and tell the author to remove the invalid fields",
+    "refusal": {
+      "code": "invalid_input",
+      "contains": [
+        ".oberth/build.yaml",
+        "offender-one",
+        "offender-two",
+        "walkUnknownOne",
+        "walkUnknownTwo"
+      ],
+      "remedy": "remove"
+    }
+  },
+  "ungranted-secret": {
+    "when": "always",
+    "description": "Give the refusal code, exact scope and grant request command",
+    "refusal": {
+      "code": "forbidden",
+      "contains": [
+        "{repo}",
+        ".oberth/build.yaml",
+        "needs-secret",
+        "oberth/data/release/walk"
+      ],
+      "remedy": "oberth access allow"
+    }
+  },
+  "readonly-source": {
+    "when": "failure",
+    "description": "Tell the author how to inspect the failed source probe",
+    "required": [
+      "oberth log\\s+[0-9a-f]{8,32}"
+    ]
+  }
+}

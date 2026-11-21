@@ -1,0 +1,79 @@
+{
+  "kind": "Workflow",
+  "apiVersion": "argoproj.io/v1alpha1",
+  "metadata": {
+    "name": "installer-status",
+    "namespace": "default",
+    "creationTimestamp": null,
+    "labels": {
+      "workflows.argoproj.io/completed": "false",
+      "workflows.argoproj.io/controller-instanceid": "frontdoor",
+      "workflows.argoproj.io/phase": "Running"
+    },
+    "annotations": {
+      "workflows.argoproj.io/pod-name-format": "v2"
+    }
+  },
+  "spec": {
+    "templates": [
+      {
+        "name": "main",
+        "inputs": {},
+        "outputs": {},
+        "metadata": {},
+        "container": {
+          "name": "",
+          "image": "image",
+          "command": [
+            "true"
+          ],
+          "resources": {}
+        }
+      }
+    ],
+    "entrypoint": "main",
+    "arguments": {}
+  },
+  "status": {
+    "phase": "Running",
+    "startedAt": null,
+    "finishedAt": null,
+    "progress": "0/1",
+    "nodes": {
+      "installer-status": {
+        "id": "installer-status",
+        "name": "installer-status",
+        "displayName": "installer-status",
+        "type": "Pod",
+        "templateName": "main",
+        "templateScope": "local/installer-status",
+        "phase": "Running",
+        "startedAt": null,
+        "finishedAt": null,
+        "progress": "0/1",
+        "outputs": {
+          "parameters": [
+            {
+              "name": "value",
+              "value": "built"
+            }
+          ]
+        },
+        "taskResultSynced": true
+      }
+    },
+    "conditions": [
+      {
+        "type": "PodRunning",
+        "status": "True"
+      }
+    ],
+    "artifactRepositoryRef": {},
+    "artifactGCStatus": {
+      "notSpecified": true
+    },
+    "taskResultsCompletionStatus": {
+      "installer-status": false
+    }
+  }
+}

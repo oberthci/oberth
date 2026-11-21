@@ -1,0 +1,50 @@
+{
+  "phase": "Succeeded",
+  "startedAt": "2026-11-18T02:56:17Z",
+  "finishedAt": "2026-11-18T02:56:17Z",
+  "progress": "1/1",
+  "nodes": {
+    "run-14e74dc83d944fd2f7c9a2cfe32c0e43": {
+      "id": "run-14e74dc83d944fd2f7c9a2cfe32c0e43",
+      "name": "run-14e74dc83d944fd2f7c9a2cfe32c0e43",
+      "displayName": "run-14e74dc83d944fd2f7c9a2cfe32c0e43",
+      "type": "Pod",
+      "templateName": "build",
+      "templateScope": "local/run-14e74dc83d944fd2f7c9a2cfe32c0e43",
+      "phase": "Succeeded",
+      "startedAt": "2026-11-18T02:56:17Z",
+      "finishedAt": "2026-11-18T02:56:17Z",
+      "progress": "1/1",
+      "resourcesDuration": {
+        "cpu": 0,
+        "memory": 2
+      },
+      "outputs": {
+        "exitCode": "0"
+      },
+      "taskResultSynced": true,
+      "failedPodRestarts": 1
+    }
+  },
+  "conditions": [
+    {
+      "type": "PodRunning",
+      "status": "False"
+    },
+    {
+      "type": "Completed",
+      "status": "True"
+    }
+  ],
+  "resourcesDuration": {
+    "cpu": 0,
+    "memory": 2
+  },
+  "artifactRepositoryRef": {
+    "default": true,
+    "artifactRepository": {}
+  },
+  "artifactGCStatus": {
+    "notSpecified": true
+  }
+}

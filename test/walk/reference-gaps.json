@@ -1,0 +1,116 @@
+{
+  "release": "v0.23.4",
+  "steps": {
+    "live-logs": {
+      "requirements": [
+        "REQ-C8-001",
+        "REQ-C8-002",
+        "REQ-C5-009"
+      ],
+      "signatures": [
+        {
+          "reason": "CLI and agent tools do not stream live output; only the dashboard does",
+          "detail": "oberth: client: /api/runs/<id>/logs returned 400: service: invalid input: no failed step; specify a step or Argo node ID\nagent output: oberth mcp call run_logs '{\"id\": \"<id>\"}' (exit 1): oberth: tool returned an error"
+        }
+      ],
+      "missing_remedies": [
+        "oberth: client: /api/runs/<id>/logs returned 400: service: invalid input: no failed step; specify a step or Argo node ID\noberth: tool returned an error"
+      ]
+    },
+    "ui": {
+      "requirements": [
+        "REQ-C1-004"
+      ],
+      "signatures": [
+        {
+          "reason": "Leaf entrypoint label is not authored: build; labels: <workflow>",
+          "detail": ""
+        }
+      ],
+      "missing_remedies": []
+    },
+    "invalid-yaml": {
+      "requirements": [
+        "REQ-C4-011",
+        "REQ-C5-009"
+      ],
+      "signatures": [
+        {
+          "reason": "Negative push was accepted: Oberth CI\nremote: [oberth] uplink test+agent@example.invalid\nremote: ref accepted \u00b7 run <id> queued (walk/oberthci/walk-<id>/walk/invalid)\nremote: watch: https://localhost:<https>/runs/<id>\nTo ssh://localhost:<ssh>/walk/oberthci/walk-<id>.git\n * [new branch]      HEAD -> walk/invalid\n",
+          "detail": "argoworkflow: decode Workflow: error unmarshaling JSON: while decoding JSON: json: unknown field \"walkUnknownOne\""
+        }
+      ],
+      "missing_remedies": [
+        "remote: [oberth] uplink test+agent@example.invalid\nremote: ref accepted \u00b7 run <id> queued (walk/oberthci/walk-<id>/walk/invalid)\nremote: watch: https://localhost:<https>/runs/<id>\nargoworkflow: decode Workflow: error unmarshaling JSON: while decoding JSON: json: unknown field \"walkUnknownOne\"; fix the Workflow YAML and push a new commit"
+      ]
+    },
+    "ungranted-secret": {
+      "requirements": [
+        "REQ-C4-011",
+        "REQ-C5-009"
+      ],
+      "signatures": [
+        {
+          "reason": "Negative push was accepted: Oberth CI\nremote: [oberth] uplink test+agent@example.invalid\nremote: ref accepted \u00b7 run <id> queued (walk/oberthci/walk-<id>/walk/ungranted)\nremote: watch: https://localhost:<https>/runs/<id>\nTo ssh://localhost:<ssh>/walk/oberthci/walk-<id>.git\n * [new branch]      HEAD -> walk/ungranted\n",
+          "detail": "secret grant denied: step \"needs-secret\" (grant scope \"needs-secret\") requests \"oberth/data/release/walk\"; granted steps: []"
+        }
+      ],
+      "missing_remedies": [
+        "remote: [oberth] uplink test+agent@example.invalid\nremote: ref accepted \u00b7 run <id> queued (walk/oberthci/walk-<id>/walk/ungranted)\nremote: watch: https://localhost:<https>/runs/<id>\nsecret grant denied: step \"needs-secret\" (grant scope \"needs-secret\") requests \"oberth/data/release/walk\"; granted steps: []; fix the Workflow YAML and push a new commit"
+      ]
+    },
+    "readonly-source": {
+      "requirements": [
+        "REQ-C6-009",
+        "REQ-C6-010",
+        "REQ-C5-009"
+      ],
+      "signatures": [
+        {
+          "reason": "Default-user source probe failed: main: Error (exit code 1)",
+          "detail": "AssertionError: source accepted a write: /work/src/.walk-write"
+        }
+      ],
+      "missing_remedies": [
+        "main: Error (exit code 1); read run_logs for the failed step and fix the code"
+      ]
+    },
+    "release-ui": {
+      "requirements": [
+        "REQ-C1-004"
+      ],
+      "signatures": [
+        {
+          "reason": "Leaf entrypoint label is not authored: publish; labels: <workflow>",
+          "detail": ""
+        }
+      ],
+      "missing_remedies": []
+    },
+    "failing-build": {
+      "requirements": [
+        "REQ-C5-009"
+      ],
+      "signatures": [
+        {
+          "reason": "Failed build views omit the exact log command: run wait, run view, agent view",
+          "detail": "{\"agent view\": \"read run_logs for the failed step and fix the code\", \"run view\": \"read run_logs for the failed step and fix the code\", \"run wait\": \"read run_logs for the failed step and fix the code\"}"
+        }
+      ],
+      "missing_remedies": []
+    },
+    "server-restart": {
+      "requirements": [
+        "REQ-C6-013"
+      ],
+      "signatures": [
+        {
+          "reason": "Restart source run is not green: child '<workflow>-<id>' failed",
+          "detail": "{\"failed_steps\": [[\"source-1\", \"init-artifact-oberth: Error (exit code 64): artifact source failed to load: plugin oberth load failed: rpc error: code = Unavailable desc = source transfer unavailable\"]], \"started_inside_outage\": [\"oberth-executor-token\"]}"
+        }
+      ],
+      "missing_remedies": []
+    }
+  },
+  "cli_sha256": "91fc48c6cf3a485f678b55fa7c73e2ffa5e74733754df3c98c5af90a994632fd"
+}

@@ -1,0 +1,90 @@
+{
+  "phase": "Failed",
+  "startedAt": "2026-11-18T02:56:16Z",
+  "finishedAt": "2026-11-18T02:56:16Z",
+  "progress": "0/1",
+  "nodes": {
+    "run-41d5690580ee698be43649050a006bd8": {
+      "id": "run-41d5690580ee698be43649050a006bd8",
+      "name": "run-41d5690580ee698be43649050a006bd8",
+      "displayName": "run-41d5690580ee698be43649050a006bd8",
+      "type": "DAG",
+      "templateName": "pipeline",
+      "templateScope": "local/run-41d5690580ee698be43649050a006bd8",
+      "phase": "Failed",
+      "startedAt": "2026-11-18T02:56:16Z",
+      "finishedAt": "2026-11-18T02:56:16Z",
+      "progress": "0/1",
+      "resourcesDuration": {
+        "cpu": 0,
+        "memory": 2
+      },
+      "children": [
+        "run-41d5690580ee698be43649050a006bd8-2629191670"
+      ],
+      "outboundNodes": [
+        "run-41d5690580ee698be43649050a006bd8-2176296379"
+      ]
+    },
+    "run-41d5690580ee698be43649050a006bd8-2176296379": {
+      "id": "run-41d5690580ee698be43649050a006bd8-2176296379",
+      "name": "run-41d5690580ee698be43649050a006bd8.build",
+      "displayName": "build",
+      "type": "Skipped",
+      "templateName": "build",
+      "templateScope": "local/run-41d5690580ee698be43649050a006bd8",
+      "phase": "Omitted",
+      "boundaryID": "run-41d5690580ee698be43649050a006bd8",
+      "message": "omitted: depends condition not met",
+      "startedAt": "2026-11-18T02:56:16Z",
+      "finishedAt": "2026-11-18T02:56:16Z",
+      "nodeFlag": {}
+    },
+    "run-41d5690580ee698be43649050a006bd8-2629191670": {
+      "id": "run-41d5690580ee698be43649050a006bd8-2629191670",
+      "name": "run-41d5690580ee698be43649050a006bd8.before",
+      "displayName": "before",
+      "type": "Pod",
+      "templateName": "before",
+      "templateScope": "local/run-41d5690580ee698be43649050a006bd8",
+      "phase": "Failed",
+      "boundaryID": "run-41d5690580ee698be43649050a006bd8",
+      "message": "main:  (exit code 7)",
+      "startedAt": "2026-11-18T02:56:16Z",
+      "finishedAt": "2026-11-18T02:56:16Z",
+      "progress": "0/1",
+      "resourcesDuration": {
+        "cpu": 0,
+        "memory": 2
+      },
+      "outputs": {
+        "exitCode": "7"
+      },
+      "children": [
+        "run-41d5690580ee698be43649050a006bd8-2176296379"
+      ],
+      "taskResultSynced": true
+    }
+  },
+  "conditions": [
+    {
+      "type": "PodRunning",
+      "status": "False"
+    },
+    {
+      "type": "Completed",
+      "status": "True"
+    }
+  ],
+  "resourcesDuration": {
+    "cpu": 0,
+    "memory": 2
+  },
+  "artifactRepositoryRef": {
+    "default": true,
+    "artifactRepository": {}
+  },
+  "artifactGCStatus": {
+    "notSpecified": true
+  }
+}

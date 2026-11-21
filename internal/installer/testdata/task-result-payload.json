@@ -1,0 +1,30 @@
+{
+  "kind": "WorkflowTaskResult",
+  "apiVersion": "argoproj.io/v1alpha1",
+  "metadata": {
+    "name": "run-node",
+    "namespace": "ci",
+    "labels": {
+      "workflows.argoproj.io/controller-instanceid": "frontdoor"
+    }
+  },
+  "outputs": {
+    "parameters": [
+      {
+        "name": "value",
+        "value": "built"
+      }
+    ],
+    "artifacts": [
+      {
+        "name": "log",
+        "s3": {
+          "bucket": "logs",
+          "key": "run/log"
+        }
+      }
+    ],
+    "result": "done",
+    "exitCode": "0"
+  }
+}

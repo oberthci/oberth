@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: cache-
+spec:
+  entrypoint: cache-records-commit
+  activeDeadlineSeconds: 600
+  templates:
+    - name: cache-records-commit
+      inputs:
+        artifacts:
+          - name: source
+            path: /work/src
+            mode: 0755
+            plugin:
+              name: oberth
+              key: '{{workflow.parameters.oberth-source}}'
+              configuration: '{"version":1,"kind":"main"}'
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: build-cache
+      container:
+        image: example.test/team/build:1
+        workingDir: /work/src
+        command: [sh, -eu, -c]
+        args:
+          - git -c safe.directory=/work/src rev-parse HEAD > /cache/last-commit
+        volumeMounts:
+          - name: cache
+            mountPath: /cache

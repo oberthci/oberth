@@ -1,0 +1,445 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "runs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "parallel": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "parallel"
+      ]
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "floor": {
+          "type": "boolean"
+        },
+        "egress": {
+          "type": "boolean"
+        }
+      }
+    },
+    "secretStore": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bundled": {
+          "type": "boolean"
+        },
+        "address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kv_mount": {
+          "type": "string",
+          "minLength": 1
+        },
+        "auth_mount": {
+          "type": "string",
+          "minLength": 1
+        },
+        "writer_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "audience": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$"
+        },
+        "caSecret": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "bundled",
+        "address",
+        "kv_mount",
+        "auth_mount",
+        "writer_role",
+        "audience",
+        "caSecret"
+      ]
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "public": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "ssh_port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          },
+          "required": [
+            "url",
+            "ssh_port"
+          ]
+        },
+        "listen": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "https": {
+              "type": "string",
+              "enum": [
+                ":8443"
+              ]
+            },
+            "ssh": {
+              "type": "string",
+              "enum": [
+                ":2222"
+              ]
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                ":8445"
+              ]
+            },
+            "health": {
+              "type": "string",
+              "enum": [
+                ":8081"
+              ]
+            }
+          },
+          "required": [
+            "https",
+            "ssh",
+            "source",
+            "health"
+          ]
+        },
+        "protocol": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema_identity": {
+              "type": "string"
+            },
+            "audit_domain": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "schema_identity",
+            "audit_domain"
+          ]
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "controller_namespace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 63,
+              "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+            },
+            "controller_configmap": {
+              "type": "string"
+            },
+            "source_configmap": {
+              "type": "string"
+            },
+            "source": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "endpoint": {
+                  "type": "string"
+                },
+                "server_name": {
+                  "type": "string"
+                },
+                "ca_pem": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "endpoint",
+                "server_name",
+                "ca_pem"
+              ]
+            },
+            "git_binary": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "source_timeout_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "admission_timeout_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "receive_max_input_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "source_client_burst": {
+              "type": "integer",
+              "minimum": 3
+            },
+            "default_branch": {
+              "type": "string",
+              "pattern": "^refs/heads/.+"
+            },
+            "image_prefixes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "source_policy": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "release_routes": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "pattern": {
+                      "type": "string"
+                    },
+                    "file": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pattern",
+                    "file"
+                  ]
+                }
+              }
+            }
+          },
+          "required": [
+            "controller_namespace",
+            "controller_configmap",
+            "source_configmap",
+            "source",
+            "git_binary",
+            "source_timeout_seconds",
+            "admission_timeout_seconds",
+            "source_client_burst",
+            "default_branch",
+            "image_prefixes",
+            "source_policy",
+            "release_routes"
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "public",
+        "listen",
+        "protocol",
+        "runtime"
+      ]
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": {
+          "type": "string"
+        },
+        "tmp": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tmp",
+        "size"
+      ]
+    },
+    "argoNative": {
+      "type": "object"
+    },
+    "storeNative": {
+      "type": "object"
+    },
+    "global": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "pipeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "createNamespace": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        }
+      },
+      "required": [
+        "namespace"
+      ]
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": "string",
+          "pattern": "^/var/lib/oberth/.+"
+        }
+      },
+      "required": [
+        "file"
+      ]
+    },
+    "logs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run_limit_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "run_limit_bytes"
+      ]
+    },
+    "schedules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_entries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 256
+        }
+      },
+      "required": [
+        "max_entries"
+      ]
+    },
+    "assist": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ttl_seconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "ttl_seconds"
+      ]
+    },
+    "adminPublicKeySHA256": {
+      "type": "string"
+    },
+    "imageRepository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourcePluginImageRepository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "imageDigest": {
+      "type": "string",
+      "pattern": "^(unset|sha256:[a-f0-9]{64})$"
+    },
+    "sourcePluginImageDigest": {
+      "type": "string",
+      "pattern": "^(unset|sha256:[a-f0-9]{64})$"
+    },
+    "targetSchema": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "nodePorts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "https",
+        "ssh"
+      ],
+      "properties": {
+        "https": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "ssh": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "sharedWorkflowDefinitions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "required": [
+    "storage",
+    "server",
+    "pipeline",
+    "database",
+    "secretStore",
+    "runs",
+    "logs",
+    "schedules",
+    "assist",
+    "policies",
+    "adminPublicKeySHA256",
+    "imageRepository",
+    "imageDigest",
+    "sourcePluginImageRepository",
+    "sourcePluginImageDigest",
+    "targetSchema"
+  ]
+}

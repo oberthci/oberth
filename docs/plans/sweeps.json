@@ -1,0 +1,505 @@
+{
+  "version": 1,
+  "sources": {
+    "store": "rewrite-p2-store.txt",
+    "surface": "rewrite-p2-surface.txt",
+    "deadcode": "rewrite-p2-deadcode.txt"
+  },
+  "findings": [
+    {
+      "source": "store",
+      "id": "F01.1",
+      "owner": "C7",
+      "subject": "Remove unused pending_token_credentials.created_at",
+      "evidence": [
+        "internal/store/schema.go:221"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unused pending_token_credentials.created_at; preserve the remaining live boundary/identity contracts.",
+      "rows": [
+        {
+          "category": "Store columns",
+          "name": "pending_token_credentials.created_at"
+        }
+      ]
+    },
+    {
+      "source": "store",
+      "id": "F01.2",
+      "owner": "C7",
+      "subject": "Remove unused ci_issue_work.created_at",
+      "evidence": [
+        "internal/store/schema.go:250"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unused ci_issue_work.created_at; preserve the remaining live boundary/identity contracts.",
+      "rows": [
+        {
+          "category": "Store columns",
+          "name": "ci_issue_work.created_at"
+        }
+      ]
+    },
+    {
+      "source": "store",
+      "id": "F01.3",
+      "owner": "C7",
+      "subject": "Remove unused ci_issue_projections.updated_at",
+      "evidence": [
+        "internal/store/schema.go:271"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unused ci_issue_projections.updated_at; preserve the remaining live boundary/identity contracts.",
+      "rows": [
+        {
+          "category": "Store columns",
+          "name": "ci_issue_projections.updated_at"
+        }
+      ]
+    },
+    {
+      "source": "store",
+      "id": "F01.4",
+      "owner": "C7",
+      "subject": "Remove unused uplink_client_pins.created_at",
+      "evidence": [
+        "internal/store/client_cert.go:122"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unused uplink_client_pins.created_at; preserve the remaining live boundary/identity contracts.",
+      "rows": [
+        {
+          "category": "Store columns",
+          "name": "uplink_client_pins.created_at"
+        }
+      ]
+    },
+    {
+      "source": "store",
+      "id": "F01.5",
+      "owner": "C7",
+      "subject": "Remove unused uplink_invites.created_at",
+      "evidence": [
+        "internal/store/uplink_invite.go:41"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unused uplink_invites.created_at; preserve the remaining live boundary/identity contracts.",
+      "rows": [
+        {
+          "category": "Store columns",
+          "name": "uplink_invites.created_at"
+        }
+      ]
+    },
+    {
+      "source": "store",
+      "id": "F03",
+      "owner": "C7",
+      "subject": "Remove unused run_timings.version",
+      "evidence": [
+        "internal/store/run_timing_schema.go:8"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unused run_timings.version; preserve the remaining live boundary/identity contracts.",
+      "rows": [
+        {
+          "category": "Store columns",
+          "name": "run_timings.version"
+        }
+      ]
+    },
+    {
+      "source": "store",
+      "id": "F02",
+      "owner": "C7",
+      "subject": "Remove unused concurrency-group columns",
+      "evidence": [
+        "internal/store/schema.go:800"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unused concurrency-group columns; preserve the remaining live boundary/identity contracts.",
+      "rows": [
+        {
+          "category": "Store columns",
+          "name": "runs.concurrency_group"
+        },
+        {
+          "category": "Store columns",
+          "name": "runs.concurrency_limit"
+        }
+      ]
+    },
+    {
+      "source": "store",
+      "id": "F06",
+      "owner": "C7",
+      "subject": "R11 + fresh history (§7.7): omit retired VM/protected-admission state; old cleanup custody stays with the read-only old instance",
+      "evidence": [
+        "internal/store/pilot_retirement_schema.go:10"
+      ],
+      "disposition": "RETIRED",
+      "reason": "R11 + fresh history (§7.7): omit retired VM/protected-admission state; old cleanup custody stays with the read-only old instance; preserve the remaining live boundary/identity contracts.",
+      "predicates": [
+        {
+          "category": "Store tables",
+          "name_regex": "^(?:vm_suite_executions|vm_suite_resources)$"
+        },
+        {
+          "category": "Store columns",
+          "name_regex": "^(?:vm_suite_executions|vm_suite_resources)\\."
+        }
+      ]
+    },
+    {
+      "source": "store",
+      "id": "F07",
+      "owner": "C7",
+      "subject": "R11 + fresh history (§7.7): omit retired VM/protected-admission state; old cleanup custody stays with the read-only old instance",
+      "evidence": [
+        "internal/store/historical-schema/v23.sql:1"
+      ],
+      "disposition": "RETIRED",
+      "reason": "R11 + fresh history (§7.7): omit retired VM/protected-admission state; old cleanup custody stays with the read-only old instance; preserve the remaining live boundary/identity contracts.",
+      "predicates": [
+        {
+          "category": "Store tables",
+          "name_regex": "^(?:vm_grants)$"
+        },
+        {
+          "category": "Store columns",
+          "name_regex": "^(?:vm_grants)\\."
+        }
+      ]
+    },
+    {
+      "source": "store",
+      "id": "F08",
+      "owner": "C7",
+      "subject": "R11 + fresh history (§7.7): omit retired VM/protected-admission state; old cleanup custody stays with the read-only old instance",
+      "evidence": [
+        "internal/store/migrations/20261106021113-protected-runtime-admissions-6bb6bdbe716e4f2623808c4dc612d943.sql:3"
+      ],
+      "disposition": "RETIRED",
+      "reason": "R11 + fresh history (§7.7): omit retired VM/protected-admission state; old cleanup custody stays with the read-only old instance; preserve the remaining live boundary/identity contracts.",
+      "predicates": [
+        {
+          "category": "Store tables",
+          "name_regex": "^(?:protected_runtime_admissions|protected_placement_admissions)$"
+        },
+        {
+          "category": "Store columns",
+          "name_regex": "^(?:protected_runtime_admissions|protected_placement_admissions)\\."
+        }
+      ]
+    },
+    {
+      "source": "store",
+      "id": "F09",
+      "owner": "C7",
+      "subject": "R11 + fresh history (§7.7): omit retired VM/protected-admission state; old cleanup custody stays with the read-only old instance",
+      "evidence": [
+        "internal/store/execution_retirement_schema.go:5"
+      ],
+      "disposition": "RETIRED",
+      "reason": "R11 + fresh history (§7.7): omit retired VM/protected-admission state; old cleanup custody stays with the read-only old instance; preserve the remaining live boundary/identity contracts.",
+      "predicates": [
+        {
+          "category": "Store tables",
+          "name_regex": "^(?:vm_executions|vm_capacity_slots)$"
+        },
+        {
+          "category": "Store columns",
+          "name_regex": "^(?:vm_executions|vm_capacity_slots)\\."
+        }
+      ]
+    },
+    {
+      "source": "store",
+      "id": "F10",
+      "owner": "C7",
+      "subject": "Remove redundant issue_locks_expiry_idx",
+      "evidence": [
+        "internal/store/schema.go:159"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove redundant issue_locks_expiry_idx; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "store",
+      "id": "F11",
+      "owner": "C7",
+      "subject": "Remove rowid-duplicate audit_actions_page_idx and audit_anchors_latest_idx",
+      "evidence": [
+        "internal/store/schema_v2.go:56"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove rowid-duplicate audit_actions_page_idx and audit_anchors_latest_idx; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "store",
+      "id": "F12",
+      "owner": "C7",
+      "subject": "Remove obsolete step_results_order_idx sort index",
+      "evidence": [
+        "internal/store/step_results.go:185"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove obsolete step_results_order_idx sort index; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "surface",
+      "id": "S01",
+      "owner": "C9",
+      "subject": "Remove ineffective backup-only utility-image flag/config copy",
+      "evidence": [
+        "cmd/oberth/backup.go:63"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove ineffective backup-only utility-image flag/config copy; preserve the remaining live boundary/identity contracts.",
+      "rows": [
+        {
+          "category": "CLI flags",
+          "name": "--utility-image [runBackup]"
+        }
+      ]
+    },
+    {
+      "source": "surface",
+      "id": "S02",
+      "owner": "C11",
+      "subject": "Remove unused TokenEnv/TokenFromEnvironment provenance copies; retain actual credential resolution",
+      "evidence": [
+        "cmd/oberth/mcp.go:58"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unused TokenEnv/TokenFromEnvironment provenance copies; retain actual credential resolution; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "surface",
+      "id": "S03",
+      "owner": "C11",
+      "subject": "Remove unused local mcpTool InputSchema/OutputSchema listing fields; preserve server schemas",
+      "evidence": [
+        "cmd/oberth/mcp.go:91"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unused local mcpTool InputSchema/OutputSchema listing fields; preserve server schemas; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "surface",
+      "id": "S05",
+      "owner": "C9",
+      "subject": "Remove unused RunCommandStream injection/copy; native idle observer remains",
+      "evidence": [
+        "internal/installer/installer.go:514"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unused RunCommandStream injection/copy; native idle observer remains; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "surface",
+      "id": "S06",
+      "owner": "C5",
+      "subject": "Remove unproduced/unread Completion.VMIDiagnostics",
+      "evidence": [
+        "internal/argojob/status.go:61"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unproduced/unread Completion.VMIDiagnostics; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "surface",
+      "id": "S07",
+      "owner": "C9",
+      "subject": "Remove unused tableRow type and fields; preserve live redacting tableWriter",
+      "evidence": [
+        "internal/installer/format.go:160"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unused tableRow type and fields; preserve live redacting tableWriter; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "surface",
+      "id": "S08",
+      "owner": "C5",
+      "subject": "Remove unused Adoption.CronCreatedAt copy; preserve durable child proof CreatedAt",
+      "evidence": [
+        "internal/argojob/adopt.go:27"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unused Adoption.CronCreatedAt copy; preserve durable child proof CreatedAt; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "surface",
+      "id": "S09",
+      "owner": "C9",
+      "subject": "Retain UpgradeResult.RecordPath pending explicit C9 contract change",
+      "evidence": [
+        "internal/installer/upgrade.go:127"
+      ],
+      "disposition": "KEEP",
+      "reason": "Retain UpgradeResult.RecordPath pending explicit C9 contract change; preserve the remaining live boundary/identity contracts.",
+      "justification": "C9 Maintenance records explicitly requires the rollback record path in UpgradeResult; main ruling 3 says report a spec conflict instead of retiring it. Preserve the required field until the owning contract changes."
+    },
+    {
+      "source": "surface",
+      "id": "S10",
+      "owner": "C8",
+      "subject": "Remove stored Hunk.NewStart only; parse/validate both header ranges",
+      "evidence": [
+        "internal/holdfs/diff.go:36"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove stored Hunk.NewStart only; parse/validate both header ranges; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "surface",
+      "id": "S11",
+      "owner": "C9",
+      "subject": "Remove unread wizard message reRegister/nodeCount/cores copies; preserve local engine detection",
+      "evidence": [
+        "internal/setuptui/finish.go:147"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unread wizard message reRegister/nodeCount/cores copies; preserve local engine detection; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "surface",
+      "id": "S28",
+      "owner": "C13",
+      "subject": "Delete 432 unused run-fact env declarations (864 scalar rows)",
+      "evidence": [
+        ".oberth/release.yaml:252"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Delete 432 unused run-fact env declarations (864 scalar rows); preserve the remaining live boundary/identity contracts.",
+      "predicates": [
+        {
+          "category": "Own pipeline configuration",
+          "name_regex": "^\\.oberth/build\\.yaml:spec\\.templates\\[(?:9|10|11|16|28|29|30|31|32|33)\\]\\.container\\.env\\[(?:2|3|4|5|6|7)\\]\\.(?:name|value)$"
+        },
+        {
+          "category": "Own pipeline configuration",
+          "name_regex": "^\\.oberth/build\\.yaml:spec\\.templates\\[(?:4|5|12|13|14|15|18)\\]\\.container\\.env\\[(?:13|14|15|16|17|18)\\]\\.(?:name|value)$"
+        },
+        {
+          "category": "Own pipeline configuration",
+          "name_regex": "^\\.oberth/build\\.yaml:spec\\.templates\\[(?:6|7|8|19|22|24|36|37)\\]\\.container\\.env\\[(?:16|17|18|19|20|21)\\]\\.(?:name|value)$"
+        },
+        {
+          "category": "Own pipeline configuration",
+          "name_regex": "^\\.oberth/build\\.yaml:spec\\.templates\\[(?:1)\\]\\.container\\.env\\[(?:0|1|2|3|4|5)\\]\\.(?:name|value)$"
+        },
+        {
+          "category": "Own pipeline configuration",
+          "name_regex": "^\\.oberth/build\\.yaml:spec\\.templates\\[(?:20|44)\\]\\.container\\.env\\[(?:14|15|16|17|18|19)\\]\\.(?:name|value)$"
+        },
+        {
+          "category": "Own pipeline configuration",
+          "name_regex": "^\\.oberth/build\\.yaml:spec\\.templates\\[(?:21)\\]\\.container\\.env\\[(?:18|19|20|21|22|23)\\]\\.(?:name|value)$"
+        },
+        {
+          "category": "Own pipeline configuration",
+          "name_regex": "^\\.oberth/build\\.yaml:spec\\.templates\\[(?:23)\\]\\.container\\.env\\[(?:17|18|19|20|21|22)\\]\\.(?:name|value)$"
+        },
+        {
+          "category": "Own pipeline configuration",
+          "name_regex": "^\\.oberth/build\\.yaml:spec\\.templates\\[(?:25|27|34|35)\\]\\.container\\.env\\[(?:15|16|17|18|19|20)\\]\\.(?:name|value)$"
+        },
+        {
+          "category": "Own pipeline configuration",
+          "name_regex": "^\\.oberth/build\\.yaml:spec\\.templates\\[(?:26)\\]\\.container\\.env\\[(?:3|4|5|6|7|8)\\]\\.(?:name|value)$"
+        },
+        {
+          "category": "Own pipeline configuration",
+          "name_regex": "^\\.oberth/build\\.yaml:spec\\.templates\\[(?:2|38|41|42)\\]\\.container\\.env\\[(?:1|2|3|4|5|6)\\]\\.(?:name|value)$"
+        },
+        {
+          "category": "Own pipeline configuration",
+          "name_regex": "^\\.oberth/release\\.yaml:spec\\.templates\\[(?:2|3|4|5|6|7|8|9|10|11|12|13|14|15|17|18|19|20|22|23|24|25|26|27|31|33|34|35)\\]\\.container\\.env\\[(?:1|2|3|4|7|8)\\]\\.(?:name|value)$"
+        },
+        {
+          "category": "Own pipeline configuration",
+          "name_regex": "^\\.oberth/release\\.yaml:spec\\.templates\\[(?:28|29|30|32|36)\\]\\.container\\.env\\[(?:3|4|5|6|9|10)\\]\\.(?:name|value)$"
+        }
+      ]
+    },
+    {
+      "source": "surface",
+      "id": "S30",
+      "owner": "C6",
+      "subject": "Remove unread cliProcess.pid copy; preserve process-group verification and joined cleanup",
+      "evidence": [
+        "internal/gitcache/command_wait_linux.go:115"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Remove unread cliProcess.pid copy; preserve process-group verification and joined cleanup; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "deadcode",
+      "id": "D01",
+      "owner": "C9",
+      "subject": "Delete installer.SetupProductionSecretStore",
+      "evidence": [
+        "internal/installer/export_test.go:152"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Delete installer.SetupProductionSecretStore; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "deadcode",
+      "id": "D02",
+      "owner": "C9",
+      "subject": "Delete installer.printProductionCredentials",
+      "evidence": [
+        "internal/installer/export_test.go:227"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Delete installer.printProductionCredentials; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "deadcode",
+      "id": "D03",
+      "owner": "C2",
+      "subject": "Delete service.ExportComputeSecretStorePlan",
+      "evidence": [
+        "internal/service/export_test.go:62"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Delete service.ExportComputeSecretStorePlan; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "deadcode",
+      "id": "A06",
+      "owner": "C7",
+      "subject": "Delete storetest.EnsureDatabase and its exact allowlist entry",
+      "evidence": [
+        "internal/storetest/open.go:78"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Delete storetest.EnsureDatabase and its exact allowlist entry; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "deadcode",
+      "id": "A17",
+      "owner": "C7",
+      "subject": "Delete storetest.UpstreamByName and its exact allowlist entry",
+      "evidence": [
+        "internal/storetest/fixtures.go:64"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Delete storetest.UpstreamByName and its exact allowlist entry; preserve the remaining live boundary/identity contracts."
+    },
+    {
+      "source": "deadcode",
+      "id": "G02",
+      "owner": "C13",
+      "subject": "Delete obsolete dead-code baseline prose; retain current tooling/isolation guidance",
+      "evidence": [
+        "docs/deadcode.md:14"
+      ],
+      "disposition": "RETIRED",
+      "reason": "Delete obsolete dead-code baseline prose; retain current tooling/isolation guidance; preserve the remaining live boundary/identity contracts."
+    }
+  ]
+}

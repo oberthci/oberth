@@ -1,0 +1,203 @@
+#!/bin/sh
+# Spec: docs/plans/c12-agent-client.md#invariants-and-budgets
+set -eu
+umask 077
+fail() { printf '%s %s\n' "$1" "$2" >&2; exit 1; }
+version=latest force=no
+for argument do
+    case "$argument" in
+        --force) force=yes ;;
+        v*) [ "$version" = latest ] || fail 'Too many versions.' 'Pass one version and optional --force.'; version=$argument ;;
+        *) fail 'Invalid fetch arguments.' 'Run fetch-oberth [--force] [vMAJOR.MINOR.PATCH].' ;;
+    esac
+done
+for tool in openssl awk uname; do
+    command -v "$tool" >/dev/null 2>&1 || fail "Missing $tool." 'Install it, then retry.'
+done
+if command -v sha256sum >/dev/null 2>&1; then
+    sha256() { sha256sum "$1" | awk '{print $1}'; }
+elif command -v shasum >/dev/null 2>&1; then
+    sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+else
+    fail 'Checksum tool is missing.' 'Install sha256sum or shasum, then retry.'
+fi
+if command -v curl >/dev/null 2>&1; then downloader=curl
+elif command -v wget >/dev/null 2>&1; then
+    command -v head >/dev/null 2>&1 || fail 'Bounded download tool is missing.' 'Install head, then retry.'
+    downloader=wget
+else fail 'Downloader is missing.' 'Install curl or wget, then retry.'; fi
+[ -n "${HOME:-}" ] || fail 'Home directory is missing.' 'Set HOME to your user directory, then retry.'
+bin=$HOME/.local/bin
+foreign=no
+if [ -e "$bin/oberth" ] || [ -L "$bin/oberth" ]; then
+    installed=$(readlink "$bin/oberth" 2>/dev/null) || installed=
+    case "$installed" in oberth-v*/*|'') foreign=yes;; oberth-v*) installed=${installed#oberth-};; *) foreign=yes;; esac
+    if [ "$foreign" = yes ]; then
+        printf 'Another oberth, not installed by this fetcher, is at %s/oberth.\n' "$bin"
+        [ "$force" = yes ] || fail 'Another oberth occupies the install path.' 'Pass --force to keep it as oberth.previous and install this client.'
+        if [ -e "$bin/oberth.previous" ] || [ -L "$bin/oberth.previous" ]; then
+            fail 'The previous oberth copy already exists.' 'Move oberth.previous aside, then retry --force.'
+        fi
+    elif [ "$force" = no ]; then
+        printf 'oberth %s is already installed at %s/oberth.\n' "$installed" "$bin"
+        fail 'Client is already installed.' 'Pass --force to replace it.'
+    fi
+fi
+mkdir -p "$bin" 2>/dev/null || fail 'Install directory is unavailable.' 'Make your user bin directory writable, then retry.'
+[ -w "$bin" ] || fail 'Install directory is not writable.' 'Make your user bin directory writable, then retry.'
+bin=$(CDPATH='' cd "$bin" && pwd -P)
+lock=$bin/.oberth-fetch-lock
+lock_failed() { fail "$1" 'Check ~/.local/bin/.oberth-fetch-lock; retry after its owner exits.'; }
+if ! mkdir "$lock" 2>/dev/null; then
+    owner=$(cat "$lock/pid" 2>/dev/null) || lock_failed 'Install lock has no owner.'
+    case "$owner" in ''|*[!0-9]*) lock_failed 'Install lock owner is invalid.';; esac
+    if kill -0 "$owner" 2>/dev/null; then lock_failed 'Another fetch is installing.'; fi
+    stale=$bin/.oberth-fetch-dead.$$
+    mv "$lock" "$stale" 2>/dev/null || lock_failed 'Install lock changed.'
+    rm -f "$stale"/*; rmdir "$stale"
+    mkdir "$lock" 2>/dev/null || lock_failed 'Another fetch is installing.'
+fi
+cleanup() {
+    if [ "$(cat "$lock/pid" 2>/dev/null)" = "$$" ]; then rm -f "$lock"/*; rmdir "$lock"; fi
+}
+trap cleanup 0
+trap 'exit 1' 1 2 15
+printf '%s\n' "$$" > "$lock/pid"
+work=$lock
+# Generated from internal/releaseverify/origin.go by hack/release-origin.py.
+origin=https://releases.oberth.ci/oberth
+metadata_max=1048576
+# Generated from internal/releaseverify/release-cosign.pub by hack/release-pin.sh.
+cat > "$work/key" <<'OBERTH_RELEASE_PUBLIC_KEY'
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE3PSDzfeovoxWRuZbit+NI8n5i4iQ
+3FGkRQnqaqKCzr2nShsjuHacVJK99ioJijpUUTPgKomr6hroJXi66Uj+Dg==
+-----END PUBLIC KEY-----
+OBERTH_RELEASE_PUBLIC_KEY
+openssl pkey -pubin -in "$work/key" -noout >/dev/null 2>&1 ||
+    fail 'Release signing key is not published.' 'Use an official fetcher after its signing key is published.'
+redirected() {
+    printf 'Release address redirected. Use the direct release address. Target: %s\n' "$1" >&2
+    exit 1
+}
+download() {
+    if [ "$downloader" = curl ]; then
+        reply=$(curl -q --silent --fail --proto '=https' --max-redirs 0 --connect-timeout 10 \
+            --max-time 300 --max-filesize "$3" --output "$2" --write-out '%{http_code} %{redirect_url}' "$origin/$1" 2>/dev/null) ||
+            fail 'Release download failed.' 'Check the release address and version, then retry.'
+        code=${reply%% *}
+        case "$code" in 3??) redirected "${reply#* }";; esac
+        [ "$code" = 200 ] || fail 'Release address redirected or refused.' 'Use the direct release address, then retry.'
+    else
+        { if wget --no-config --quiet --server-response --https-only --max-redirect=0 --timeout=300 --tries=1 -O - "$origin/$1" 2> "$work/wget-response"; then
+            printf 0 > "$work/wget-status"
+          else printf 1 > "$work/wget-status"; fi; } 2>/dev/null |
+            head -c "$(($3 + 1))" > "$2" || fail 'Release download failed.' 'Check the release address and version, then retry.'
+    fi
+    [ "$(wc -c < "$2")" -le "$3" ] || fail 'Release file exceeds its limit.' 'Do not install this release; report it.'
+    if [ "$downloader" = wget ]; then
+        target=$(awk 'tolower($1)=="location:" {sub(/^[[:space:]]*[^:]+:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' "$work/wget-response")
+        [ -z "$target" ] || redirected "$target"
+        [ "$(cat "$work/wget-status")" = 0 ] || fail 'Release download failed.' 'Check the release address and version, then retry.'
+    fi
+}
+case $(uname -s) in Linux) os=linux;; Darwin) os=darwin;; *) fail 'System is unsupported.' 'Use Linux or macOS.';; esac
+case $(uname -m) in x86_64|amd64) arch=amd64;; aarch64|arm64) arch=arm64;; *) fail 'Architecture is unsupported.' 'Use amd64 or arm64.';; esac
+json_version() {
+    awk '
+    function string( value,c) {
+        value=""
+        while (++i<=length(body)) {
+            c=substr(body,i,1)
+            if (c=="\\") {value=value c substr(body,++i,1); continue}
+            if (c=="\"") return value
+            value=value c
+        }
+        exit 1
+    }
+    {body=body $0}
+    END {
+        for(i=1;i<=length(body);i++) {
+            c=substr(body,i,1)
+            if(c=="\"") {
+                key=string(); j=i+1
+                while(substr(body,j,1)~/[[:space:]]/ && j<=length(body)) j++
+                if(depth==1 && key=="version" && substr(body,j,1)==":") {
+                    i=j; while(substr(body,++i,1)~/[[:space:]]/) {}
+                    if(substr(body,i,1)!="\"") exit 1
+                    version=string(); found++
+                }
+            } else if(c=="{" || c=="[") depth++
+            else if(c=="}" || c=="]") depth--
+        }
+        if(found!=1) exit 1
+        print version
+    }' "$1"
+}
+# Generated from internal/workflowpolicy/release-version.pattern by hack/release-origin.py.
+version_pattern='^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$'
+valid_version() {
+    printf '%s\n' "$1" | LC_ALL=C awk -v pattern="$version_pattern" '
+        length > 128 || $0 !~ pattern {exit 1}
+        END {if (NR != 1) exit 1}'
+}
+version_older() {
+    LC_ALL=C awk -v offered="$1" -v installed="$2" 'BEGIN {
+        sub(/^v/, "", offered); sub(/^v/, "", installed)
+        split(offered, a, "."); split(installed, b, ".")
+        for (i=1; i<=3; i++) {
+            if (length(a[i]) != length(b[i])) exit !(length(a[i]) < length(b[i]))
+            if ("x" a[i] != "x" b[i]) exit !("x" a[i] < "x" b[i])
+        }
+        exit 1
+    }'
+}
+requested=$version
+if [ "$version" = latest ]; then
+    download latest "$work/latest" "$metadata_max"
+    version=$(json_version "$work/latest") || fail 'Latest release version is invalid.' 'Choose an exact release version, then retry.'
+fi
+valid_version "$version" || fail 'Release version is invalid.' 'Choose a stable vMAJOR.MINOR.PATCH release.'
+if [ "$requested" = latest ]; then
+    printf 'Latest resolves to %s.\n' "$version"
+    installed=$(readlink "$bin/oberth" 2>/dev/null) || installed=
+    case "$installed" in oberth-v*) installed=${installed#oberth-};; *) installed=;; esac
+    if valid_version "$installed" && version_older "$version" "$installed"; then
+        printf 'Installed version: %s.\n' "$installed"
+        fail 'Latest is older than installed version.' 'Pass the desired version explicitly to install an older release.'
+    fi
+fi
+artifact=oberth-$os-$arch
+download "$version/SHA256SUMS" "$work/sums" "$metadata_max"
+download "$version/SHA256SUMS.sigstore.json" "$work/bundle" "$metadata_max"
+signature_failed() { fail 'Release signature is invalid.' 'Do not install this release; report it.'; }
+awk '{body=body $0} END {
+    if (split(body, parts, /"messageSignature"[[:space:]]*:/) != 2) exit 1
+    if (!match(parts[2], /"signature"[[:space:]]*:[[:space:]]*"[A-Za-z0-9+\/=]+"/)) exit 1
+    value=substr(parts[2], RSTART, RLENGTH); sub(/^.*:[[:space:]]*"/, "", value); sub(/"$/, "", value); print value
+}' "$work/bundle" | openssl base64 -d -A > "$work/signature" 2>/dev/null || signature_failed
+openssl dgst -sha256 -verify "$work/key" -signature "$work/signature" "$work/sums" >/dev/null 2>&1 ||
+    signature_failed
+listed_digest() {
+    awk -v artifact="$1" '
+        $2 == artifact {found++; digest=$1; if (NF != 2 || length(digest) != 64 || digest !~ /^[0-9a-f]+$/) bad=1}
+        END {if (found != 1 || bad) exit 1; print digest}' "$work/sums"
+}
+expected=$(listed_digest release.json) || fail 'Release record entry is invalid.' 'Do not install this release; report it.'
+download "$version/release.json" "$work/record" "$metadata_max"
+[ "$(sha256 "$work/record")" = "$expected" ] || fail 'Release record checksum is invalid.' 'Do not install this release; report it.'
+record_version=$(json_version "$work/record") || fail 'Release record version is invalid.' 'Do not install this release; report it.'
+[ "$record_version" = "$version" ] || fail 'Release version does not match the requested version.' 'Do not install this release; report it.'
+expected=$(listed_digest "$artifact") || fail 'Release artifact entry is invalid.' 'Do not install this release; report it.'
+download "$version/$artifact" "$work/binary" 536870912
+[ -s "$work/binary" ] && [ "$(sha256 "$work/binary")" = "$expected" ] ||
+    fail 'Release checksum is invalid.' 'Do not install this release; report it.'
+[ ! -d "$bin/oberth-$version" ] || fail 'Install target is a directory.' 'Move the directory aside, then retry.'
+if [ "$foreign" = yes ]; then
+    mv "$bin/oberth" "$bin/oberth.previous" || fail 'The existing oberth could not be kept.' 'Check user bin permissions, then retry.'
+    printf 'Kept previous oberth at %s/oberth.previous.\n' "$bin"
+fi
+{ cp "$work/binary" "$work/staged" && chmod 0755 "$work/staged" &&
+    ln -s "oberth-$version" "$work/oberth" && mv -f "$work/staged" "$bin/oberth-$version" &&
+    mv -f "$work/oberth" "$bin/oberth"; } 2>/dev/null || fail 'Verified install failed.' 'Check user bin permissions and free space, then retry.'
+printf 'installed oberth %s at %s/oberth (signature verified)\n' "$version" "$bin"

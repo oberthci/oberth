@@ -1,0 +1,48 @@
+{
+  "phase": "Failed",
+  "startedAt": "2026-11-18T02:56:17Z",
+  "finishedAt": "2026-11-18T02:56:17Z",
+  "progress": "0/1",
+  "message": "probe node pressure",
+  "nodes": {
+    "run-bfd220e31b5c285c4c96a83a264abee1": {
+      "id": "run-bfd220e31b5c285c4c96a83a264abee1",
+      "name": "run-bfd220e31b5c285c4c96a83a264abee1",
+      "displayName": "run-bfd220e31b5c285c4c96a83a264abee1",
+      "type": "Pod",
+      "templateName": "build",
+      "templateScope": "local/run-bfd220e31b5c285c4c96a83a264abee1",
+      "phase": "Failed",
+      "message": "probe node pressure",
+      "startedAt": "2026-11-18T02:56:17Z",
+      "finishedAt": null,
+      "progress": "0/1",
+      "resourcesDuration": {
+        "cpu": 0,
+        "memory": 0
+      },
+      "taskResultSynced": true
+    }
+  },
+  "conditions": [
+    {
+      "type": "PodRunning",
+      "status": "False"
+    },
+    {
+      "type": "Completed",
+      "status": "True"
+    }
+  ],
+  "resourcesDuration": {
+    "cpu": 0,
+    "memory": 0
+  },
+  "artifactRepositoryRef": {
+    "default": true,
+    "artifactRepository": {}
+  },
+  "artifactGCStatus": {
+    "notSpecified": true
+  }
+}

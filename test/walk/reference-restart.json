@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "target_kind": "reference",
+  "release": "v0.23.4",
+  "cli_sha256": "91fc48c6cf3a485f678b55fa7c73e2ffa5e74733754df3c98c5af90a994632fd",
+  "evidence": "w0-walk-r6-waiter-warm-01",
+  "result_sha256": "0a869ea25b78e5ea4334b8fd55784622dc844791f4c15a0ff320593eb33dd9bd",
+  "ruling": "Owner-authorized eighth reference gap, REQ-C6-013; first server-dependent container started inside the outage.",
+  "step": {
+    "name": "server-restart",
+    "status": "fail",
+    "reason": "Restart source run is not green: child 'oberth-walk-a448ee11457f-2c6387de-ffda1e44472d-3004150048' failed",
+    "facts": {
+      "outage_start": "2026-11-16T16:44:43Z",
+      "outage_end": "2026-11-16T16:45:15Z",
+      "hold_seconds": 15.012,
+      "observed_waiter": {
+        "uid": "a05e8fc8-0c8b-417b-b7a7-73490a6631b5",
+        "container": "oberth-executor-token",
+        "started_at": "2026-11-16T16:44:53Z"
+      },
+      "replica_restoration": {
+        "replicas": 1,
+        "ready_replicas": 1
+      },
+      "source_checks": [
+        {
+          "uid": "a05e8fc8-0c8b-417b-b7a7-73490a6631b5",
+          "name": "oberth-walk-a448ee11457f-2c6387de-ffda1e44472d-source-check-3004150048",
+          "load_start": "2026-11-16T16:45:13.861865818Z",
+          "waited_container": "oberth-executor-token",
+          "waited_started_at": "2026-11-16T16:44:53Z",
+          "exact_source": false,
+          "restart_counts": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "source_commit": "28fe311988a60cf5cd68710d2094a4984afe4ef0",
+      "restart_run": {
+        "id": "2c6387de878db6b82065c99a3e1ae28a",
+        "sha": "28fe311988a60cf5cd68710d2094a4984afe4ef0",
+        "status": "failed",
+        "error": "child 'oberth-walk-a448ee11457f-2c6387de-ffda1e44472d-3004150048' failed"
+      },
+      "native_phase": "Failed",
+      "workflow_uid": "c673d53a-d715-4d52-bbca-71dd81ff3e08",
+      "workflow_uid_before": "c673d53a-d715-4d52-bbca-71dd81ff3e08",
+      "native_nodes": {
+        "oberth-walk-a448ee11457f-2c6387de-ffda1e44472d-3004150048": {
+          "id": "oberth-walk-a448ee11457f-2c6387de-ffda1e44472d-3004150048",
+          "type": "Pod",
+          "displayName": "source-1",
+          "phase": "Failed",
+          "children": null,
+          "message": "init-artifact-oberth: Error (exit code 64): artifact source failed to load: plugin oberth load failed: rpc error: code = Unavailable desc = source transfer unavailable"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,246 @@
+# Release a tested commit
+
+## Release your project
+
+Put your publisher in the tested `.oberth/release.yaml`; later sections build Oberth itself.
+As administrator, provision [pipeline grants](pipelines.md#secrets-and-identity), then promote:
+
+```sh
+oberth promote <tested-commit-sha>
+```
+
+Promotion may create a different default-branch commit without moving local `HEAD`. Save local work,
+then fetch and check out the full resulting commit ID printed by promotion:
+
+```sh
+git fetch -- oberth refs/heads/<default-branch>
+git switch --detach <resulting-commit-sha>
+```
+
+Wait for its passing, unassisted CI. If default moved again, inspect its head and evidence first:
+
+```sh
+oberth release v0.1.0
+```
+
+Release checks eligibility and grants before creating/pushing a tag; refusals create none. Follow
+printed grant remedies and retry. Existing tags require the same commit. Confirm the run and
+[publication receipt](operations.md#retention-and-publication).
+
+`check --local` with a release filename selects no release run or release-tier grants. No release
+dry-run flag exists: use `release` when ready to create the tag.
+
+## Agent promotion
+
+Commit `uplinks_may_promote: true` in `.oberth/promotion.yaml` to permit uplink promotion; passing
+unassisted evidence is still required, and direct default-branch pushes remain refused.
+
+## Maintainer release preparation
+
+Stable `vMAJOR.MINOR.PATCH` tags release after setup. The server supplies:
+
+- `version`: the admitted tag, above successful or in-flight releases recorded here.
+- `release-tested-commit`: the tag's peeled commit, for lightweight and annotated tags.
+- `release-default-commit`: the exact default head used by the server's Git ancestry check.
+- `release-build-status`: `passed` from the latest admitted `.oberth/build.yaml` run on that commit.
+
+Missing, running, failed or assisted builds refuse before execution: run the build, then push again.
+Outside releases are unknown; reruns keep facts but must clear the recorded version floor. Changed
+identity or assistance refuses. Release arguments, defaults and global outputs cannot replace facts;
+builds keep their own values. Offline validation proves no live facts. Bootstrap by hand below. See
+[tag routing](pipelines.md#build-tags-and-release-tags) for file selection and ambiguity refusal.
+Set `release-config.origin` to `https://releases.oberth.ci/oberth`, the
+[canonical address](../internal/releaseverify/origin.go); scripts refuse other addresses.
+Signatures are checked only against the committed pinned key; no public log is used.
+
+## First release by hand
+
+Use Linux amd64, Go **go1.26.10**, Python 3, curl, Git, make, grep and `sha256sum` in a clean tree.
+Have registry write access, a versioned-store token and a separate `latest` update token.
+Allow about 12 GiB and eight minutes for the byte build; cold caches can take longer.
+Keep work and credentials outside Git; staging needs 0.7 GiB in `$TMPDIR`.
+Choose a stable `vMAJOR.MINOR.PATCH` strictly above `latest` (403 or 404 means no floor):
+
+```sh
+export RELEASE_ORIGIN=https://releases.oberth.ci/oberth
+curl --fail --silent --show-error "$RELEASE_ORIGIN/latest"
+export VERSION="<version-above-latest>"
+export PATH="<go1.26.10-directory>/bin:$PATH" GOTOOLCHAIN=local
+go version
+export RELEASE_WORK="$HOME/work/oberth/release-$VERSION"
+export RELEASE_PRIVATE="$RELEASE_WORK/private" RELEASE_SHARED="$RELEASE_WORK/shared"
+export RELEASE_DIR="$RELEASE_WORK/dist" RELEASE_VERIFY_DIR="$RELEASE_WORK/verify"
+export RELEASE_TOOL="$RELEASE_WORK/oberth-release" RELEASE_BASE="$RELEASE_WORK/base-image"
+export RELEASE_CACHE_A="$RELEASE_WORK/cache-a" RELEASE_CACHE_B="$RELEASE_WORK/cache-b"
+export GOTMPDIR="$HOME/.cache/go-tmp" TMPDIR="$HOME/.cache/go-tmp"
+mkdir -p "$RELEASE_PRIVATE" "$RELEASE_SHARED" "$RELEASE_VERIFY_DIR" "$GOTMPDIR"
+chmod 700 "$RELEASE_WORK" "$RELEASE_PRIVATE"
+bash hack/release.sh prepare-signing
+export PATH="$RELEASE_PRIVATE:$PATH"
+```
+
+`go version` must show the pinned version. `prepare-signing` downloads and checks `cosign` v3.1.1:
+https://github.com/sigstore/cosign/releases/download/v3.1.1/cosign-linux-amd64 SHA256
+`ae1ecd212663f3693ad9edf8b1a183900c9a52d3155ba6e354237f9a0f6463fc`; exit 0 means the tool is ready.
+Create an empty-password key, pin its public half, and commit. Save it in encrypted offline custody.
+The pin command prints the public key hash and updated paths:
+
+```sh
+COSIGN_PASSWORD= cosign generate-key-pair --output-key-prefix "$RELEASE_WORK/release" </dev/null
+sh hack/release-pin.sh "$RELEASE_WORK/release.pub"
+git add internal/releaseverify/release-cosign.pub agent/skills/oberth/fetch-oberth
+git commit -m "Pin release verification key"
+```
+
+Publish and test that pin commit on the public default branch, then check out its exact full ID.
+The built commit must be that public pinned commit. These scripts create no tag. Follow the
+[base publication procedure](../hack/base-image/README.md#publish-the-qualified-release-base).
+Keep its public digest readback; fetch the verified base and build twice with independent caches:
+
+```sh
+git switch --detach "<public-pinned-commit>"
+git rev-parse HEAD
+bash hack/prepare-base.sh
+make release-bytes
+go build -p=2 -buildvcs=false -o "$RELEASE_TOOL" ./cmd/oberth-release
+grep -E '"commit"|sha256:' "$RELEASE_DIR/release.json"
+```
+
+Base preparation exits 0 after checking its pin; the build prints “Release bytes built.” Compare
+the printed record's commit with HEAD. Deliver the key and sign offline with closed input:
+
+```sh
+export OBERTH_SECRETS_DIR="$RELEASE_WORK/secrets"
+mkdir -p "$OBERTH_SECRETS_DIR/oberth/data/release"
+chmod 700 "$OBERTH_SECRETS_DIR" "$OBERTH_SECRETS_DIR/oberth/data/release"
+cp "$RELEASE_WORK/release.key" "$OBERTH_SECRETS_DIR/oberth/data/release/signing"
+chmod 600 "$OBERTH_SECRETS_DIR/oberth/data/release/signing"
+bash hack/release.sh sign
+"$RELEASE_TOOL" verify --dir "$RELEASE_DIR" --version "$VERSION"
+```
+
+Signing prints “Release signature verified.”; local verification prints “Release verified.”
+Log in with a private password file, then push to the public repositories in the signed chart:
+
+```sh
+export DOCKER_CONFIG="$RELEASE_PRIVATE/registry"
+go tool -modfile=hack/tools/crane.mod crane auth login index.docker.io -u "<registry-user>" \
+  --password-stdin < "<registry-password-file>"
+go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth.oci" \
+  "oberthci/oberth:$VERSION"
+go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth-source-plugin.oci" \
+  "oberthci/oberth-source-plugin:$VERSION"
+"$RELEASE_TOOL" publish --dir "$RELEASE_DIR" --version "$VERSION" --origin "$RELEASE_ORIGIN" \
+  --token-file "<publish-token-file>"
+bash hack/release.sh verify
+"$RELEASE_TOOL" finalize --dir "$RELEASE_DIR" --version "$VERSION" --origin "$RELEASE_ORIGIN" \
+  --token-file "<finalize-token-file>" --receipt "$RELEASE_SHARED/verified.json"
+```
+
+Compare each printed push digest with the record's images. Publish checks public image
+reads and any existing signature before writing; it prints the version, file count and destination.
+Clean verification prints “Release verified.” and writes the receipt. Finalize prints where `latest`
+points; if it stays newer, nothing moved and exit 0 is intentional. Keep signed bytes for identical
+retries; another signature for a published version refuses. Retain the receipt and build evidence.
+After confirming encrypted offline key custody, delete both plaintext copies:
+
+```sh
+python3 -c 'import pathlib,sys; [pathlib.Path(p).unlink() for p in sys.argv[1:]]' \
+  "$RELEASE_WORK/release.key" "$OBERTH_SECRETS_DIR/oberth/data/release/signing"
+```
+
+The pipeline's `publish` and `finalize` use `RELEASE_TOKEN_FILE`, `RELEASE_EXCHANGE_URL` and
+`RELEASE_AUDIENCE` for short-lived token exchange; a plain bearer file uses the direct tool above.
+
+## Release accounts and projected identities
+
+Admission chooses each credential-bearing step's account from its secret and audience grants. A
+server-classified release tag in default history uses deterministic release-step accounts; branches
+and ordinary tags use CI accounts. Author parameters and account names cannot select release
+authority. As administrator, grant the independent
+[token audiences](pipelines.md#secrets-and-identity):
+
+```sh
+oberth access allow --kind identity --audience oberth-publish \
+  <repo> .oberth/release.yaml release-published-immutable identity
+oberth access allow --kind identity --audience oberth-finalize \
+  <repo> .oberth/release.yaml latest-advanced-monotonic identity
+```
+
+Exact-step grants align secrets and identity on repository/file/step accounts; wildcards share one.
+Submission creates release accounts; pipeline and executor accounts stay
+separate. Supply source/workflow delivery, secret storage, publication and exchange services with
+separate publish/finalize permissions for the exact namespace, account and audience. Renames need
+new grants and trust; see [grant operations](operations.md#grants-and-secrets) and the
+[release account-name rule](../internal/identityname/name.go).
+
+## Oberth's own releases
+
+Stages prepare the base and signer, build, sign, push images, publish files, verify in a clean Pod,
+and advance `latest`. Admission retains default-history/build facts; the build checks its commit
+without rerunning tests. Each step declares its own secret path: only signing gets the long-lived
+key, only the image push gets the registry login; publish/finalize get separate short-lived tokens.
+Branch CI reaches neither those credentials nor release cache.
+
+Edit [pipeline-resources.yaml](../.oberth/pipeline-resources.yaml), then apply it in the pipeline
+namespace. Set its storage class/sizes, positive `go` semaphore limit, HTTPS origin, exchange
+addresses. Publish reads repositories from the signed chart; caches need user/group 65534 access.
+Each run fetches its verified base; compilation caches contain no release base. Provision guest
+volume, VM API, executor permissions and VM capability separately;
+the manifest neither builds nor imports that disk.
+
+Before the first push, store the private names policy for the static step as the administrator:
+
+```sh
+oberth secret put --repo '<repo>' --file .oberth/build.yaml --step lint-and-guards-pass \
+  oberth/policy/names < <private-names-file>
+```
+
+`secret put` grants only the named step; keep the names list outside Git. Pushers can read it.
+Add [audience grants](#release-accounts-and-projected-identities); missing grants print remedies.
+Creating objects grants no access. Run these object grants as administrator, replacing `<repo>`:
+
+```sh
+oberth access allow --kind pvc --tier ci '<repo>' 'build-cache'
+oberth access allow --kind pvc --tier release '<repo>' 'release-cache'
+oberth access allow --kind configmap '<repo>' '.oberth/release.yaml' \
+  'release-published-immutable' 'release-config'
+oberth access allow --kind configmap '<repo>' '.oberth/release.yaml' \
+  'release-verifies-from-clean-pod' 'release-config'
+oberth access allow --kind configmap '<repo>' '.oberth/release.yaml' \
+  'latest-advanced-monotonic' 'release-config'
+```
+
+`oberth-sync-limits/go` is a native lock; walk namespace/volume access needs VM capability, not
+direct cache grants. These grants configure no external exchange or registry rights.
+
+Store the pinned key and the registry login at the paths their own steps declare:
+
+```sh
+oberth secret put --repo '<repo>' --file .oberth/release.yaml --step release-files-signed \
+  oberth/data/release/signing < <private-key-file>
+oberth secret put --repo '<repo>' --file .oberth/release.yaml --step release-images-pushed \
+  oberth/data/release/registry/config.json < <registry-login-file>
+```
+
+Use `$DOCKER_CONFIG/config.json` as `<registry-login-file>`. `secretstore exec` delivers granted
+files below `OBERTH_SECRETS_DIR`, without exporting its value.
+
+[Check local build YAML](pipelines.md#start-with-a-complete-file) against live grants; checks create
+no resources. Offline checks cannot validate source or granted workflows.
+
+Signed `SHA256SUMS` and `release.json` bind shipped digests; versioned objects are create-only. The
+[fetcher](../agent/skills/oberth/fetch-oberth) and installer verify before changing local state.
+
+## Verify downloaded bytes
+
+`oberth-release <operation> --help` lists flags. Build from the trusted committed pin. Put the
+checksum list, bundle, record and release files in a clean directory, then run:
+
+```sh
+oberth-release verify --dir <download-directory> --version <version>
+```
+
+Local checks are not publication proof. Clean verification checks public images and CLI version to
+issue the `latest` receipt.
+The workflow's 3,600-second deadline is a budget; end-to-end release time remains unmeasured.

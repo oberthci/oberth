@@ -1,0 +1,997 @@
+{
+  "version": 1,
+  "requirements": [
+    {
+      "id": "REQ-C1-002",
+      "component": "C1",
+      "class": "security",
+      "requirement": "Oberth never writes a secret, token or private key to logs, events, diagnostics or command output; server diagnostics use a fixed list of fields.",
+      "loss_if_absent": "Without this, a normal diagnostic can disclose private work or credentials.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestPrivateBoundedDiagnosticsContract"
+      }
+    },
+    {
+      "id": "REQ-C1-003",
+      "component": "C1",
+      "class": "ux",
+      "requirement": "Status reasons fit 40 characters, refusal reasons 80 and remedies 120; native detail stays separate, and views show each message whole.",
+      "loss_if_absent": "Without this, users cannot read what happened or the next action.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "ux-gate"
+      }
+    },
+    {
+      "id": "REQ-C1-004",
+      "component": "C1",
+      "class": "ux",
+      "requirement": "The web UI shows a pushed run within seconds, with the same run ID, step names, statuses and logs the CLI shows.",
+      "loss_if_absent": "Without this, the web view disagrees with the run users just pushed.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "ui"
+      }
+    },
+    {
+      "id": "REQ-C1-005",
+      "component": "C1",
+      "class": "ux",
+      "requirement": "Imported issue views show the original author, closer, ordered history and an imported mark through the ordinary issue page.",
+      "loss_if_absent": "Without this, preserved issue history is invisible where a person reads the issue.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "ui"
+      }
+    },
+    {
+      "id": "REQ-C2-001",
+      "component": "C2",
+      "class": "security",
+      "requirement": "Enrollment and renewal issue a credential only for the identity and repository scope the operator approved; a caller can never choose another identity or a wider scope.",
+      "loss_if_absent": "Without this, a caller can acquire another identity or more authority than approved.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestValidatedEnrollmentAndIdentityContract"
+      }
+    },
+    {
+      "id": "REQ-C2-002",
+      "component": "C2",
+      "class": "correctness",
+      "requirement": "Installation-wide actions, including manual-issue import, require an unscoped admin and report success only with their audit record saved; only one database backup runs at a time, or returns \"backup already running\".",
+      "loss_if_absent": "Without this, a repository-limited key can change installation authority, effects can lose their audit, or backups can exhaust resources.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestAuditedAdministrativeEffectsContract"
+      }
+    },
+    {
+      "id": "REQ-C2-004",
+      "component": "C2",
+      "class": "ux",
+      "requirement": "Run views show each repository's latest runs, hide Argo helper containers unless asked, and show \"unknown\" rather than a guessed result when evidence is missing.",
+      "loss_if_absent": "Without this, users miss what ran or what to do next.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "ui"
+      }
+    },
+    {
+      "id": "REQ-C2-005",
+      "component": "C2",
+      "class": "correctness",
+      "requirement": "A client waiting on a run always gets its final state, even across a server restart, and a restart never runs accepted work twice or drops it.",
+      "loss_if_absent": "Without this, users miss completion or see a newer failure silently closed.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestTruthfulConcurrentHistoryContract"
+      }
+    },
+    {
+      "id": "REQ-C2-006",
+      "component": "C2",
+      "class": "security",
+      "requirement": "Promote moves main only to a commit whose latest branch run passed, or that main's current policy lets skip branch CI, and never deletes main or a reserved branch.",
+      "loss_if_absent": "Without this, promotion can move main from untested code or delete a protected branch.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestExactTestedPromotionContract"
+      }
+    },
+    {
+      "id": "REQ-C2-008",
+      "component": "C2",
+      "class": "security",
+      "requirement": "Tools validate arguments and name bad values, including unregistered issue upstreams and viewer scopes; import maps a source upstream only through an explicit --upstream <local>, creation without an upstream uses the repository's single upstream or refuses naming the choices, and one credential's slow log searches leave capacity for other callers.",
+      "loss_if_absent": "Without this, malformed inputs can hide issues or one caller can stall others.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestBoundedScopedReadsContract"
+      }
+    },
+    {
+      "id": "REQ-C2-009",
+      "component": "C2",
+      "class": "security",
+      "requirement": "A grant or revoke is saved before publication; revocation survives invalid unrelated grants, reports incomplete application, and a stored-secret revoke deletes its exact path under both tier accounts or reports that it remains stored with a repeat remedy.",
+      "loss_if_absent": "Without this, uncommitted authority can authorize work or a revoked secret can remain readable.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestAtomicGrantPublicationContract"
+      }
+    },
+    {
+      "id": "REQ-C2-015",
+      "component": "C2",
+      "class": "security",
+      "requirement": "Sync refuses the default branch and internal promotion or release runs, publishing only the exact current head of one named non-default branch.",
+      "loss_if_absent": "Without this, sync can move main without promotion checks.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestNoPromotionBypassThroughSyncContract"
+      }
+    },
+    {
+      "id": "REQ-C2-018",
+      "component": "C2",
+      "class": "correctness",
+      "requirement": "CI issue projection preserves C7's person-owned fields and closes an issue only after a later passing run of the same branch; a newer failure keeps it open.",
+      "loss_if_absent": "Without this, a newer failure can disappear from the issue list.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestCiIssueClosesAfterLaterPassContract"
+      }
+    },
+    {
+      "id": "REQ-C2-019",
+      "component": "C2",
+      "class": "ux",
+      "requirement": "A release run reports the tag, commit and run it published and emits `release.published`; a passed run without publication is never shown as released.",
+      "loss_if_absent": "Without this, users cannot tell a passed run from a published release.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "release"
+      }
+    },
+    {
+      "id": "REQ-C3-001",
+      "component": "C3",
+      "class": "correctness",
+      "requirement": "The secrets a repository asks for are computed on demand from its YAML at one default-head commit; unreadable or invalid files return an error, never a partial list.",
+      "loss_if_absent": "Without this, a pending-grant view can silently omit a required secret.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestAtomicDeclarationRefreshContract"
+      }
+    },
+    {
+      "id": "REQ-C3-002",
+      "component": "C3",
+      "class": "security",
+      "requirement": "Adding a Git host trusts its SSH key only if it matches a fingerprint the operator gave or confirmed; `--yes` never trusts an unknown key.",
+      "loss_if_absent": "Without this, connecting a repository can trust an unintended endpoint.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestReviewedEndpointTrustContract"
+      }
+    },
+    {
+      "id": "REQ-C3-003",
+      "component": "C3",
+      "class": "correctness",
+      "requirement": "Connection checks report the truth: a Git server error is shown as a failure, and a later success for the same host and key clears the old failure.",
+      "loss_if_absent": "Without this, setup reports success for a repository the user cannot access.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestHonestRepositoryProbesContract"
+      }
+    },
+    {
+      "id": "REQ-C4-001",
+      "component": "C4",
+      "class": "security",
+      "requirement": "A step receives a secret or release credential only if an operator granted it for this repository, workflow file and step, and the step reads only the admitted source.",
+      "loss_if_absent": "Without this, a different step or substituted source can receive approved authority.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestExactGrantedSourceAndSecretPathsContract"
+      }
+    },
+    {
+      "id": "REQ-C4-003",
+      "component": "C4",
+      "class": "security",
+      "requirement": "A step may create, read or delete Kubernetes objects only of the kind, namespace and action an operator granted; field names must match exactly, so another spelling cannot widen it.",
+      "loss_if_absent": "Without this, alternate spellings or substitutions can widen a resource grant.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestExactNativeCapabilitiesContract"
+      }
+    },
+    {
+      "id": "REQ-C4-004",
+      "component": "C4",
+      "class": "correctness",
+      "requirement": "Admission reads each referenced shared template once, refuses reference loops between templates and stops at a fixed nesting depth, so a push never hangs or runs an unadmitted plan.",
+      "loss_if_absent": "Without this, a normal push can hang, miscount its steps or execute a different plan.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestFiniteCanonicalPreparationContract"
+      }
+    },
+    {
+      "id": "REQ-C4-007",
+      "component": "C4",
+      "class": "correctness",
+      "requirement": "If admission cannot read a template because of a passing network error, the push says to retry; a certificate or YAML error says what to fix; failed reads are never cached.",
+      "loss_if_absent": "Without this, a repaired push can remain stuck or repeat an error the user must fix.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestHelpfulPreparationFailuresContract"
+      }
+    },
+    {
+      "id": "REQ-C4-011",
+      "component": "C4",
+      "class": "ux",
+      "requirement": "A push with invalid YAML or a missing grant is refused before any run starts, listing every problem with its file and fix, and the exact grant command for the operator.",
+      "loss_if_absent": "Without this, a successful-looking push queues work that cannot run.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "push"
+      }
+    },
+    {
+      "id": "REQ-C4-012",
+      "component": "C4",
+      "class": "security",
+      "requirement": "Admission refuses YAML that mounts a Kubernetes Secret, ConfigMap or volume Oberth did not grant, or writes over the paths where credentials are delivered.",
+      "loss_if_absent": "Without this, a pushed step can read ungranted data or replace credentials.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestGrantedMountPathsContract"
+      }
+    },
+    {
+      "id": "REQ-C4-013",
+      "component": "C4",
+      "class": "security",
+      "requirement": "Admission refuses host paths, host namespaces, privileged containers and the server's accounts or volumes.",
+      "loss_if_absent": "Without this, a run can read or change Oberth's state.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestServerStateBoundaryContract"
+      }
+    },
+    {
+      "id": "REQ-C4-014",
+      "component": "C4",
+      "class": "ux",
+      "requirement": "The grant command printed in an ungranted-secret refusal, run as printed by the operator, makes the same push admissible with no other step.",
+      "loss_if_absent": "Without this, the printed fix does not let the user continue.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "grant"
+      }
+    },
+    {
+      "id": "REQ-C5-002",
+      "component": "C5",
+      "class": "security",
+      "requirement": "Ordinary step code may read its executor token; its product-granted authority reaches only source for its own run and task-result writes bound to its Pod, never another run or server state.",
+      "loss_if_absent": "Without this, a readable executor token could change another run's evidence or expose server state.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestPrivateExecutorAuthorityContract"
+      }
+    },
+    {
+      "id": "REQ-C5-006",
+      "component": "C5",
+      "class": "correctness",
+      "requirement": "A step shows as passed only when Argo reported it passed for this run and attempt; a failure, once seen, stays a failure through cancellation and server restarts.",
+      "loss_if_absent": "Without this, users can see a failed or unexecuted step reported as successful.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestTruthfulNativeObservationsContract"
+      }
+    },
+    {
+      "id": "REQ-C5-007",
+      "component": "C5",
+      "class": "security",
+      "requirement": "A release step uses the deterministic account chosen once in admission from verified release-kind evidence and exact repository, workflow-file and step grants, without a configured release-role mapping; branch CI receives only CI secret authority and refuses missing CI identity without fallback.",
+      "loss_if_absent": "Without this, branch code can use release credentials or a second account choice can apply different authority.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestSeparateCiAndReleaseIdentityContract"
+      }
+    },
+    {
+      "id": "REQ-C5-008",
+      "component": "C5",
+      "class": "ux",
+      "requirement": "Run views list steps in plan order, fold retries into one step, and give a short waiting or failure reason based on Argo's status, never a guess.",
+      "loss_if_absent": "Without this, users cannot tell what ran or what to fix next.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "ui"
+      }
+    },
+    {
+      "id": "REQ-C5-009",
+      "component": "C5",
+      "class": "ux",
+      "requirement": "A failed run's view and `run wait` name the failed step, its short reason and the exact command to read its log.",
+      "loss_if_absent": "Without this, a failed build leaves users searching for its cause.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "failing-build"
+      }
+    },
+    {
+      "id": "REQ-C5-010",
+      "component": "C5",
+      "class": "security",
+      "requirement": "After cutover, a release role authorizes only its exact repository, selected file and template under verified release-kind evidence, with an independent exact-audience grant and deterministic release-step account.",
+      "loss_if_absent": "Without this, an ungranted template or branch run can acquire publication authority.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "release"
+      }
+    },
+    {
+      "id": "REQ-C5-011",
+      "component": "C5",
+      "class": "correctness",
+      "requirement": "Every Workflow the product submits carries the native controller-instance label with C9's installation instance ID, so another controller never acts on it.",
+      "loss_if_absent": "Without this, a second controller can execute the same run and create duplicate steps.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "push"
+      }
+    },
+    {
+      "id": "REQ-C6-001",
+      "component": "C6",
+      "class": "security",
+      "requirement": "Oberth uses only the key configured for each Git host, never a shared or ambient key, and rechecks an incoming SSH key's repository scope after it logs in.",
+      "loss_if_absent": "Without this, Git operations can reach another repository or endpoint with unintended credentials.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestExplicitGitIdentitiesContract"
+      }
+    },
+    {
+      "id": "REQ-C6-002",
+      "component": "C6",
+      "class": "security",
+      "requirement": "Oberth treats main's promotion policy as absent only after a successful fresh upstream read shows no policy file; a failed read or a deleted main never counts as \"no policy\".",
+      "loss_if_absent": "Without this, an upstream read failure can bypass the policy protecting main.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestFreshUpstreamPolicyContract"
+      }
+    },
+    {
+      "id": "REQ-C6-006",
+      "component": "C6",
+      "class": "correctness",
+      "requirement": "When connecting to a pinned Git host, offer only host-key types that have a pin, so hosts with several keys connect, and say so when no pin fits.",
+      "loss_if_absent": "Without this, a valid pinned repository can fail to connect.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestPinnedGitInteroperabilityContract"
+      }
+    },
+    {
+      "id": "REQ-C6-008",
+      "component": "C6",
+      "class": "security",
+      "requirement": "Close a Git connection that sends no data for the idle timeout, and end every connection at a fixed total time limit, so a stuck client cannot hold the server.",
+      "loss_if_absent": "Without this, a stuck client can retain server capacity indefinitely.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestBoundedGitTransportContract"
+      }
+    },
+    {
+      "id": "REQ-C6-009",
+      "component": "C6",
+      "class": "ux",
+      "requirement": "Deliver the exact admitted checkout as a private copy per step with writable helper scratch on the default install, without requiring a user override.",
+      "loss_if_absent": "Without this, the first ordinary build fails before reading its source.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "push"
+      }
+    },
+    {
+      "id": "REQ-C6-010",
+      "component": "C6",
+      "class": "security",
+      "requirement": "Each source-consuming step gets a private copy of exactly the admitted commit, with committed files delivered without write permission; local edits stay in its Pod, and only Pods of that run's recorded Workflow can load it.",
+      "loss_if_absent": "Without this, a run can test different source or load another run’s source.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestExactRecordedWorkflowSourceContract"
+      }
+    },
+    {
+      "id": "REQ-C6-011",
+      "component": "C6",
+      "class": "security",
+      "requirement": "Names, refs and paths from callers are validated once before use in Git commands, file paths or URLs.",
+      "loss_if_absent": "Without this, caller input can change a command, path or destination.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestValidatedGitInputsContract"
+      }
+    },
+    {
+      "id": "REQ-C6-012",
+      "component": "C6",
+      "class": "ux",
+      "requirement": "A push prints the started run's watch link, or says the push is parked and that `-o oberth.run=1` runs it.",
+      "loss_if_absent": "Without this, users cannot find the run or know how to start it.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "push"
+      }
+    },
+    {
+      "id": "REQ-C6-013",
+      "component": "C6",
+      "class": "correctness",
+      "requirement": "A step whose source delivery starts while the server restarts waits within its own deadline, then gets its source without spending native retries.",
+      "loss_if_absent": "Without this, a routine server restart fails otherwise valid multi-step builds.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "server-restart"
+      }
+    },
+    {
+      "id": "REQ-C6-014",
+      "component": "C6",
+      "class": "correctness",
+      "requirement": "Every push ends accepted and delivered once immediately despite a lost reply or client exit, or rejected with refs restored; recovery uses the reservation's old values and each transaction's prepared reference/value set, never the transport exit, the hook refuses repeated refs, only refs changed since reservation and equal to the requested value count as applied, and audited abandonment by reported ID completes required rollback before record removal, including for unreadable records.",
+      "loss_if_absent": "Without this, a client disconnect or restart can lose, replay or misattribute an accepted push.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "push"
+      }
+    },
+    {
+      "id": "REQ-C7-004",
+      "component": "C7",
+      "class": "correctness",
+      "requirement": "The audit log is a local hash chain checked when read and on backup and restore, never on the path of every mutation.",
+      "loss_if_absent": "Without this, tampered or missing history can authorize changes to Oberth state.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestLocalAuditChainContract"
+      }
+    },
+    {
+      "id": "REQ-C7-009",
+      "component": "C7",
+      "class": "security",
+      "requirement": "Re-registering a key, deleting an upstream or retrying never widens what a key may access; only an explicit scope change can, and a revoked key never becomes active again.",
+      "loss_if_absent": "Without this, removal or retry can accidentally grant wider access.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestNonwideningDurableIdentityContract"
+      }
+    },
+    {
+      "id": "REQ-C7-011",
+      "component": "C7",
+      "class": "correctness",
+      "requirement": "An edit naming the version it read fails if the record changed meanwhile, and every change is saved with its audit or not at all; a failing run preserves a person's lock and title on a native CI issue.",
+      "loss_if_absent": "Without this, a concurrent user change or failure can be lost.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestTransactionalEvidenceUpdatesContract"
+      }
+    },
+    {
+      "id": "REQ-C7-019",
+      "component": "C7",
+      "class": "correctness",
+      "requirement": "Recording a key's last-use time never delays or fails a login; under load those updates may be dropped.",
+      "loss_if_absent": "Without this, ordinary connections can stop behind optional usage accounting.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestNonblockingAuthenticationTelemetryContract"
+      }
+    },
+    {
+      "id": "REQ-C7-020",
+      "component": "C7",
+      "class": "correctness",
+      "requirement": "Manual-issue import saves each file atomically with its audit and preserved numbers, refuses overwrite and non-manual kinds, confirms identical record-set replay without changing later edits and allocates above the highest imported number; files and encoded requests fit 1 MiB, while lines and complete issues with provenance and history fit 128 KiB, checked at the save point without truncation or raised limits.",
+      "loss_if_absent": "Without this, an import can overwrite issues, lose half a file or change the numbers used by people and commits.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "ui"
+      }
+    },
+    {
+      "id": "REQ-C7-021",
+      "component": "C7",
+      "class": "correctness",
+      "requirement": "The grants store uses schema 5's baseline without configured release-role records, refuses mismatched layouts, and pins each supported schema's baseline so a changed layout needs a new number.",
+      "loss_if_absent": "Without this, a changed grants layout can be opened under the same schema number and misread authority.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestSchemaNumberPinsBaselineLayout"
+      }
+    },
+    {
+      "id": "REQ-C8-001",
+      "component": "C8",
+      "class": "ux",
+      "requirement": "Explain pending run or step state and follow the active run into live logs without requiring a second manual observation.",
+      "loss_if_absent": "Without this, users see unavailable bytes and cannot tell whether their build has started.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "live-logs"
+      }
+    },
+    {
+      "id": "REQ-C8-002",
+      "component": "C8",
+      "class": "ux",
+      "requirement": "`oberth log <run>` without a step follows the failed or running step, showing its own output under a step heading and executor output only for a failure outside that container.",
+      "loss_if_absent": "Without this, users must find and select the useful log themselves.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "live-logs"
+      }
+    },
+    {
+      "id": "REQ-C9-001",
+      "component": "C9",
+      "class": "correctness",
+      "requirement": "Only the profile holding an existing installation's administrator key may update it; an interrupted install reuses its saved admin key and certificate or issues a matching certificate from the installation CA, and finishes with working admin access.",
+      "loss_if_absent": "Without this, an interrupted install can lose its only usable administrator identity.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestResumablePrivateEnrollmentContract"
+      }
+    },
+    {
+      "id": "REQ-C9-003",
+      "component": "C9",
+      "class": "correctness",
+      "requirement": "Upgrade uses the real latest native revision for version checks and replacement, takes user choices only from the newest applied installer revision, asks for review after failure and treats values as data, never chart code; verified completion saves upgrade.completed.",
+      "loss_if_absent": "Without this, an upgrade or rollback can silently apply the wrong configuration.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestReviewedUpgradeStateContract"
+      }
+    },
+    {
+      "id": "REQ-C9-004",
+      "component": "C9",
+      "class": "security",
+      "requirement": "A backup produces an authenticated, complete age-encrypted database archive whose inspected snapshot and report match, while a dry run writes nothing; the bundled store is in no backup and install gives the operator no administrator token for it, so review and backup output say secrets must be put again after store loss and show how to list secret names to keep beside the backup.",
+      "loss_if_absent": "Without this, an operator can save an incomplete or unauthenticated database copy, or a preview can write files.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestBackupIsAgeAndDryRunCreatesNoFiles"
+      }
+    },
+    {
+      "id": "REQ-C9-009",
+      "component": "C9",
+      "class": "security",
+      "requirement": "Install publishes a server certificate only after checking it matches its key, covers the server's names and is valid now.",
+      "loss_if_absent": "Without this, install can publish unusable trust or trust another endpoint.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestVerifiedInstallationTlsContract"
+      }
+    },
+    {
+      "id": "REQ-C9-022",
+      "component": "C9",
+      "class": "security",
+      "requirement": "Secret-store setup writes one static rule set: the server may write or delete but not read step secrets, and a step reads only its own account's secrets, rejecting account and path names that could change a rule's meaning; admin credentials go only to the verified store Pod.",
+      "loss_if_absent": "Without this, setup can widen secret access or send recovery authority to an unrelated workload.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestExactSecretStoreAuthorityContract"
+      }
+    },
+    {
+      "id": "REQ-C9-027",
+      "component": "C9",
+      "class": "security",
+      "requirement": "The secret client talks only to the configured secret store over verified TLS, ignores proxy settings, and leaves no partial secret file when a fetch fails.",
+      "loss_if_absent": "Without this, normal install or credential use can leak secrets through ambient configuration, output or leftover files.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestPrivateBoundedSecretDeliveryContract"
+      }
+    },
+    {
+      "id": "REQ-C9-038",
+      "component": "C9",
+      "class": "security",
+      "requirement": "Install, upgrade, rollback and recorded repair use online or --release-dir download-layout inputs, including a version-named child directory, only if chart and images match the signed release record under C13's key-only trust; there is no unsigned fallback.",
+      "loss_if_absent": "Without this, a release install can run substituted bytes.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestVerifiedReleaseInstallationContract"
+      }
+    },
+    {
+      "id": "REQ-C9-052",
+      "component": "C9",
+      "class": "ux",
+      "requirement": "Complete install, upgrade and recovery with usable saved access, explicit output locations and one clear next action for any pending state.",
+      "loss_if_absent": "Without this, users leave setup without working access or cannot tell whether an upgrade completed.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "install"
+      }
+    },
+    {
+      "id": "REQ-C9-053",
+      "component": "C9",
+      "class": "correctness",
+      "requirement": "Every cluster admission-policy expression guards optional request fields; a plain Pod update without subResource is admitted.",
+      "loss_if_absent": "Without this, a missing request field can refuse every Pod update and stop native completion.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestOptionalPolicyRequestFieldsContract"
+      }
+    },
+    {
+      "id": "REQ-C9-054",
+      "component": "C9",
+      "class": "correctness",
+      "requirement": "A side-by-side installation uses reviewed namespaces and node ports, leaves existing namespaces untouched, refuses namespaces held by any chart's release and isolates its controller by the server namespace instance ID; it borrows compatible definitions without owning or deleting them, tests every admitted leaf form, controller-written status and paused schedule, and recreates missing own definitions through the chart.",
+      "loss_if_absent": "Without this, installing beside another release can change its namespace, collide with its ports or delete shared definitions.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "install"
+      }
+    },
+    {
+      "id": "REQ-C10-001",
+      "component": "C10",
+      "class": "correctness",
+      "requirement": "Every submitted CronWorkflow and its child Workflow metadata carry the native controller-instance label with C9's installation instance ID.",
+      "loss_if_absent": "Without this, another controller can fire or execute the same schedule.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "push"
+      }
+    },
+    {
+      "id": "REQ-C11-001",
+      "component": "C11",
+      "class": "correctness",
+      "requirement": "Audit tail shows every new audit entry exactly once, including entries added during the read.",
+      "loss_if_absent": "Without this, users can miss audit entries or loop forever.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestCompleteAuditTailContract"
+      }
+    },
+    {
+      "id": "REQ-C11-002",
+      "component": "C11",
+      "class": "ux",
+      "requirement": "Redeeming an invitation prepares all local files first and checks the returned certificate matches your key, so a used invitation always ends in a working login or \"ask for a new one\".",
+      "loss_if_absent": "Without this, onboarding can consume an invitation without leaving a usable matching credential.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "connect"
+      }
+    },
+    {
+      "id": "REQ-C11-007",
+      "component": "C11",
+      "class": "correctness",
+      "requirement": "The CLI writes credentials only into a directory it owns that others cannot write, uses owner-only files and removes partial credential plaintext when a write fails.",
+      "loss_if_absent": "Without this, a command can trust a substituted credential directory or leave private client material exposed.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestOwnedPrivateCliFilesContract"
+      }
+    },
+    {
+      "id": "REQ-C11-012",
+      "component": "C11",
+      "class": "security",
+      "requirement": "Activate a newly issued bearer only after its full one-time output and durable binding to exactly one uplink succeed.",
+      "loss_if_absent": "Without this, an undisclosed or unbound token can become live.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestOneTimeBearerActivationContract"
+      }
+    },
+    {
+      "id": "REQ-C11-013",
+      "component": "C11",
+      "class": "security",
+      "requirement": "The CLI sends saved credentials only over verified HTTPS to their bound URL and authority, refuses a differing CA override before using saved identity, and ignores settings files other users can write.",
+      "loss_if_absent": "Without this, a command can disclose saved credentials over plain HTTP, to an overridden endpoint, or to the same URL under a different CA.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestInstallationBoundClientAuthorityContract"
+      }
+    },
+    {
+      "id": "REQ-C11-021",
+      "component": "C11",
+      "class": "correctness",
+      "requirement": "The server reports not-ready when it cannot serve (invalid certificate, database stuck 90 seconds) and stays alive while its own loop progresses, even while waiting on other services.",
+      "loss_if_absent": "Without this, users receive traffic on a broken server or see a healthy server repeatedly restarted.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestHonestResponsiveHealthContract"
+      }
+    },
+    {
+      "id": "REQ-C11-022",
+      "component": "C11",
+      "class": "ux",
+      "requirement": "If a local `.local` server name does not resolve, the CLI briefly asks the system's multicast DNS resolver and still checks TLS against that name.",
+      "loss_if_absent": "Without this, a default local installation can appear unreachable.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "connect"
+      }
+    },
+    {
+      "id": "REQ-C11-023",
+      "component": "C11",
+      "class": "ux",
+      "requirement": "Setup generates only the keys needed for the chosen connection, requires no SSH key for a browser-only identity and shows the identity, scope, profile and repository binding in use and how to change each.",
+      "loss_if_absent": "Without this, a normal connection fails opaquely or uses the wrong profile.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "connect"
+      }
+    },
+    {
+      "id": "REQ-C11-024",
+      "component": "C11",
+      "class": "ux",
+      "requirement": "`oberth promote <sha>` needs no input file and reports the tested run, the new main commit and the CI run at that commit.",
+      "loss_if_absent": "Without this, promoting a tested commit requires manual preparation.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "promote"
+      }
+    },
+    {
+      "id": "REQ-C11-025",
+      "component": "C11",
+      "class": "correctness",
+      "requirement": "The server starts each part once, drains HTTP before stopping parts in reverse order, joins workers before closing storage and refuses missing parts or settings.",
+      "loss_if_absent": "Without this, shutdown can lose accepted work or use closed dependencies.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestServerShutdownContract"
+      }
+    },
+    {
+      "id": "REQ-C11-026",
+      "component": "C11",
+      "class": "ux",
+      "requirement": "Run results through oberth mcp carry a rendered text block with complete reasons after the server's JSON.",
+      "loss_if_absent": "Without this, the agent cannot show the same complete run view as the CLI.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "connect"
+      }
+    },
+    {
+      "id": "REQ-C11-027",
+      "component": "C11",
+      "class": "security",
+      "requirement": "The server renews its leaf certificate at two thirds of its life with the same key, name and validity checks as install, and serves its checked CA chain; readiness requires a currently valid leaf.",
+      "loss_if_absent": "Without this, a running installation can lose usable trust or claim readiness with an expired certificate.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestServedLeafRenews"
+      }
+    },
+    {
+      "id": "REQ-C11-028",
+      "component": "C11",
+      "class": "ux",
+      "requirement": "After install or join saves the SSH endpoint, repo add registers the repository and checks that the forge accepts its deploy key as administrator, or binds a visible registered repository as a joined caller; its per-remote file:/// address has pack commands that use that SSH endpoint, effective fetch/push addresses and transport policy are checked with a remedy on refusal, only its own configuration is changed, every other remote and personal setting is preserved, and the next push with oberth.run=1 is the smoke run.",
+      "loss_if_absent": "Without this, connecting a repository requires several manual steps or leaves an unusable checkout binding.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "connect"
+      }
+    },
+    {
+      "id": "REQ-C12-001",
+      "component": "C12",
+      "class": "security",
+      "requirement": "The agent instructions require MCP registration with the verified CLI's absolute path, rejecting a bare name or project executable.",
+      "loss_if_absent": "Without this, opening a project can execute its code with client credential paths.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestAgentRegistrationContract"
+      }
+    },
+    {
+      "id": "REQ-C12-003",
+      "component": "C12",
+      "class": "correctness",
+      "requirement": "Serialize CLI installation and atomically publish only executable bytes verified under C13's key-only release trust, keeping the current working executable after a failed update.",
+      "loss_if_absent": "Without this, concurrent updates can leave the agent without a working CLI.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestAtomicCliInstallationContract"
+      }
+    },
+    {
+      "id": "REQ-C12-007",
+      "component": "C12",
+      "class": "ux",
+      "requirement": "The agent instruction file names only existing commands and tools, uses neutral wording and is read whole in fewer than 100 lines.",
+      "loss_if_absent": "Without this, the agent follows missing commands or misses part of the guidance.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "ux-gate"
+      }
+    },
+    {
+      "id": "REQ-C12-008",
+      "component": "C12",
+      "class": "ux",
+      "requirement": "The optional run box shows active and watched runs using only public CLI JSON through the verified executable and the agent uplink profile, without delaying session start.",
+      "loss_if_absent": "Without this, agents lose the run view or read a different scope from their tools.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "ux-gate"
+      }
+    },
+    {
+      "id": "REQ-C13-001",
+      "component": "C13",
+      "class": "correctness",
+      "requirement": "The first release is made by hand with hack/release.sh and the documented release steps; automated publication follows cutover and uses only an admitted release run with short-lived delegated credentials, with the signing key as the one long-lived secret reaching only its granted signing step.",
+      "loss_if_absent": "Without this, a release can publish substituted bytes or expose broader credentials.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestExactShortLivedPublicationAuthorityContract"
+      }
+    },
+    {
+      "id": "REQ-C13-003",
+      "component": "C13",
+      "class": "correctness",
+      "requirement": "The release's component list describes exactly the binaries and libraries shipped and where each came from, built only from verified inputs.",
+      "loss_if_absent": "Without this, a release can describe or sign bytes different from those built.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestReproduciblePackagedBytesContract"
+      }
+    },
+    {
+      "id": "REQ-C13-013",
+      "component": "C13",
+      "class": "correctness",
+      "requirement": "Publishing a release record never moves \"latest\" backwards, updates only its own aliases, and deletes only objects it confirmed it owns.",
+      "loss_if_absent": "Without this, a retry can publish an older release or delete unrelated outputs.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestMonotonicReleaseFinalizationContract"
+      }
+    },
+    {
+      "id": "REQ-C13-016",
+      "component": "C13",
+      "class": "ux",
+      "requirement": "One build target produces the matching server image, source-plugin image and chart for local use and release, with declared startup commands that require no application-time registry lookup.",
+      "loss_if_absent": "Without this, local development assembles missing artifacts by hand or fails before source delivery.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "push"
+      }
+    },
+    {
+      "id": "REQ-C13-017",
+      "component": "C13",
+      "class": "ux",
+      "requirement": "From fresh install, reach the first green build in at most 8 commands and 10 flags, then the first release in at most 4 more commands; missing time baselines or 25% time growth fail the gate.",
+      "loss_if_absent": "Without this, the normal path gets longer and slower without review.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "ux-gate"
+      }
+    },
+    {
+      "id": "REQ-C13-018",
+      "component": "C13",
+      "class": "correctness",
+      "requirement": "With pinned build inputs provisioned, the complete check runs without external network access and never installs or substitutes a check tool.",
+      "loss_if_absent": "Without this, a normal check depends on an external service or silently changes its toolchain.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "ux-gate"
+      }
+    },
+    {
+      "id": "REQ-C13-019",
+      "component": "C13",
+      "class": "security",
+      "requirement": "Guard diagnostics never disclose a private name or matched pattern, including through filenames, link targets or malformed policy.",
+      "loss_if_absent": "Without this, a guard refusal can publish the private text it is meant to keep out.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "ux-gate"
+      }
+    },
+    {
+      "id": "REQ-C13-020",
+      "component": "C13",
+      "class": "correctness",
+      "requirement": "Branch and promotion CI use one build workflow, with every declared template admitted; no promotion-file selection or skipped-template admission path exists.",
+      "loss_if_absent": "Without this, the tree needs a second routing mechanism or admits different work from what it can execute.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "push"
+      }
+    },
+    {
+      "id": "REQ-C13-021",
+      "component": "C13",
+      "class": "security",
+      "requirement": "Release signatures are checked only against the pinned public key, with no transparency log, and signing needs no network; one provisioning command updates C13's canonical key and C12's generated fetch key material together.",
+      "loss_if_absent": "Without this, release consumers can trust different keys or a stale fetch pin.",
+      "inspection": {
+        "kind": "walk_step",
+        "name": "release"
+      }
+    },
+    {
+      "id": "REQ-C14-001",
+      "component": "C14",
+      "class": "correctness",
+      "requirement": "Documented commands and examples are checked against the current release, and examples pass branch and tag names to shell steps as quoted arguments, never inside script text.",
+      "loss_if_absent": "Without this, users follow commands or defaults the product does not support.",
+      "inspection": {
+        "kind": "contract_test",
+        "name": "TestCurrentPublicDocumentationContract"
+      }
+    }
+  ],
+  "retired_ids": {
+    "REQ-C3-004": "merged into REQ-C3-003",
+    "REQ-C7-001": "merged into REQ-C9-004",
+    "REQ-C11-004": "merged into REQ-C1-002",
+    "REQ-C12-005": "merged into REQ-C11-023",
+    "REQ-C13-011": "merged into REQ-C9-038",
+    "REQ-C9-043": "merged into REQ-C5-002",
+    "REQ-C13-004": "README walk and parity capture rule",
+    "REQ-C7-016": "dropped; chart owns the database path",
+    "REQ-C11-005": "dropped; shared decoder contract applies",
+    "REQ-C9-015": "dropped; no external witness",
+    "REQ-C2-017": "retired with REQ-C3-005; no cross-call scratch cleanup",
+    "REQ-C3-005": "retired; no scratch survives one call, so no C3 recovery cleanup exists",
+    "REQ-C3-006": "moved to REQ-C2-019; C2 owns release receipts and release.published",
+    "REQ-C2-016": "merged into REQ-C2-002; administrative scope and audited effects share one contract",
+    "REQ-C1-001": "There is no failed-login table.",
+    "REQ-C7-013": "There are no promotion grants.",
+    "REQ-C12-002": "The agent client uploads no deploy key and edits no host settings; C11 owns the joined profile and pinned transport.",
+    "REQ-C12-006": "REQ-C11-028 owns the single repository connection command and its smoke push.",
+    "REQ-C5-001": "Held steps use live inspection and release; native results remain authoritative and the original code is diagnostic text."
+  },
+  "component_limits": {
+    "C11": 13
+  }
+}

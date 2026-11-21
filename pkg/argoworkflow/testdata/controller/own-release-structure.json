@@ -1,0 +1,870 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "Workflow",
+  "spec": {
+    "entrypoint": "release",
+    "templates": [
+      {
+        "name": "release",
+        "dag": {
+          "tasks": [
+            {
+              "name": "release-setup",
+              "template": "release-setup"
+            },
+            {
+              "name": "release-lint",
+              "template": "release-lint",
+              "depends": "release-setup && release-scan"
+            },
+            {
+              "name": "release-scan",
+              "template": "release-scan",
+              "depends": "release-setup"
+            },
+            {
+              "name": "release-test",
+              "template": "release-test",
+              "depends": "release-lint && release-scan"
+            },
+            {
+              "name": "release-chart-test",
+              "template": "release-chart-test",
+              "depends": "release-setup && release-scan"
+            },
+            {
+              "name": "release-build",
+              "template": "release-build",
+              "depends": "release-test && release-chart-test && release-verify-publisher-tools"
+            },
+            {
+              "name": "release-verify-publisher-tools",
+              "template": "verify-publisher-tools",
+              "depends": "release-setup && release-scan"
+            },
+            {
+              "name": "release-sign-binaries",
+              "template": "release-sign-binaries",
+              "depends": "release-package-chart"
+            },
+            {
+              "name": "release-build-source-plugin",
+              "template": "release-build",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "release-action",
+                    "value": "build-source-plugin"
+                  }
+                ]
+              },
+              "depends": "release-build"
+            },
+            {
+              "name": "release-publish-images",
+              "template": "release-publish-images",
+              "depends": "release-build-source-plugin"
+            },
+            {
+              "name": "release-publish-homebrew",
+              "template": "release-publish-homebrew",
+              "depends": "release-publish-public"
+            },
+            {
+              "name": "release-package-chart",
+              "template": "release-package-chart",
+              "depends": "release-publish-images"
+            },
+            {
+              "name": "release-publish-chart",
+              "template": "release-publish-chart",
+              "depends": "release-sign-binaries && release-package-chart"
+            },
+            {
+              "name": "release-publish-public",
+              "template": "release-public-artifacts",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "phase",
+                    "value": "publish-public"
+                  }
+                ]
+              },
+              "depends": "release-publish-chart"
+            },
+            {
+              "name": "release-verify",
+              "template": "release-verify",
+              "depends": "release-publish-public && (release-publish-homebrew.Succeeded || release-publish-homebrew.Failed || release-publish-homebrew.Errored)"
+            },
+            {
+              "name": "release-runtime",
+              "template": "release-runtime",
+              "depends": "release-verify"
+            },
+            {
+              "name": "release-finalize",
+              "template": "release-public-artifacts",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "phase",
+                    "value": "finalize"
+                  }
+                ]
+              },
+              "depends": "release-runtime"
+            }
+          ]
+        }
+      },
+      {
+        "name": "release-setup",
+        "steps": [
+          [
+            {
+              "name": "tools-dir",
+              "template": "tools-dir"
+            }
+          ],
+          [
+            {
+              "name": "copy-trivy",
+              "template": "copy-trivy"
+            }
+          ],
+          [
+            {
+              "name": "link-go",
+              "template": "link-go"
+            }
+          ],
+          [
+            {
+              "name": "install-golangci-lint",
+              "template": "install-golangci-lint"
+            }
+          ],
+          [
+            {
+              "name": "install-helm",
+              "template": "install-helm"
+            }
+          ],
+          [
+            {
+              "name": "fetch-cosign",
+              "template": "fetch-cosign"
+            }
+          ],
+          [
+            {
+              "name": "verify-cosign",
+              "template": "verify-cosign"
+            }
+          ],
+          [
+            {
+              "name": "install-cosign",
+              "template": "install-cosign"
+            }
+          ],
+          [
+            {
+              "name": "build-release-support",
+              "template": "build-release-support"
+            }
+          ],
+          [
+            {
+              "name": "build-release-image",
+              "template": "build-release-image"
+            }
+          ],
+          [
+            {
+              "name": "validate-tag",
+              "template": "validate-tag"
+            }
+          ],
+          [
+            {
+              "name": "fetch-node",
+              "template": "fetch-node"
+            }
+          ],
+          [
+            {
+              "name": "verify-node",
+              "template": "verify-node"
+            }
+          ],
+          [
+            {
+              "name": "copy-test-tools",
+              "template": "copy-test-tools"
+            }
+          ]
+        ]
+      },
+      {
+        "name": "tools-dir",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "verify-publisher-tools",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "copy-trivy",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "link-go",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "install-golangci-lint",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "install-helm",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "fetch-cosign",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "verify-cosign",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "install-cosign",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "build-release-support",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "build-release-image",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "validate-tag",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "fetch-node",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "verify-node",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-lint",
+        "steps": [
+          [
+            {
+              "name": "vet",
+              "template": "vet"
+            }
+          ],
+          [
+            {
+              "name": "golangci-lint-run",
+              "template": "golangci-lint-run"
+            }
+          ],
+          [
+            {
+              "name": "deadcode",
+              "template": "deadcode"
+            }
+          ]
+        ]
+      },
+      {
+        "name": "vet",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "golangci-lint-run",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "deadcode",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-scan",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-test",
+        "dag": {
+          "tasks": [
+            {
+              "name": "store",
+              "template": "release-test-store"
+            },
+            {
+              "name": "service",
+              "template": "release-test-service"
+            },
+            {
+              "name": "rest",
+              "template": "release-test-rest"
+            },
+            {
+              "name": "gitcache",
+              "template": "release-test-gitcache"
+            }
+          ]
+        }
+      },
+      {
+        "name": "release-test-store",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-test-service",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-test-rest",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-test-gitcache",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-chart-test",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-build",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "release-action",
+              "default": "build"
+            }
+          ]
+        },
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-sign-binaries",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnFailure",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-publish-homebrew",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnFailure",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-publish-images",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnFailure",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-package-chart",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-publish-chart",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnFailure",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-verify",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnFailure",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-runtime",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnFailure",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "copy-test-tools",
+        "inputs": {},
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      },
+      {
+        "name": "release-public-artifacts",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "phase",
+              "enum": [
+                "publish-public",
+                "finalize"
+              ]
+            }
+          ]
+        },
+        "retryStrategy": {
+          "limit": 2,
+          "retryPolicy": "OnFailure",
+          "backoff": {
+            "duration": "30s",
+            "factor": 2
+          }
+        },
+        "container": {
+          "image": "image",
+          "command": [
+            "true"
+          ]
+        }
+      }
+    ]
+  }
+}

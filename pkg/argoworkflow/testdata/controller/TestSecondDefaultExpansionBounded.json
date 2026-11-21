@@ -1,0 +1,64 @@
+{
+  "kind": "Workflow",
+  "apiVersion": "argoproj.io/v1alpha1",
+  "metadata": {},
+  "spec": {
+    "templates": [
+      {
+        "name": "main",
+        "inputs": {},
+        "outputs": {},
+        "metadata": {},
+        "dag": {
+          "tasks": [
+            {
+              "name": "run",
+              "inline": {
+                "inputs": {},
+                "outputs": {},
+                "metadata": {},
+                "suspend": {}
+              },
+              "arguments": {}
+            }
+          ]
+        }
+      }
+    ],
+    "entrypoint": "main",
+    "arguments": {},
+    "templateDefaults": {
+      "inputs": {},
+      "outputs": {},
+      "metadata": {},
+      "dag": {
+        "tasks": [
+          {
+            "name": "a",
+            "inline": {
+              "inputs": {},
+              "outputs": {},
+              "metadata": {},
+              "suspend": {}
+            },
+            "arguments": {}
+          },
+          {
+            "name": "b",
+            "inline": {
+              "inputs": {},
+              "outputs": {},
+              "metadata": {},
+              "suspend": {}
+            },
+            "arguments": {}
+          }
+        ]
+      }
+    }
+  },
+  "status": {
+    "startedAt": null,
+    "finishedAt": null
+  }
+}

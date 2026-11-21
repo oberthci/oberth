@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: release-
+spec:
+  entrypoint: release-secret-reaches-step
+  activeDeadlineSeconds: 600
+  templates:
+    - name: release-secret-reaches-step
+      metadata:
+        annotations:
+          oberth.ci/secret-paths: release/signing-key
+      inputs:
+        artifacts:
+          - name: source
+            path: /work/src
+            mode: 0755
+            plugin:
+              name: oberth
+              key: '{{workflow.parameters.oberth-source}}'
+              configuration: '{"version":1,"kind":"main"}'
+      container:
+        image: example.test/team/release:1
+        workingDir: /work/src
+        command: [oberth, secretstore, exec, --, git]
+        args: [-c, safe.directory=/work/src, rev-parse, HEAD]

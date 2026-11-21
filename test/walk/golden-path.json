@@ -1,0 +1,252 @@
+{
+  "schema_version": 5,
+  "basis": "Product user commands and flags only; table-declared harness flags excluded. Faster of two signed reference samples per milestone; candidate targets bound counts and product seconds allow +25%.",
+  "profiles": {
+    "reference": {
+      "fresh": {
+        "release": "v0.23.4",
+        "samples": [
+          "w0-walk-r3-fresh-05",
+          "w0-walk-r3-fresh-06"
+        ],
+        "reason": "Owner R6: exclude table-declared parse/default/bound flags from user effort; same immutable samples and product durations.",
+        "first_green": {
+          "complete": true,
+          "counts": {
+            "commands": 18,
+            "flags": 73,
+            "manual_actions": 3,
+            "retry_steps": 0,
+            "wait_steps": 1
+          },
+          "seconds": 204.806,
+          "elapsed_lower_bound_seconds": null
+        },
+        "first_release": {
+          "complete": true,
+          "counts": {
+            "commands": 30,
+            "flags": 97,
+            "manual_actions": 3,
+            "retry_steps": 0,
+            "wait_steps": 3
+          },
+          "seconds": 270.705,
+          "elapsed_lower_bound_seconds": null
+        }
+      },
+      "warm": {
+        "release": "v0.23.4",
+        "samples": [
+          "w0-walk-r3-warm-05",
+          "w0-walk-r3-warm-06"
+        ],
+        "reason": "Owner R6: exclude table-declared parse/default/bound flags from user effort; same immutable samples and product durations.",
+        "first_green": {
+          "complete": true,
+          "counts": {
+            "commands": 17,
+            "flags": 69,
+            "manual_actions": 3,
+            "retry_steps": 0,
+            "wait_steps": 1
+          },
+          "seconds": 150.02,
+          "elapsed_lower_bound_seconds": null
+        },
+        "first_release": {
+          "complete": true,
+          "counts": {
+            "commands": 29,
+            "flags": 93,
+            "manual_actions": 3,
+            "retry_steps": 0,
+            "wait_steps": 3
+          },
+          "seconds": 217.933,
+          "elapsed_lower_bound_seconds": null
+        }
+      }
+    }
+  },
+  "reference": {
+    "release": "v0.23.4",
+    "cli_sha256": "91fc48c6cf3a485f678b55fa7c73e2ffa5e74733754df3c98c5af90a994632fd"
+  },
+  "samples": {
+    "fresh": [
+      {
+        "mode": "fresh",
+        "release": "v0.23.4",
+        "evidence": "w0-walk-r3-fresh-05",
+        "result_sha256": "efe7e54ba4bfb634ffcaa4bf06cdabb85d3810962215267f05b08f50d399bb3a",
+        "reference_gaps": [
+          "failing-build",
+          "invalid-yaml",
+          "live-logs",
+          "readonly-source",
+          "release-ui",
+          "ui",
+          "ungranted-secret"
+        ],
+        "reason": "Owner R4: count product effort; exclude sample authoring and independent verification.",
+        "first_green": {
+          "complete": true,
+          "counts": {
+            "commands": 18,
+            "flags": 73,
+            "manual_actions": 3,
+            "retry_steps": 0,
+            "wait_steps": 1
+          },
+          "seconds": 205.512,
+          "elapsed_lower_bound_seconds": null
+        },
+        "first_release": {
+          "complete": true,
+          "counts": {
+            "commands": 30,
+            "flags": 97,
+            "manual_actions": 3,
+            "retry_steps": 0,
+            "wait_steps": 3
+          },
+          "seconds": 273.298,
+          "elapsed_lower_bound_seconds": null
+        }
+      },
+      {
+        "mode": "fresh",
+        "release": "v0.23.4",
+        "evidence": "w0-walk-r3-fresh-06",
+        "reference_gaps": [
+          "failing-build",
+          "invalid-yaml",
+          "live-logs",
+          "readonly-source",
+          "release-ui",
+          "ui",
+          "ungranted-secret"
+        ],
+        "reason": "Owner R4: count product effort; exclude sample authoring and independent verification.",
+        "first_green": {
+          "complete": true,
+          "counts": {
+            "commands": 18,
+            "flags": 73,
+            "manual_actions": 3,
+            "retry_steps": 0,
+            "wait_steps": 1
+          },
+          "seconds": 204.806,
+          "elapsed_lower_bound_seconds": null
+        },
+        "first_release": {
+          "complete": true,
+          "counts": {
+            "commands": 30,
+            "flags": 97,
+            "manual_actions": 3,
+            "retry_steps": 0,
+            "wait_steps": 3
+          },
+          "seconds": 270.705,
+          "elapsed_lower_bound_seconds": null
+        },
+        "result_sha256": "7a4b0d0e9c635d637340046e69ce60ddd45b9795dd190dc4f552261e794cf682"
+      }
+    ],
+    "warm": [
+      {
+        "mode": "warm",
+        "release": "v0.23.4",
+        "evidence": "w0-walk-r3-warm-05",
+        "reference_gaps": [
+          "failing-build",
+          "invalid-yaml",
+          "live-logs",
+          "readonly-source",
+          "release-ui",
+          "ui",
+          "ungranted-secret"
+        ],
+        "reason": "Owner R4: count product effort; exclude sample authoring and independent verification.",
+        "first_green": {
+          "complete": true,
+          "counts": {
+            "commands": 17,
+            "flags": 69,
+            "manual_actions": 3,
+            "retry_steps": 0,
+            "wait_steps": 1
+          },
+          "seconds": 150.02,
+          "elapsed_lower_bound_seconds": null
+        },
+        "first_release": {
+          "complete": true,
+          "counts": {
+            "commands": 29,
+            "flags": 93,
+            "manual_actions": 3,
+            "retry_steps": 0,
+            "wait_steps": 3
+          },
+          "seconds": 217.933,
+          "elapsed_lower_bound_seconds": null
+        },
+        "result_sha256": "4166b0a9f941f8af2c38de22313cf1416cdad80c018a934d0001a3e3cf05aef0"
+      },
+      {
+        "mode": "warm",
+        "release": "v0.23.4",
+        "evidence": "w0-walk-r3-warm-06",
+        "reference_gaps": [
+          "failing-build",
+          "invalid-yaml",
+          "live-logs",
+          "readonly-source",
+          "release-ui",
+          "ui",
+          "ungranted-secret"
+        ],
+        "reason": "Owner R4: count product effort; exclude sample authoring and independent verification.",
+        "first_green": {
+          "complete": true,
+          "counts": {
+            "commands": 17,
+            "flags": 69,
+            "manual_actions": 3,
+            "retry_steps": 0,
+            "wait_steps": 1
+          },
+          "seconds": 152.948,
+          "elapsed_lower_bound_seconds": null
+        },
+        "first_release": {
+          "complete": true,
+          "counts": {
+            "commands": 29,
+            "flags": 93,
+            "manual_actions": 3,
+            "retry_steps": 0,
+            "wait_steps": 3
+          },
+          "seconds": 219.836,
+          "elapsed_lower_bound_seconds": null
+        },
+        "result_sha256": "613b60e39c1293047609ba2a6e397d91fbeebc84b04f40170045fe05076775df"
+      }
+    ]
+  },
+  "candidate_target": {
+    "reason": "Owner R4: at most 8 commands and 10 flags to first green, then at most 4 more commands to release.",
+    "first_green": {
+      "commands": 8,
+      "flags": 10
+    },
+    "first_release": {
+      "commands": 12
+    }
+  }
+}

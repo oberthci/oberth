@@ -1,0 +1,2034 @@
+[
+  {
+    "Name": "logs",
+    "Summary": "Read retained logs for a native object.",
+    "Command": "log",
+    "CommandFlow": true,
+    "Arguments": [
+      {
+        "Name": "byte_offset",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "container",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "containers",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "context",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "limit",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "node_id",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "offset",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "pattern",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "raw",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "sha",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "step",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "tail",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "run_cancel",
+    "Summary": "Cancel a run.",
+    "Command": "run cancel",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "force",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "run_check",
+    "Summary": "Check pipeline files before pushing.",
+    "Command": "check",
+    "CommandFlow": true,
+    "Arguments": [
+      {
+        "Name": "release_tag",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "ref",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "files",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "run_get",
+    "Summary": "Read a run and its admitted logical steps in plan order.",
+    "Command": "run get",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "step_limit",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "step_offset",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "view",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "run_hold_abandon",
+    "Summary": "Release a held failed step.",
+    "Command": "run hold release",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "step",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "run_hold_exec",
+    "Summary": "Inspect a held step with a command.",
+    "Command": "run hold exec",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "argv",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "step",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "timeout_s",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "run_hold_list",
+    "Summary": "List current held steps and their availability.",
+    "Command": "run hold list",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "run_list",
+    "Summary": "List authorized runs and complete logical-step counts.",
+    "Command": "run list",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "before",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "held",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "latest",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "limit",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "own",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "ref",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "ref_glob",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "status",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "view",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "run_logs",
+    "Summary": "Read retained log bytes or discover native containers.",
+    "Command": "log",
+    "CommandFlow": true,
+    "Arguments": [
+      {
+        "Name": "byte_offset",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "container",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "containers",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "context",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "limit",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "node_id",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "offset",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "pattern",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "raw",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "step",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "tail",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "run_purge",
+    "Summary": "Purge retained run logs.",
+    "Command": "run purge",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "what",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "run_rerun",
+    "Summary": "Submit another run of an authorized recorded source.",
+    "Command": "run rerun",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "assist",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "run_wait",
+    "Summary": "Wait for a run to finish, hold or change.",
+    "Command": "run wait",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "timeout_s",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "until",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "status",
+    "Summary": "Show a commit's visible run state.",
+    "Command": "commit status",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "ref",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "wait",
+    "Summary": "Wait for a commit or reference to change.",
+    "Command": "commit wait",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "ref",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "sha",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "timeout_s",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "trigger",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "issue_import",
+    "Summary": "Import a complete issue file without overwriting records.",
+    "Command": "issue import",
+    "CommandFlow": true,
+    "Arguments": [
+      {
+        "Name": "upstream",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "jsonl",
+        "Sensitive": true,
+        "Position": 0
+      },
+      {
+        "Name": "dry_run",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "issue_append",
+    "Summary": "Append investigation notes without replacing the issue body.",
+    "Command": "issue append",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1,
+        "Positional": true
+      },
+      {
+        "Name": "text",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "issue_close",
+    "Summary": "Close an issue after recording its resolution.",
+    "Command": "issue close",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1,
+        "Positional": true
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "issue_create",
+    "Summary": "Create an issue with a title and body.",
+    "Command": "issue create",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "body",
+        "Sensitive": false,
+        "Position": 2
+      },
+      {
+        "Name": "title",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "upstream",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "issue_delete",
+    "Summary": "Delete an issue when retaining it is no longer appropriate.",
+    "Command": "issue delete",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1,
+        "Positional": true
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "issue_get",
+    "Summary": "Read an issue.",
+    "Command": "issue get",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "active_stale_after",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1,
+        "Positional": true
+      },
+      {
+        "Name": "stale_after",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "issue_get_many",
+    "Summary": "Read complete authorized issues in request order.",
+    "Command": "issue get many",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "active_stale_after",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "ids",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "stale_after",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "issue_list",
+    "Summary": "List authorized issue metadata before selecting full bodies.",
+    "Command": "issue list",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "active_stale_after",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "before",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "kind",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "limit",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "query",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "stale_after",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "state",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "work_status",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "issue_lock",
+    "Summary": "Lock an issue before a coordinated edit.",
+    "Command": "issue lock",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1,
+        "Positional": true
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "issue_reopen",
+    "Summary": "Reopen an issue for further investigation.",
+    "Command": "issue reopen",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1,
+        "Positional": true
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "issue_update",
+    "Summary": "Update an issue at its expected revision.",
+    "Command": "issue update",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "body",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "expected_revision",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1,
+        "Positional": true
+      },
+      {
+        "Name": "title",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "upstream",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "work_status",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "secret_put",
+    "Summary": "Write a secret for an approved step.",
+    "Command": "secret put",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "workflow",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "step",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "secret",
+        "Sensitive": false,
+        "Position": 1
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "access_allow",
+    "Summary": "Approve a secret access request.",
+    "Command": "access allow",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "audience",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "claim",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "kind",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "secret",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "step",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "tier",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "workflow",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "access_dismiss",
+    "Summary": "Dismiss a secret access request.",
+    "Command": "access dismiss",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "secret",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "step",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "workflow",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "access_list",
+    "Summary": "List visible secret access requests and grants.",
+    "Command": "access list",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "claim",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "kind",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "pending",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "revoked",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "tier",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "access_revoke",
+    "Summary": "Revoke a secret access grant.",
+    "Command": "access revoke",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "audience",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "claim",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "kind",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "secret",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "step",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "tier",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "workflow",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "workflow_capability_get",
+    "Summary": "Read approved native permissions for a workflow.",
+    "Command": "workflow capability get",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 1
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "workflow_capability_grant",
+    "Summary": "Approve workflow execution permissions.",
+    "Command": "workflow capability grant",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "capability",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "workflow_capability_revoke",
+    "Summary": "Revoke workflow execution permissions.",
+    "Command": "workflow capability revoke",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "promote",
+    "Summary": "Promote a tested commit to the default branch.",
+    "Command": "promote",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "branch",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "sha",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "promote_retry",
+    "Summary": "Retry a durable promotion whose previous attempt failed.",
+    "Command": "promote retry",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "promote_status",
+    "Summary": "Read a promotion and its current outcome.",
+    "Command": "promote status",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "timeout_s",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "promotion_list",
+    "Summary": "List durable promotions visible to this caller.",
+    "Command": "promote list",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "before",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "limit",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "source_sha",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "status",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "publication_abandon",
+    "Summary": "Abandon a failed publication after investigation.",
+    "Command": "publication abandon",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "publish_retry",
+    "Summary": "Retry a failed upstream publication.",
+    "Command": "publication retry",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "receive_outbox",
+    "Summary": "Read or repair pending push delivery obligations.",
+    "Command": "receive outbox",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "action",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "sync",
+    "Summary": "Publish a parked branch upstream without running it.",
+    "Command": "sync",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "branch",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "sha",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "publication_list",
+    "Summary": "List publication receipts visible to this caller.",
+    "Command": "publication list",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "status",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "before",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "limit",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "admin_access_list",
+    "Summary": "Read approved grant paths for installation materialization.",
+    "Command": "-",
+    "CommandFlow": false,
+    "Arguments": null,
+    "SensitiveResult": null
+  },
+  {
+    "Name": "admin_audit_record",
+    "Summary": "Record an installation administration action.",
+    "Command": "-",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "action",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "details",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "admin_idle",
+    "Summary": "Wait for admission to become idle.",
+    "Command": "-",
+    "CommandFlow": false,
+    "Arguments": null,
+    "SensitiveResult": null
+  },
+  {
+    "Name": "admin_public_identity",
+    "Summary": "Read named public server identity material.",
+    "Command": "-",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "name",
+        "Sensitive": false,
+        "Position": 1
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "admin_readiness",
+    "Summary": "Read current service readiness without freezing admission.",
+    "Command": "-",
+    "CommandFlow": false,
+    "Arguments": null,
+    "SensitiveResult": null
+  },
+  {
+    "Name": "admin_version",
+    "Summary": "Read the server and state-schema versions.",
+    "Command": "-",
+    "CommandFlow": false,
+    "Arguments": null,
+    "SensitiveResult": null
+  },
+  {
+    "Name": "audit_list",
+    "Summary": "Read authorized audit records in order.",
+    "Command": "audit",
+    "CommandFlow": true,
+    "Arguments": [
+      {
+        "Name": "action",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "actor",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "before",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "limit",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "since",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "until",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "client_renew",
+    "Summary": "Renew the current client certificate.",
+    "Command": "renew",
+    "CommandFlow": true,
+    "Arguments": [
+      {
+        "Name": "csr",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "ttl",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "repo_add",
+    "Summary": "Register a repository and its upstream.",
+    "Command": "repo add",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "default_branch",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "upstream",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "repo_archive",
+    "Summary": "Archive a repository to stop new work.",
+    "Command": "repo archive",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "repo_list",
+    "Summary": "List registered repositories and their latest runs.",
+    "Command": "repo list",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "names_only",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "archived",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "repo_remove",
+    "Summary": "Remove a registered repository with an audit reason.",
+    "Command": "repo remove",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "repo_unarchive",
+    "Summary": "Reactivate an archived repository registration.",
+    "Command": "repo unarchive",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "repo_verify",
+    "Summary": "Verify repository upstream access and configuration.",
+    "Command": "repo verify",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 1
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "uplink_add",
+    "Summary": "Create an uplink identity.",
+    "Command": "uplink add",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "admin",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "bearer_digest",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "csr",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "identity",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "scope",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "ssh_public_key",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "ttl",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "uplink_cert",
+    "Summary": "Issue a certificate for a registered identity.",
+    "Command": "uplink cert",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "csr",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "fingerprint",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "identity",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "ttl",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "uplink_invite",
+    "Summary": "Create a scoped invitation for a new caller.",
+    "Command": "invite",
+    "CommandFlow": true,
+    "Arguments": [
+      {
+        "Name": "expires",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "identity",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "scope",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "secret_digest",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "server_url",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "uplink_list",
+    "Summary": "List registered caller identities and their scopes.",
+    "Command": "uplink list",
+    "CommandFlow": false,
+    "Arguments": null,
+    "SensitiveResult": null
+  },
+  {
+    "Name": "uplink_revoke",
+    "Summary": "Revoke the selected registered caller identity.",
+    "Command": "uplink revoke",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "fingerprint",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "identity",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "uplink_rotate",
+    "Summary": "Rotate an uplink credential.",
+    "Command": "uplink rotate",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "fingerprint",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "identity",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "replacement_fingerprint",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "uplink_scope",
+    "Summary": "Change the repository scope of a caller identity.",
+    "Command": "uplink scope",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "fingerprint",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "identity",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "scope",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "upstream_add",
+    "Summary": "Register an upstream and its access configuration.",
+    "Command": "upstream add",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "base_url",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "check_repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "dedicated_key",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "expected_host_fingerprint",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "name",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "no_wait",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repin",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "upstream_list",
+    "Summary": "Read registered upstreams and their public access state.",
+    "Command": "upstream list",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "check",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "upstream_provide_key",
+    "Summary": "Provide a private key for upstream access.",
+    "Command": "upstream provide key",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "dedicated_key",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "name",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "private_key",
+        "Sensitive": true,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "upstream_remove",
+    "Summary": "Remove an upstream registration.",
+    "Command": "upstream remove",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "name",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "events_wait",
+    "Summary": "Wait for matching durable events or recover after a gap.",
+    "Command": "events wait",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "after_id",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "kinds",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "limit",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "own",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "refs_glob",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repos",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "run_ids",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "timeout_s",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "schedule_list",
+    "Summary": "Read authored schedules and their visible admission state.",
+    "Command": "schedule list",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "schedule_pause",
+    "Summary": "Pause future admission for an authored schedule entry.",
+    "Command": "schedule pause",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "entry",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "schedule_resume",
+    "Summary": "Resume future admission for a paused schedule entry.",
+    "Command": "schedule resume",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "entry",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "schedule_trigger",
+    "Summary": "Start an immediate occurrence of an authored schedule.",
+    "Command": "schedule trigger",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "entry",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "force",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "reason",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "sync_status",
+    "Summary": "Show native lock holders and waiters.",
+    "Command": "lock status",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "lock",
+        "Sensitive": false,
+        "Position": 0
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
+    "Name": "system_status",
+    "Summary": "Show installation health and readiness.",
+    "Command": "system status",
+    "CommandFlow": false,
+    "Arguments": null,
+    "SensitiveResult": null
+  }
+]

@@ -1,0 +1,73 @@
+{
+  "phase": "Succeeded",
+  "startedAt": "2026-11-18T02:56:15Z",
+  "finishedAt": "2026-11-18T02:56:15Z",
+  "progress": "0/1",
+  "nodes": {
+    "run-6afe324f6c4db828b0ff3ebf1e0398d0": {
+      "id": "run-6afe324f6c4db828b0ff3ebf1e0398d0",
+      "name": "run-6afe324f6c4db828b0ff3ebf1e0398d0",
+      "displayName": "run-6afe324f6c4db828b0ff3ebf1e0398d0",
+      "type": "DAG",
+      "templateName": "pipeline",
+      "templateScope": "local/run-6afe324f6c4db828b0ff3ebf1e0398d0",
+      "phase": "Succeeded",
+      "startedAt": "2026-11-18T02:56:15Z",
+      "finishedAt": "2026-11-18T02:56:15Z",
+      "progress": "0/1",
+      "resourcesDuration": {
+        "cpu": 0,
+        "memory": 2
+      },
+      "children": [
+        "run-6afe324f6c4db828b0ff3ebf1e0398d0-3756603999"
+      ],
+      "outboundNodes": [
+        "run-6afe324f6c4db828b0ff3ebf1e0398d0-3756603999"
+      ]
+    },
+    "run-6afe324f6c4db828b0ff3ebf1e0398d0-3756603999": {
+      "id": "run-6afe324f6c4db828b0ff3ebf1e0398d0-3756603999",
+      "name": "run-6afe324f6c4db828b0ff3ebf1e0398d0.build",
+      "displayName": "build",
+      "type": "Pod",
+      "templateName": "build",
+      "templateScope": "local/run-6afe324f6c4db828b0ff3ebf1e0398d0",
+      "phase": "Failed",
+      "boundaryID": "run-6afe324f6c4db828b0ff3ebf1e0398d0",
+      "message": "main:  (exit code 7)",
+      "startedAt": "2026-11-18T02:56:15Z",
+      "finishedAt": "2026-11-18T02:56:15Z",
+      "progress": "0/1",
+      "resourcesDuration": {
+        "cpu": 0,
+        "memory": 2
+      },
+      "outputs": {
+        "exitCode": "7"
+      },
+      "taskResultSynced": true
+    }
+  },
+  "conditions": [
+    {
+      "type": "PodRunning",
+      "status": "False"
+    },
+    {
+      "type": "Completed",
+      "status": "True"
+    }
+  ],
+  "resourcesDuration": {
+    "cpu": 0,
+    "memory": 2
+  },
+  "artifactRepositoryRef": {
+    "default": true,
+    "artifactRepository": {}
+  },
+  "artifactGCStatus": {
+    "notSpecified": true
+  }
+}

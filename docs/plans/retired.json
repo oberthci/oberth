@@ -1,0 +1,307 @@
+{
+  "version": 1,
+  "selector_semantics": "Literal word-boundary text matches; spellings are enumerated, never discovery regexes. R19 explicitly names the removed grouping words; current generic workspace, seed and compatibility words are not blanket bans.",
+  "rules": [
+    {
+      "id": "R01",
+      "tokens": [
+        "oberth.ci/workspace-env",
+        "oberth.ci/workspace-mounts",
+        "cache.ciRoot",
+        "cache.releaseRoot"
+      ],
+      "owner": "C13",
+      "scope": "Retired selectors are refused outside the declared documentation exemptions; authored native YAML uses current names.",
+      "replacement": "Authored YAML; explicit R01 exception: C5 automatically adds safe.directory=/work/src for main-source consumers (#1635), through the C4 preparation hook. Scaffolds, examples and the migration guide show the portable setting explicitly"
+    },
+    {
+      "id": "R02",
+      "tokens": [
+        "OBERTH_REPO",
+        "OBERTH_REF",
+        "OBERTH_SHA",
+        "OBERTH_TRIGGER",
+        "OBERTH_RELEASE_TAG",
+        "OBERTH_RELEASE_SHA",
+        "OBERTH_ARTIFACTS"
+      ],
+      "owner": "C13",
+      "scope": "Retired selectors are refused outside the declared documentation exemptions; authored native YAML uses current names.",
+      "replacement": "Admitted native parameters and authored environment. OBERTH_RELEASE_WIF remains as an explicit selector"
+    },
+    {
+      "id": "R03",
+      "tokens": [
+        "credential-chain"
+      ],
+      "owner": "C13",
+      "replacement": "Explicit projected tokens and the current secret client"
+    },
+    {
+      "id": "R04",
+      "tokens": [
+        "docs/standalone-configuration.md"
+      ],
+      "owner": "C13",
+      "scope": "old deployment-mode guide and its historical mode contract; independent dependency operation is current",
+      "replacement": "None. Independent operation of a dependency server is unaffected"
+    },
+    {
+      "id": "R05",
+      "tokens": [
+        "executionTarget",
+        "executionTargetConfigMap",
+        "executionTargetCredentialsSecret",
+        "executionPlacementConfigMap"
+      ],
+      "owner": "C13",
+      "replacement": "One configured native execution namespace"
+    },
+    {
+      "id": "R06",
+      "tokens": [
+        "goProxy"
+      ],
+      "owner": "C13",
+      "replacement": "Authored module access"
+    },
+    {
+      "id": "R07",
+      "tokens": [
+        "sourceStorageClass",
+        "oberth.ci/sources",
+        "sourceClaim",
+        "argo.sourceStorageClass",
+        "internal/sourceport",
+        "ManifestStore",
+        "LeaseJournal",
+        "CheckedWorkflowBinding",
+        "LeaseRetirement"
+      ],
+      "owner": "C13",
+      "replacement": "Prepared admission records source bindings; Git keep refs retain roots; the run records native identity once."
+    },
+    {
+      "id": "R08",
+      "tokens": [
+        "retention.artifacts.limitBytes",
+        "retention.artifacts.budgetBytes",
+        "--artifact-retention",
+        "--artifacts-budget-bytes",
+        "artifact_get",
+        "internal/artifacts"
+      ],
+      "owner": "C13",
+      "replacement": "D5: no artifact tools, routes, CLI, retention/budget flags or artifact purge option; run_purge removes logs only"
+    },
+    {
+      "id": "R09",
+      "tokens": [
+        "type Fragment",
+        "sourcedelivery.Fragment",
+        "Fragments",
+        "json:\"fragments"
+      ],
+      "owner": "C13",
+      "replacement": "Native shared templates. D3 deletes Fragment, Manifest.Fragments and digest inputs; F8 closed",
+      "scope": "Removed source-template reuse declarations and fields; native URL Fragment properties remain valid."
+    },
+    {
+      "id": "R10",
+      "tokens": [
+        "controllerProfile",
+        "controllerProfileConfigMap",
+        "oberth.ci/nonroot-templates",
+        "executorScratchSizeLimit",
+        "oberth-controller-profile"
+      ],
+      "owner": "C13",
+      "replacement": "Native controller settings plus identity verification"
+    },
+    {
+      "id": "R11",
+      "tokens": [
+        ".oberth/tests.yaml",
+        "vmLauncher",
+        "trustedTests",
+        "guest-test"
+      ],
+      "owner": "C13",
+      "replacement": "Operator-owned native capability grants"
+    },
+    {
+      "id": "R12",
+      "tokens": [
+        "oberth.ci/exclusive",
+        "runtimeCapacity",
+        "declaredResources",
+        "legacyResources",
+        "admission.pressure",
+        "admission-pressure"
+      ],
+      "owner": "C13",
+      "replacement": "None (principle 2)"
+    },
+    {
+      "id": "R13",
+      "tokens": [
+        "maxConcurrentJobs",
+        "--admission-cpu-enabled",
+        "--admission-pressure-enabled",
+        "--admission-disk-floor-bytes",
+        "--admission-stall-timeout",
+        "queueCap.maxNotStarted",
+        "admission.stepStartup",
+        "admission.stallTimeout"
+      ],
+      "owner": "C13",
+      "replacement": "The global run cap, plus authored retries and deadlines"
+    },
+    {
+      "id": "R14",
+      "tokens": [
+        "step_resource_usage",
+        "resource_attempts",
+        "resource_attempt_inventories",
+        "pod_resource_dispositions",
+        "resourceSampler"
+      ],
+      "owner": "C13",
+      "replacement": "None"
+    },
+    {
+      "id": "R15",
+      "tokens": [
+        "OBERTH_GO_FIELD_NAMES",
+        "X-Oberth-Go-Field-Names",
+        "go_field_names",
+        "--go-field-names",
+        "failed_burn"
+      ],
+      "owner": "C13",
+      "replacement": "The current public DTO with an exact rejection"
+    },
+    {
+      "id": "R16",
+      "tokens": [
+        "gitBackend",
+        "--git-backend",
+        "OBERTH_GITCACHE_SHADOW",
+        "argoSync",
+        "--argo-sync-limit",
+        "watchTunnel",
+        "--watch-tunnel",
+        "secretCreatePolicy",
+        "secretstore.transit"
+      ],
+      "owner": "C13",
+      "replacement": "The current Git cache (C6) and the current installer (C9)"
+    },
+    {
+      "id": "R17",
+      "tokens": [
+        ".oberth/ci.yaml",
+        "pkg/pipeline"
+      ],
+      "owner": "C13",
+      "replacement": "Admitted native YAML is the plan"
+    },
+    {
+      "id": "R18",
+      "tokens": [
+        "StageAndStep",
+        "seed one set of step rows"
+      ],
+      "owner": "C13",
+      "replacement": "The plan computed from admitted YAML (C4)"
+    },
+    {
+      "id": "R19",
+      "tokens": [
+        "failed_burn",
+        "--burn",
+        "Burn",
+        "FailedBurn",
+        "burn",
+        "burns",
+        "Burns",
+        "failedBurn",
+        "BURN",
+        "BURNS"
+      ],
+      "owner": "C13",
+      "replacement": "step = plan path; node_id = native attempt; no grouping",
+      "bare_words": [
+        "burn",
+        "burns"
+      ]
+    },
+    {
+      "id": "R20",
+      "tokens": [
+        "dropRetiredInstallerValues",
+        "printGrantMirrorUpgradeNotice"
+      ],
+      "owner": "C14",
+      "replacement": "The current contract, or release history"
+    },
+    {
+      "id": "R21",
+      "tokens": [
+        "internal/auditanchor",
+        "auditAnchor",
+        "witnessKeyInfo",
+        "audit_anchors",
+        "--accept-witness-chain-reset",
+        "--accept-witness-genesis",
+        "--audit-anchor-interval",
+        "--audit-anchor-max-age",
+        "--audit-rekor-ca",
+        "--audit-rekor-insecure-http",
+        "--audit-rekor-pubkey",
+        "--audit-rekor-url",
+        "--audit-tsa-ca",
+        "--audit-tsa-insecure-http",
+        "--audit-tsa-roots",
+        "--audit-tsa-url",
+        "--install-rekor",
+        "--rekor-chart-version",
+        "--rekor-namespace"
+      ],
+      "owner": "C7",
+      "replacement": "Local hash-chained audit records; no external witness"
+    }
+  ],
+  "exemptions": [
+    {
+      "path": "docs/plans/",
+      "owner": "C14",
+      "checks": [
+        "retired_vocabulary",
+        "leftovers"
+      ],
+      "ends": "permanent",
+      "reason": "Planning and historical evidence may describe removed code."
+    },
+    {
+      "path": "docs/releases/",
+      "owner": "C14",
+      "checks": [
+        "retired_vocabulary",
+        "leftovers"
+      ],
+      "ends": "permanent",
+      "reason": "Planning and historical evidence may describe removed code."
+    },
+    {
+      "path": "docs/archive/",
+      "owner": "C14",
+      "checks": [
+        "retired_vocabulary",
+        "leftovers"
+      ],
+      "ends": "permanent",
+      "reason": "Planning and historical evidence may describe removed code."
+    }
+  ]
+}

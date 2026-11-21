@@ -1,0 +1,302 @@
+"""Exercise gate refusals and trusted tooling with local Git and a fake VM."""
+import os
+import json
+import re
+import shlex
+from pathlib import Path
+import shutil
+import subprocess
+import tarfile
+import tempfile
+import unittest
+from unittest.mock import patch
+
+
+class GateVerdicts(unittest.TestCase):
+    def setUp(self):
+        scratch = Path(os.environ.get("GOTMPDIR", Path.home() / ".cache/go-tmp"))
+        scratch.mkdir(parents=True, exist_ok=True)
+        self.directory = tempfile.TemporaryDirectory(dir=scratch)
+        self.addCleanup(self.directory.cleanup)
+        self.fixture = Path(self.directory.name)
+        root = Path(__file__).resolve().parents[1]
+        manifest = re.search(r"tool_paths=\((.*?)\)", (root / "hack/gate.sh").read_text(), re.S)
+        for name in shlex.split(manifest[1]):
+            target = self.fixture / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(root / name, target)
+        shutil.copytree(root / "docs/plans", self.fixture / "docs/plans")
+        self.git("init", "-q", "-b", "main")
+        for key in ("user.name", "user.email"):
+            self.git("config", key, self.fixture.name)
+        self.git("add", ".")
+        self.git("commit", "-qm", "Establish tooling")
+        self.git("checkout", "-qb", "w0/probe")
+        self.names = self.fixture.parent / (self.fixture.name + "-names")
+        self.names.write_text("unmatched-"+self.fixture.name+"\n")
+        self.addCleanup(self.names.unlink)
+        self.bin_path = self.fixture / "bin"
+        self.bin_path.mkdir()
+        docker = self.bin_path / "docker"
+        docker.write_text('''#!/usr/bin/env bash
+shift 2
+case $1 in
+create) printf '%s\\n' "$@" > "$GATE_COMMANDS"; printf 'gate-test-container\\n' ;;
+cp) if [[ $2 == */tooling.tar ]]; then cp "$2" "$GATE_ARCHIVE"; fi ;;
+start) exit "${GATE_FAKE_START_STATUS:-0}" ;;
+esac
+''')
+        docker.chmod(0o755)
+
+    def git(self, *args):
+        return subprocess.check_output(["git", *args], cwd=self.fixture, stderr=subprocess.STDOUT)
+
+    def run_gate(self, branch="w0/probe", status=0):
+        result = subprocess.run(["bash", "hack/gate.sh", branch], cwd=self.fixture,
+            env={**os.environ, "PATH": f"{self.bin_path}:{os.environ['PATH']}",
+                 "GOLANGCI_LINT": str(self.bin_path / "docker"),
+                 "GOTMPDIR": str(self.fixture), "GATE_FAKE_START_STATUS": str(status),
+                 "OBERTH_GUARDS_NAMES_FILE": os.environ.get("OBERTH_GUARDS_NAMES_FILE", str(self.names)),
+                 "GATE_ARCHIVE": str(self.fixture / "trusted.tar"),
+                 "GATE_COMMANDS": str(self.fixture / "commands")},
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        self.assertEqual(list(self.fixture.glob("gate.*")), [])
+        return result
+
+    def test_success_verdict_keeps_branch(self):
+        result = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("VERDICT: PASS\nBRANCH: w0/probe", result.stdout)
+        self.assertIn("GATE FILES CHANGED: none", result.stdout)
+        self.assertEqual((self.fixture / "commands").read_text().splitlines()[-3], "")
+
+    def test_nested_command_failure_keeps_branch_and_status(self):
+        result = self.run_gate(status=7)
+        self.assertEqual(result.returncode, 7, result.stdout)
+        self.assertIn("VERDICT: FAIL\nBRANCH: w0/probe", result.stdout)
+        self.assertIn("FAIL (7): timeout", result.stdout)
+        self.assertIn("STATUS: 7", result.stdout)
+
+    def test_cache_prefix_keeps_scratch_out_of_shared_volumes(self):
+        with patch.dict(os.environ, {"GATE_CACHE_PREFIX": "gate-fixture"}):
+            result = self.run_gate()
+        self.assertEqual(0, result.returncode, result.stdout)
+        command = (self.fixture / "commands").read_text()
+        self.assertIn("src=gate-fixture-go-build,dst=/go/cache", command)
+        self.assertIn("src=gate-fixture-go-mod,dst=/go/pkg/mod", command)
+        self.assertIn("GOCACHE=/go/cache", command)
+        self.assertNotIn("dst=/go/tmp", command)
+        self.assertIn("mkdir -p /go/tmp", command)
+        self.assertIn("OBERTH_GUARDS_NAMES_FILE=/guard-names.txt", command)
+        self.assertIn("gate: phase=cleanup seconds=", result.stdout)
+
+    def test_invalid_cache_prefix_is_refused_before_container_creation(self):
+        with patch.dict(os.environ, {"GATE_CACHE_PREFIX": "bad,dst=/other"}):
+            result = self.run_gate()
+        self.assertEqual(2, result.returncode, result.stdout)
+        self.assertIn("invalid GATE_CACHE_PREFIX", result.stdout)
+        self.assertFalse((self.fixture / "commands").exists())
+
+    def test_install_and_walk_wait_only_while_product_is_absent(self):
+        self.assertEqual(0, self.run_gate().returncode)
+        command = (self.fixture / "commands").read_text()
+        pending = command.split("        if [[ -d cmd/oberth ]]; then", 1)[1].split("\ngate\n", 1)[0]
+        pending = "if [[ -d cmd/oberth ]]; then" + pending
+        result = subprocess.run(["bash", "-ec", pending], cwd=self.fixture,
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertIn("install: product absent; integration pending", result.stdout)
+        self.assertIn("walk: product absent; integration pending", result.stdout)
+        (self.fixture / "cmd/oberth").mkdir(parents=True)
+        result = subprocess.run(["bash", "-ec", pending], cwd=self.fixture,
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("wire install and walk", result.stderr)
+
+    def test_invalid_branch_has_failure_verdict(self):
+        result = self.run_gate(branch="invalid..branch")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PHASE: resolve", result.stdout)
+
+    def test_branch_missing_main_is_refused_before_vm(self):
+        self.git("checkout", "-q", "main")
+        self.git("commit", "--allow-empty", "-qm", "Advance main")
+        result = self.run_gate()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("merge or rebase", result.stdout)
+        self.assertFalse((self.fixture / "commands").exists())
+
+    def test_missing_main_tooling_requires_bootstrap(self):
+        self.git("checkout", "-q", "main")
+        self.git("rm", "-q", "Makefile")
+        self.git("commit", "-qm", "Remove tooling")
+        self.git("branch", "-f", "w0/probe", "main")
+        result = self.run_gate()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("bootstrap main tooling first", result.stdout)
+        self.assertFalse((self.fixture / "commands").exists())
+
+    def test_changed_tooling_uses_main_and_requests_selftest(self):
+        files = ("Makefile", ".golangci.yml", "hack/lint-version", "hack/check.sh",
+                 "hack/steps.sh", "hack/history.py", "hack/test_lint.py", "hack/devloop/Dockerfile",
+                 "hack/guards/main.go", "hack/guards/run.py")
+        for name in files:
+            self.fixture.joinpath(name).write_text("weakened branch tooling\n")
+        self.fixture.joinpath("hack/guards/branch_only.py").write_text("raise RuntimeError('branch tooling')\n")
+        self.git("add", *files)
+        self.git("add", "hack/guards/branch_only.py")
+        self.git("commit", "-qm", "Change tooling")
+        # Invoke the entry point with its own required shell support intact.
+        self.fixture.joinpath("hack/steps.sh").write_bytes(self.git("show", "main:hack/steps.sh"))
+        result = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        line = next(s for s in result.stdout.splitlines() if s.startswith("GATE FILES CHANGED:"))
+        with tarfile.open(self.fixture / "trusted.tar") as archive:
+            self.assertNotIn("hack/guards/branch_only.py", archive.getnames())
+            for name in files:
+                self.assertIn(name, line)
+                self.assertEqual(archive.extractfile(name).read(), self.git("show", f"main:{name}"))
+        command = (self.fixture / "commands").read_text()
+        self.assertEqual(command.splitlines()[-3], line.removeprefix("GATE FILES CHANGED: "))
+        self.assertEqual(command.splitlines()[-2:], [self.fixture.name, self.fixture.name])
+        self.assertIn('git config user.name "$3"', command)
+        self.assertIn('git config user.email "$4"', command)
+        self.assertLess(command.index("tar -xf /tooling.tar"), command.index("make -f Makefile check"))
+        self.assertLess(command.index('for dir in hack/guards hack/plans hack/devloop docs/plans'), command.index("tar -xf /tooling.tar"))
+        self.assertIn('if [[ -n $2 ]]; then timed lint-selftest make -f Makefile lint-selftest; fi', command)
+        restore = command.split("        cd /src\n", 1)[1].split('git config user.name', 1)[0]
+        subprocess.run(["bash", "-ec", restore.replace("/tooling.tar", "trusted.tar")],
+                       cwd=self.fixture, check=True)
+        self.assertFalse((self.fixture / "hack/guards/branch_only.py").exists())
+
+    def test_missing_main_guards_requires_bootstrap(self):
+        self.git("checkout", "-q", "main")
+        self.git("rm", "-q", "hack/guards/main.go")
+        self.git("commit", "-qm", "Remove parser")
+        self.git("branch", "-f", "w0/probe", "main")
+        result = self.run_gate()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("main lacks hack/guards/main.go", result.stdout)
+        self.assertFalse((self.fixture / "commands").exists())
+
+    def test_main_guard_and_plan_additions_are_in_the_trusted_bundle(self):
+        self.git("checkout", "-q", "main")
+        files = ("hack/guards/requirements_test.go", "hack/guards/test_walk.py", "hack/plans/extra.py")
+        for file in files:
+            (self.fixture / file).write_text("approved tooling\n")
+        self.git("add", *files)
+        self.git("commit", "-qm", "Extend approved tooling")
+        self.git("checkout", "-qB", "w0/probe", "main")
+        result = self.run_gate()
+        self.assertEqual(0, result.returncode, result.stdout)
+        with tarfile.open(self.fixture / "trusted.tar") as archive:
+            for file in files:
+                self.assertEqual(b"approved tooling\n", archive.extractfile(file).read())
+
+    def test_external_names_check_uses_branch_before_vm(self):
+        with tempfile.NamedTemporaryFile(mode="w", dir=self.fixture.parent) as names:
+            token = "forbidden-" + "fixture-value"
+            names.write(token + "\n")
+            names.flush()
+            self.fixture.joinpath("example.txt").write_text(token)
+            self.git("add", "example.txt")
+            self.git("commit", "-qm", "Add fixture text")
+            with patch.dict(os.environ, {"OBERTH_GUARDS_NAMES_FILE": names.name}):
+                result = self.run_gate()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("[NAME]", result.stdout)
+        self.assertIn("PHASE: names", result.stdout)
+        self.assertFalse((self.fixture / "commands").exists())
+
+    def test_component_and_fixture_files_keep_branch_contents(self):
+        self.git("checkout", "-q", "main")
+        files = ("hack/pipeline.go", "hack/testdata/input.json", "hack/upgrade-e2e/fixture/value.go")
+        for name in files:
+            path = self.fixture / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("main contents\n")
+        self.git("add", *files)
+        self.git("commit", "-qm", "Add component fixtures")
+        self.git("checkout", "-qB", "w0/probe", "main")
+        for name in files:
+            (self.fixture / name).write_text("branch contents\n")
+        self.git("add", *files)
+        self.git("commit", "-qm", "Update component fixtures")
+        result = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        command = (self.fixture / "commands").read_text()
+        restore = command.split("        cd /src\n", 1)[1].split('git config user.name', 1)[0]
+        subprocess.run(["bash", "-ec", restore.replace("/tooling.tar", "trusted.tar")],
+                       cwd=self.fixture, check=True)
+        for name in files:
+            self.assertEqual("branch contents\n", (self.fixture / name).read_text())
+        self.assertIn("GATE FILES CHANGED: none", result.stdout)
+
+    def test_check_runs_guard_fixtures_and_propagates_failure(self):
+        go = self.bin_path / "go"
+        go.write_text("#!/usr/bin/env bash\nexit 0\n")
+        go.chmod(0o755)
+        python = self.bin_path / "python3"
+        python.write_text('#!/usr/bin/env bash\nprintf "%s\\\n" "$*" >> "$CHECK_COMMANDS"\n'
+                          'if [[ "$*" == *"-s hack/guards"* ]]; then exit 7; fi\n')
+        python.chmod(0o755)
+        result = subprocess.run(["bash", "hack/check.sh", "test"], cwd=self.fixture,
+            env={**os.environ, "PATH": str(self.bin_path) + ":" + os.environ["PATH"],
+                 "GOTMPDIR": str(self.fixture), "CHECK_COMMANDS": str(self.fixture / "checks")},
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        self.assertEqual(7, result.returncode, result.stdout)
+        self.assertIn("-m unittest discover -s hack/guards -p test_*.py",
+                      (self.fixture / "checks").read_text())
+
+    def test_make_check_rejects_broken_plans_before_go(self):
+        root = Path(__file__).resolve().parents[1]
+        shutil.copytree(root / "docs/plans", self.fixture / "docs/plans", dirs_exist_ok=True)
+        register = self.fixture / "docs/plans/retired.json"
+        data = json.loads(register.read_text())
+        data["rules"][0]["tokens"] = []
+        register.write_text(json.dumps(data))
+        go = self.bin_path / "go"
+        go.write_text('#!/usr/bin/env bash\nprintf "started\\n" > "$CHECK_GO_STARTED"\nexit 97\n')
+        go.chmod(0o755)
+        marker = self.fixture / "go-started"
+        result = subprocess.run(["make", "check"], cwd=self.fixture,
+            env={**os.environ, "PATH": str(self.bin_path) + ":" + os.environ["PATH"],
+                 "GOTMPDIR": str(self.fixture), "CHECK_GO_STARTED": str(marker)},
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        self.assertEqual(2, result.returncode, result.stdout)
+        self.assertIn("retirement selectors missing", result.stdout)
+        self.assertFalse(marker.exists(), result.stdout)
+
+    def test_missing_names_policy_refuses_gate(self):
+        with patch.dict(os.environ, {"OBERTH_GUARDS_NAMES_FILE":""}):
+            result=self.run_gate()
+        self.assertEqual(1,result.returncode,result.stdout)
+        self.assertIn("external names policy is required",result.stdout)
+        self.assertFalse((self.fixture/"commands").exists())
+
+    def test_branch_policy_changes_use_target_and_request_branch_check(self):
+        data=json.loads((self.fixture/"docs/plans/dependencies.json").read_text())
+        data["allow"]["C2"].append("internal/api")
+        data["rules"]=[r for r in data["rules"] if r["id"] not in (2,3)]
+        (self.fixture/"docs/plans/dependencies.json").write_text(json.dumps(data))
+        self.git("add","docs/plans/dependencies.json")
+        self.git("commit","-qm","Change branch policy")
+        result=self.run_gate()
+        self.assertEqual(0,result.returncode,result.stdout)
+        self.assertIn("GATE FILES CHANGED: docs/plans/dependencies.json",result.stdout)
+        with tarfile.open(self.fixture/"trusted.tar") as archive:
+            self.assertEqual(self.git("show","main:docs/plans/dependencies.json"),
+                             archive.extractfile("docs/plans/dependencies.json").read())
+        command=(self.fixture/"commands").read_text()
+        self.assertIn("timed branch-check make",command)
+        self.assertIn("worktree add -q --detach /branch",command)
+
+    def test_branch_cannot_remove_existing_parity(self):
+        self.git("checkout","-q","main")
+        p=self.fixture/"test/parity/corpus.json";p.parent.mkdir(parents=True);p.write_text("{}")
+        self.git("add",str(p));self.git("commit","-qm","Add parity")
+        self.git("checkout","-qB","w0/probe","main")
+        self.git("rm","test/parity/corpus.json");self.git("commit","-qm","Remove parity")
+        result=self.run_gate()
+        self.assertEqual(1,result.returncode,result.stdout)
+        self.assertIn("parity harness was removed",result.stdout)

@@ -1,0 +1,182 @@
+# Write a pipeline
+
+A pipeline is an Argo Workflow: `.oberth/build.yaml` runs CI; `.oberth/release.yaml` runs releases.
+See the [admission boundary](security.md#the-six-things-oberth-protects) and
+[source delivery](#source-is-explicit-and-private-to-each-step).
+
+## Start with a complete file
+
+Prepare a starter before connecting:
+
+```sh
+oberth init
+oberth validate .oberth/build.yaml
+```
+
+The starter only prints a success message: it neither fetches source nor tests your project. Replace
+it with your tests. `init` refuses overwrites without `--force`; `--release` changes only the
+destination to `.oberth/release.yaml`, adding no signing or publication. `validate` connects to no
+server. It runs push admission with placeholder server parameters and reports all refusals in
+file/field order. “Needs before the first run:” lists installation requirements and exact commands;
+needs alone exit 0, refusals exit 1. `-o json` returns `refusals` and `needs`. Never define reserved
+parameters yourself. After [connecting](../README.md#first-green-build), check local build YAML:
+
+```sh
+oberth check --local .oberth/build.yaml
+```
+
+This uses server repository context and grants. Bare `oberth check` checks the server-resolved
+revision, ignoring local edits. Neither starts a run or proves images/source are fetchable. See
+[releasing](releasing.md#release-your-project) for release selection.
+
+| File | Copy to | Shows |
+| --- | --- | --- |
+| [Build](examples/build.yaml) | `.oberth/build.yaml` | Source and a quoted stamped parameter |
+| [Cache](examples/cache.yaml) | `.oberth/build.yaml` | An explicitly granted existing claim |
+| [Pinned source](examples/pin.yaml) | `.oberth/build.yaml` | Another repository's exact commit |
+| [Release](examples/release.yaml) | `.oberth/release.yaml` | Named secret delivery |
+
+Replace fixture images and pinned repository/commit values with your own, and configure required
+grants before pushing. The examples supply no images, repositories, claims or credentials. Build
+images need `sh`, `git`, `tar` and standard file tools; the release image also needs `oberth`.
+Replace the archive command with your tests or publisher. Scratch archives are not uploaded.
+
+## Source is explicit and private to each step
+
+A source-consuming step declares an input artifact, named `source` in the examples: plugin `oberth`,
+key `{{workflow.parameters.oberth-source}}`, configuration `{"version":1,"kind":"main"}`, path
+`/work/src`, mode `0755`. Oberth supplies the key at submission; never define reserved `oberth-*`
+parameters yourself. `main` means the run's primary repository at its admitted commit, not the
+default branch. A working directory under `/work/src` needs this input unless an authored volume
+supplies it. Symbolic links and submodule entries are not delivered. Later branch changes do not
+alter delivered source. Each step has a private copy, including pins. Committed files are read-only;
+steps may create or replace files, but changes stay in that Pod. Outputs disappear with
+it unless declared. The build example writes an archive on temporary `emptyDir` storage. For Git,
+use `safe.directory=/work/src` as shown: this trusts the directory's owner without changing
+permissions. Oberth adds that setting for main-source steps while retaining your settings; pins
+receive no hook. Explicit per-command configuration is portable. The pin example uses kind `pin`, a
+full repository name and full commit ID. It arrives under `/work/sources/<name>` without `.git`; no
+Git history commands work there. The fixed revision must be visible and permitted to the run.
+
+## Pass refs as data
+
+Refs can contain shell syntax. Pass them and other parameters through environment variables or
+separate arguments, then quote shell variables. Never interpolate parameters into shell program
+text. The build example passes the stamped `oberth-trigger` through `env` as `TRIGGER`; it is not a
+branch-name parameter and never becomes shell source.
+
+## Ordering, retries and deadlines
+
+Use Argo steps, DAG dependencies, retry rules, synchronization and `activeDeadlineSeconds`.
+Semaphore keys belong in `oberth-sync-limits`. Oberth adds no ordering or capacity queue. Template
+retries are attempts of one step; reruns are new runs. Memory limits are configured bounds, not
+usage measurements; inspect detail for out-of-memory termination or eviction. `oberth lock status`
+shows Argo lock holders. The single global run cap is Argo `parallelism`, set by installation
+`runs.parallel` (default 4; 0 unlimited). Workflow limits add no Oberth cap.
+
+## Cache and outputs
+
+A cache is an existing administrator-granted claim. The example's `build-cache` must match it;
+admission refuses an unapproved claim even if present. Copy the refusal's exact command:
+
+```sh
+oberth access allow --kind pvc --tier ci 'forge/team/app' 'build-cache'
+```
+
+Mount it away from source and point build tools there. Branch code can poison shared caches: use a
+separate release-tier claim for release bytes. For workflow-scoped storage, use
+`volumeClaimTemplates`; pass outputs between steps on that volume, with Argo dependencies making the
+writer finish first. This differs from the existing shared cache claim above.
+
+## Secrets and identity
+
+Declarations request authority; only an administrator grants it for an exact repo/file/step. Branch
+builds cannot select release accounts through YAML, account names or release parameters. A step
+lists the store paths it reads in its own template annotation `oberth.ci/secret-paths` (the release
+example: `release/signing-key`) and calls `oberth secretstore exec -- <command>`. Oberth supplies
+`/run/oberth/bin/oberth` (`command: [oberth, ...]` resolves there), the token, address and CA.
+The program is pinned; no download or authored projection is needed. Secret files stay in memory.
+
+A step that consumes a projected identity token itself declares that projection and needs its own
+exact audience grant. Use one read-only main-container mount at a path of its choice and a lifetime
+of 600 through 3,600 seconds. When this grant is missing, admission prints its exact command:
+
+```sh
+oberth access allow --kind identity --audience 'publisher' \
+  'forge/team/app' '.oberth/release.yaml' 'publish' 'identity'
+```
+
+An administrator checks the refusal's repo, file, step, path and audience, then runs its command. A
+step uses one store account and gets only paths it declares and is granted; a Workflow-wide list is
+refused. If any secret grant names the step, each path needs a named grant; `*` fills no gap. A `*`
+grant is one store account for the whole file: grant steps that must be kept apart by step name, as
+the release guide does. A step with a secret grant cannot be held for inspection.
+
+`oberth secret put` grants the named step access first, then stores the value, in one command. The
+administrator supplies the value on standard input, never in command arguments:
+
+```sh
+oberth secret put --repo <repo> --file .oberth/release.yaml --step release-secret-reaches-step \
+  release/signing-key < <value-file>
+```
+
+Use the administrator profile for that command. The command prints:
+
+- Success: `Secret access granted.` then `Secret stored for the approved step.`
+- Storage refused: `Secret access granted.` then `Secret not stored.`
+  The error gives the reason and remedy. Storage failure does not revoke the grant.
+- Grant refused: `Secret access not granted; secret not stored.`
+  The error gives the reason and remedy; no storage request follows.
+
+A lost reply leaves the outcome unknown; inspect the grant and stored state before retrying. Static
+store rules let the server write values; each step reads only its own prefix. Inspect and revoke
+through [grant operations](operations.md#grants-and-secrets).
+
+## Kubernetes resources and virtual machines
+
+Ordinary containers need no resource capability grant. A resource template, including a virtual
+machine, needs an administrator-approved capability: namespace, executor account, resource kind and
+allowed actions for that workflow. Copy [resource.yaml](examples/resource.yaml) to
+`.oberth/build.yaml` and [resource-capability.json](examples/resource-capability.json) to
+`resource-capability.json`. This build creates a ConfigMap in `build-resources`; its capability
+permits only `create` on that kind/namespace with account `resource-writer`. The cluster
+administrator first creates the target namespace, creates that account in the installation's
+pipeline namespace, and grants it RBAC to create ConfigMaps in `build-resources`. Use an account
+distinct from the normal pipeline account. The grant command creates none of these objects or
+permissions. As Oberth administrator, approve and inspect the exact repository:
+
+```sh
+oberth workflow capability grant --repo <repo> \
+  --capability "$(cat resource-capability.json)" --reason 'Create build notes'
+oberth workflow capability get <repo> --json
+```
+
+Admission selects the account; do not author `serviceAccountName`. After trying the example, the
+cluster administrator lists ConfigMaps in the target namespace and deletes its generated
+`build-note-` object. Owner references cannot clean up objects across namespaces. Use owner
+references or exit handlers for other cleanup. A declaration grants no node access, server namespace
+or another repo's data; never bypass refusals with branch infrastructure keys.
+
+## Build tags and release tags
+
+Ordinary tags select `.oberth/build.yaml`; semantic versions such as `v0.1.0` select
+`.oberth/release.yaml` from default history. Ambiguity refuses. Follow the
+[project release steps](releasing.md#release-your-project) for eligibility and publication.
+
+## Plans and budgets
+
+The admitted plan is immutable. Pending entries exist before Pods start; retries stay attempts of
+one logical step. Dynamic placeholders represent unresolved expansion, so `step_count` is a lower
+bound while `steps_planned_exact` is false. Observations expand the display, not the plan. Pipeline
+files have a 1 MiB limit; submitted source-consuming Workflow specs have a 512 KiB limit. Display
+plan limits: 2,048 entries / 1 MiB; excess expansion collapses to dynamic placeholders. These plan
+budgets do not limit native fan-out or refuse admission for expansion. The server reserves at least
+1,856 MiB of source-delivery scratch, separate from step storage. Pushes allow 256 refs and a 1 GiB
+pack by default (`server.runtime.receive_max_input_bytes`).
+
+## CI issues
+
+Eligible default-branch or scheduled failures create/update scoped CI issues; newer passes close
+them. Branch CI creates no default issue. Assisted, cancelled, restart-cut or evicted runs change no
+red/green evidence. Investigate the failure; never change stored run state. Owners close manual
+issues explicitly.

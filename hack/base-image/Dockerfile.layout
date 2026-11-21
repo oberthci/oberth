@@ -1,0 +1,8 @@
+ARG ASSEMBLER_IMAGE=scratch
+FROM ${ASSEMBLER_IMAGE} AS assemble
+WORKDIR /assembly
+COPY layout.py .
+COPY artifacts/ /artifacts/
+RUN python3 --version && python3 -c 'from layout import assemble; print(assemble("/artifacts", "/out"))'
+FROM scratch
+COPY --from=assemble /out/ /

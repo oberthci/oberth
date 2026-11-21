@@ -1,0 +1,6 @@
+/bin/
+/dist/
+/.cache/
+*.test
+*.out
+__pycache__/

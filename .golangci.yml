@@ -1,0 +1,68 @@
+version: "2"
+run:
+  timeout: 5m
+  concurrency: 2
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - contextcheck
+    - errcheck
+    - errorlint
+    - forbidigo
+    - funlen
+    - gochecknoglobals
+    - gochecknoinits
+    - gocognit
+    - gocyclo
+    - godox
+    - govet
+    - ineffassign
+    - nakedret
+    - nolintlint
+    - revive
+    - staticcheck
+    - unused
+  settings:
+    godox: {keywords: [TODO, FIXME, XXX, HACK]}
+    funlen:
+      lines: 60
+      statements: -1
+      ignore-comments: false
+    gocyclo:
+      min-complexity: 12
+    gocognit:
+      min-complexity: 20
+    nakedret:
+      max-func-lines: 0
+    forbidigo:
+      analyze-types: true
+      exclude-godoc-examples: false
+      forbid:
+        - pattern: '^time\.(Sleep|Now|Since|Until)$'
+          pkg: '^time$'
+          msg: Inject time and synchronization dependencies.
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    revive:
+      rules:
+        - name: argument-limit
+          arguments: [4]
+        - name: file-length-limit
+          arguments:
+            - max: 500
+              skip-comments: false
+              skip-blank-lines: false
+  exclusions:
+    generated: disable
+    presets: [std-error-handling]
+    rules:
+      - path: '_test\.go$'
+        linters: [funlen]
+    warn-unused: true
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false

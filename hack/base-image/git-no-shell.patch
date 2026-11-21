@@ -1,0 +1,48 @@
+--- a/connect.c
++++ b/connect.c
+@@ -1367,7 +1367,7 @@
+ 		case VARIANT_AUTO:
+ 			BUG("VARIANT_AUTO passed to push_ssh_options");
+ 		case VARIANT_SIMPLE:
+-			die(_("ssh variant 'simple' does not support setting port"));
++			/* Oberth's closed SSH helper accepts only this additional pair. */
+ 		case VARIANT_SSH:
+ 			strvec_push(args, "-p");
+ 			break;
+@@ -1522,13 +1522,35 @@
+ 		} else {
+ 			transport_check_allowed("file");
+ 			conn->trace2_child_class = "transport/file";
++			/* Tokenize, but never interpret, a local service command. */
++			{
++				char *command = xstrdup(prog);
++				const char **argv;
++				int argc = split_cmdline(command, &argv);
++				if (argc <= 0)
++					die("invalid local Git service command");
++				conn->use_shell = 0;
++				if (!strcmp(argv[0], "git-upload-pack") ||
++				    !strcmp(argv[0], "git-receive-pack") ||
++				    !strcmp(argv[0], "git-upload-archive")) {
++					conn->git_cmd = 1;
++					strvec_push(&conn->args, argv[0] + 4);
++					strvec_pushv(&conn->args, argv + 1);
++				} else {
++					strvec_pushv(&conn->args, argv);
++				}
++				strvec_push(&conn->args, path);
++				free(argv);
++				free(command);
++			}
+ 			if (version > 0) {
+ 				strvec_pushf(&conn->env,
+ 					     GIT_PROTOCOL_ENVIRONMENT "=version=%d",
+ 					     version);
+ 			}
+ 		}
+-		strvec_push(&conn->args, cmd.buf);
++		if (scheme == URL_SCHEME_SSH)
++			strvec_push(&conn->args, cmd.buf);
+ 
+ 		if (start_command(conn))
+ 			die(_("unable to fork"));

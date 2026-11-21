@@ -1,0 +1,17 @@
+apiVersion: v2
+name: oberth
+version: 0.0.0
+appVersion: unset
+kubeVersion: '>=1.30.0-0'
+description: Oberth server and native workflow execution
+type: application
+dependencies:
+  - name: argo-workflows
+    alias: argoNative
+    version: 1.0.24
+    repository: https://argoproj.github.io/argo-helm
+  - name: openbao
+    alias: storeNative
+    version: 0.30.7
+    repository: https://openbao.github.io/openbao-helm
+    condition: secretStore.bundled

@@ -1,0 +1,162 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: release
+  activeDeadlineSeconds: 3600
+  nodeSelector: {kubernetes.io/arch: amd64}
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534, fsGroup: 65534, seccompProfile: {type: RuntimeDefault}}
+  volumeClaimTemplates:
+    - metadata: {name: work}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 6Gi}}
+  templateDefaults:
+    volumes:
+      - {name: private, emptyDir: {medium: Memory, sizeLimit: 512Mi}}
+    container:
+      image: golang@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd
+      workingDir: /work/src
+      command: [bash, hack/release.sh]
+      env:
+        - {name: VERSION, value: '{{workflow.parameters.version}}'}
+        - {name: GOTMPDIR, value: /cache/tmp}
+        - {name: GOCACHE, value: /cache/build}
+        - {name: GOMODCACHE, value: /cache/modules}
+        - {name: GOFLAGS, value: '-mod=readonly -buildvcs=false -p=2'}
+        - {name: RELEASE_BASE, value: /work/shared/base-image}
+      volumeMounts:
+        - {name: work, mountPath: /work/shared}
+        - {name: private, mountPath: /run/private}
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+      resources:
+        requests: {cpu: '1', memory: 512Mi}
+        limits: {cpu: '2', memory: 2Gi, ephemeral-storage: 3Gi}
+  templates:
+    - name: release
+      dag:
+        tasks:
+          - {name: prepare-base, template: prepare-base}
+          - {name: release-bytes-build, template: release-bytes-build, depends: prepare-base}
+          - {name: release-files-signed, template: release-files-signed, depends: release-bytes-build}
+          - {name: release-images-pushed, template: release-images-pushed, depends: release-files-signed}
+          - {name: release-published-immutable, template: release-published-immutable, depends: release-images-pushed}
+          - {name: release-verifies-from-clean-pod, template: release-verifies-from-clean-pod, depends: release-published-immutable}
+          - {name: latest-advanced-monotonic, template: latest-advanced-monotonic, depends: release-verifies-from-clean-pod}
+    - name: release-bytes-build
+      inputs: &source-input
+        artifacts:
+          - name: source
+            path: /work/src
+            mode: 0755
+            plugin: {name: oberth, key: '{{workflow.parameters.oberth-source}}', configuration: '{"version":1,"kind":"main"}'}
+      synchronization:
+        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: go}}]
+      volumes:
+        - {name: cache, persistentVolumeClaim: {claimName: release-cache}}
+      container:
+        command: [bash, -ec]
+        args:
+          - |
+            bash hack/release.sh check
+            mkdir -p "$GOTMPDIR"
+            RELEASE_PRIVATE="$RELEASE_SHARED/signing" bash hack/release.sh prepare-signing
+            make release-bytes
+            cp "$RELEASE_DIR/oberth-linux-amd64" "$RELEASE_SHARED/oberth"
+            chmod 755 "$RELEASE_SHARED/oberth"
+            go build -p=2 -buildvcs=false -o "$RELEASE_SHARED/oberth-release" ./cmd/oberth-release
+        env:
+          - {name: RELEASE_DEFAULT_COMMIT, value: '{{workflow.parameters.release-default-commit}}'}
+          - {name: RELEASE_TESTED_COMMIT, value: '{{workflow.parameters.release-tested-commit}}'}
+          - {name: RELEASE_BUILD_STATUS, value: '{{workflow.parameters.release-build-status}}'}
+          - {name: GOMAXPROCS, value: '6'}
+          - {name: RELEASE_CACHE_A, value: /cache/build-a}
+          - {name: RELEASE_CACHE_B, value: /cache/build-b}
+          - {name: RELEASE_DIR, value: /work/shared/dist}
+          - {name: RELEASE_SHARED, value: /work/shared}
+          - {name: GIT_CONFIG_COUNT, value: '1'}
+          - {name: GIT_CONFIG_KEY_0, value: safe.directory}
+          - {name: GIT_CONFIG_VALUE_0, value: /work/src}
+        volumeMounts: [{name: cache, mountPath: /cache}]
+        resources:
+          requests: {cpu: '2', memory: 2Gi}
+          limits: {cpu: '6', memory: 8Gi}
+    - name: prepare-base
+      inputs: *source-input
+      synchronization:
+        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: go}}]
+      volumes:
+        - {name: cache, persistentVolumeClaim: {claimName: release-cache}}
+      container:
+        command: [bash, hack/prepare-base.sh]
+        env:
+          - {name: GOMAXPROCS, value: '2'}
+        volumeMounts: [{name: cache, mountPath: /cache}]
+    - name: release-files-signed
+      metadata:
+        annotations: {oberth.ci/secret-paths: oberth/data/release/signing}
+      inputs: *source-input
+      container:
+        command: [/work/shared/oberth, secretstore, exec]
+        args: [--, bash, hack/release.sh, sign]
+        env: [{name: RELEASE_PRIVATE, value: /work/shared/signing}]
+    - name: release-images-pushed
+      metadata:
+        annotations: {oberth.ci/secret-paths: oberth/data/release/registry/config.json}
+      inputs: *source-input
+      synchronization:
+        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: go}}]
+      volumes:
+        - {name: cache, persistentVolumeClaim: {claimName: release-cache}}
+      container:
+        command: [/work/shared/oberth, secretstore, exec]
+        args:
+          - --
+          - bash
+          - -ec
+          - |
+            export DOCKER_CONFIG="$OBERTH_SECRETS_DIR/oberth/data/release/registry"
+            go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth.oci" "oberthci/oberth:$VERSION"
+            go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth-source-plugin.oci" "oberthci/oberth-source-plugin:$VERSION"
+        env:
+          - {name: RELEASE_DIR, value: /work/shared/dist}
+        volumeMounts: [{name: cache, mountPath: /cache}]
+    - name: release-published-immutable
+      inputs: *source-input
+      volumes:
+        - name: login
+          projected:
+            sources:
+              - serviceAccountToken: {audience: oberth-publish, expirationSeconds: 600, path: token}
+      container:
+        args: [publish]
+        env:
+          - {name: RELEASE_TOKEN_FILE, value: /run/identity/token}
+          - {name: RELEASE_AUDIENCE, value: oberth-publish}
+          - {name: RELEASE_ORIGIN, valueFrom: {configMapKeyRef: {name: release-config, key: origin}}}
+          - {name: RELEASE_EXCHANGE_URL, valueFrom: {configMapKeyRef: {name: release-config, key: publishExchange}}}
+        volumeMounts: [{name: login, mountPath: /run/identity, readOnly: true}]
+    - name: release-verifies-from-clean-pod
+      inputs: *source-input
+      volumes:
+        - {name: verify, emptyDir: {sizeLimit: 2Gi}}
+      container:
+        args: [verify]
+        env:
+          - {name: RELEASE_ORIGIN, valueFrom: {configMapKeyRef: {name: release-config, key: origin}}}
+        volumeMounts: [{name: verify, mountPath: /verify}]
+    - name: latest-advanced-monotonic
+      inputs: *source-input
+      volumes:
+        - name: login
+          projected:
+            sources:
+              - serviceAccountToken: {audience: oberth-finalize, expirationSeconds: 600, path: token}
+      container:
+        args: [finalize]
+        env:
+          - {name: RELEASE_TOKEN_FILE, value: /run/identity/token}
+          - {name: RELEASE_AUDIENCE, value: oberth-finalize}
+          - {name: RELEASE_ORIGIN, valueFrom: {configMapKeyRef: {name: release-config, key: origin}}}
+          - {name: RELEASE_EXCHANGE_URL, valueFrom: {configMapKeyRef: {name: release-config, key: finalizeExchange}}}
+        volumeMounts: [{name: login, mountPath: /run/identity, readOnly: true}]

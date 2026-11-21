@@ -1,0 +1,66 @@
+{
+  "kind": "Workflow",
+  "apiVersion": "argoproj.io/v1alpha1",
+  "metadata": {},
+  "spec": {
+    "templates": [
+      {
+        "name": "main",
+        "inputs": {},
+        "outputs": {},
+        "metadata": {},
+        "dag": {
+          "tasks": [
+            {
+              "name": "run",
+              "template": "leaf",
+              "arguments": {},
+              "withItems": [
+                "a",
+                "b"
+              ],
+              "hooks": {
+                "exit": {
+                  "template": "leaf",
+                  "arguments": {}
+                }
+              }
+            },
+            {
+              "name": "wait",
+              "template": "wait",
+              "arguments": {}
+            }
+          ]
+        }
+      },
+      {
+        "name": "leaf",
+        "inputs": {},
+        "outputs": {},
+        "metadata": {},
+        "container": {
+          "name": "",
+          "image": "example.test/image:1",
+          "command": [
+            "true"
+          ],
+          "resources": {}
+        }
+      },
+      {
+        "name": "wait",
+        "inputs": {},
+        "outputs": {},
+        "metadata": {},
+        "suspend": {}
+      }
+    ],
+    "entrypoint": "main",
+    "arguments": {}
+  },
+  "status": {
+    "startedAt": null,
+    "finishedAt": null
+  }
+}
