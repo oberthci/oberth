@@ -72,7 +72,9 @@ access earlier, revoke the same identity:
 ```sh
 oberth uplink revoke browser-reader --reason 'End browser access'
 ```
-Revocation cannot retract copied data. Issue bodies are plain text.
+Revocation cannot retract copied data. Issue bodies are plain text. An open issue is stale after 24
+hours unchanged (2 hours if `active`); reads compute it, never write. Set the windows with
+`server.runtime.issue_stale_after_seconds` and `issue_active_stale_after_seconds`.
 
 ## Grants and secrets
 
@@ -83,16 +85,15 @@ deletes its value in both tiers. If it reports `Grant revoked; secret still stor
 store and repeat. Revocation cannot retract read material. `oberth access dismiss` handles pending
 requests; approved/revoked grants need revoke. Annotations, projections and public CAs grant
 nothing. Audit records a request, not stored success. Inspect and approve resource grants with the
-[resource recipe](pipelines.md#kubernetes-resources-and-virtual-machines).
-Allow pin pairs with the repeatable `oberth upgrade --source-pin <consumer>=<producer>`; upgrades
-keep saved pairs, `--no-source-pins` drops them first, and `--detail` lists them.
-Install configures the bundled store's static rules and installation audience; grants need no
-synchronization or chart upgrade. Its contents are not in any backup; no store snapshot procedure
-or operator token ships. Put secrets again from secure originals after loss. Keep approved paths,
-workflows and steps beside backups, not values or proof of stored values:
-`oberth access list --repo <repo> --kind store_path --json`.
-The profile's `recovery` file unseals surviving data after restart; it cannot restore lost values.
-See [backup and secret recovery](install.md#back-up).
+[resource recipe](pipelines.md#kubernetes-resources-and-virtual-machines). Allow pin pairs with the
+repeatable `oberth upgrade --source-pin <consumer>=<producer>`; upgrades keep saved pairs,
+`--no-source-pins` drops them first, and `--detail` lists them. Install configures the bundled
+store's static rules and installation audience; grants need no synchronization or chart upgrade. Its
+contents are not in any backup; no store snapshot procedure or operator token ships. Put secrets
+again from secure originals after loss. Keep approved paths, workflows and steps beside backups, not
+values or proof of stored values: `oberth access list --repo <repo> --kind store_path --json`. The
+profile's `recovery` file unseals surviving data after restart; it cannot restore lost values. See
+[backup and secret recovery](install.md#back-up).
 
 For external stores, run these advanced checks in an operator Pod with store network access:
 
@@ -140,8 +141,7 @@ Set `activeDeadlineSeconds` on scheduled pipelines: a run Oberth never records w
 
 `oberth events wait --after-id <cursor>` observes authorized durable events; `oberth audit` gives
 administrator action receipts. Progress observations are not audit records. `--repos`, `--run-ids`,
-`--refs-glob` and `--kinds` take JSON arrays, even for one item. `--own` is a boolean. Start with
-cursor 0; for example:
+`--refs-glob` and `--kinds` take JSON arrays, even for one item; `--own` is a boolean. Start at 0:
 
 ```sh
 oberth events wait --after-id 0 --repos '["<repo>"]' --kinds '["run.updated"]' \
