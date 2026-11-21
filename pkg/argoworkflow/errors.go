@@ -57,6 +57,7 @@ func grantMessages() map[string]message {
 		"grant":             {"credential declaration has no exact operator grant", "Ask the operator to approve this repository, file, step, path and exact audience."},
 		"pvc":               {"PVC has no repository grant", "Use an allowed repository PVC, or ask the operator for its exact CI or release grant."},
 		"device":            {"device resource has no step grant", "Remove the request, or ask the operator to grant this resource to this step."},
+		"device_inline":     {"inline step cannot hold a device grant", "Move this step to a named template, then ask the operator for its device grant."},
 		"resource_name":     {"resource name exceeds 317 bytes", "Use a qualified resource name of at most 317 bytes."},
 		"device_annotation": {"device annotations bypass device grants", "Remove the annotation; request the device under resources and ask for its device grant."},
 	}

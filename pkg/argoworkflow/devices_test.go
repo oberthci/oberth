@@ -230,3 +230,21 @@ func TestDeviceFindingPathCannotForgeARefusalLine(t *testing.T) {
 	_, err := Prepare(t.Context(), r, Policy{}, identityHooks())
 	requireCode(t, err, "resource_name")
 }
+
+// An inline step has no name, and a "*" grant would cover every step of the
+// file, so an inline device request is refused with no grant command.
+func TestInlineDeviceRequestIsRefusedWithoutAGrantCommand(t *testing.T) {
+	t.Parallel()
+	w := simpleWorkflow()
+	inline := &wfv1.Template{Container: &corev1.Container{Image: "example.test/image:1", Command: []string{"true"}, Resources: deviceResources("limits")}}
+	w.Spec.Templates[0] = wfv1.Template{Name: "main", Steps: []wfv1.ParallelSteps{{Steps: []wfv1.WorkflowStep{{Name: "leaf", Inline: inline}}}}}
+	for _, grants := range [][]admissioncontract.GrantEvidence{nil, {deviceGrantFor("*"), deviceGrantFor("main"), deviceGrantFor("leaf")}} {
+		r := requestFor(t, w)
+		r.Grants = grants
+		_, err := Prepare(t.Context(), r, Policy{}, identityHooks())
+		findings := admissionFindings(t, err)
+		if len(findings) != 1 || findings[0].Code != "device_inline" || findings[0].Command != "" || findings[0].Installation || !strings.HasSuffix(findings[0].Path, `.resources["`+kvm+`"]`) {
+			t.Fatal(findings)
+		}
+	}
+}

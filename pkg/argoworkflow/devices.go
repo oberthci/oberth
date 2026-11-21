@@ -41,6 +41,10 @@ func (g *graph) devices(c *corev1.Container, n *node, where string) {
 		case standardResource(name):
 		case len(name) > maxResourceNameBytes:
 			g.refuse(where+".resources", "resource_name")
+		case n.inlineDepth > 0:
+			// An inline step has no name a grant can hold; its "*" grant would
+			// give the device to every step of the file.
+			g.refuse(fmt.Sprintf("%s.resources[%q]", where, name), "device_inline")
 		case !g.granted(n, deviceGrant, string(name), ""):
 			g.missingGrant(n, deviceGrant, string(name), fmt.Sprintf("%s.resources[%q]", where, name))
 		}
