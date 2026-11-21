@@ -25,7 +25,11 @@ const results=[];
      else check(metrics.columns.positions.every(row=>row.every((left,index)=>Math.abs(left-metrics.columns.positions[0][index])<0.5)),'run columns are misaligned');
     }
     metrics.fonts=await evaluate(`({body:getComputedStyle(document.body).fontFamily,log:document.querySelector('.log > pre')?getComputedStyle(document.querySelector('.log > pre')).fontFamily:null})`);
-    check(metrics.fonts.body.includes('system-ui')&&(!metrics.fonts.log||metrics.fonts.log.includes('monospace')),'font scope is wrong');
+    if(theme==='light'||theme==='dark'){
+     // The default design is monospace throughout: every element that carries text, and every control.
+     metrics.fonts.text=await evaluate(`Array.from(new Set(Array.from(document.querySelectorAll('body *')).filter(node=>node.matches('button,select,input,option')||Array.from(node.childNodes).some(child=>child.nodeType===3&&child.textContent.trim())).map(node=>getComputedStyle(node).fontFamily)))`);
+     check(metrics.fonts.body.includes('monospace')&&!metrics.fonts.body.includes('system-ui')&&metrics.fonts.text.length&&metrics.fonts.text.every(family=>family.includes('monospace')&&!/system-ui|sans-serif/.test(family)),'default design is not monospace throughout '+JSON.stringify(metrics.fonts));
+    } else check(metrics.fonts.body.includes('system-ui')&&(!metrics.fonts.log||metrics.fonts.log.includes('monospace')),'font scope is wrong');
     metrics.textCharacters=await evaluate(`Array.from(new Set(Array.from(document.body.textContent).filter(character=>character.codePointAt(0)>127&&character!=='·')))`);
     check(!metrics.textCharacters.length,'unlisted page character '+JSON.stringify(metrics.textCharacters));
     metrics.marks=await evaluate(`Array.from(document.querySelectorAll('a.row .mark')).map(mark=>{const style=getComputedStyle(mark),box=mark.getBoundingClientRect();return {text:mark.textContent,width:box.width,height:box.height,radius:style.borderRadius,border:style.borderTopStyle};})`);

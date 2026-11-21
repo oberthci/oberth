@@ -19,7 +19,7 @@
  --tfg: light-dark(var(--bg), var(--fg));
  --tline: light-dark(var(--fg), var(--line));
  --tbar: color-mix(in srgb, var(--tbg) 88%, var(--tfg));
- font: 13px/1.65 system-ui, sans-serif;
+ font: 13px/1.65 var(--mono);
  --mono: ui-monospace, monospace;
  color: var(--fg); background: var(--bg);
 }
@@ -183,6 +183,37 @@ main > button { margin-bottom: 12px; }
  .repos .head, .issues .head { display: none; }
  .repos .row, .issues .row { grid-template-columns: auto 1fr; gap: 6px 16px; }
 }
+/* The default design's frame as the previous dashboard set it: a 1440px
+   list column, lowercase tabs, the wider run column, 22px pills, and the
+   run page as one full-width frame with the back control in its header. */
+:root:not([data-theme="mono"], [data-theme="color"]) {
+ main { max-width: 1440px; }
+ main:has(> .run-layout) { max-width: none; position: relative; }
+ main:has(> .runs) > h1 { position: absolute; width: 1px; height: 1px; margin: 0; clip-path: inset(50%); white-space: nowrap; }
+ nav a { min-width: 72px; text-transform: lowercase; }
+ .runs { grid-template-columns: 150px minmax(10ch, 1.6fr) max-content minmax(40ch, 1fr); }
+ .runs .row { line-height: 22px; }
+ .runs .state, .repos .state { height: 22px; }
+ .run-head { border-width: 0 0 1px; border-radius: 0; }
+ .run-head > h1 .state { height: 20px; border-radius: 11px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+ .run-head > h1 + p { margin-bottom: 0; border-bottom: 0; }
+ @media (min-width: 760px) {
+  .run-layout { gap: 0; margin-top: 0; }
+  .steps { border-width: 0 1px 0 0; border-radius: 0 0 8px 8px; }
+  .log { padding: 12px 18px 0; }
+  .brand { flex: 0 0 214px; margin-right: 0; }
+  .runs .row:not(.head) { padding-top: 12px; padding-bottom: 12px; }
+  .back { position: absolute; top: 30px; right: 36px; margin: 0; }
+ }
+ /* A whole 40-character reason and its time share one 360px line in
+    monospace only at 10px with these insets. */
+ @media (max-width: 759px) {
+  main { padding-inline: 8px; }
+  .runs .row { gap: 0 4px; padding-inline: 6px; }
+  .runs .when, .runs .message { font-size: 10px; }
+  nav a { padding: 0 2px; font-size: 11px; }
+ }
+}
 [data-theme="light"] { color-scheme: light; }
 [data-theme="dark"] { color-scheme: dark; }
 
@@ -215,6 +246,7 @@ main > button { margin-bottom: 12px; }
  --running: #f0a45c;
 }
 :root:is([data-theme="mono"], [data-theme="color"]) {
+ font-family: system-ui, sans-serif;
  --shadow: transparent;
  :not(.mark) { border-radius: 0 !important; }
  /* labels */
