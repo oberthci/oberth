@@ -91,14 +91,8 @@ func (a serverAdministration) ProbeUpstream(ctx context.Context, name, checkRepo
 	for _, repo := range repos {
 		if err = a.ProbeRepository(ctx, repo); err != nil {
 			out.Pending = true
-			switch publicerr.Classify(err).Reason() {
-			case gitssh.HostKeyMismatchReason:
-				out.DisplayReason = gitssh.HostKeyMismatchReason
-			case repositoryArchivedReason:
-				out.DisplayReason = repositoryArchivedReason
-			default:
-				out.DisplayReason = repositoryProbeFailureReason
-			}
+			reason := upstreamProbeStatusReason(err)
+			out.DisplayReason = reason
 			return out, nil
 		}
 		out.Pending = false
@@ -106,6 +100,22 @@ func (a serverAdministration) ProbeUpstream(ctx context.Context, name, checkRepo
 	}
 	return out, nil
 }
+// upstreamProbeStatusReason is the upstream's line for a failed repository
+// probe, one of the catalogue reasons the message guard checks: a host key
+// mismatch, an archived repository and a first clone still running are named;
+// anything else is a failed check.
+func upstreamProbeStatusReason(err error) string {
+	switch publicerr.Classify(err).Reason() {
+	case gitssh.HostKeyMismatchReason:
+		return gitssh.HostKeyMismatchReason
+	case repositoryArchivedReason:
+		return repositoryArchivedReason
+	case gitport.CloneUnfinishedReason:
+		return gitport.CloneUnfinishedReason
+	}
+	return repositoryProbeFailureReason
+}
+
 func (a serverAdministration) probeRepositories(ctx context.Context, u stateport.Upstream, checkRepo string) ([]stateport.Repository, error) {
 	if checkRepo != "" {
 		canonical := u.Name + "/" + checkRepo
