@@ -31,7 +31,7 @@ func TestSyncStatusListsStaleHolderWithItsCommand(t *testing.T) {
 	if !slices.Equal(got.Holders, []string{"live"}) || !slices.Equal(got.Waiters, []string{"queued"}) || !slices.Equal(got.Stale, []string{runID}) || got.Command != staleClear {
 		t.Fatalf("stale holder not separated %+v", got)
 	}
-	if got.Remedy == "" || publicerr.CheckMessage(got.Remedy, 120) != nil {
+	if got.Remedy != "A run that ended still blocks this lock; restart the workflow controller to release it." || publicerr.CheckMessage(got.Remedy, 120) != nil {
 		t.Fatalf("stale holder remedy %q", got.Remedy)
 	}
 }

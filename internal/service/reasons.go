@@ -12,7 +12,7 @@ const (
 	reasonPromotionUnavailable     = "promotion record unavailable"
 	reasonPromotionEvidenceInvalid = "promotion evidence invalid"
 	warningAuthorityIncomplete     = "Authority application incomplete. Retry the grant or revocation."
-	remedyStaleLock                = "A run that ended still holds this lock; restart the workflow controller to release it."
+	remedyStaleLock                = "A run that ended still blocks this lock; restart the workflow controller to release it."
 	reasonIssueUpdated             = "issue updated"
 	reasonAuthorityIncomplete      = "authority application incomplete"
 	reasonPubPending               = "publication pending"
