@@ -64,6 +64,26 @@ func TestInvalidPolicyNeverWidensPromotion(t *testing.T) {
 	}
 }
 
+// A default head that is not a branch refuses everyone with its own reason,
+// never the policy file's remedy.
+func TestDefaultHeadThatIsNoBranchHasItsOwnRefusal(t *testing.T) {
+	t.Parallel()
+	for _, ref := range []gitport.Ref{{}, {Name: "refs/tags/v1", ObjectSHA: strings.Repeat("b", 40), CommitSHA: strings.Repeat("b", 40)}} {
+		f := setup(t)
+		f.seed(stepmodel.RunPassed)
+		f.source.File = func(context.Context, string, string) (gitport.Ref, gitport.File, error) {
+			return ref, gitport.File{Bytes: []byte(legacyPolicy)}, nil
+		}
+		for _, a := range []actor.Actor{admin(), caller()} {
+			_, err := preparePromotion(t, f, a, head)
+			var p *publicerr.Error
+			if !errors.As(err, &p) || p.Reason() != "The default branch head is not a readable branch." || strings.Contains(p.Remedy(), "promotion.yaml") || p.Command() != "" {
+				t.Fatalf("%s: %v", a.Identity, err)
+			}
+		}
+	}
+}
+
 func TestInvalidPolicyRefusesUplinkWithAdministratorCommand(t *testing.T) {
 	t.Parallel()
 	f := legacyPolicyFixture(t, legacyPolicy)

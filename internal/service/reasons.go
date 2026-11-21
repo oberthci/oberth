@@ -91,6 +91,7 @@ const (
 	promotionCurrent
 	grantArgumentMissing
 	grantArgumentUnused
+	promotionHeadInvalid
 )
 
 type diagnostic struct {
@@ -135,6 +136,7 @@ func diagnostics() []diagnostic {
 		{publicerr.InvalidTransition, "The default branch is already at this commit.", "Nothing to promote; push new work to a branch and promote its tested commit."},
 		{publicerr.InvalidInput, "This grant kind needs the %s argument.", "Pass every argument the grant kind takes; oberth help access allow lists them."},
 		{publicerr.InvalidInput, "This grant kind takes no %s argument.", "Drop that argument, or choose the grant kind it belongs to with kind."},
+		{publicerr.InvalidInput, "The default branch head is not a readable branch.", "Check the repository's default branch on the forge, then retry the promotion."},
 	}
 }
 func issueReadAlone(id int64) *publicerr.Error {

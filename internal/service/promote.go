@@ -50,7 +50,7 @@ func (s *Service) promotionPolicy(ctx context.Context, repo string) (gitport.Ref
 		return head, promotionPolicy{}, false, err
 	}
 	if head.Validate() != nil || !strings.HasPrefix(head.Name, "refs/heads/") {
-		return head, promotionPolicy{}, false, refuse(promotionPolicyInvalid)
+		return head, promotionPolicy{}, false, refuse(promotionHeadInvalid)
 	}
 	if missing {
 		return head, promotionPolicy{}, false, nil
