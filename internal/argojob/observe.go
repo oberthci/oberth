@@ -68,6 +68,9 @@ func (e *Executor) track(b nativebinding.RunBinding, plan admissioncontract.Plan
 	if t, ok := e.tracked[b.Workflow.Name]; !ok || t.binding != b {
 		t = &tracking{binding: b, plan: plan.Clone(), previous: (stepmodel.RunSummary{Steps: seed.steps}).Clone().Steps, previousNodes: seed.nodes, captures: map[string]bool{}, holds: map[string]bool{}}
 		t.child = seed.child
+		if seed.child != nil {
+			t.final = seed.child.refused
+		}
 		e.tracked[b.Workflow.Name] = t
 	}
 	e.mu.Unlock()

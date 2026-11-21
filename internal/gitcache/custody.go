@@ -2,6 +2,7 @@ package gitcache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -75,13 +76,21 @@ func (c *Cache) keepRoots(ctx context.Context, p, owner string, roots keepRoots)
 			if err := check.check(ctx, p, oid); err != nil {
 				if isAbsent(err) {
 					failure := &sourcedelivery.Failure{Code: "gone"}
-					return &RefusalError{reason: failure.Error(), remedy: failure.Remedy(), Field: "recorded source"}
+					return &RefusalError{reason: failure.Error(), remedy: failure.Remedy(), Field: goneField}
 				}
 				return err
 			}
 		}
 	}
 	return c.pinObjects(ctx, p, owner, append(roots.commits, roots.objects...))
+}
+
+const goneField = "recorded source"
+
+// sourceGone reports a Keep refused because a recorded root no longer exists.
+func sourceGone(err error) bool {
+	var refusal *RefusalError
+	return errors.As(err, &refusal) && refusal.Field == goneField
 }
 func (c *Cache) pinObjects(ctx context.Context, p, owner string, objects []string) error {
 	slices.Sort(objects)

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
 	core "k8s.io/api/core/v1"
 	"strconv"
@@ -27,6 +28,7 @@ const (
 	reasonOOM         = "out of memory"
 	reasonDeadline    = "step timed out"
 	reasonSource      = "source delivery failed"
+	reasonKeep        = stateport.ReasonRetentionRefused
 	reasonInit        = "init container failed"
 	reasonShutdown    = "node shut down"
 	reasonDisrupted   = "Pod disrupted"

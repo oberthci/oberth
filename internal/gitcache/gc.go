@@ -11,7 +11,9 @@ import (
 )
 
 // GC first restores every live owner's roots, then deletes orphan refs and
-// compacts. Failed or incomplete owner reads and failed re-pins stop deletion.
+// compacts. Failed or incomplete owner reads and failed re-pins stop deletion;
+// a live owner whose recorded source is gone stops it only in the
+// repositories that owner records, so it never stops anyone else's.
 func (c *Cache) GC(ctx context.Context) error {
 	return c.withOwners(ctx, func(snapshot collection) error {
 		paths, err := c.repositories()
@@ -35,11 +37,12 @@ func (c *Cache) withOwners(ctx context.Context, visit func(collection) error) er
 	}
 	epoch := c.beginCollection()
 	defer c.endCollection()
-	live, err := c.restoreOwners(ctx)
+	snapshot, err := c.restoreOwners(ctx)
 	if err != nil {
 		return err
 	}
-	return visit(collection{live: live, epoch: epoch})
+	snapshot.epoch = epoch
+	return visit(snapshot)
 }
 func (c *Cache) refreshRetention(ctx context.Context, p string) error {
 	if c.config.LiveOwners == nil {
@@ -49,8 +52,9 @@ func (c *Cache) refreshRetention(ctx context.Context, p string) error {
 }
 
 type collection struct {
-	live  map[string]bool
-	epoch uint64
+	live    map[string]bool
+	stalled map[string]error // repository path -> a live owner's gone source
+	epoch   uint64
 }
 
 func (c *Cache) collect(ctx context.Context, p string, snapshot collection) error {
@@ -58,7 +62,9 @@ func (c *Cache) collect(ctx context.Context, p string, snapshot collection) erro
 		return err
 	}
 	defer c.unlock(p)
-
+	if err := snapshot.stalled[p]; err != nil {
+		return err
+	}
 	active, err := c.restoreReceive(ctx, p, snapshot.live)
 	if err != nil || active {
 		return err
@@ -108,35 +114,47 @@ func (c *Cache) logExpirations(owners map[string]bool) {
 	}
 }
 
-func (c *Cache) restoreOwners(ctx context.Context) (map[string]bool, error) {
-	live := make(map[string]bool)
+func (c *Cache) restoreOwners(ctx context.Context) (collection, error) {
+	snapshot := collection{live: make(map[string]bool), stalled: make(map[string]error)}
 	cursor := ""
 	seen := make(map[string]bool)
 	for {
 		if ctx.Err() != nil {
-			return nil, context.Cause(ctx)
+			return collection{}, context.Cause(ctx)
 		}
 		page, err := c.config.LiveOwners(ctx, cursor)
 		if err != nil {
-			return nil, err
+			return collection{}, err
 		}
 		if len(page.Owners) > 128 {
-			return nil, refuse("owner page")
+			return collection{}, refuse("owner page")
 		}
 		for _, owner := range page.Owners {
-			if err = c.keepOwner(ctx, owner.ID, owner.Bindings); err != nil {
-				return nil, err
+			err = c.keepOwner(ctx, owner.ID, owner.Bindings)
+			if err != nil && !sourceGone(err) {
+				return collection{}, err
 			}
-			live[owner.ID] = true
+			if err != nil {
+				c.stall(snapshot, owner, err)
+			}
+			snapshot.live[owner.ID] = true
 		}
 		if page.Next == "" {
-			return live, nil
+			return snapshot, nil
 		}
 		if seen[page.Next] {
-			return nil, refuse("owner cursor")
+			return collection{}, refuse("owner cursor")
 		}
 		seen[page.Next] = true
 		cursor = page.Next
+	}
+}
+// stall stops deletion in each repository an owner with gone source records.
+func (c *Cache) stall(snapshot collection, owner Owner, cause error) {
+	for repo := range bindingRoots(owner.Bindings) {
+		if p, err := c.path(repo); err == nil {
+			snapshot.stalled[p] = cause
+		}
 	}
 }
 func (c *Cache) repositories() ([]string, error) {

@@ -16,6 +16,8 @@ type childObservation struct {
 	proof     nativebinding.ChildBinding
 	shutdown  wf.ShutdownStrategy
 	admission string
+	// refused is the terminal fact of a child whose source could not be kept.
+	refused *Observation
 }
 
 func boundChild(r stateport.Run, proof nativebinding.ChildBinding) (*childObservation, error) {

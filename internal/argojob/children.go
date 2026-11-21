@@ -77,7 +77,31 @@ func (e *Executor) restoreChild(ctx context.Context, w *wf.Workflow, proof nativ
 	if err = child.verify(e.config.Children, w); err != nil {
 		return err
 	}
-	return e.restoreSnapshot(ctx, r, child)
+	return e.startChild(ctx, r, child)
+}
+
+// startChild keeps a recorded live child's source, then tracks it. It runs on
+// every notice, so a crash or a transient failure after acceptance is repaired
+// by the next one. A permanent refusal fails the run with the reason a pushed
+// run gets and terminates its Workflow: a child without its source never stays
+// a live owner of nothing.
+func (e *Executor) startChild(ctx context.Context, r stateport.Run, child *childObservation) error {
+	kept := e.config.Keeper.Keep(ctx, r.ID, r.Admission.SourceBindings)
+	if kept != nil && !publicerr.Permanent(kept) {
+		return kept
+	}
+	if kept != nil {
+		detail := kept.Error()
+		var public *publicerr.Error
+		if errors.As(kept, &public) && public.Detail != "" {
+			detail = public.Detail
+		}
+		child.refused = &Observation{Status: stepmodel.RunFailed, Phase: stepmodel.NativeError, Reason: reasonKeep, Detail: detail, Failure: &stepmodel.FailureRecord{Class: stepmodel.FailureUnknown, Retry: stepmodel.RetryHint{Action: stepmodel.RetryNone}}}
+	}
+	if err := e.restoreSnapshot(ctx, r, child); err != nil || kept == nil {
+		return err
+	}
+	return e.Terminate(ctx, runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.WorkflowUID}))
 }
 
 func (e *Executor) acceptChild(ctx context.Context, p *admissioncontract.PreparedAdmission, proof nativebinding.ChildBinding) error {
@@ -97,16 +121,11 @@ func (e *Executor) acceptChild(ctx context.Context, p *admissioncontract.Prepare
 	if terminalChild(r) {
 		return nil
 	}
-	// The run is stored first, so a crash before Keep is repaired by the
-	// cache's collection pass, which pins every stored live run.
-	if err = e.config.Keeper.Keep(ctx, r.ID, v.SourceBindings); err != nil {
-		return err
-	}
 	child, err := boundChild(r, proof)
 	if err != nil {
 		return err
 	}
-	return e.restoreSnapshot(ctx, r, child)
+	return e.startChild(ctx, r, child)
 }
 
 func scheduledChildRun(r stateport.Run) bool {
