@@ -25,8 +25,9 @@ func pinFixture(t *testing.T, policy, producer string) *fixture {
 // the administrator command that allows exactly the refused pair.
 func TestPinRefusalCarriesTheAdministratorCommand(t *testing.T) {
 	t.Parallel()
-	command := "oberth upgrade --source-pin 'origin/team/widget=origin/team/source'"
+	command := "oberth upgrade --version 'v0.30.3' --source-pin 'origin/team/widget=origin/team/source'"
 	f := pinFixture(t, "{}", "origin/team/source")
+	f.d.Version = "v0.30.3"
 	s := f.new(t)
 	_, err := s.Admit(context.Background(), request(), f.source)
 	expectRefusal(t, err, "pin")

@@ -31,6 +31,9 @@ type Deps struct {
 	Deadline      Deadline
 	Routes        workflowpolicy.ReleaseRoutes
 	SourcePolicy  []byte
+	// Version is the running server's release version, which the printed
+	// source pin command keeps; "" for a development build.
+	Version      string
 	ReleaseFacts  func(context.Context, Request, string) (admissioncontract.ReleaseFacts, error)
 }
 

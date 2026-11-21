@@ -24,8 +24,8 @@ func installationRelease(ctx context.Context, request installationRequest) (inst
 		return installer.LocalRelease(chart)
 	}
 	version := request.text("version")
-	if version == "" && binaryVersion() != "(devel)" {
-		version = binaryVersion()
+	if version == "" {
+		version = releaseVersion()
 	}
 	files, err := installationReleaseFiles(ctx, request, version)
 	if err != nil {

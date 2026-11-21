@@ -43,3 +43,12 @@ func buildVersion() string {
 func binaryVersion() string {
 	return version
 }
+
+// releaseVersion is this binary's signed release version, or "" for a
+// development build.
+func releaseVersion() string {
+	if version == "(devel)" {
+		return ""
+	}
+	return version
+}

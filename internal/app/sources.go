@@ -32,7 +32,7 @@ func (s *Submitter) binder(r Request, source Source) func(context.Context, sourc
 			return b, err
 		}
 		if !s.policy.Allows(r.Repository, d.Repository) {
-			return b, refusal("pin", nil).withCommand(publicerr.SourcePinCommand(r.Repository, d.Repository))
+			return b, refusal("pin", nil).withCommand(publicerr.SourcePinCommand(r.Repository, d.Repository, s.d.Version))
 		}
 		b.Revision = sourcecontract.Revision{Repository: d.Repository, Commit: d.Commit}
 		id, reachable, err := source.Pin(ctx, b.Revision)

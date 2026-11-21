@@ -158,14 +158,19 @@ func CapabilityGrantCommand(repo, capability string) string {
 
 // SourcePinCommand lets the consumer's pipelines pin commits of the producer
 // its own pipeline names. The pair is one consumer=producer value, so a name
-// that begins with "-", holds "=" or is empty prints no command.
-func SourcePinCommand(consumer, producer string) string {
+// that begins with "-", holds "=" or is empty prints no command. A release
+// version keeps the upgrade on that version; "" leaves the version out.
+func SourcePinCommand(consumer, producer, version string) string {
 	for _, name := range []string{consumer, producer} {
 		if name == "" || flagLike(name) || strings.Contains(name, "=") {
 			return ""
 		}
 	}
-	return newLine("upgrade").flag("source-pin", consumer+"="+producer).String()
+	c := newLine("upgrade")
+	if version != "" {
+		c.flag("version", version)
+	}
+	return c.flag("source-pin", consumer+"="+producer).String()
 }
 
 // commandLine collects the words of one command in order; unsafe marks a

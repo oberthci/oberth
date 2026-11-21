@@ -25,7 +25,7 @@ func missingStore(err error) bool {
 	return err != nil && publicerr.Classify(err).Code() == publicerr.NotFound
 }
 func (o *serverOwners) wiringDeps(ctx context.Context) app.Deps {
-	return app.Deps{Lifetime: ctx, SourceTimeout: o.sourceTimeout(), PublicURL: o.c.config.Public.URL, Source: cacheSource{o}, Authority: o.authority, Service: o, Runs: o.c.store, Resolver: o, Native: o.native, Preparation: nativebinding.Preparation{HoldTTL: timeDuration(o.c.config.Assist.TTLSeconds), HelperImage: o.settings.HelperImage}, Keeper: o.cache, Deadline: context.WithTimeout, Routes: o.settings.Routes, SourcePolicy: o.settings.SourcePolicy, ReleaseFacts: func(ctx context.Context, r app.Request, file string) (admissioncontract.ReleaseFacts, error) {
+	return app.Deps{Lifetime: ctx, SourceTimeout: o.sourceTimeout(), PublicURL: o.c.config.Public.URL, Source: cacheSource{o}, Authority: o.authority, Service: o, Runs: o.c.store, Resolver: o, Native: o.native, Preparation: nativebinding.Preparation{HoldTTL: timeDuration(o.c.config.Assist.TTLSeconds), HelperImage: o.settings.HelperImage}, Keeper: o.cache, Deadline: context.WithTimeout, Routes: o.settings.Routes, SourcePolicy: o.settings.SourcePolicy, Version: releaseVersion(), ReleaseFacts: func(ctx context.Context, r app.Request, file string) (admissioncontract.ReleaseFacts, error) {
 		return app.VerifiedReleaseFacts(ctx, r, file, o.c.store)
 	}}
 }
