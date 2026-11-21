@@ -28,15 +28,22 @@ func (o *serverOwners) scheduleConfig() {
 // startupSchedules reconciles every repository's schedules once the server
 // reports ready, under the server's lifetime: a first clone, a slow forge or
 // unreadable schedule Git can neither delay nor fail the start. As with a ref
-// notice, failures go to the log and to each repository's schedule state,
-// and the next relevant event retries them.
+// notice, a repository's failure goes to the log and to its schedule state,
+// and the next relevant event retries it. A pass that cannot read the
+// catalogue or list the cluster's schedules at all fails the part.
 func (c *composition) startupSchedules(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-c.health.readySignal:
 	}
-	if err := c.schedules.SyncAll(ctx); err != nil && ctx.Err() == nil {
+	err := c.schedules.SyncAll(ctx)
+	if cronsync.Unstarted(err) && ctx.Err() == nil {
+		// No repository was reached and no later event repeats a full pass:
+		// the part fails, and the restart (Kubernetes', not Oberth's) retries.
+		return err
+	}
+	if err != nil && ctx.Err() == nil {
 		_, _ = fmt.Fprintln(c.diagnostic, err)
 	}
 	close(c.startupPassDone)

@@ -67,6 +67,19 @@ type ChildRefusal struct{ cause error }
 func (e *ChildRefusal) Error() string { return problem(childMismatch, nil).Error() }
 func (e *ChildRefusal) Unwrap() error { return problem(childMismatch, e.cause) }
 
+// unstarted marks a full pass that failed before it reached any repository:
+// the catalogue or the native LIST could not be read.
+type unstarted struct{ error }
+
+func (e unstarted) Unwrap() error { return e.error }
+
+// Unstarted reports whether err is a full pass that reached no repository,
+// which no later event repeats; per-repository failures are not.
+func Unstarted(err error) bool {
+	var failure unstarted
+	return errors.As(err, &failure)
+}
+
 func transientError(err error) error {
 	if publicerr.Permanent(err) {
 		return nil

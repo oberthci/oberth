@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -94,6 +95,37 @@ func (s *startupRepositories) wire(t *testing.T, f *serverFixture) {
 		cfg.Repositories = func(context.Context) ([]cronsync.Repository, error) { return s.all(), nil }
 		cfg.Repository = s.lookup
 		return p, err
+	}
+}
+
+// A startup pass that cannot read the catalogue reached no repository, and
+// no later event repeats it: the part fails and the server stops, so the
+// restart retries it.
+func TestStartupPassThatReachesNoRepositoryStopsTheServer(t *testing.T) {
+	f := fixtureServer(t)
+	f.deps.constructors.WiringNew = func(ctx context.Context, c *composition) (Part, error) {
+		p, err := f.wiring(ctx, c)
+		c.scheduleConfig.Repositories = func(context.Context) ([]cronsync.Repository, error) {
+			return nil, errors.New("catalogue unavailable")
+		}
+		return p, err
+	}
+	// serve directly: the server stops right after it reports ready, which
+	// the fixture's own start would take for a readiness failure.
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- serve(ctx, f.config, f.deps, f.trace) }()
+	select {
+	case err := <-done:
+		if !strings.Contains(f.trace.String(), "ready:") {
+			t.Fatal("the server stopped before it reported ready", err, f.trace.String())
+		}
+		if err == nil || !strings.Contains(err.Error()+compositionRefusalDetail(err), "schedules") {
+			t.Fatal("the server stopped without naming the failed part", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("an unstarted startup pass left the server running", f.trace.String())
 	}
 }
 

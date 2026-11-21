@@ -72,11 +72,11 @@ func (c *Syncer) syncAll(ctx context.Context) error {
 	c.fullSyncFailed = true
 	repos, err := c.config.Repositories(ctx)
 	if err != nil {
-		return problem(catalogFailure, err)
+		return unstarted{problem(catalogFailure, err)}
 	}
 	objects, err := c.list(ctx)
 	if err != nil {
-		return err
+		return unstarted{err}
 	}
 	c.fullSyncFailed = false
 	present := map[int64]bool{}
