@@ -136,7 +136,9 @@ func lockResult(rows []Lock, name string) apicontract.SyncStatus {
 		}
 		switch {
 		case r.Clear != "":
-			out.Locks[i].Stale = append(out.Locks[i].Stale, r.RunID)
+			if r.RunID != "" {
+				out.Locks[i].Stale = append(out.Locks[i].Stale, r.RunID)
+			}
 			out.Locks[i].Remedy, out.Locks[i].Command = remedyStaleLock, r.Clear
 		case r.Waiting:
 			out.Locks[i].Waiters = append(out.Locks[i].Waiters, r.RunID)

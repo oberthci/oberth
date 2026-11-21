@@ -162,12 +162,20 @@ func (s *Service) prepareSyncStatus(ctx context.Context, a actor.Actor) (func(co
 	return bounded(func(ctx context.Context) ([]Lock, error) { return s.syncStatus(ctx, a) }), nil
 }
 
+// syncStatus keeps the rows of repositories the caller may touch. A stale row of
+// another repository on a lock the caller sees keeps only the lock and the
+// command, so a run waiting behind it still learns the remedy.
 func (s *Service) syncStatus(ctx context.Context, a actor.Actor) ([]Lock, error) {
 	locks, err := s.c.Exec.Locks(ctx)
-	out := []Lock{}
+	out, seen := []Lock{}, map[string]bool{}
 	for _, l := range locks {
 		if a.CanTouchRepository(l.Repo) {
-			out = append(out, l)
+			out, seen[l.Name] = append(out, l), true
+		}
+	}
+	for _, l := range locks {
+		if l.Clear != "" && seen[l.Name] && !a.CanTouchRepository(l.Repo) {
+			out = append(out, Lock{Name: l.Name, Clear: l.Clear})
 		}
 	}
 	return out, err

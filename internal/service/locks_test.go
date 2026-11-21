@@ -36,6 +36,26 @@ func TestSyncStatusListsStaleHolderWithItsCommand(t *testing.T) {
 	}
 }
 
+// A run waiting behind another repository's stale unit learns the remedy and
+// command without that run's name; a lock the caller has no row on stays unseen.
+func TestSyncStatusKeepsRemedyOfAHiddenStaleHolder(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	f.exec.LockValues = []service.Lock{
+		{Repo: repository, RunID: "queued", Name: staleLock, Waiting: true},
+		{Repo: "private/team/hidden", RunID: "hidden", Name: staleLock, Clear: staleClear},
+		{Repo: "private/team/hidden", RunID: "other", Name: "runs/Mutex/hidden", Clear: staleClear},
+	}
+	locks, err := f.s.SyncStatus(t.Context(), caller())
+	if err != nil || len(locks.Locks) != 1 {
+		t.Fatalf("lock status %+v %v", locks, err)
+	}
+	got := locks.Locks[0]
+	if got.Lock != staleLock || got.Stale != nil || len(got.Holders) != 0 || got.Remedy == "" || got.Command != staleClear {
+		t.Fatalf("hidden stale holder lost its remedy or leaked its run %+v", got)
+	}
+}
+
 // Live holders and waiters carry no repair.
 func TestSyncStatusLiveLocksCarryNoRepair(t *testing.T) {
 	t.Parallel()
