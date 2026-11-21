@@ -5,7 +5,6 @@ import (
 	"github.com/oberthci/oberth/internal/sourcecontract"
 	core "k8s.io/api/core/v1"
 	"math/big"
-	"path"
 	"slices"
 	"strings"
 )
@@ -62,8 +61,11 @@ func sourceTrust(env []core.EnvVar) []core.EnvVar {
 
 // hasSourceTrust reports whether an authored entry Git reads already trusts
 // the source directory: an index below the count, the key without letter case,
-// the same directory however it is spelled, and no later empty entry, which
-// resets Git's list. The authored entry stays exactly as written.
+// exactly the value Oberth would add, and no later empty entry, which resets
+// Git's list. Only the exact value counts: a step runs its image's own Git,
+// and an older Git compares the configured path literally, so another spelling
+// of the directory keeps Oberth's exact entry beside it. The authored entry
+// stays exactly as written.
 func hasSourceTrust(values map[string]string, count *big.Int) bool {
 	var trust, reset *big.Int
 	for key, value := range values {
@@ -75,10 +77,10 @@ func hasSourceTrust(values map[string]string, count *big.Int) bool {
 		if !ok {
 			continue
 		}
-		switch dir := values["GIT_CONFIG_VALUE_"+index]; {
-		case dir == "":
+		switch values["GIT_CONFIG_VALUE_"+index] {
+		case "":
 			reset = later(reset, number)
-		case sameDir(dir, trustDir):
+		case trustDir:
 			trust = later(trust, number)
 		}
 	}
@@ -96,13 +98,6 @@ func readIndex(index string, count *big.Int) (*big.Int, bool) {
 // equal byte lengths keep Unicode foldings such as "ſ" for "s" out.
 func gitKeyIs(key, want string) bool {
 	return len(key) == len(want) && strings.EqualFold(key, want)
-}
-
-// sameDir treats a trailing slash, repeated separators and "." segments as the
-// same directory, as Git does. A ".." segment never matches, because Git
-// resolves it through the file system, where its parent may not exist.
-func sameDir(dir, want string) bool {
-	return !slices.Contains(strings.Split(dir, "/"), "..") && path.Clean(dir) == want
 }
 
 func later(current, index *big.Int) *big.Int {

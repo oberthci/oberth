@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestSourceTrustDuplicateCheckNormalisesPaths(t *testing.T) {
+func TestSourceTrustCountsOnlyTheExactAuthoredEntry(t *testing.T) {
 	t.Parallel()
 	entry := func(keys, values []string) []core.EnvVar {
 		env := []core.EnvVar{{Name: "GIT_CONFIG_COUNT", Value: string(rune('0' + len(keys)))}}
@@ -28,11 +28,12 @@ func TestSourceTrustDuplicateCheckNormalisesPaths(t *testing.T) {
 		trusts bool
 	}{
 		{"exact", entry([]string{sd}, []string{"/work/src"}), true},
-		{"trailing slash", entry([]string{sd}, []string{"/work/src/"}), true},
-		{"repeated separators", entry([]string{sd}, []string{"//work//src//"}), true},
-		{"dot segments", entry([]string{sd}, []string{"/./work/./src/."}), true},
 		{"key case", entry([]string{"Safe.Directory"}, []string{"/work/src"}), true},
-		{"trust after reset", entry([]string{sd, sd}, []string{"", "/work/src/"}), true},
+		{"trust after reset", entry([]string{sd, sd}, []string{"", "/work/src"}), true},
+		// An older Git in the step image compares these spellings literally.
+		{"trailing slash", entry([]string{sd}, []string{"/work/src/"}), false},
+		{"repeated separators", entry([]string{sd}, []string{"//work//src//"}), false},
+		{"dot segments", entry([]string{sd}, []string{"/./work/./src/."}), false},
 		{"reset after trust", entry([]string{sd, sd}, []string{"/work/src", ""}), false},
 		{"other directory", entry([]string{sd}, []string{"/work/src2"}), false},
 		{"relative", entry([]string{sd}, []string{"work/src"}), false},
