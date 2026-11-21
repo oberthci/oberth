@@ -1,8 +1,10 @@
 package cronsync
 
 import (
+	"fmt"
 	"github.com/argoproj/argo-workflows/v4/util/instanceid"
 	"maps"
+	"slices"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -11,6 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/nativebinding"
+	"github.com/oberthci/oberth/internal/sourcecontract"
 )
 
 const scheduleParameter = "oberth-schedule"
@@ -47,6 +50,13 @@ func render(namespace, instanceID string, request Preparation, prepared *admissi
 	view := prepared.View()
 	if view.Workflow == nil || namespace == "" || !preparedMatches(view, request) {
 		return nil, problem(badPrepared, nil)
+	}
+	// A pin is authorised against its producer at admission only, and a
+	// parent outlives that check, so a schedule loads only its own source.
+	if i := slices.IndexFunc(view.SourceBindings, func(b sourcecontract.Binding) bool { return b.Descriptor.Kind == sourcecontract.Pinned }); i >= 0 {
+		refusal := problem(pinRefused, nil)
+		refusal.Detail = fmt.Sprintf("entry %q: field %q has value pinned step %q: %s.", request.Entry.Name, "source", view.SourceBindings[i].Path, messages()[pinRefused].remedy)
+		return nil, refusal
 	}
 	name, err := nativebinding.CronName(request.Repository.ID, request.Entry.Name)
 	if err != nil {

@@ -56,6 +56,32 @@ func TestScheduledSourceParentIsAdmittedAndSuspendsWithoutBranch(t *testing.T) {
 		t.Fatal("absent branch did not suspend the source schedule", status, err)
 	}
 }
+// A pin is authorised against its producer only at admission, so a schedule
+// that pins another repository's source is refused and never published.
+func TestScheduledPinnedSourceIsRefused(t *testing.T) {
+	f := newFixture(t)
+	request := requestFixture(t, f)
+	view := prepared(request)
+	view.SourceBindings = []sourcecontract.Binding{{Path: "main"}, {Path: "lib", Descriptor: sourcecontract.Descriptor{Version: 1, Kind: sourcecontract.Pinned, Repository: "origin/team/library", Commit: strings.Repeat("b", 40)}}}
+	sealed, err := admissioncontract.Seal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := f.config
+	config.Admit = func(context.Context, cronsync.Preparation) (*admissioncontract.PreparedAdmission, error) {
+		return sealed, nil
+	}
+	f.c, err = cronsync.New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.sync()
+	status, err := f.c.Status(t.Context(), f.repo, "nightly")
+	want := "scheduled source is not supported - use a push or manual schedule trigger\nentry \"nightly\": field \"source\" has value pinned step \"lib\": use a push or manual schedule trigger."
+	if err != nil || status.Error != "schedule file is invalid" || status.Detail != want || len(f.native.Actions()) != 0 {
+		t.Fatal(status, err)
+	}
+}
 func TestSealedSpecAndCapturedTemplatesStayUnchangedAcrossValidation(t *testing.T) {
 	f := newFixture(t)
 	request := requestFixture(t, f)
