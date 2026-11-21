@@ -235,9 +235,9 @@ async function inspectHolds(client){
 async function nativeIssues(client){
  const results=[];
  for(const [id,summary] of [[45,'manual · 1 occurrence'],[46,'manual · 2 occurrences']]){
-  await client.loaded('/issues/'+id,'main h2');
+  await client.loaded('/issues/'+id,'.issue h1');
   const result=await client.evaluate(`(()=>{
-   const region=document.querySelector('main > .issues');
+   const region=document.querySelector('main > .issue');
    return {summary:Array.from(region.querySelectorAll('p')).find(node=>node.textContent.startsWith('manual · '))?.textContent,
     body:region.querySelector('pre').textContent,imported:Boolean(region.querySelector('.imported-source')),
     strayNull:Array.from(region.childNodes).some(node=>node.nodeType===Node.TEXT_NODE&&node.textContent==='null')};
@@ -267,6 +267,72 @@ async function importedIssue(client){
  const unknown=await client.evaluate(`document.querySelector('.imported-source').textContent`);
  check(unknown.includes('Original closer: unknown'),'closed source lost its unknown-closer attribution');
  return {...result,open,unknown};
+}
+
+// The issue workspace: chips with counts, paging both ways, search, stale rows and the way back.
+const issueState=`({search:location.search,chips:Array.from(document.querySelectorAll('.chips a')).map(link=>[link.textContent,link.getAttribute('aria-current')]),positions:Array.from(document.querySelectorAll('.pages .position')).map(node=>node.textContent),newer:Array.from(document.querySelectorAll('.pages')).map(pages=>pages.children[1].tagName),older:Array.from(document.querySelectorAll('.pages')).map(pages=>pages.children[2].tagName),rows:Array.from(document.querySelectorAll('.issues a.row')).map(row=>row.dataset.key)})`;
+const issueRead=(client,mark)=>client.requests.slice(mark).filter(request=>request.path==='/api/issues').map(request=>Object.fromEntries(new URL(request.url).searchParams));
+
+async function issueChipsAndPaging(client){
+ await client.loaded('/issues','.issues a.row');
+ const first=await client.evaluate(issueState);
+ check(JSON.stringify(first.chips)===JSON.stringify([['all open 64','true'],['todo 40',null],['active 3',null],['waiting 7',null],['review 14',null],['stale 4',null],['closed 8',null]]),'chips lack their counts or the current mark '+JSON.stringify(first.chips));
+ check(JSON.stringify(first.positions)==='["1-50 of 64","1-50 of 64"]'&&first.rows.length===50&&first.newer.join()==='SPAN,SPAN'&&first.older.join()==='A,A','first page position or pager wrong '+JSON.stringify(first));
+ let mark=client.requests.length;
+ await client.evaluate(`document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))`);
+ await settle(client,`new URLSearchParams(location.search).has('before')&&document.querySelector('.pages .position')?.textContent==='51-64 of 64'`,'older page');
+ const older=await client.evaluate(issueState);
+ check(older.rows.length===14&&older.newer.join()==='A,A'&&older.older.join()==='SPAN,SPAN'&&!older.rows.some(id=>first.rows.includes(id)),'older page overlaps or offers no way back '+JSON.stringify(older));
+ check(issueRead(client,mark).some(query=>query.before===first.rows.at(-1)&&query.limit==='50'),'older page did not use the before cursor');
+ mark=client.requests.length;
+ await client.evaluate(`Array.from(document.querySelectorAll('.pages'))[1].querySelector('a').click()`);
+ await settle(client,`new URLSearchParams(location.search).has('after')&&document.querySelector('.pages .position')?.textContent==='1-50 of 64'`,'newer page');
+ const newer=await client.evaluate(issueState);
+ check(JSON.stringify(newer.rows)===JSON.stringify(first.rows)&&newer.newer.join()==='SPAN,SPAN','newer page did not return to the first page '+JSON.stringify(newer));
+ check(issueRead(client,mark).some(query=>query.after===older.rows[0]),'newer page did not use the after cursor');
+ mark=client.requests.length;
+ await client.evaluate(`Array.from(document.querySelectorAll('.chips a')).find(link=>link.textContent.startsWith('active')).click()`);
+ await settle(client,`location.search==='?work_status=active'&&document.querySelectorAll('.issues a.row').length===3`,'active chip');
+ const active=await client.evaluate(issueState);
+ check(JSON.stringify(active.chips.filter(chip=>chip[1]))==='[["active 3","true"]]'&&active.positions[0]==='1-3 of 3'&&JSON.stringify(active.rows)==='["71","70","42"]','active chip did not filter '+JSON.stringify(active));
+ check(issueRead(client,mark).some(query=>query.work_status==='active'&&!query.before&&!query.after),'active chip did not reach issue_list');
+ return {first,older,newer,active};
+}
+
+async function issueSearchAndStale(client){
+ await client.loaded('/issues?stale=true','.issues a.row');
+ const stale=await client.evaluate(`Array.from(document.querySelectorAll('.issues a.row')).map(row=>({id:row.dataset.key,touched:row.querySelector('.touched').textContent,stale:row.querySelector('.touched').classList.contains('stale'),colour:getComputedStyle(row.querySelector('.touched')).color,lock:row.querySelector('.lock')?.textContent||null,place:[row.querySelector('.place').textContent,row.querySelector('.place').title]}))`);
+ check(JSON.stringify(stale.map(row=>[row.id,row.touched]))===JSON.stringify([['70','stale · 3h untouched'],['68','stale · 26h untouched'],['42','stale · 10h untouched'],['1','stale · 24h untouched']])&&stale.every(row=>row.stale),'stale rows lack their reason line '+JSON.stringify(stale));
+ const running=await client.evaluate(`(()=>{const probe=h('span',{class:'running'});document.body.append(probe);const colour=getComputedStyle(probe).color;probe.remove();return colour;})()`);
+ check(stale.every(row=>row.colour===running),'stale text is not in the warning token '+JSON.stringify({running,stale}));
+ check(JSON.stringify(stale[2].lock)==='"locked by editor · 5m left"'&&JSON.stringify(stale.map(row=>row.place))==='[["api","origin/team/api"],["origin","origin"],["cli","mirror/tools/cli"],["web","origin/team/web"]]','lock line or place wrong '+JSON.stringify(stale));
+ await client.loaded('/issues','.issues a.row');
+ const locked=await client.evaluate(`document.querySelector('.issues a.row[data-key="71"] .lock').textContent`);
+ check(locked==='locked by agent-b · 3m left','lock holder and time left missing '+locked);
+ const mark=client.requests.length;
+ await client.evaluate(`(()=>{const input=document.querySelector('.issue-search');input.focus();input.value='fla';input.dispatchEvent(new Event('input'));input.value='flaky';input.dispatchEvent(new Event('input'));})()`);
+ await settle(client,`location.search==='?query=flaky'&&document.querySelectorAll('.issues a.row').length===9`,'search');
+ const searched=await client.evaluate(`({focused:document.activeElement===document.querySelector('.issue-search'),value:document.querySelector('.issue-search').value,chips:Array.from(document.querySelectorAll('.chips a')).map(link=>[link.textContent,new URL(link.href).search]),titles:Array.from(document.querySelectorAll('.issues .title')).every(node=>/flaky/i.test(node.textContent))})`);
+ const reads=issueRead(client,mark);
+ check(searched.focused&&searched.value==='flaky'&&searched.titles,'search lost focus or matched other titles '+JSON.stringify(searched));
+ check(reads.length===1&&reads[0].query==='flaky','search was not debounced to one read '+JSON.stringify(reads));
+ check(JSON.stringify(searched.chips.slice(0,3))===JSON.stringify([['all open 9','?query=flaky'],['todo 8','?query=flaky&work_status=todo'],['active 1','?query=flaky&work_status=active']]),'chips do not count or keep the search '+JSON.stringify(searched.chips));
+ return {stale,searched};
+}
+
+async function issueBackLink(client){
+ await client.loaded('/issues?work_status=active','.issues a.row');
+ await client.evaluate(`document.querySelector('.issues a.row[data-key="70"]').click()`);
+ await settle(client,`location.pathname==='/issues/70'&&Boolean(document.querySelector('.issue h1'))`,'issue page');
+ const detail=await client.evaluate(`({search:location.search,back:document.querySelector('main > a.back').getAttribute('href'),title:document.querySelector('.issue h1').textContent,states:Array.from(document.querySelectorAll('.issue-states .state')).map(node=>node.textContent),touched:document.querySelector('.issue-states .touched').textContent,body:document.querySelector('.issue-body').textContent})`);
+ check(detail.search==='?work_status=active'&&detail.back==='/issues?work_status=active'&&detail.title.startsWith('#70 ')&&JSON.stringify(detail.states)==='["open","active"]'&&detail.touched==='stale · 3h untouched'&&detail.body.includes('failing command'),'issue page lost the list or its states '+JSON.stringify(detail));
+ await client.evaluate(`document.querySelector('main > a.back').click()`);
+ await settle(client,`location.search==='?work_status=active'&&document.querySelectorAll('.issues a.row').length===3`,'back link');
+ await client.evaluate(`document.querySelector('.issues a.row[data-key="42"]').click()`);
+ await settle(client,`location.pathname==='/issues/42'&&Boolean(document.querySelector('.issue h1'))`,'second issue');
+ await client.evaluate(`document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+ await settle(client,`location.pathname==='/issues'&&location.search==='?work_status=active'&&document.querySelector('.chips a[aria-current="true"]')?.textContent==='active 3'`,'escape back to the list');
+ return detail;
 }
 
 async function settle(client,test,label){
@@ -406,6 +472,9 @@ export async function behavior(client){
  const result={burst:await burst(client),visibility:await hidden(client),observation:await idleAndRecovery(client)};
  result.importedIssue=await importedIssue(client);
  result.nativeIssues=await nativeIssues(client);
+ result.issuePaging=await issueChipsAndPaging(client);
+ result.issueSearch=await issueSearchAndStale(client);
+ result.issueBack=await issueBackLink(client);
  result.offline=await offline(client);
  result.promote=await actions(client,'Promote','/runs/77777777','promote');
  result.release=await actions(client,'Release','/runs/33333333','run_hold_abandon');

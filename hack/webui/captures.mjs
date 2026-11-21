@@ -8,7 +8,7 @@ const results=[];
   await cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
   for(const theme of ['light','dark','mono','color']){
    await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme==='light'?'light':'dark'},{name:'prefers-reduced-motion',value:'reduce'}]});
-   for(const [page,path,selector] of [['runs','/runs','.runs a.row'],['run','/runs/22222222','.steps a.row']]){
+   for(const [page,path,selector] of [['runs','/runs','.runs a.row'],['run','/runs/22222222','.steps a.row'],['issues','/issues','.issues a.row'],['issue','/issues/42','.issue h1']]){
     await loaded(path,selector);
     await evaluate(`document.getAnimations().forEach(animation=>animation.cancel());document.documentElement.dataset.theme=${JSON.stringify(theme)};`);
     const metrics=await evaluate(`({width:innerWidth,scroll:document.documentElement.scrollWidth,errors:document.querySelector('#notice').textContent,rows:document.querySelectorAll(${JSON.stringify(selector)}).length,secret:document.querySelectorAll('.secret').length,steps:Array.from(document.querySelectorAll('.steps .row')).map(node=>node.dataset.key),reason:Array.from(document.querySelectorAll('.message')).find(node=>node.textContent.length===40)?(()=>{const node=Array.from(document.querySelectorAll('.message')).find(node=>node.textContent.length===40);const range=document.createRange();range.selectNodeContents(node);return {length:node.textContent.length,height:range.getBoundingClientRect().height,lineHeight:getComputedStyle(node).lineHeight,width:range.getBoundingClientRect().width}})():null})`);
@@ -43,6 +43,17 @@ const results=[];
      check(metrics.runPieces.head==='Steps · 4'&&metrics.runPieces.failed==='test'&&metrics.runPieces.container==='Container'&&metrics.runPieces.select,'run page pieces missing '+JSON.stringify(metrics.runPieces));
      check(metrics.runPieces.gutter==='1\n2\n3\n4\n'&&metrics.runPieces.gutterLine===metrics.runPieces.preLine&&Math.abs(metrics.runPieces.gutterTop-metrics.runPieces.preTop)<0.5&&metrics.runPieces.selectable==='none','line numbers misaligned or selectable '+JSON.stringify(metrics.runPieces));
     }
+    // The issue workspace: seven counted chips, search, a pager above and below, and two-line rows (a phone row may add a line for a lock).
+    if(page==='issues'){
+     metrics.issues=await evaluate(`({chips:document.querySelectorAll('.chips a .count').length,pages:Array.from(document.querySelectorAll('.pages .position')).map(node=>node.textContent),search:Boolean(document.querySelector('input.issue-search')),rows:Array.from(document.querySelectorAll('.issues a.row')).map(row=>{const style=getComputedStyle(row);return {key:row.dataset.key,lines:(row.getBoundingClientRect().height-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)-parseFloat(style.borderBottomWidth))/parseFloat(style.lineHeight)};})})`);
+     check(metrics.issues.chips===7&&JSON.stringify(metrics.issues.pages)==='["1-50 of 64","1-50 of 64"]'&&metrics.issues.search,'issue workspace pieces missing '+JSON.stringify(metrics.issues));
+     const limit=width===1280?2:3;
+     check(metrics.issues.rows.every(row=>row.lines<=limit+0.3),'issue rows exceed '+limit+' lines '+JSON.stringify(metrics.issues.rows.filter(row=>row.lines>limit+0.3)));
+    }
+    if(page==='issue'){
+     metrics.issue=await evaluate(`({back:document.querySelector('main > a.back')?.getAttribute('href'),states:Array.from(document.querySelectorAll('.issue-states .state')).map(node=>node.textContent),lock:document.querySelector('.issue-states .lock')?.textContent})`);
+     check(metrics.issue.back==='/issues'&&JSON.stringify(metrics.issue.states)==='["open","active"]'&&metrics.issue.lock==='locked by editor · 5m left','issue page pieces missing '+JSON.stringify(metrics.issue));
+    }
     metrics.fonts=await evaluate(`({body:getComputedStyle(document.body).fontFamily,log:document.querySelector('.terminal > pre')?getComputedStyle(document.querySelector('.terminal > pre')).fontFamily:null})`);
     if(theme==='light'||theme==='dark'){
      // The default design is monospace throughout: every element that carries text, and every control.
@@ -52,7 +63,7 @@ const results=[];
     metrics.textCharacters=await evaluate(`Array.from(new Set(Array.from(document.body.textContent).filter(character=>character.codePointAt(0)>127&&character!=='·')))`);
     check(!metrics.textCharacters.length,'unlisted page character '+JSON.stringify(metrics.textCharacters));
     metrics.marks=await evaluate(`Array.from(document.querySelectorAll('a.row .mark')).map(mark=>{const style=getComputedStyle(mark),box=mark.getBoundingClientRect();return {text:mark.textContent,width:box.width,height:box.height,radius:style.borderRadius,border:style.borderTopStyle};})`);
-    check(metrics.marks.length===4&&metrics.marks.every(mark=>!mark.text&&mark.width===7&&mark.height===7&&mark.radius==='50%'&&mark.border==='solid'),'CSS marks missing');
+    check(metrics.marks.length===({runs:4,run:4,issues:50,issue:0})[page]&&metrics.marks.every(mark=>!mark.text&&mark.width===7&&mark.height===7&&mark.radius==='50%'&&mark.border==='solid'),'CSS marks missing');
     if(page==='run'){
      metrics.identifiers=await evaluate(`({text:document.querySelector('.identity').textContent,started:document.querySelector('main>section .when').parentElement.textContent,run:document.querySelector('.identity [title="Run ID"]').textContent,commit:document.querySelector('.identity [title="Commit ID"]').textContent,height:document.querySelector('.identity').getBoundingClientRect().height,lineHeight:parseFloat(getComputedStyle(document.querySelector('.identity')).lineHeight),detail:Array.from(document.querySelectorAll('main>section details pre')).map(node=>node.textContent).join('\\n'),right:document.querySelector('.identity').lastElementChild.getBoundingClientRect().right,container:document.querySelector('.identity').getBoundingClientRect().right})`);
      check(metrics.identifiers.run==='run 22222222'&&metrics.identifiers.commit==='commit 1234567890ab'&&metrics.identifiers.text==='run 22222222 · commit 1234567890ab'&&metrics.identifiers.started==='Started 15:00 · 48s'&&metrics.identifiers.height<=metrics.identifiers.lineHeight+0.5&&metrics.identifiers.right<=metrics.identifiers.container+0.5,'identifier header wrapped or wrong '+JSON.stringify(metrics.identifiers));
@@ -69,7 +80,7 @@ const results=[];
  }
  await cdp('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});
  await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'},{name:'prefers-reduced-motion',value:'reduce'}]});
- for(const [page,path,selector]of [['repositories','/repos','.repos a.row'],['issues','/issues','.issues a.row'],['issue','/issues/42','.issues h2'],['status','/status','main section p']]){
+ for(const [page,path,selector]of [['repositories','/repos','.repos a.row'],['issues','/issues','.issues a.row'],['issue','/issues/42','.issue h1'],['status','/status','main section p']]){
   await loaded(path,selector);await evaluate(`document.documentElement.dataset.theme='light';document.getAnimations().forEach(animation=>animation.cancel());`);
   const clip=await evaluate(`({x:0,y:0,width:innerWidth,height:Math.max(innerHeight,document.documentElement.scrollHeight),scale:1})`);
     const capture=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip});

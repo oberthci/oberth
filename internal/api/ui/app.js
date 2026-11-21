@@ -4,6 +4,7 @@ const copy = {
  filteredRuns: ["No runs match this filter.", "Choose all to see every run."],
  emptyRepos: ["No repositories yet.", "An operator adds one with oberth repo add."],
  emptyIssues: ["No open issues."], filteredIssues: ["No issues match this filter."],
+ pastIssues: ["No issues on this page.", "Choose a filter to start from the newest issues."],
  accepted: ["Request accepted."], cancel: ["Cancel this run?"], abandon: ["Release this held step?"],
  emptySteps: ["This run has no planned steps."], emptyLog: ["This step wrote no output."],
  network: ["Oberth is not reachable.", "Check that the server is running, then reload this page."],
@@ -471,25 +472,89 @@ function reposScreen(view) {
     h("span", {}, repo.latest_run ? [state(repo.latest_run.status), " · " + repo.latest_run.ref + " · " + time(repo.latest_run.created_at)] : "unknown"), h("span", {}, repo.branch_count === null ? "unknown" : String(repo.branch_count))))] : [empty(copy.emptyRepos)]);
  };
 }
+// The issue list is the agents' workspace. Each chip carries its count and
+// chooses one filter, search narrows by text, and Newer and Older page by
+// cursor. The address holds the whole choice; an issue's page links back to it.
+const issueChips = [["all open", "open", {}], ["todo", "todo", {work_status: "todo"}], ["active", "active", {work_status: "active"}], ["waiting", "waiting", {work_status: "waiting"}],
+ ["review", "review", {work_status: "review"}], ["stale", "stale", {stale: "true"}], ["closed", "closed", {state: "closed"}]];
+const issueChoice = query => Object.fromEntries(["state", "work_status", "stale", "query", "before", "after"].map(key => [key, query.get(key)]));
+const chosenChip = query => query.get("state") === "closed" ? "closed" : query.get("stale") === "true" ? "stale" : query.get("work_status") || "all open";
+const number = value => (value || 0).toLocaleString("en-US");
+function span(milliseconds, up) {
+ const round = up ? Math.ceil : Math.floor, seconds = round(Math.max(0, milliseconds) / 1000);
+ if (seconds < 60) return seconds + "s";
+ if (seconds < 3600) return round(seconds / 60) + "m";
+ return seconds < 172800 ? round(seconds / 3600) + "h" : round(seconds / 86400) + "d";
+}
+function workChip(word) { return h("span", {class: "state work " + word}, h("span", {class: "mark " + word, "aria-hidden": "true"}), word); }
+function touched(issue, now) {
+ if (issue.stale) return h("span", {class: "touched stale"}, "stale · " + span(now - Date.parse(issue.updated_at)) + " untouched");
+ return h("span", {class: "touched"}, issue.closed_at ? "closed " + span(now - Date.parse(issue.closed_at)) + " ago" : "updated " + span(now - Date.parse(issue.updated_at)) + " ago");
+}
+function lockLine(issue, now) {
+ return issue.lock ? h("span", {class: "lock", title: "Lock expires " + fullTime(issue.lock.expires_at)}, "locked by " + issue.lock.owner + " · " + span(Date.parse(issue.lock.expires_at) - now, true) + " left") : null;
+}
+const issuePlace = issue => issue.repo || (issue.upstream && issue.upstream !== "global" ? issue.upstream : "global");
+function issueRow(issue, names, back, now) {
+ const place = issuePlace(issue);
+ return h("a", {class: "row", href: "/issues/" + issue.id + back, "data-key": String(issue.id)},
+  h("span", {class: "issue-id"}, h("b", {}, "#" + issue.id), h("small", {class: issue.kind}, issue.kind === "ci" ? "CI" : "manual")),
+  h("span", {class: "issue-main"}, h("span", {class: "title"}, issue.title), h("span", {class: "place", title: place}, names.get(place) || place)),
+  h("span", {class: "issue-work"}, workChip(issue.state === "closed" ? "closed" : issue.work_status), lockLine(issue, now)),
+  h("span", {class: "issue-when"}, touched(issue, now), h("time", {datetime: issue.updated_at, title: fullTime(issue.updated_at)}, time(issue.updated_at))));
+}
+function issuePager(page, choice, label) {
+ const link = (text, cursor, direction, key) => cursor ? h("a", {href: "/issues?" + params({...choice, before: null, after: null, [direction]: cursor}), "aria-keyshortcuts": key}, text) : h("span", {"aria-disabled": "true"}, text);
+ const shown = page.issues.length ? number(page.offset + 1) + "-" + number(page.offset + page.issues.length) : "0";
+ return h("div", {class: "pages", role: "group", "aria-label": label}, h("span", {class: "position"}, shown + " of " + number(page.total)),
+  link("< Newer", page.next_after, "after", "ArrowLeft"), link("Older >", page.next_before, "before", "ArrowRight"));
+}
+// Search waits for a pause in typing, then rewrites the address and rereads the list in place.
+function searchIssues(view, text) {
+ view.typing?.abort();
+ const typing = view.typing = new AbortController(), stop = () => typing.abort();
+ view.controller.signal.addEventListener("abort", stop, {once: true});
+ waitRetry(300, typing.signal).then(() => {
+  view.controller.signal.removeEventListener("abort", stop);
+  if (typing.signal.aborted) return;
+  const query = new URLSearchParams(location.search);
+  query.delete("before"); query.delete("after");
+  if (text.trim()) query.set("query", text.trim()); else query.delete("query");
+  history.replaceState(null, "", "/issues" + (query.size ? "?" + query : ""));
+  refresh(view);
+ });
+}
 function issuesScreen(view, id) {
  view.filter = null;
- const query = new URLSearchParams(location.search), region = h("div", {class: "issues"});
- main.append(h("h1", {}, "Issues"), button("Reload", () => refresh(view)), region);
+ if (id) return issueScreen(view, id);
+ const signal = view.controller.signal, chips = h("div", {class: "chips", role: "group", "aria-label": "Issue status"}), top = h("div"), bottom = h("div"), region = h("div", {class: "issues"});
+ const search = h("input", {type: "search", class: "issue-search", "aria-label": "Search issues", placeholder: "Search titles and bodies", value: new URLSearchParams(location.search).get("query") || "", oninput: () => searchIssues(view, search.value)});
+ main.append(h("h1", {}, "Issues"), h("div", {class: "filters"}, chips, search, button("Reload", () => refresh(view))), top, region, bottom);
+ view.names = get("/api/repos?names_only=true", signal).then(page => shortNames(page.repositories.map(item => item.repo)), () => new Map());
  view.read = async () => {
-  if (id) {
-   const issue = await get("/api/issues/" + encodeURIComponent(id), view.controller.signal);
-   if (view.controller.signal.aborted) return;
-   region.replaceChildren(h("p", {}, h("a", {href: "/issues"}, "< Issues")), h("h2", {}, "#" + issue.id + " " + issue.title),
-    h("p", {}, issue.state + " · " + issue.work_status + (issue.stale ? " · stale" : "")), h("p", {class: "mono"}, issue.repo + " · " + issue.branch),
-    h("p", {}, issue.kind + " · " + issue.occurrences + (issue.occurrences === 1 ? " occurrence" : " occurrences")), h("p", {}, issue.lock ? "Locked by " + issue.lock.owner + " until " + time(issue.lock.expires_at) : ""),
-    h("p", {class: "muted"}, "created " + time(issue.created_at) + " · updated " + time(issue.updated_at) + (issue.closed_at ? " · closed " + time(issue.closed_at) : "")), h("pre", {}, issue.body), importedSource(issue));
-   return;
-  }
-  const page = await get("/api/issues?" + params({state: "open", limit: 50, before: query.get("before")}), view.controller.signal);
-  if (view.controller.signal.aborted) return;
-  replace(region, page.issues.length ? [h("div", {class: "row head"}, ["#", "TITLE", "STATUS", "UPDATED"].map(text => h("span", {}, text))),
-   ...page.issues.map(issue => h("a", {class: "row", href: "/issues/" + issue.id, "data-key": String(issue.id)}, h("span", {}, String(issue.id)), h("span", {}, issue.title), h("span", {}, issue.work_status + (issue.stale ? " · stale" : "")), h("span", {}, time(issue.updated_at)))),
-   page.next_before ? h("a", {class: "pager", href: "/issues?" + params({before: page.next_before})}, "Older issues") : null].filter(Boolean) : [empty(query.size ? copy.filteredIssues : copy.emptyIssues)]);
+  const query = new URLSearchParams(location.search), choice = issueChoice(query);
+  const [page, names] = await Promise.all([get("/api/issues?" + params({limit: 50, ...choice}), signal), view.names]);
+  if (signal.aborted) return;
+  const chosen = chosenChip(query), now = Date.now();
+  replace(chips, issueChips.map(([label, key, filter]) => h("a", {class: "chip", href: "/issues?" + params({query: choice.query, ...filter}), "aria-current": label === chosen ? "true" : null}, label + " ", h("b", {class: "count"}, number(page.counts[key])))));
+  replace(top, [issuePager(page, choice, "Pages")]); replace(bottom, [issuePager(page, choice, "Pages, again")]);
+  replace(region, page.issues.length ? [h("div", {class: "row head", "aria-hidden": "true"}, ["#", "ISSUE", "STATUS", "UPDATED"].map(text => h("span", {}, text))), ...page.issues.map(issue => issueRow(issue, names, location.search, now))]
+   : [empty(choice.before || choice.after ? copy.pastIssues : query.size ? copy.filteredIssues : copy.emptyIssues)]);
+ };
+}
+function issueScreen(view, id) {
+ const signal = view.controller.signal, region = h("div", {class: "issue"});
+ main.append(h("a", {class: "back", href: "/issues" + location.search}, "< Issues"), region);
+ view.read = async () => {
+  const issue = await get("/api/issues/" + encodeURIComponent(id), signal);
+  if (signal.aborted) return;
+  const now = Date.now(), times = [["created", issue.created_at], ["updated", issue.updated_at], ["closed", issue.closed_at]].filter(([, at]) => at);
+  region.replaceChildren(h("section", {class: "issue-head"}, h("h1", {}, "#" + issue.id + " " + issue.title),
+   h("p", {class: "issue-states"}, workChip(issue.state), issue.state === "open" ? workChip(issue.work_status) : null, touched(issue, now), lockLine(issue, now)),
+   h("p", {class: "mono", title: issue.upstream || "global"}, issuePlace(issue) + (issue.branch ? " · " + issue.branch : "")),
+   h("p", {}, (issue.kind === "ci" ? "CI" : "manual") + " · " + issue.occurrences + (issue.occurrences === 1 ? " occurrence" : " occurrences")),
+   h("p", {class: "muted"}, times.flatMap(([word, at], index) => [index ? " · " : "", word + " ", h("time", {datetime: at, title: fullTime(at)}, time(at))]))),
+   h("pre", {class: "issue-body"}, issue.body), importedSource(issue));
  };
 }
 function importedSource(issue) {
@@ -525,7 +590,8 @@ document.addEventListener("keydown", event => {
  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.target.closest("input,textarea,select,[contenteditable]")) return;
  const paths = ["/runs", "/repos", "/issues", "/status"];
  if (/^[1-4]$/.test(event.key)) { event.preventDefault(); navigate(paths[Number(event.key) - 1]); }
- else if (event.key === "Escape") { event.preventDefault(); navigate(location.pathname.startsWith("/issues") ? "/issues" : "/runs"); }
+ else if (event.key === "Escape") { event.preventDefault(); navigate(location.pathname.startsWith("/issues/") ? "/issues" + location.search : location.pathname.startsWith("/issues") ? "/issues" : "/runs"); }
+ else if (["ArrowLeft", "ArrowRight"].includes(event.key) && main.querySelector(`.pages a[aria-keyshortcuts="${event.key}"]`)) { event.preventDefault(); main.querySelector(`.pages a[aria-keyshortcuts="${event.key}"]`).click(); }
  else if (["j", "k", "ArrowDown", "ArrowUp"].includes(event.key)) {
   const rows = Array.from(main.querySelectorAll("a.row")), index = rows.indexOf(document.activeElement);
   const next = Math.max(0, Math.min(rows.length - 1, index + (["j", "ArrowDown"].includes(event.key) ? 1 : -1)));

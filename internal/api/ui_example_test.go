@@ -106,7 +106,7 @@ func uiExample(t *testing.T) *fixture {
 		if os.Getenv("OBERTH_UI_EVENTS") != "" {
 			b.EventsWait.Handler = exampleEventsEverySecond(runs[2].ID)
 		}
-		issue := model.Issue{ID: 42, Title: "Flaky test in pkg/check", Body: "The check sometimes returns a different status.\n\nExpected: status 200.\nObserved: status 500.\n\nReproduce with the authored test command, then inspect its complete output.", State: model.IssueOpen, Kind: model.IssueManual, WorkStatus: model.IssueActive, Upstream: "origin", Repo: runs[0].Repo, Branch: "fix-login", Occurrences: 4, Stale: true, CreatedAt: at, UpdatedAt: end, Lock: &model.IssueLock{Owner: "editor", ExpiresAt: end}}
+		issue := model.Issue{ID: 42, Title: "Flaky test in pkg/check", Body: "The check sometimes returns a different status.\n\nExpected: status 200.\nObserved: status 500.\n\nReproduce with the authored test command, then inspect its complete output.", State: model.IssueOpen, Kind: model.IssueManual, WorkStatus: model.IssueActive, Upstream: "origin", Repo: runs[0].Repo, Branch: "fix-login", Occurrences: 4, Stale: true, CreatedAt: at, UpdatedAt: end, Lock: &model.IssueLock{Owner: "editor", ExpiresAt: browserNow().Add(5 * time.Minute)}}
 		issue.Imported = &model.IssueImportSource{SetSHA256: strings.Repeat("a", 64), Count: 1}
 		issue.Author, issue.Closer = "source author", "source closer"
 		issue.SourceClosedAt = new(at.Add(-time.Hour))
@@ -114,10 +114,9 @@ func uiExample(t *testing.T) *fixture {
 			{Kind: "append", At: at, Author: "first source editor", Text: "First continued text <script>plain source</script>"},
 			{Kind: "comment", At: at.Add(-time.Hour), Author: "second source editor", Text: "Second source entry"},
 		}
-		b.IssueGet.Handler = exampleImportedIssue(issue)
-		issue.Body = ""
-		issue.History = nil
-		b.IssueList.Handler = &fake.Handler[apicontract.IssueListArgs, apicontract.IssuePage]{Value: apicontract.IssuePage{Issues: []model.Issue{issue}}}
+		issues := exampleIssues()
+		b.IssueGet.Handler = exampleImportedIssue(issue, issues)
+		b.IssueList.Handler = exampleIssueList(issues)
 		c.Views.Counts.Handler = &fake.Handler[apicontract.Empty, apicontract.RunCounts]{Value: apicontract.RunCounts{Queued: 1, Running: 2, Passed: 140, Failed: 9, Cancelled: 3}}
 		b.SystemStatus.Handler = &fake.Handler[apicontract.SystemStatusArgs, apicontract.SystemStatus]{Value: apicontract.SystemStatus{Ready: true, Version: "1"}}
 		c.Views.Containers.Handler = &fake.Handler[apicontract.IDArgs, apicontract.ContainerPage]{Value: apicontract.ContainerPage{Containers: []apicontract.Container{{NodeID: "attempt-one", Container: "main"}, {NodeID: "attempt-two", Container: "main"}}}}
@@ -205,9 +204,15 @@ func exampleEventsEverySecond(runID string) apicontract.HandlerFunc[apicontract.
 	}
 }
 
-func exampleImportedIssue(issue model.Issue) apicontract.HandlerFunc[apicontract.IssueGetArgs, model.Issue] {
+// exampleImportedIssue serves #42-#46 as imported and native examples and the
+// other listed issues with a short body.
+func exampleImportedIssue(issue model.Issue, listed []model.Issue) apicontract.HandlerFunc[apicontract.IssueGetArgs, model.Issue] {
 	return func(_ context.Context, _ apicontract.Caller, q apicontract.IssueGetArgs) (apicontract.Call[model.Issue], error) {
 		v := issue.Clone()
+		if (q.ID < 42 || q.ID > 46) && q.ID >= 1 && q.ID <= int64(len(listed)) {
+			v = listed[q.ID-1].Clone()
+			v.Body = "Seen on the default branch.\nThe step log names the failing command."
+		}
 		if q.ID == 45 || q.ID == 46 {
 			v.ID, v.Title, v.Body = q.ID, "Native issue", "null"
 			v.Occurrences = q.ID - 44

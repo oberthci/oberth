@@ -25,7 +25,7 @@ func TestUIBrowserFlowOverHTTP(t *testing.T) {
 		"/api/runs/12345678/logs?step=build&tail=true&limit=500&byte_offset=0",
 		"/api/runs/12345678/containers", "/api/runs/12345678/containerlog?node_id=node&container=main&tail=true&limit=500",
 		"/api/runs/12345678/containerlog/stream?node_id=node&container=main",
-		"/api/repos?archived=include", "/api/issues?state=open&limit=50", "/api/issues?state=open&limit=50&before=42", "/api/issues/42", "/api/status", "/api/runs/counts",
+		"/api/repos?archived=include", "/api/issues?state=open&limit=50", "/api/issues?state=open&limit=50&before=42", "/api/issues?limit=50&state=closed&work_status=active&stale=true&query=flaky&after=42", "/api/issues/42", "/api/status", "/api/runs/counts",
 	} {
 		assertSuccess(t, request(f, "GET", path, nil))
 	}

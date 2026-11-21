@@ -106,10 +106,7 @@ a.row:focus-visible { outline-offset: -2px; }
 .pager { display: block; margin-top: 10px; font-size: 12px; }
 .runs > .pager { margin: 0; padding: 10px 12px; }
 .repos .row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 3fr) 96px; }
-.issues .row { grid-template-columns: 56px minmax(0, 3fr) minmax(0, 1fr) 160px; }
-main > button { margin-bottom: 12px; }
-.repos a.row > span:first-child, .issues a.row > span:first-child { font-weight: 700; }
-.issues a.row > span:first-child { font-family: var(--mono); color: var(--muted); }
+.repos a.row > span:first-child { font-weight: 700; }
 
 /* one run: header band, step list, terminal log */
 .back { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font-size: 11px; }
@@ -191,11 +188,39 @@ main:has(> .repo-side) .filters > label { display: none; }
  .runs .at-word { display: none; }
 }
 
-/* issue detail */
-.issues:has(> h2) { padding: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 30px var(--shadow); }
-.issues > h2 { font-size: 18px; margin: 6px 0; }
-.issues > p { font-size: 12px; }
-.issues > pre, .imported-source pre { padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2); font-size: 12px; line-height: 1.55; }
+/* issues, the agents' workspace: chips with counts, search, a pager above
+   and below the table, and two-line rows as in the run list */
+.issues { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content max-content; column-gap: 16px; }
+.issues .row { grid-column: 1 / -1; grid-template-columns: subgrid; align-items: start; }
+.issues > .empty { grid-column: 1 / -1; }
+.issues a.row > span { display: grid; justify-items: start; min-width: 0; }
+.issue-id { font-family: var(--mono); }
+.issue-id b { color: var(--muted); }
+.issue-id small, .issues .place, .issue-when time { color: var(--muted); font-size: 11px; }
+.issues .title { font-weight: 600; }
+.issue-work { gap: 2px; }
+.issues .lock { font-size: 11px; }
+.touched { color: var(--muted); font-size: 12px; }
+.touched.stale { color: var(--running); font-weight: 700; }
+.work.active { color: var(--accent); }
+.work.review { color: var(--fg); }
+.mark.active, .mark.review { background: currentColor; }
+.chip .count { margin-left: 4px; color: var(--fg); font-weight: 700; }
+.chip[aria-current="true"] .count { color: inherit; }
+.filters > .issue-search { flex: 1 1 24ch; }
+.pages { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin: 10px 0; font-size: 12px; }
+.pages .position { margin-right: auto; color: var(--muted); }
+.pages > a, .pages > [aria-disabled] { display: inline-flex; align-items: center; height: 30px; padding: 0 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--fg); }
+.pages > a:hover { border-color: var(--edge); text-decoration: none; }
+.pages > [aria-disabled] { color: var(--muted); opacity: .48; }
+
+/* one issue: a header band like a run's, the body, then any imported history */
+.issue-head { display: flex; flex-direction: column; gap: 4px; padding: 14px 18px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.issue-head > * { margin: 0; font-size: 12px; }
+.issue-head > h1 { margin-bottom: 4px; font-size: 18px; overflow-wrap: anywhere; }
+.issue-states { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.issue-body, .imported-source pre { padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2); font-size: 12px; line-height: 1.55; }
+.issue > .issue-body { margin: 12px 0; }
 .imported-source h3 { font-size: 14px; margin: 18px 0 6px; }
 .imported-source h4 { margin: 18px 0 7px; color: var(--muted); font-size: 12px; letter-spacing: .05em; text-transform: uppercase; }
 .imported-source ol { padding-left: 22px; }
@@ -245,7 +270,23 @@ main:has(> .repo-side) .filters > label { display: none; }
  .log { margin-top: 14px; }
  .terminal { min-height: 200px; }
  .repos .head, .issues .head { display: none; }
- .repos .row, .issues .row { grid-template-columns: auto 1fr; gap: 6px 16px; }
+ .repos .row { grid-template-columns: auto 1fr; gap: 6px 16px; }
+ /* An issue reads as two lines: number and title, then status, place, age
+    and a CI mark; a lock or a long title adds a line. */
+ .issues { display: block; }
+ .issues a.row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 10px 8px; font-size: 12px; }
+ .issues a.row > span { display: contents; }
+ .issues .title { order: 1; flex: 1 1 calc(100% - 9ch); }
+ .issue-id b { order: 0; }
+ .issue-work .state { order: 2; }
+ .issues .place { order: 3; }
+ .issues .touched { order: 4; font-size: 11px; }
+ .issue-id small { order: 5; }
+ .issues .lock { order: 6; }
+ .issues .place::before, .issues .touched::before, .issue-id small::before { content: "\00B7"; margin-right: 8px; color: var(--muted); }
+ .issue-when time, .issue-id small.manual { display: none; }
+ .filters > .issue-search { flex: 1 1 0; }
+ .issue-head { padding: 12px; }
 }
 /* The default design's frame as the previous dashboard set it: a 1440px
    list column, lowercase tabs, the wider run column, 22px pills, and the
@@ -264,7 +305,7 @@ main:has(> .repo-side) .filters > label { display: none; }
   .steps { border-width: 0 1px 0 0; border-radius: 0 0 8px 8px; }
   .log { padding: 12px 18px 0; }
   .brand { flex: 0 0 214px; margin-right: 0; }
-  .back { position: absolute; top: 30px; right: 36px; margin: 0; }
+  main:has(> .run-layout) > .back { position: absolute; top: 30px; right: 36px; margin: 0; }
  }
  @media (max-width: 759px) {
   main { padding-inline: 8px; }
@@ -313,7 +354,7 @@ main:has(> .repo-side) .filters > label { display: none; }
  /* upstream names are identifiers and keep their case; the row's word reads as a label on a phone */
  .upstreams label { font-size: 12px; letter-spacing: 0; text-transform: none; }
  @media (max-width: 1099px) { .upstreams > .side-word { font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; } }
- h1, h2, h3, .brand, .repos a.row > span:first-child { font-weight: 400; }
+ h1, h2, h3, .brand, .repos a.row > span:first-child, .issues .title, .issue-id b { font-weight: 400; }
  /* tabs: a word and one hairline */
  nav { align-self: stretch; gap: 4px 22px; }
  nav a { height: auto; min-height: 30px; min-width: 0; padding: 0; border-width: 0 0 1px; border-color: transparent; background: none; }

@@ -7,8 +7,8 @@ try {
  step('scoped viewer opens administrator issue');
  await client.loaded('/issues', '.issues a.row');
  check(await client.evaluate(`document.querySelector('.issues a.row').textContent.includes('Scoped administrator task')`), 'scoped viewer cannot discover administrator issue');
- await client.loaded('/issues/1', '.issues h2');
- check(await client.evaluate(`document.querySelector('.issues h2').textContent === '#1 Scoped administrator task'`), 'scoped viewer cannot render administrator issue');
+ await client.loaded('/issues/1', '.issue h1');
+ check(await client.evaluate(`document.querySelector('.issue h1').textContent === '#1 Scoped administrator task'`), 'scoped viewer cannot render administrator issue');
  const issue=await client.evaluate(`fetch('/api/issues/1',{headers:{Authorization:'Bearer '+localStorage.getItem('oberth.token')}}).then(async response=>({status:response.status,issue:await response.json()}))`);
  check(issue.status===200 && issue.issue.upstream==='origin', 'scoped viewer cannot read defaulted upstream through API');
  client.checkFatal();
