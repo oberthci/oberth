@@ -84,6 +84,10 @@ function when(run) {
  const at = run.started_at || run.created_at;
  return h("span", {class: "when", title: fullTimes(run)}, h("time", {datetime: at, title: fullTime(at)}, time(at)), run.started_at ? " · " : "", clock(run));
 }
+function runWhen(run) {
+ const at = run.started_at || run.created_at;
+ return h("span", {class: "when", title: fullTimes(run)}, clock(run), h("span", {class: "at"}, h("span", {class: "at-word"}, run.started_at ? "started at " : "queued at "), h("time", {datetime: at, title: fullTime(at)}, time(at))));
+}
 function state(status) { return h("span", {class: "state " + status}, h("span", {class: "mark " + status, "aria-hidden": "true"}), status + " "); }
 function runIdentity(run) {
  return h("p", {class: "identity", "aria-label": "Run and commit"}, h("span", {title: "Run ID"}, "run " + run.id.slice(0, 8)), " · ", h("span", {title: "Commit ID"}, "commit " + (run.commit_sha ? run.commit_sha.slice(0, 12) : "unknown")));
@@ -143,17 +147,21 @@ async function live(view) {
   while (!signal.aborted) {
    try {
     const page = await call("events_wait", {...view.filter, after_id: view.cursor, timeout_s: 25, limit: 200}, signal);
-    view.cursor = page.next_after_id; view.liveError?.remove(); view.readError?.remove();
+    view.cursor = page.next_after_id; view.liveFailures = 0; view.liveError?.remove(); view.readError?.remove();
     if (page.events.length || page.gap) {
      await waitRetry(readSpacing, signal);
      if (!signal.aborted) await refresh(view);
     }
    } catch (error) {
     if (signal.aborted) break;
-    if (!error.reason) view.readError?.remove();
-    view.liveError?.remove();
-    view.liveError = showError(error, h("div"));
-    view.liveError.append(empty(copy.live)); notice.append(view.liveError);
+    // One cut long poll is retried quietly; a refusal, or a second failure in a row, is shown.
+    view.liveFailures = (view.liveFailures || 0) + 1;
+    if (error.reason || view.liveFailures > 1) {
+     if (!error.reason) view.readError?.remove();
+     view.liveError?.remove();
+     view.liveError = showError(error, h("div"));
+     view.liveError.append(empty(copy.live)); notice.append(view.liveError);
+    }
     await waitRetry(error.retry ?? 5000, signal);
     if (!signal.aborted) await refresh(view);
    }
@@ -192,15 +200,20 @@ async function runsScreen(view) {
  const repos = await get("/api/repos?names_only=true", signal);
  if (signal.aborted) return;
  const change = key => event => { query.delete("before"); query.set(key, event.target.value); navigate("/runs?" + query); };
- main.append(h("h1", {}, "Runs"), h("div", {class: "filters"},
-  select("Repository", [["", "all"], ...repos.repositories.map(repo => [repo.repo, repo.repo])], query.get("repo") || "", change("repo")),
-  select("Status", ["", "queued", "running", "passed", "failed", "cancelled"].map(v => [v, v || "all"]), query.get("status") || "", change("status"))));
- const region = h("div", {class: "runs"}); main.append(region);
+ const link = (key, value) => "/runs?" + params({...Object.fromEntries(query), before: null, [key]: value});
+ const repo = query.get("repo") || "", status = query.get("status") || "";
+ main.append(h("h1", {}, "Runs"),
+  h("aside", {class: "repo-side", "aria-label": "Repositories"}, h("p", {class: "side-head"}, "Repositories"),
+   [["", "All repos"], ...repos.repositories.map(item => [item.repo, item.repo])].map(([value, text]) => h("a", {class: "repo-filter", href: link("repo", value), "aria-current": value === repo ? "true" : null}, text))),
+  h("div", {class: "filters"},
+   select("Repository", [["", "all"], ...repos.repositories.map(item => [item.repo, item.repo])], repo, change("repo")),
+   h("div", {class: "chips", role: "group", "aria-label": "Status"}, ["", "queued", "running", "passed", "failed", "cancelled"].map(value => h("a", {class: "chip", href: link("status", value), "aria-current": value === status ? "true" : null}, value || "all")))));
+ const region = h("div", {class: "runs"}); main.append(region, h("p", {class: "runs-foot"}, "Newest first · 50 runs per page"));
  view.read = async () => {
   const page = await get("/api/runs?" + params({limit: 50, repo: query.get("repo"), ref: query.get("ref"), status: query.get("status"), before: query.get("before")}), signal);
   if (signal.aborted) return;
   replace(region, page.runs.length ? [h("div", {class: "row head", "aria-hidden": "true"}, ["STATUS", "RUN", "WHEN", "MESSAGE"].map(text => h("span", {}, text))),
-   ...page.runs.map(run => h("a", {class: "row", href: "/runs/" + encodeURIComponent(run.id), "data-key": run.id}, when(run), h("span", {class: "run-label"}, state(run.status), h("span", {class: "name"}, run.repo + " · " + run.ref)), h("span", {class: "message"}, run.display_reason))),
+   ...page.runs.map(run => h("a", {class: "row", href: "/runs/" + encodeURIComponent(run.id), "data-key": run.id}, runWhen(run), h("span", {class: "run-label"}, state(run.status), h("span", {class: "name"}, h("b", {class: "repo"}, run.repo), h("span", {class: "ref"}, run.ref))), h("span", {class: "message"}, run.display_reason))),
    page.next_cursor ? h("a", {class: "pager", href: "/runs?" + params({...Object.fromEntries(query), before: page.next_cursor})}, "Older runs") : null].filter(Boolean) : [empty(query.size ? copy.filteredRuns : copy.emptyRuns)]);
  };
 }
@@ -216,13 +229,13 @@ function runScreen(view, id) {
   const holds = await call("run_hold_list", {id}, signal).catch(() => ({holds: [], unknown: true}));
   if (signal.aborted) return;
   replace(header, [h("h1", {}, state(run.status), " ", h("span", {class: "mono"}, run.repo + " · " + run.ref)),
-   h("p", {}, run.display_reason), runIdentity(run),
+   h("p", {}, run.failure ? h("b", {class: "failed-step"}, run.failure.failed_step_name || run.failure.failed_step) : null, run.display_reason), runIdentity(run),
    h("p", {class: "muted"}, run.started_at ? "Started " : "Created ", when(run)), runDetail(run),
    h("a", {href: "/runs?" + params({repo: run.repo, ref: run.ref})}, "Other runs of this ref"),
    h("p", {}, (run.steps_planned_exact ? "" : ">=") + run.step_count + " steps · " + run.passed + " passed · " + run.failed + " failed · " + run.pending + " pending")].filter(Boolean));
   header.append(runActions(view, run, repositories.repositories, holds.holds));
   if (holds.unknown) header.append(h("p", {class: "muted"}, "hold availability unknown"));
-  replace(steps, (run.steps || []).length ? run.steps.map(step => stepRow(view, step, path, pane)) : [empty(copy.emptySteps)]);
+  replace(steps, (run.steps || []).length ? [h("p", {class: "steps-head"}, "Steps · " + (run.steps_planned_exact ? "" : ">=") + run.step_count), ...run.steps.map(step => stepRow(view, step, path, pane))] : [empty(copy.emptySteps)]);
   if (run.next_step_offset !== undefined) steps.append(button("Next 100 steps", () => { view.offset = run.next_step_offset; refresh(view); }));
   if (view.offset) steps.append(button("First steps", () => { view.offset = 0; refresh(view); }));
   const selected = run.steps?.find(step => step.plan_path === view.selected);
@@ -244,15 +257,15 @@ function chooseStep(view, step, path, pane, scroll) {
  view.logs.signal.addEventListener("abort", () => view.controller.signal.removeEventListener("abort", stop), {once: true});
  view.logHeader = h("div", {}, h("h2", {}, step.name + " · " + step.status), h("p", {}, step.display_reason), detail(step.detail));
  pane.replaceChildren(view.logHeader);
- const controls = h("div", {class: "toolbar"}), status = h("div"), output = h("pre", {tabindex: "0"});
- pane.append(controls, status, output);
+ const controls = h("div", {class: "toolbar"}), status = h("div"), output = h("pre", {tabindex: "0"}), gutter = h("div", {class: "gutter", "aria-hidden": "true"}, "");
+ pane.append(controls, status, h("div", {class: "terminal"}, gutter, output));
  const args = {step: step.plan_path, tail: true, limit: 500};
  const selectors = [...(step.logs || [])];
  const selection = h("select", {"aria-label": "Attempt or container", onchange: () => {
   const chosen = selectors[Number(selection.value)];
-  loadLog(view, path, chosen ? {node_id: chosen.node_id, container: chosen.container} : args, {controls, status, output}, true);
+  loadLog(view, path, chosen ? {node_id: chosen.node_id, container: chosen.container} : args, {controls, status, output, gutter}, true);
  }}, h("option", {value: "-1"}, "All attempts"), selectors.map((item, index) => h("option", {value: index}, item.node_id + " · " + item.container)));
- controls.append(selection);
+ controls.append(h("label", {}, "Container", selection));
  get(path + "/containers", view.logs.signal).then(page => {
   if (view.selected !== step.plan_path || view.controller.signal.aborted) return;
   for (const item of page.containers) {
@@ -260,7 +273,7 @@ function chooseStep(view, step, path, pane, scroll) {
    selectors.push(item); selection.append(h("option", {value: selectors.length - 1}, item.node_id + " · " + item.container));
   }
  }).catch(error => { if (!view.controller.signal.aborted) showError(error); });
- loadLog(view, path, args, {controls, status, output}, false);
+ loadLog(view, path, args, {controls, status, output, gutter}, false);
  document.querySelectorAll(".steps [data-key]").forEach(node => { if (node.dataset.key === step.plan_path) node.setAttribute("aria-current", "step"); else node.removeAttribute("aria-current"); });
  if (scroll && matchMedia("(max-width: 759px)").matches) pane.scrollIntoView({behavior: "instant"});
 }
@@ -307,8 +320,32 @@ async function streamLog(path, target, context) {
  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
 function resetLog(regions, text) {
- regions.output.replaceChildren(); regions.liveBytes = 0;
+ regions.output.replaceChildren(); regions.liveBytes = 0; regions.lines = 0; regions.open = false;
+ if (regions.gutter) { regions.gutter.firstChild.data = ""; regions.gutter.lines = 0; }
  appendLive(regions, text);
+}
+function newlines(text) {
+ let count = 0;
+ for (let index = text.indexOf("\n"); index >= 0; index = text.indexOf("\n", index + 1)) count++;
+ return count;
+}
+// The gutter is one text node of line numbers beside the log; it is never part of the log's text.
+function numbersLength(count) {
+ let length = 0;
+ for (let digits = 1, first = 1; first <= count; digits++, first *= 10) length += (Math.min(count, first * 10 - 1) - first + 1) * (digits + 1);
+ return length;
+}
+function numberLines(regions) {
+ const gutter = regions.gutter;
+ if (!gutter) return;
+ const total = regions.lines + (regions.open ? 1 : 0), node = gutter.firstChild;
+ if (total < gutter.lines) node.deleteData(numbersLength(total), node.length);
+ else if (total > gutter.lines) {
+  const numbers = [];
+  for (let line = gutter.lines + 1; line <= total; line++) numbers.push(line + "\n");
+  node.appendData(numbers.join(""));
+ }
+ gutter.lines = total;
 }
 function appendLive(regions, text) {
  if (regions.liveBytes === undefined) { const initial = regions.output.textContent; resetLog(regions, initial); }
@@ -321,16 +358,21 @@ function appendLive(regions, text) {
   tail.appendData(decoder.decode(bytes.subarray(offset, end)));
   tail.logBytes += end - offset; regions.liveBytes += end - offset; offset = end;
  }
- if (regions.liveBytes <= 1048576) return;
- regions.status.replaceChildren(empty(copy.logBound));
- while (regions.liveBytes > 1048576) {
-  const head = regions.output.firstChild;
-  let cut = regions.liveBytes - 1048576;
-  if (cut >= head.logBytes) { regions.liveBytes -= head.logBytes; head.remove(); continue; }
-  const bytes = encoder.encode(head.data);
-  while (cut < bytes.length && (bytes[cut] & 0xc0) === 0x80) cut++;
-  head.data = decoder.decode(bytes.subarray(cut)); head.logBytes -= cut; regions.liveBytes -= cut;
+ regions.lines = (regions.lines || 0) + newlines(text);
+ if (text) regions.open = !text.endsWith("\n");
+ if (regions.liveBytes > 1048576) {
+  regions.status.replaceChildren(empty(copy.logBound));
+  while (regions.liveBytes > 1048576) {
+   const head = regions.output.firstChild;
+   let cut = regions.liveBytes - 1048576;
+   if (cut >= head.logBytes) { regions.liveBytes -= head.logBytes; regions.lines -= newlines(head.data); head.remove(); continue; }
+   const bytes = encoder.encode(head.data), before = head.data;
+   while (cut < bytes.length && (bytes[cut] & 0xc0) === 0x80) cut++;
+   head.data = decoder.decode(bytes.subarray(cut)); head.logBytes -= cut; regions.liveBytes -= cut;
+   regions.lines -= newlines(before.slice(0, before.length - head.data.length));
+  }
  }
+ numberLines(regions);
 }
 function releaseActions(view) {
  view.actionPending = false; view.actionAccepted = false;
@@ -440,4 +482,10 @@ document.addEventListener("keydown", event => {
   if (rows[next]) { event.preventDefault(); rows[next].focus(); }
  }
 });
+// The top bar's server light and version come from the same status read the Status page makes.
+const server = document.querySelector("#server");
+if (localStorage.getItem("oberth.token")) get("/api/status").then(status => {
+ server.querySelector(".mark").className = "mark " + (status.ready ? "passed" : "failed");
+ server.querySelector(".ver").textContent = status.version; server.title = status.ready ? "Server ready" : "Server unavailable";
+}).catch(() => {});
 route();

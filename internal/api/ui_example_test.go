@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func uiExample(t *testing.T) *fixture {
 	}
 	runs := []stepmodel.RunSummary{
 		{ID: "11111111", Repo: "origin/team/api", Ref: "main", Status: stepmodel.RunPassed, CreatedAt: at, StartedAt: &at, FinishedAt: &end, CommitSHA: &sha, ObjectSHA: sha},
-		{ID: "22222222", Repo: "origin/team/api", Ref: "fix-login", Status: stepmodel.RunFailed, DisplayReason: "test failed: exit 2", CreatedAt: at, StartedAt: &at, FinishedAt: &end, CommitSHA: &sha, ObjectSHA: sha},
+		{ID: "22222222", Repo: "origin/team/api", Ref: "fix-login", Status: stepmodel.RunFailed, DisplayReason: "test failed: exit 2", CreatedAt: at, StartedAt: &at, FinishedAt: &end, CommitSHA: &sha, ObjectSHA: sha, Failure: &stepmodel.FailureRecord{Step: "x-test", Name: "test", NodeID: "attempt-two"}},
 		{ID: "33333333", Repo: "origin/team/web", Ref: "feature/search", Status: stepmodel.RunRunning, DisplayReason: "waiting for an available build node soon", CreatedAt: at, StartedAt: &at, CommitSHA: &sha, ObjectSHA: sha},
 		{ID: "44444444", Repo: "origin/team/web", Ref: "main", Status: stepmodel.RunQueued, DisplayReason: "waiting for execution", CreatedAt: at, ObjectSHA: sha},
 	}
@@ -101,6 +102,9 @@ func uiExample(t *testing.T) *fixture {
 				return apicontract.EventResult{TimedOut: true}, ctx.Err()
 			}, nil
 		})
+		if os.Getenv("OBERTH_UI_EVENTS") != "" {
+			b.EventsWait.Handler = exampleEventsEverySecond(runs[2].ID)
+		}
 		issue := model.Issue{ID: 42, Title: "Flaky test in pkg/check", Body: "The check sometimes returns a different status.\n\nExpected: status 200.\nObserved: status 500.\n\nReproduce with the authored test command, then inspect its complete output.", State: model.IssueOpen, Kind: model.IssueManual, WorkStatus: model.IssueActive, Upstream: "origin", Repo: runs[0].Repo, Branch: "fix-login", Occurrences: 4, Stale: true, CreatedAt: at, UpdatedAt: end, Lock: &model.IssueLock{Owner: "editor", ExpiresAt: end}}
 		issue.Imported = &model.IssueImportSource{SetSHA256: strings.Repeat("a", 64), Count: 1}
 		issue.Author, issue.Closer = "source author", "source closer"
@@ -139,6 +143,46 @@ func exampleHoldList(at time.Time) apicontract.HandlerFunc[apicontract.RunHoldLi
 				rows = append(rows, model.LiveHold{HeldNotice: model.HeldNotice{RunID: q.ID, Step: "test", NodeID: "node", PodUID: "pod-uid", HeldSince: at.Add(-time.Hour), TTLSeconds: 1200}, PodName: "held-pod", RemainingMS: 600000, AvailabilityUnknown: strings.HasPrefix(q.ID, "22222222")})
 			}
 			return apicontract.HoldPage{Holds: rows}, nil
+		}, nil
+	}
+}
+
+// exampleEventsEverySecond answers like a busy server: the running run emits
+// one event a second; a wait returns at once when events are pending, else at
+// the next event or at its timeout.
+func exampleEventsEverySecond(runID string) apicontract.HandlerFunc[apicontract.EventsWaitArgs, apicontract.EventResult] {
+	var ticks atomic.Int64
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			ticks.Add(1)
+		}
+	}()
+	page := func(after, latest int64) model.EventPage {
+		page := model.EventPage{NextAfterID: latest, LatestID: latest}
+		for id := after + 1; id <= latest; id++ {
+			page.Events = append(page.Events, model.AgentEvent{ID: id, Kind: "run.step", At: testNow(), RunID: runID, Summary: "step changed"})
+		}
+		return page
+	}
+	return func(_ context.Context, _ apicontract.Caller, q apicontract.EventsWaitArgs) (apicontract.Call[apicontract.EventResult], error) {
+		return func(ctx context.Context) (apicontract.EventResult, error) {
+			after := ticks.Load()
+			if q.AfterID != nil {
+				after = *q.AfterID
+			}
+			timeout := time.After(time.Duration(max(q.TimeoutS, 1)) * time.Second)
+			for ticks.Load() <= after {
+				select {
+				case <-ctx.Done():
+					return apicontract.EventResult{TimedOut: true}, ctx.Err()
+				case <-timeout:
+					return apicontract.EventResult{EventPage: page(after, after), TimedOut: true}, nil
+				case <-time.After(50 * time.Millisecond):
+				}
+			}
+			return apicontract.EventResult{EventPage: page(after, ticks.Load())}, nil
 		}, nil
 	}
 }

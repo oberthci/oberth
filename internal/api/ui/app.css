@@ -57,7 +57,7 @@ h1 { font-size: 18px; line-height: 1.25; margin: 4px 0 14px; }
 h2 { font-size: 14px; margin: 0; }
 p { margin: 6px 0; }
 pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
-.mono, .runs .name, .when, .duration, .identity, .log > pre, .brand { font-family: var(--mono); }
+.mono, .runs .name, .when, .duration, .identity, .terminal, .brand { font-family: var(--mono); }
 details { margin: 6px 0; }
 summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 details pre { padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2); font-size: 12px; }
@@ -122,9 +122,9 @@ main > button { margin-bottom: 12px; }
 .run-head > .toolbar { order: 4; flex-basis: 100%; margin: 6px 0 0; font-size: 12px; }
 .run-head > p.muted:last-child { order: 5; }
 .identity { display: flex; gap: 8px; color: var(--muted); white-space: nowrap; }
-.run-layout { display: grid; grid-template-columns: 19rem minmax(0, 1fr); gap: 16px; margin-top: 14px; }
+.run-layout { display: grid; grid-template-columns: 22rem minmax(0, 1fr); gap: 16px; margin-top: 14px; }
 .steps { padding: 6px 0 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-.steps::before { content: "Steps"; display: block; padding: 7px 14px 8px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.steps-head { margin: 0; padding: 7px 14px 8px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 .steps .row { grid-template-columns: 9ch minmax(0, 1fr) auto auto; gap: 8px; padding: 5px 14px 5px 11px; border-bottom: 0; border-left: 3px solid transparent; color: var(--muted); font-size: 12px; }
 .steps .row .state { height: auto; padding: 0; border: 0; background: none; font-size: 11px; font-weight: 600; line-height: inherit; }
 .steps [aria-current="step"] { background: var(--panel2); color: var(--fg); font-weight: 600; border-left-color: var(--accent); }
@@ -135,8 +135,41 @@ main > button { margin-bottom: 12px; }
 .log h2 { font-size: 13px; }
 .log p { margin: 0; font-size: 12px; }
 .log .toolbar { margin: 4px 0 0; }
-.log > pre { flex: 1; min-height: max(240px, calc(100vh - 470px)); margin: 4px 0 0; padding: 0 14px 12px; border: 1px solid var(--tline); border-radius: 8px; background: var(--tbg); color: var(--tfg); font-size: 12px; line-height: 1.65; box-shadow: 0 12px 34px var(--shadow); }
-.log > pre::before { content: ""; display: block; height: 34px; margin: 0 -14px 12px; border-bottom: 1px solid var(--tline); border-radius: 8px 8px 0 0; background: radial-gradient(circle at 16px 50%, var(--failed) 4px, transparent 4.5px), radial-gradient(circle at 30px 50%, var(--running) 4px, transparent 4.5px), radial-gradient(circle at 44px 50%, var(--passed) 4px, transparent 4.5px), var(--tbar); }
+.terminal { flex: 1; display: grid; grid-template-columns: auto minmax(0, 1fr); align-content: start; min-height: max(240px, calc(100vh - 470px)); margin: 4px 0 0; border: 1px solid var(--tline); border-radius: 8px; background: var(--tbg); color: var(--tfg); font-size: 12px; line-height: 1.65; box-shadow: 0 12px 34px var(--shadow); }
+.terminal > pre { margin: 0; padding: 0 14px 12px 0; font: inherit; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+.gutter { padding: 0 12px 12px 14px; color: color-mix(in srgb, var(--tfg) 45%, var(--tbg)); text-align: right; white-space: pre; user-select: none; }
+.terminal::before { content: ""; grid-column: 1 / -1; height: 34px; margin: 0 0 12px; border-bottom: 1px solid var(--tline); border-radius: 8px 8px 0 0; background: radial-gradient(circle at 16px 50%, var(--failed) 4px, transparent 4.5px), radial-gradient(circle at 30px 50%, var(--running) 4px, transparent 4.5px), radial-gradient(circle at 44px 50%, var(--passed) 4px, transparent 4.5px), var(--tbar); }
+
+/* runs page: repository list on the left, status chips above the table */
+main:has(> .repo-side) { display: grid; grid-template-columns: 208px minmax(0, 1fr); grid-template-areas: "head head" ". filters" "side runs" "side foot"; grid-template-rows: auto auto auto 1fr; column-gap: 14px; align-items: start; }
+main:has(> .repo-side) > h1 { grid-area: head; }
+main:has(> .repo-side) > .filters { grid-area: filters; }
+main:has(> .repo-side) > .runs, main:has(> .repo-side) > .empty { grid-area: runs; }
+main:has(> .repo-side) .filters > label { display: none; }
+.repo-side { grid-area: side; position: sticky; top: 64px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.side-head { display: flex; align-items: center; height: 38px; margin: 0; padding: 0 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 700; }
+.repo-filter { display: block; padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--fg); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.repo-filter:hover { background: var(--panel2); text-decoration: none; }
+.repo-filter:last-child { border-bottom: 0; border-radius: 0 0 8px 8px; }
+.repo-filter[aria-current="true"] { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; height: 30px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; }
+.chip:hover { border-color: var(--edge); color: var(--fg); text-decoration: none; }
+.chip[aria-current="true"] { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.runs .name, .runs .when { display: grid; }
+.runs .ref { color: var(--muted); font-size: 12px; }
+.runs .duration { min-height: 1lh; color: var(--fg); }
+.runs .at { font-size: 11px; }
+.runs-foot { grid-area: foot; margin: 10px 0 0; color: var(--muted); font-size: 11px; }
+.failed-step { margin-right: 1ch; color: var(--failed); }
+.log .toolbar label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.server { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.server .mark:not(.passed, .failed) { color: var(--muted); }
+@media (max-width: 1099px) {
+ main:has(> .repo-side) { display: block; }
+ .repo-side { display: none; }
+ main:has(> .repo-side) .filters > label { display: flex; }
+}
 
 /* issue detail */
 .issues:has(> h2) { padding: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 30px var(--shadow); }
@@ -169,17 +202,27 @@ main > button { margin-bottom: 12px; }
  .runs .row.head { display: none; }
  .runs .row { grid-template-columns: minmax(0, 1fr) max-content; gap: 0 8px; min-height: calc(2lh + 21px); padding: 10px 12px; font-size: 12px; line-height: 22px; }
  .runs .row:first-of-type { border-radius: 8px 8px 0 0; }
- .runs .run-label { display: block; grid-column: 1 / -1; grid-row: 1; }
+ .runs .run-label { display: flex; align-items: center; grid-column: 1 / -1; grid-row: 1; }
+ .runs .run-label > .name { min-width: 0; }
  .runs .state, .runs .name { margin-right: 6px; vertical-align: top; }
  .runs .row { padding: 10px 8px; }
  .runs .state { padding: 0 6px; gap: 5px; }
  .runs .when { grid-column: 2; grid-row: 2; font-size: 11px; line-height: 22px; }
  .runs .message { grid-column: 1; grid-row: 2; min-width: min(40ch, 100%); font-size: 11px; }
+ .runs .name { display: inline; }
+ .runs .ref { font-size: inherit; }
+ .runs .ref::before, .runs .duration:not(:empty)::before { content: "\00B7"; margin: 0 1ch; color: var(--muted); }
+ .runs .when { display: flex; }
+ .runs .at { order: -1; font-size: inherit; }
+ .runs .at-word { display: none; }
+ .runs .duration { min-height: 0; color: inherit; }
+ .server-name { display: none; }
+ .chips { gap: 6px; }
  .run-head { padding: 12px 12px 10px; }
  .run-head > h1 + p { flex-basis: calc(100% + 24px); margin: 8px -12px 4px; padding: 8px 12px; }
  .run-layout { display: block; }
  .log { margin-top: 14px; }
- .log > pre { min-height: 200px; }
+ .terminal { min-height: 200px; }
  .repos .head, .issues .head { display: none; }
  .repos .row, .issues .row { grid-template-columns: auto 1fr; gap: 6px 16px; }
 }
@@ -192,7 +235,6 @@ main > button { margin-bottom: 12px; }
  main:has(> .runs) > h1 { position: absolute; width: 1px; height: 1px; margin: 0; clip-path: inset(50%); white-space: nowrap; }
  nav a { min-width: 72px; text-transform: lowercase; }
  .runs { grid-template-columns: 150px minmax(10ch, 1.6fr) max-content minmax(40ch, 1fr); }
- .runs .row { line-height: 22px; }
  .runs .state, .repos .state { height: 22px; }
  .run-head { border-width: 0 0 1px; border-radius: 0; }
  .run-head > h1 .state { height: 20px; border-radius: 11px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
@@ -202,7 +244,8 @@ main > button { margin-bottom: 12px; }
   .steps { border-width: 0 1px 0 0; border-radius: 0 0 8px 8px; }
   .log { padding: 12px 18px 0; }
   .brand { flex: 0 0 214px; margin-right: 0; }
-  .runs .row:not(.head) { padding-top: 12px; padding-bottom: 12px; }
+  .runs .row { line-height: 18px; }
+  .runs .row:not(.head) { padding-top: 10px; padding-bottom: 10px; }
   .back { position: absolute; top: 30px; right: 36px; margin: 0; }
  }
  /* A whole 40-character reason and its time share one 360px line in
@@ -250,7 +293,7 @@ main > button { margin-bottom: 12px; }
  --shadow: transparent;
  :not(.mark) { border-radius: 0 !important; }
  /* labels */
- nav a, button, label, #signin label, summary, .back, .row.head, .card-name, .steps::before, main > h1, #signin h1 { font-size: 10.5px; font-weight: 400; letter-spacing: .2em; text-transform: uppercase; }
+ nav a, button, label, #signin label, summary, .back, .row.head, .card-name, .steps-head, main > h1, #signin h1 { font-size: 10.5px; font-weight: 400; letter-spacing: .2em; text-transform: uppercase; }
  input, select { font-size: 12px; }
  h1, h2, h3, .brand, .repos a.row > span:first-child { font-weight: 400; }
  /* tabs: a word and one hairline */
@@ -264,8 +307,8 @@ main > button { margin-bottom: 12px; }
  .runs a.row:has(.failed) { box-shadow: inset 2px 0 var(--failed); }
  /* surfaces: frames, no fills, no bar on the log */
  .row.head { background: none; }
- .log > pre { padding-top: 12px; }
- .log > pre::before { content: none; }
+ .terminal { padding-top: 12px; }
+ .terminal::before { content: none; }
  /* room */
  main { padding-block: 40px 72px; }
  main > h1 { margin-bottom: 28px; }

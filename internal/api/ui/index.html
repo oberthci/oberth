@@ -8,7 +8,7 @@
 <script src="/assets/app.js" defer></script>
 </head>
 <body>
-<header><a class="brand" href="/runs"><span class="logo" aria-hidden="true">[<svg viewBox="0 0 10 10"><path d="M5 1 9 9H1z"/></svg>]</span>oberth</a><nav aria-label="Main"><a href="/runs">Runs</a><a href="/repos">Repositories</a><a href="/issues">Issues</a><a href="/status">Status</a></nav><button id="theme" type="button">Theme: auto</button><button id="signout" type="button">Sign out</button></header>
+<header><a class="brand" href="/runs"><span class="logo" aria-hidden="true">[<svg viewBox="0 0 10 10"><path d="M5 1 9 9H1z"/></svg>]</span>oberth</a><nav aria-label="Main"><a href="/runs">Runs</a><a href="/repos">Repositories</a><a href="/issues">Issues</a><a href="/status">Status</a></nav><span id="server" class="server" title="Server status"><span class="mark" aria-hidden="true"></span><span class="server-name">oberth</span> <span class="ver"></span></span><button id="theme" type="button">Theme: auto</button><button id="signout" type="button">Sign out</button></header>
 <div id="notice" role="status" aria-live="polite"></div>
 <section id="signin" hidden><h1>Sign in</h1><p>Paste a bearer token for this server.</p><p>An operator creates one with oberth uplink add.</p><form><label>Bearer token <input type="password" autocomplete="off" required></label><button type="submit">Sign in</button></form></section>
 <main id="main"></main>

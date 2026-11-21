@@ -251,6 +251,78 @@ async function importedIssue(client){
  return {...result,open,unknown};
 }
 
+async function settle(client,test,label){
+ for(let i=0;i<150;i++){if(await client.evaluate(test))return;await pause(20);}
+ check(false,label+' did not settle');
+}
+
+async function repositoryListAndChips(client){
+ await client.loaded('/runs','.runs a.row');await pause(20);
+ const mark=client.requests.length;
+ await client.evaluate(`Array.from(document.querySelectorAll('.repo-side a')).find(link=>link.textContent==='origin/team/web').click()`);
+ await settle(client,`location.search==='?repo=origin%2Fteam%2Fweb'&&Boolean(document.querySelector('.runs a.row'))`,'repository choice');
+ const side=await client.evaluate(`Array.from(document.querySelectorAll('.repo-side a')).map(link=>[link.textContent,link.getAttribute('aria-current')])`);
+ check(JSON.stringify(side)===JSON.stringify([['All repos',null],['origin/team/api',null],['origin/team/web','true']]),'chosen repository not marked '+JSON.stringify(side));
+ check(client.requests.slice(mark).some(request=>request.path==='/api/runs'&&new URL(request.url).searchParams.get('repo')==='origin/team/web'),'repository list did not filter the run list');
+ const chipMark=client.requests.length;
+ await client.evaluate(`Array.from(document.querySelectorAll('.chips a')).find(link=>link.textContent==='failed').click()`);
+ await settle(client,`new URLSearchParams(location.search).get('status')==='failed'&&Boolean(document.querySelector('.runs a.row'))`,'status chip');
+ const chips=await client.evaluate(`({search:location.search,current:Array.from(document.querySelectorAll('.chips a[aria-current="true"]')).map(link=>link.textContent),side:document.querySelector('.repo-side a[aria-current="true"]').textContent})`);
+ check(chips.search==='?repo=origin%2Fteam%2Fweb&status=failed'&&JSON.stringify(chips.current)==='["failed"]'&&chips.side==='origin/team/web','chip choice lost the address or the repository '+JSON.stringify(chips));
+ check(client.requests.slice(chipMark).some(request=>{const query=new URL(request.url).searchParams;return request.path==='/api/runs'&&query.get('status')==='failed'&&query.get('repo')==='origin/team/web';}),'status chip did not filter the run list');
+ await client.evaluate(`Array.from(document.querySelectorAll('.chips a')).find(link=>link.textContent==='all').click()`);
+ await settle(client,`location.search==='?repo=origin%2Fteam%2Fweb'`,'all chip');
+ return {side,chips};
+}
+
+async function lineNumbers(client){
+ await client.loaded('/runs/22222222','.steps a.row');
+ await settle(client,`Boolean(document.querySelector('.terminal .gutter')?.textContent)`,'log');
+ const copied=await client.evaluate(`(()=>{
+  const terminal=document.querySelector('.terminal'),pre=terminal.querySelector('pre'),range=document.createRange();
+  range.selectNodeContents(terminal);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);
+  const result={selected:selection.toString(),log:pre.textContent,gutter:terminal.querySelector('.gutter').textContent};selection.removeAllRanges();return result;
+ })()`);
+ check(copied.gutter==='1\n2\n3\n4\n'&&copied.selected.trim()===copied.log.trim()&&!/^\s*1\s/.test(copied.selected),'line numbers were selected or copied with the log '+JSON.stringify(copied));
+ // Five thousand lines: one text node of numbers beside the log text, timed with layout.
+ const timing=await client.evaluate(`(()=>{
+  const output=h('pre'),gutter=h('div',{class:'gutter','aria-hidden':'true'},''),box=h('div',{class:'terminal'},gutter,output);
+  document.querySelector('.log').append(box);
+  const lines=Array.from({length:5000},(_,index)=>'line '+(index+1)+' of a long build log with some text').join('\\n')+'\\n';
+  const start=performance.now();resetLog({output,gutter,status:h('div')},lines);box.getBoundingClientRect();const reset=performance.now()-start;
+  const regions={output,gutter,status:h('div')};regions.liveBytes=new TextEncoder().encode(output.textContent).length;regions.lines=5000;regions.open=false;
+  const appendStart=performance.now();for(let chunk=0;chunk<50;chunk++)appendLive(regions,Array.from({length:100},(_,index)=>'appended '+(chunk*100+index)).join('\\n')+'\\n');box.getBoundingClientRect();const append=performance.now()-appendStart;
+  const result={reset:Math.round(reset),append:Math.round(append),numbers:gutter.textContent.split('\\n').length-1,last:gutter.textContent.slice(-6),height:Math.abs(gutter.getBoundingClientRect().height-output.getBoundingClientRect().height)};
+  box.remove();return result;
+ })()`);
+ check(timing.numbers===10000&&timing.last==='10000\n'&&timing.height<1&&timing.reset<1000&&timing.append<1000,'five thousand line log too slow or misnumbered '+JSON.stringify(timing));
+ return {copied:copied.gutter,timing};
+}
+
+async function liveHiccup(client){
+ await client.loaded('/runs','.runs a.row');await pause(20);
+ const result=await client.evaluate(`(async()=>{
+  const original=fetch,view=screen,plan=['fail','ok','fail','ok','fail','fail','ok'];let calls=0,early=false,late=false;
+  const observer=new MutationObserver(()=>{if(notice.textContent.includes(copy.live[0])){if(calls<=5)early=true;else late=true;}});
+  observer.observe(notice,{subtree:true,childList:true,characterData:true});
+  window.fetch=(path,options)=>{
+   if(path!=='/mcp'||JSON.parse(options.body).params.name!=='events_wait')return original(path,options);
+   const step=plan[calls++];
+   if(step==='fail')return Promise.reject(Object.assign(new TypeError('connection cut'),{retry:25}));
+   if(step==='ok')return Promise.resolve(new Response(JSON.stringify({result:{isError:false,structuredContent:{events:[],next_after_id:0}}})));
+   return new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));
+  };
+  try{
+   view.waiting.abort();
+   for(let i=0;i<800&&calls<8;i++)await new Promise(resolve=>setTimeout(resolve,10));
+   await new Promise(resolve=>setTimeout(resolve,50));
+   return {calls,early,late,final:notice.textContent};
+  }finally{observer.disconnect();view.controller.abort();window.fetch=original;}
+ })()`);
+ check(result.calls===8&&!result.early&&result.late&&result.final==='','one cut live update was not quiet, or two in a row were not shown '+JSON.stringify(result));
+ return result;
+}
+
 export async function behavior(client){
  const result={burst:await burst(client),visibility:await hidden(client),observation:await idleAndRecovery(client)};
  result.importedIssue=await importedIssue(client);
@@ -263,6 +335,9 @@ export async function behavior(client){
  result.confirmation=await confirmationAndFetch(client);
  result.refusedRerun=await refusedRerun(client);
  result.logs=await logAppend(client);
+ result.pieces=await repositoryListAndChips(client);
+ result.lineNumbers=await lineNumbers(client);
+ result.liveHiccup=await liveHiccup(client);
  result.signout=await signout(client);
  client.checkFatal();
  return result;
