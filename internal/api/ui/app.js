@@ -173,6 +173,7 @@ async function route() {
  const view = {controller: new AbortController(), filter: {}}; screen = view;
  main.replaceChildren(); notice.replaceChildren();
  const parts = location.pathname.split("/").filter(Boolean);
+ document.querySelectorAll("nav a").forEach(link => { if (link.pathname === "/" + parts[0]) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current"); });
  try {
   if (parts[0] === "runs" && parts[1]) runScreen(view, parts[1]);
   else if (parts[0] === "runs") await runsScreen(view);
@@ -206,8 +207,8 @@ async function runsScreen(view) {
 function runScreen(view, id) {
  const signal = view.controller.signal, path = "/api/runs/" + encodeURIComponent(id);
  view.filter = {run_ids: [id]};
- const header = h("section"), steps = h("div", {class: "steps"}), pane = h("section", {class: "log", id: "log", "aria-label": "Step log"});
- main.append(h("a", {href: "/runs"}, "< Runs"), header, h("div", {class: "run-layout"}, steps, pane));
+ const header = h("section", {class: "run-head"}), steps = h("div", {class: "steps"}), pane = h("section", {class: "log", id: "log", "aria-label": "Step log"});
+ main.append(h("a", {class: "back", href: "/runs"}, "< Runs"), header, h("div", {class: "run-layout"}, steps, pane));
  view.read = async () => {
   const run = await get(path + "?" + params({view: "dashboard", step_limit: 100, step_offset: view.offset}), signal);
   view.repositories ||= get("/api/repos?" + params({repo: run.repo}), signal).catch(error => { view.repositories = null; throw error; });
@@ -414,8 +415,11 @@ function statusScreen(view) {
  view.read = async () => {
   const [status, counts] = await Promise.all([get("/api/status", view.controller.signal), get("/api/runs/counts", view.controller.signal)]);
   if (view.controller.signal.aborted) return;
-  region.replaceChildren(h("p", {}, "Server · " + (status.ready ? "ready" : "unavailable") + " · version " + status.version), h("p", {}, status.display_reason), detail(status.detail) || h("span"),
-   h("p", {}, "Runs · " + Object.entries(counts).map(([name, count]) => name + " " + count).join(" · ")));
+  const ready = status.ready ? "passed" : "failed";
+  region.replaceChildren(h("div", {class: "cards"},
+   h("div", {class: "card"}, h("p", {class: "card-name"}, h("span", {class: "mark " + ready, "aria-hidden": "true"}), "Server"), h("p", {class: "card-value " + ready}, status.ready ? "ready" : "unavailable"),
+    h("p", {class: "muted"}, "version " + status.version), h("p", {}, status.display_reason), detail(status.detail) || h("span")),
+   ...Object.entries(counts).map(([name, count]) => h("div", {class: "card"}, h("p", {class: "card-name"}, h("span", {class: "mark " + name, "aria-hidden": "true"}), "Runs " + name), h("p", {class: "card-value " + name}, String(count))))));
  };
 }
 const themes = ["auto", "light", "dark"], themeButton = document.querySelector("#theme");

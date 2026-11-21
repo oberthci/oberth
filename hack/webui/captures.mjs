@@ -51,6 +51,9 @@ const results=[];
   await writeFile(`${shots}/${page}-1280-light.png`,Buffer.from(capture.data,'base64'));
   const metrics=await evaluate(`({width:innerWidth,scroll:document.documentElement.scrollWidth,text:document.querySelector('main').textContent,errors:document.querySelector('#notice').textContent})`);
   check(metrics.scroll<=1280&&!metrics.errors,'extra screen overflow or error '+page);results.push({page,theme:'light',...metrics});
+  metrics.current=await evaluate(`Array.from(document.querySelectorAll('nav a[aria-current="page"]')).map(link=>link.pathname)`);
+  check(JSON.stringify(metrics.current)===JSON.stringify(['/'+path.split('/')[1]]),'current tab not marked '+JSON.stringify(metrics.current));
+  if(page==='status'){metrics.cards=await evaluate(`Array.from(document.querySelectorAll('main .card')).map(card=>card.textContent)`);check(JSON.stringify(metrics.cards)===JSON.stringify(['Serverreadyversion 1','Runs queued1','Runs running2','Runs passed140','Runs failed9','Runs cancelled3']),'status cards changed '+JSON.stringify(metrics.cards));}
  }
  const formats=await evaluate(`({durations:[0,48,59,60,372,3599,3600,22920].map(seconds=>duration('1970-01-01T00:00:00Z',new Date(seconds*1000).toISOString())),today:time('2026-11-16T14:00:00Z'),older:time('2026-11-15T14:00:00Z'),fullTimestamp:fullTime('2026-11-16T14:00:00.123456789Z')})`);
  check(JSON.stringify(formats.durations)===JSON.stringify(['0s','48s','59s','1m 0s','6m 12s','59m 59s','1h 0m','6h 22m'])&&formats.today==='15:00'&&formats.older==='Nov 15 15:00'&&formats.fullTimestamp.includes('2026-11-16T14:00:00.123456789Z')&&formats.fullTimestamp.includes('GMT+0100'),'time formats failed '+JSON.stringify(formats));
