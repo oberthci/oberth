@@ -48,7 +48,7 @@ func Project(ctx context.Context, in Projection) (Observation, error) {
 	if err := packer.DecompressWorkflow(ctx, w); err != nil {
 		return Observation{}, err
 	}
-	out := Observation{workflow: w, Phase: stepmodel.NativePhase(w.Status.Phase), Detail: w.Status.Message, Complete: len(w.Status.Nodes) > 0 && w.Status.OffloadNodeStatusVersion == ""}
+	out := Observation{workflow: w, Phase: stepmodel.NativePhase(w.Status.Phase), Detail: runDetail(w), Complete: len(w.Status.Nodes) > 0 && w.Status.OffloadNodeStatusVersion == ""}
 	out.Status, out.Reason = runStatus(w)
 	if !out.Phase.Valid() {
 		out.Phase = stepmodel.NativeUnknown
@@ -166,6 +166,17 @@ func projectAttempt(row *projected, in projectionInput, n wf.NodeStatus) {
 	if !terminalStep(row.step.Status) || d.exit == nil && n.Phase != wf.NodeSkipped && n.Phase != wf.NodeOmitted {
 		in.out.Complete = false
 	}
+}
+
+// runDetail is the native message; a run still pending on a workflow-level
+// lock also points to lock status, as a step waiting for a lock does.
+func runDetail(w *wf.Workflow) string {
+	s := w.Status.Synchronization
+	pending := w.Status.Phase == "" || w.Status.Phase == wf.WorkflowPending
+	if !pending || s == nil || (s.Semaphore == nil || len(s.Semaphore.Waiting) == 0) && (s.Mutex == nil || len(s.Mutex.Waiting) == 0) {
+		return w.Status.Message
+	}
+	return strings.TrimSpace(w.Status.Message + "\n" + detailLockStatus)
 }
 
 func runStatus(w *wf.Workflow) (stepmodel.RunStatus, string) {

@@ -172,6 +172,22 @@ func TestLockWaitingStepPointsToLockStatus(t *testing.T) {
 	}
 }
 
+// A run pending on a workflow-level lock points to lock status after its
+// native message; a running holder of that lock does not.
+func TestLockWaitingRunPointsToLockStatus(t *testing.T) {
+	t.Parallel()
+	plan := admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "", Name: "main"}}}
+	const hint = "Run oberth lock status to see who holds it."
+	for name, want := range map[string]string{"mutex-pending-stop": "Waiting for release lock\n" + hint, "mutex-holder": "Waiting for release lock"} {
+		rows := cancelledLocks(t)
+		i := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == name })
+		rows[i].Status.Message = "Waiting for release lock"
+		if out := project(t, argojob.Projection{Plan: plan, Workflow: &rows[i]}); out.Detail != want {
+			t.Fatalf("%s: detail %q, want %q", name, out.Detail, want)
+		}
+	}
+}
+
 // Terminate marks a run that was waiting for a workflow-level lock Succeeded;
 // it is reported cancelled, never passed. Stop leaves it queued for the lock.
 func TestTerminatedLockWaiterIsCancelledNotPassed(t *testing.T) {
