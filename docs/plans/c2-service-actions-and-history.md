@@ -137,7 +137,7 @@ matches. Pages carry events, next_after_id, latest_id, oldest_id, has_more and g
 A pruned cursor requires a snapshot. Progress retention is separately 24 hours
 or newest 10,000, whichever removes first. Ordinary events are kept for 30 days;
 C11 calls retention once a day. Streams and waits are observations only. Completion/timeout reads
-durable state again. sync_status shows current native holders/waiters only, without stored intervals.
+durable state again. sync_status shows current native holders/waiters/stale units only, without stored intervals.
 
 C7 owns the canonical acceptance, stored run and result values in
 `internal/stateport`. C2 and C3 use those values directly. C2 `Decide` checks
@@ -163,7 +163,7 @@ outcomes, step order and domain identities remain strict. Audit includes
 authority and administrative records only; omit progress and retired
 promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained
 ordering, identities and chain validity. sync_status exposes current
-holders/waiters without stored intervals or aggregate history.
+holders/waiters/stale units without stored intervals or aggregate history.
 
 ## Allowed dependencies
 

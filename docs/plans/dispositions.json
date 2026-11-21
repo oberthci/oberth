@@ -9396,7 +9396,7 @@
     "docs/plans/c12-agent-client.md": "bb69fd9b2aec5887e02baf6e887df4b439102b4131062a518b112a1aa3d24260",
     "docs/plans/c13-own-pipelines.md": "2a2ec98164d0eee77c796cda88ac40c540639e78443d2fdb691d3bd34929a42d",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
-    "docs/plans/c2-service-actions-and-history.md": "262e4490f6e9afcad5ada97302e760089f508720d642db5c574887be2caa0451",
+    "docs/plans/c2-service-actions-and-history.md": "2bb78bb7ead2d62bc02a8b27ab219f5ff1bc61f505d29069ada6eea25590d2f8",
     "docs/plans/c3-wiring-and-submission.md": "3554fde5b2a08f22cf7554103bb5f8ee7d199cb93f08878c23f32ca5236c1f77",
     "docs/plans/c4-admission-rules-and-plan.md": "64a9661d37c4189e6fea3bbb01e46e776f8d71ffc5dfff50e14b8b9bb5617905",
     "docs/plans/c5-native-execution.md": "f82bcf8ee9b7264bfbb2c2be78740cd85eddcf9c11275aec5b89a2198a67c325",
@@ -11227,14 +11227,14 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** After commit, wake waiters by closing/replacing a channel; register before read, then wait, so a concurrent commit cannot be missed. Event reads capture an upper cursor and scan `(after,upper]`, at most 500 internally and 200 publicly, filtering scope before output. Advance past examined filter misses; never skip unexamined matches. Pages carry events, next_after_id, latest_id, oldest_id, has_more and gap. A pruned cursor requires a snapshot. Progress retention is separately 24 hours or newest 10,000, whichever removes first. Ordinary events are kept for 30 days; C11 calls retention once a day. Streams and waits are observations only. Completion/timeout reads durable state again. sync_status shows current native holders/waiters only, without stored intervals.",
+      "basis": "**Delta:** After commit, wake waiters by closing/replacing a channel; register before read, then wait, so a concurrent commit cannot be missed. Event reads capture an upper cursor and scan `(after,upper]`, at most 500 internally and 200 publicly, filtering scope before output. Advance past examined filter misses; never skip unexamined matches. Pages carry events, next_after_id, latest_id, oldest_id, has_more and gap. A pruned cursor requires a snapshot. Progress retention is separately 24 hours or newest 10,000, whichever removes first. Ordinary events are kept for 30 days; C11 calls retention once a day. Streams and waits are observations only. Completion/timeout reads durable state again. sync_status shows current native holders/waiters/stale units only, without stored intervals.",
       "rows": [
         {
           "category": "MCP tools",
           "name": "events_wait",
           "disposition": "CHANGE",
           "reason": "events_wait: old/future/pruned cursors report gaps/reset semantics and scans terminate at captured upper cursor; never silently acknowledge unseen matches.",
-          "basis": "**Delta:** After commit, wake waiters by closing/replacing a channel; register before read, then wait, so a concurrent commit cannot be missed. Event reads capture an upper cursor and scan `(after,upper]`, at most 500 internally and 200 publicly, filtering scope before output. Advance past examined filter misses; never skip unexamined matches. Pages carry events, next_after_id, latest_id, oldest_id, has_more and gap. A pruned cursor requires a snapshot. Progress retention is separately 24 hours or newest 10,000, whichever removes first. Ordinary events are kept for 30 days; C11 calls retention once a day. Streams and waits are observations only. Completion/timeout reads durable state again. sync_status shows current native holders/waiters only, without stored intervals."
+          "basis": "**Delta:** After commit, wake waiters by closing/replacing a channel; register before read, then wait, so a concurrent commit cannot be missed. Event reads capture an upper cursor and scan `(after,upper]`, at most 500 internally and 200 publicly, filtering scope before output. Advance past examined filter misses; never skip unexamined matches. Pages carry events, next_after_id, latest_id, oldest_id, has_more and gap. A pruned cursor requires a snapshot. Progress retention is separately 24 hours or newest 10,000, whichever removes first. Ordinary events are kept for 30 days; C11 calls retention once a day. Streams and waits are observations only. Completion/timeout reads durable state again. sync_status shows current native holders/waiters/stale units only, without stored intervals."
         }
       ]
     },
@@ -12521,84 +12521,84 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters without stored intervals or aggregate history.",
+      "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters/stale units without stored intervals or aggregate history.",
       "rows": [
         {
           "category": "CLI commands",
           "name": "oberth audit",
           "disposition": "CHANGE",
           "reason": "Authority and administrative audit only; omit progress and retired promotion/bulk-deletion kinds; preserve retained ordering, identity and chain validity. Row: oberth audit.",
-          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters without stored intervals or aggregate history."
+          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters/stale units without stored intervals or aggregate history."
         },
         {
           "category": "CLI commands",
           "name": "oberth repos",
           "disposition": "CHANGE",
           "reason": "Canonical admitted-plan run projection with logical steps, attempts, counts, exactness and object/commit identities; scope, outcomes and domain facts retained. Row: oberth repos.",
-          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters without stored intervals or aggregate history."
+          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters/stale units without stored intervals or aggregate history."
         },
         {
           "category": "CLI commands",
           "name": "oberth sync status",
           "disposition": "CHANGE",
           "reason": "Current native holders/waiters only; no stored intervals or aggregate history; current identities/counts retained. Row: oberth sync status.",
-          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters without stored intervals or aggregate history."
+          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters/stale units without stored intervals or aggregate history."
         },
         {
           "category": "MCP tools",
           "name": "audit_list",
           "disposition": "CHANGE",
           "reason": "Authority and administrative audit only; omit progress and retired promotion/bulk-deletion kinds; preserve retained ordering, identity and chain validity. Row: audit_list.",
-          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters without stored intervals or aggregate history."
+          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters/stale units without stored intervals or aggregate history."
         },
         {
           "category": "MCP tools",
           "name": "repo_list",
           "disposition": "CHANGE",
           "reason": "Canonical admitted-plan run projection with logical steps, attempts, counts, exactness and object/commit identities; scope, outcomes and domain facts retained. Row: repo_list.",
-          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters without stored intervals or aggregate history."
+          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters/stale units without stored intervals or aggregate history."
         },
         {
           "category": "MCP tools",
           "name": "sync_status",
           "disposition": "CHANGE",
           "reason": "Current native holders/waiters only; no stored intervals or aggregate history; current identities/counts retained. Row: sync_status.",
-          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters without stored intervals or aggregate history."
+          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters/stale units without stored intervals or aggregate history."
         },
         {
           "category": "HTTP endpoints",
           "name": "GET /api/runs",
           "disposition": "CHANGE",
           "reason": "Canonical admitted-plan run projection, including nested latest_run for repositories; logical steps, attempts, counts, exactness and object/commit identities; scope, outcomes and order stay strict. Row: GET /api/runs.",
-          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters without stored intervals or aggregate history."
+          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters/stale units without stored intervals or aggregate history."
         },
         {
           "category": "HTTP endpoints",
           "name": "GET /api/runs/counts",
           "disposition": "CHANGE",
           "reason": "Canonical admitted-plan run projection, including nested latest_run for repositories; logical steps, attempts, counts, exactness and object/commit identities; scope, outcomes and order stay strict. Row: GET /api/runs/counts.",
-          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters without stored intervals or aggregate history."
+          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters/stale units without stored intervals or aggregate history."
         },
         {
           "category": "HTTP endpoints",
           "name": "GET /api/runs/{run}",
           "disposition": "CHANGE",
           "reason": "Canonical admitted-plan run projection, including nested latest_run for repositories; logical steps, attempts, counts, exactness and object/commit identities; scope, outcomes and order stay strict. Row: GET /api/runs/{run}.",
-          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters without stored intervals or aggregate history."
+          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters/stale units without stored intervals or aggregate history."
         },
         {
           "category": "HTTP endpoints",
           "name": "GET /api/repos",
           "disposition": "CHANGE",
           "reason": "Canonical admitted-plan run projection, including nested latest_run for repositories; logical steps, attempts, counts, exactness and object/commit identities; scope, outcomes and order stay strict. Row: GET /api/repos.",
-          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters without stored intervals or aggregate history."
+          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters/stale units without stored intervals or aggregate history."
         },
         {
           "category": "HTTP endpoints",
           "name": "GET /api/audit",
           "disposition": "CHANGE",
           "reason": "Authority and administrative records only; omit progress and retired promotion/bulk-deletion kinds; preserve retained ordering, identity and audit chain validity.",
-          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters without stored intervals or aggregate history."
+          "basis": "**Delta:** Across HTTP, MCP and CLI, run lists/counts/detail and nested repository latest_run use the canonical admitted-plan projection: logical steps, native attempts, stored counts, exactness, object_sha and commit_sha. Authority, outcomes, step order and domain identities remain strict. Audit includes authority and administrative records only; omit progress and retired promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained ordering, identities and chain validity. sync_status exposes current holders/waiters/stale units without stored intervals or aggregate history."
         }
       ]
     },
