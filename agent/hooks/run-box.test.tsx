@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Run, Snapshot } from '../types'
-import { decodeRun, progress, shortID, table, visible } from './model'
+import { decodeRun, progress, shortID, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
 
 const options = { executable: '/verified/oberth', profile: 'joined-uplink' }
 const commandInput = { origin: { kind: 'plugin', name: 'oberth' },
@@ -312,7 +312,7 @@ test('short IDs disambiguate and non-hex IDs stay whole; unknown plans remain in
   expect(progress({ ...first, steps_planned_exact: false })).toBe('6/≥11')
   expect(progress({ ...first, failed: 2, skipped: 1 })).toBe('9/11')
   expect(() => decodeRun({ ...first, step_count: undefined })).toThrow()
-  expect(visible({ recent: [first], pins: [], now: 0, reachable: false })).toEqual([])
+  expect(visible({ recent: [first], pins: [], now: 0, reachable: false }, 3)).toEqual([])
   expect(table([{ ...first, ref: 'ref\u001b\u200b' }], 0)).not.toContain('\u001b')
   expect(table([{ ...first, ref: 'ref\u001b\u200b' }], 0)).not.toContain('\u200b')
 })
@@ -409,6 +409,112 @@ test('a competing state write cannot duplicate a completion toast', { options },
   await clock.advance(15000)
   expect(conflict).toBe(false)
   expect(toasts).toEqual([`Oberth ${item.id}: passed`])
+})
+
+const six = [1, 2, 3, 4, 5, 6].map(n => run(String(n).repeat(8) + '0'.repeat(24)))
+
+function cli(on: On, rows: () => Run[]) {
+  const calls: string[][] = []
+  on('process.run', (_, e) => {
+    calls.push([...e.argv])
+    const data = e.argv[2] === 'get' ? rows().find(run => run.id === e.argv[3]) : { runs: rows() }
+    return { value: { exitCode: 0, stdout: JSON.stringify(data), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  return calls
+}
+
+function toasts(on: On) {
+  const texts: string[] = []
+  on('ui.toast', (_, e) => { texts.push(e.text); return { value: undefined } })
+  return texts
+}
+
+function refreshes(on: On) {
+  const count = { value: 0 }
+  on('state.set', { plugin: 'oberth', key: 'snapshot' }, (_, e, next) => { count.value++; return next(e) })
+  return count
+}
+
+async function noBox($: Engine) {
+  for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...band, surface })
+    expect(await ui.findAll({ type: 'Text' })).toHaveLength(0)
+    await ui.unmount()
+  }
+}
+
+for (const [name, runs, count] of [['unset', undefined, 3], ['empty', '', 3], ['1', 1, 1], ['5', 5, 5]] as const) {
+  test(`runs ${name} lists and shows ${count} runs`, { options: runs === undefined ? options : { ...options, runs } }, async ($, on) => {
+    bottom(on)
+    mock.clock(on)
+    const calls = cli(on, () => six)
+    await startSession($, on)
+    expect(calls).toEqual([['/verified/oberth', 'run', 'list', '--limit', String(count), '--json']])
+    for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
+      const ui = await $.ui.mount({ ...band, surface })
+      const lines = await ui.findAll({ type: 'Text' })
+      expect(lines.map(line => line.text.split(' ')[1])).toEqual(six.slice(0, count).map(run => run.id.slice(0, 8)))
+      await ui.unmount()
+    }
+  })
+}
+
+test('runs 0 draws no box and never refreshes it', { options: { ...options, runs: 0 } }, async ($, on) => {
+  bottom(on)
+  const clock = mock.clock(on)
+  const stored = { value: { shape: 'runs-1', value: { recent: [run()], pins: [], reachable: true, now: 0 } }, version: 1 }
+  on('state.get', { plugin: 'oberth', key: 'snapshot' }, () => ({ value: stored }))
+  const written = refreshes(on)
+  const calls = cli(on, () => six)
+  const notices = toasts(on)
+  await $.session.start(start)
+  await clock.advance(180000)
+  expect(calls).toEqual([])
+  expect(written.value).toBe(0)
+  expect(notices).toEqual([])
+  await noBox($)
+})
+
+for (const runs of [11, -1, 2.5]) {
+  test(`runs ${runs} hides the box with one notice and never refreshes it`, { options: { ...options, runs } }, async ($, on) => {
+    bottom(on)
+    const clock = mock.clock(on)
+    const written = refreshes(on)
+    const calls = cli(on, () => six)
+    const notices = toasts(on)
+    await $.session.start(start)
+    await $.session.start(start)
+    await clock.advance(180000)
+    expect(notices).toEqual([`${SHOWN_REASON} ${SHOWN_REMEDY}`])
+    expect(SHOWN_REASON.length).toBeLessThanOrEqual(40)
+    expect(SHOWN_REMEDY.length).toBeLessThanOrEqual(120)
+    expect(calls).toEqual([])
+    expect(written.value).toBe(0)
+    await noBox($)
+    expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain(six[5]!.id)
+  })
+}
+
+test('runs 0 keeps the table, watches with completion toasts and both tools', { options: { ...options, runs: 0 } }, async ($, on) => {
+  bottom(on)
+  const clock = mock.clock(on)
+  let rows = [run(), run('aaaaaaaa000000000000000000000000')]
+  const calls = cli(on, () => rows)
+  const notices = toasts(on)
+  await $.session.start(start)
+  const listed = await $.command.run({ ...commandInput, command: 'oberth-runs', args: '--limit=2' })
+  expect(listed.text).toContain(rows[1]!.id)
+  expect((await $.tool.call({ tool: 'mcp__oberth__runs', limit: 2 })).result).toBe(listed.text)
+  expect((await $.command.run({ ...commandInput, command: 'oberth-watch', args: rows[0]!.id })).text).toContain('Watching')
+  expect((await $.tool.call({ tool: 'mcp__oberth__watch', id: rows[1]!.id })).result).toContain('Watching')
+  await noBox($)
+  rows = rows.map(row => ({ ...row, status: 'passed' }))
+  await clock.advance(15000)
+  expect(notices).toEqual(rows.map(row => `Oberth ${row.id}: passed`))
+  expect(calls.map(call => call[2])).toEqual(['list', 'list', 'get', 'get', 'get', 'get'])
+  await clock.advance(180000)
+  expect(calls).toHaveLength(6)
+  await noBox($)
 })
 
 

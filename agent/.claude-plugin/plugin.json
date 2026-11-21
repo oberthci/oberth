@@ -1,10 +1,11 @@
 {
   "name": "oberth",
   "version": "0.24.0",
-  "description": "Oberth runs above the prompt, a run table, pinned completion notices and the connection skill.",
+  "description": "Oberth runs above the prompt (up to the runs option, three by default, none at 0), a run table, pinned completion notices and the connection skill.",
   "types": "./types/index.d.ts",
   "userConfig": {
     "executable": { "type": "string", "title": "Verified executable", "description": "Absolute verified executable path printed by oberth join." },
-    "profile": { "type": "string", "title": "Uplink profile", "description": "Uplink profile in the agent tools line from oberth join; defaults to OBERTH_PROFILE." }
+    "profile": { "type": "string", "title": "Uplink profile", "description": "Uplink profile in the agent tools line from oberth join; defaults to OBERTH_PROFILE." },
+    "runs": { "type": "number", "title": "Runs shown", "description": "How many runs the box above the prompt shows: a whole number from 0 to 10; 0 shows no box.", "default": 3 }
   }
 }

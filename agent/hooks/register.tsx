@@ -2,15 +2,17 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Register, Timer } from 'claude-code'
 import type { Snapshot } from '../types'
 import { executable, get, list, profile, SETUP, PROFILE_SETUP } from './client'
-import { active, boxRows, limit, outcome, table, visible } from './model'
+import { active, boxRows, limit, outcome, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
 
 const empty: Snapshot = { recent: [], pins: [], reachable: false, now: 0 }
 const snapshot = atom({ plugin: 'oberth', key: 'snapshot' } as const, empty, { shape: 'runs-1' })
 const errorText = (error: unknown) => error instanceof Error ? error.message : 'Unable to read Oberth runs.'
-type Loop = { timer?: Timer; pending?: Promise<void>; stopped?: boolean; refreshedAt?: number }
+// count is how many runs the box shows; with none, only active watches are read.
+type Loop = { count: number; timer?: Timer; pending?: Promise<void>; stopped?: boolean; refreshedAt?: number }
 
 async function tick($: EngineInterface, options: PluginOptions, loop: Loop) {
   const state = await read($, snapshot)
+  if (!loop.count && !state.pins.some(pin => active(pin.run))) return
   const interval = [...state.recent, ...state.pins.map(pin => pin.run)].some(active) ? 15000 : 60000
   if (await $.clock.now() - (loop.refreshedAt ?? -Infinity) >= interval) await poll($, options, loop)
 }
@@ -25,7 +27,7 @@ function poll($: EngineInterface, options: PluginOptions, loop: Loop) {
 async function refresh($: EngineInterface, options: PluginOptions, loop: Loop) {
   try {
     loop.refreshedAt = await $.clock.now()
-    const recent = await list($, options, 3)
+    const recent = loop.count ? await list($, options, loop.count) : []
     const before = await read($, snapshot)
     const missing = before.pins.filter(pin => active(pin.run) && !recent.some(run => run.id === pin.run.id))
     const details = await Promise.all(missing.map(pin => get($, options, pin.run.id)))
@@ -106,18 +108,20 @@ async function registerActions($: EngineInterface) {
   })
 }
 
-async function setupNotice($: EngineInterface, key: string, message: string) {
-  if (await $.store.get(key)) return
-  await $.store.set(key, true)
+async function setupNotice($: EngineInterface, key: string, message: string, mark: unknown = true) {
+  if (await $.store.get(key) === mark) return
+  await $.store.set(key, mark)
   await $.ui.toast(message)
 }
 
 export const register: Register = (on, options) => {
-  const loop: Loop = {}
+  const count = shown(options.runs)
+  const loop: Loop = { count: count ?? 0 }
   on('session.start', async ($, e, next) => {
     loop.timer?.cancel()
     loop.stopped = false
     await registerActions($)
+    if (count === undefined) await setupNotice($, 'runs-notice', `${SHOWN_REASON} ${SHOWN_REMEDY}`, String(options.runs))
     try { executable(options) }
     catch {
       await update($, snapshot, () => empty)
@@ -130,7 +134,7 @@ export const register: Register = (on, options) => {
       await setupNotice($, 'profile-notice', PROFILE_SETUP)
       return next(e)
     }
-    void poll($, options, loop)
+    if (loop.count) void poll($, options, loop)
     loop.timer = $.clock.every(15000, () => { void tick($, options, loop).catch(() => {}) })
     return next(e)
   })
@@ -145,9 +149,9 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const state = await read($, snapshot)
-    const rows = visible(state)
+    const rows = visible(state, loop.count)
     if (!rows.length) return next(e)
-    const lines = boxRows(state)
+    const lines = boxRows(state, loop.count)
     const { Box, Text } = $.ui.resolve(e)
     const color = (status: string) => status === 'passed' ? 'green' : status === 'failed' ? 'red' : status === 'cancelled' ? 'gray' : 'yellow'
     return <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor="gray" paddingX={1}>

@@ -40,12 +40,21 @@ export function shortID(id: string, runs: Run[]): string {
   return id.slice(0, size)
 }
 
-export function visible(state: Snapshot): Run[] {
+export const SHOWN_REASON = 'Runs shown accepts 0 to 10.'
+export const SHOWN_REMEDY = 'Set runs to a whole number from 0 to 10; 3 is the default and 0 shows no run box.'
+
+// The `runs` option: unset is three; anything but a whole number from 0 to 10 is undefined.
+export function shown(value: unknown): number | undefined {
+  if (value === undefined || value === '') return 3
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 10 ? value : undefined
+}
+
+export function visible(state: Snapshot, count: number): Run[] {
   if (!state.reachable) return []
   const pins = state.pins.map(pin => pin.run)
   if (![...state.recent, ...pins].some(active)) return []
   const priority = [...pins.filter(active), ...state.recent, ...pins]
-  return priority.filter((run, index) => priority.findIndex(row => row.id === run.id) === index).slice(0, 3)
+  return priority.filter((run, index) => priority.findIndex(row => row.id === run.id) === index).slice(0, count)
 }
 
 export const failedStep = (run: Run) => run.status === 'failed' ? clean(run.failure?.failed_step_name ?? '') : ''
@@ -56,8 +65,8 @@ function columns(cells: string[][], gap: number): string[] {
   return cells.map(row => row.map((cell, index) => cell.padEnd(widths[index]! + gap)).join('').trimEnd())
 }
 
-export function boxRows(state: Snapshot): string[] {
-  const runs = visible(state)
+export function boxRows(state: Snapshot, count: number): string[] {
+  const runs = visible(state, count)
   if (!runs.length) return []
   const known = [...state.recent, ...state.pins.map(pin => pin.run)]
   return columns(runs.map(run => {

@@ -86,18 +86,18 @@ Once the repository is public, Claude Code installs the skill and run box with
 quoted) and uplink profile after `--profile`:
 ```sh
 claude plugin configure oberth@oberthci --values-stdin <<'JSON'
-{"executable":"/absolute/verified/path/from-join","profile":"uplink-profile-from-join"}
+{"executable":"/absolute/verified/path/from-join","profile":"uplink-profile-from-join","runs":3}
 JSON
 ```
 Set the agent's uplink profile here or in `OBERTH_PROFILE`; the option takes precedence. No
 profile hides the box. Use the verified executable, never a checkout file. The box shows up to
-three runs, progress and failed steps; refresh is every 15 seconds when active/watched, 60 when
-idle. `/oberth-runs [--limit=N]` shows the table; `/oberth-watch <id-or-prefix>` watches until the
-completion toast. The `runs` and `watch` tools provide the same actions. Codex installs the
-existing skill through `agent/.codex-plugin/plugin.json` with
-`codex plugin marketplace add oberthci/oberth`, then `codex plugin add oberth@oberthci`. Register
-join's exact bridge line as in [agent connection](agents.md#connect-the-tools); this package has
-no above-prompt view for Codex.
+`runs` runs (0 to 10), three by default, none at 0, with progress and failed steps; refresh is
+every 15 seconds when active/watched, 60 when idle. `/oberth-runs [--limit=N]` shows the table;
+`/oberth-watch <id-or-prefix>` watches until the completion toast. The `runs` and `watch` tools
+provide the same actions. Codex installs the existing skill through
+`agent/.codex-plugin/plugin.json` with `codex plugin marketplace add oberthci/oberth`, then
+`codex plugin add oberth@oberthci`. Register join's exact bridge line as in
+[agent connection](agents.md#connect-the-tools); this package has no above-prompt view for Codex.
 
 ## Upgrade
 
