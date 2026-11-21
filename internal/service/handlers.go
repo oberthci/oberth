@@ -23,7 +23,7 @@ func (s *Service) PrepareRunList(ctx context.Context, c apicontract.Caller, q ap
 	if q.View != "" && q.View != "all" && q.View != "history" {
 		return nil, bad("view")
 	}
-	call, err := s.prepareRunList(ctx, c.Actor, runQuery{Repo: q.Repo, Before: q.Before, Ref: q.Ref, RefGlob: q.RefGlob, Status: stepmodel.RunStatus(q.Status), Latest: q.Latest, Own: q.Own, Held: q.Held, Limit: q.Limit})
+	call, err := s.prepareRunList(ctx, c.Actor, runQuery{Repo: q.Repo, Before: q.Before, Ref: q.Ref, RefGlob: q.RefGlob, Status: stepmodel.RunStatus(q.Status), Latest: q.Latest, Own: q.Own, Held: q.Held, Limit: q.Limit, Upstreams: q.Upstreams})
 	return call, err
 }
 func (s *Service) PrepareStatus(ctx context.Context, c apicontract.Caller, q apicontract.StatusArgs) (apicontract.Call[stepmodel.RunSummary], error) {

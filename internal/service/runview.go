@@ -23,6 +23,7 @@ type runQuery struct {
 	Latest, Own, Held          bool
 	Until                      string
 	Trigger                    model.RunTrigger
+	Upstreams                  []string
 }
 
 // PrepareRunGet authorizes and resolves before transport opens a stream.
@@ -77,7 +78,7 @@ func (s *Service) listFilter(ctx context.Context, a actor.Actor, q runQuery) (st
 	if !stateport.ValidRefGlob(q.RefGlob) {
 		return stateport.RunFilter{}, bad("ref_glob")
 	}
-	scope, err := s.repositoryScope(ctx, a)
+	scope, err := s.listRepositories(ctx, a, q)
 	if err != nil {
 		return stateport.RunFilter{}, err
 	}
@@ -85,14 +86,43 @@ func (s *Service) listFilter(ctx context.Context, a actor.Actor, q runQuery) (st
 	if q.Own {
 		f.Actor = a.Identity
 	}
+	return f, nil
+}
+
+// listRepositories is a run list's repository scope: the caller's, narrowed to
+// the selected repository and to the selected upstreams.
+func (s *Service) listRepositories(ctx context.Context, a actor.Actor, q runQuery) ([]string, error) {
+	scope, err := s.repositoryScope(ctx, a)
+	if err != nil {
+		return nil, err
+	}
 	if q.Repo != "" {
 		r, err := s.resolveRepo(ctx, a, q.Repo)
 		if err != nil {
-			return f, err
+			return nil, err
 		}
-		f.Repositories = []string{r.Canonical}
+		scope = []string{r.Canonical}
 	}
-	return f, nil
+	if len(q.Upstreams) == 0 {
+		return scope, nil
+	}
+	names, err := s.upstreamRepositories(ctx, a, q.Upstreams)
+	if err != nil {
+		return nil, err
+	}
+	return within(scope, names), nil
+}
+
+// within narrows a repository scope (nil means every repository) to names;
+// the result is never nil, so an empty intersection reads an empty page.
+func within(scope, names []string) []string {
+	out := []string{}
+	for _, name := range names {
+		if scope == nil || slices.Contains(scope, name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 func (s *Service) prepareRunList(ctx context.Context, a actor.Actor, q runQuery) (func(context.Context) (apicontract.RunPage, error), error) {
 	a, err := s.allow(ctx, a, "run_list")

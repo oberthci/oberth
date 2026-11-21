@@ -76,16 +76,38 @@ func quotedUpstreams(names []string) string {
 	return strings.Join(quoted, ", ")
 }
 
-func (s *Service) issueUpstream(ctx context.Context, a actor.Actor, requested string) (string, error) {
+// scopedUpstreamNames lists the registered upstream names the caller may see, sorted once each.
+func (s *Service) scopedUpstreamNames(ctx context.Context, a actor.Actor) ([]string, error) {
 	upstreams, err := s.scopedRepoUpstreams(ctx, a)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	choices := make([]string, 0, len(upstreams))
 	for _, upstream := range upstreams {
 		choices = append(choices, upstream.Name)
 	}
 	slices.Sort(choices)
+	return slices.Compact(choices), nil
+}
+
+// upstreamRepositories lists the repositories under the requested upstreams.
+// A name outside the caller's visible upstreams is refused like an unregistered one.
+func (s *Service) upstreamRepositories(ctx context.Context, a actor.Actor, requested []string) ([]string, error) {
+	choices, err := s.scopedUpstreamNames(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := checkUpstreams(choices, requested); err != nil {
+		return nil, err
+	}
+	return s.c.Catalog.RepositoryScope(ctx, requested)
+}
+
+func (s *Service) issueUpstream(ctx context.Context, a actor.Actor, requested string) (string, error) {
+	choices, err := s.scopedUpstreamNames(ctx, a)
+	if err != nil {
+		return "", err
+	}
 	if requested == "" {
 		switch {
 		case len(choices) == 1:

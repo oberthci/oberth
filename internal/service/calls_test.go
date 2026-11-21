@@ -35,7 +35,7 @@ func (s *testService) RunList(ctx context.Context, a actor.Actor, q viewQuery) (
 	return execute(ctx, call, err)
 }
 func (s *testService) PrepareRunList(ctx context.Context, a actor.Actor, q viewQuery) (apicontract.Call[apicontract.RunPage], error) {
-	return s.Service.PrepareRunList(ctx, apicontract.Caller{Actor: a}, apicontract.RunListArgs{Repo: q.Repo, Before: q.Before, Ref: q.Ref, RefGlob: q.RefGlob, Status: string(q.Status), Latest: q.Latest, Own: q.Own, Held: q.Held, Limit: q.Limit})
+	return s.Service.PrepareRunList(ctx, apicontract.Caller{Actor: a}, apicontract.RunListArgs{Repo: q.Repo, Before: q.Before, Ref: q.Ref, RefGlob: q.RefGlob, Status: string(q.Status), Latest: q.Latest, Own: q.Own, Held: q.Held, Limit: q.Limit, Upstreams: q.Upstreams})
 }
 func (s *testService) Status(ctx context.Context, a actor.Actor, q viewQuery) (stepmodel.RunSummary, error) {
 	if q.ID != "" && q.Repo == "" {
@@ -166,6 +166,7 @@ type viewQuery struct {
 	Status             stepmodel.RunStatus
 	Latest, Own, Held  bool
 	Until              string
+	Upstreams          []string
 }
 type actionInput struct {
 	ID, Reason, What string

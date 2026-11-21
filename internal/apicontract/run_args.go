@@ -31,16 +31,17 @@ type RunGetArgs struct {
 }
 
 type RunListArgs struct {
-	Before  string `json:"before,omitempty" desc:"Continue an older page using the record-ID cursor from the preceding reply." sensitive:"false" position:"0"`
-	Held    bool   `json:"held,omitempty" desc:"Select runs with an active assistance hold." sensitive:"false" position:"0"`
-	Latest  bool   `json:"latest,omitempty" desc:"Return the latest visible run for each matching repository and reference." sensitive:"false" position:"0"`
-	Limit   int    `json:"limit,omitempty" desc:"Bound the number of records returned; continue with the cursor in the reply." min:"0" max:"100" default:"50" sensitive:"false" position:"0"`
-	Own     bool   `json:"own,omitempty" desc:"Include only observations attributed to the authenticated identity." sensitive:"false" position:"0"`
-	Ref     string `json:"ref,omitempty" desc:"Select a branch, tag or exact revision in the authorized repository." sensitive:"false" position:"0"`
-	RefGlob string `json:"ref_glob,omitempty" desc:"Filter run references with a shell-style pattern before pagination." sensitive:"false" position:"0"`
-	Repo    string `json:"repo,omitempty" desc:"Select a visible repository by bare name or canonical upstream/organization/name." format:"repo" sensitive:"false" position:"0"`
-	Status  string `json:"status,omitempty" desc:"Filter by the committed public state; run success and publication delivery are separate facts." sensitive:"false" position:"0"`
-	View    string `json:"view,omitempty" desc:"Choose all visible runs or the older history view while preserving the returned cursor." default:"all" sensitive:"false" position:"0"`
+	Before    string   `json:"before,omitempty" desc:"Continue an older page using the record-ID cursor from the preceding reply." sensitive:"false" position:"0"`
+	Held      bool     `json:"held,omitempty" desc:"Select runs with an active assistance hold." sensitive:"false" position:"0"`
+	Latest    bool     `json:"latest,omitempty" desc:"Return the latest visible run for each matching repository and reference." sensitive:"false" position:"0"`
+	Limit     int      `json:"limit,omitempty" desc:"Bound the number of records returned; continue with the cursor in the reply." min:"0" max:"100" default:"50" sensitive:"false" position:"0"`
+	Own       bool     `json:"own,omitempty" desc:"Include only observations attributed to the authenticated identity." sensitive:"false" position:"0"`
+	Ref       string   `json:"ref,omitempty" desc:"Select a branch, tag or exact revision in the authorized repository." sensitive:"false" position:"0"`
+	RefGlob   string   `json:"ref_glob,omitempty" desc:"Filter run references with a shell-style pattern before pagination." sensitive:"false" position:"0"`
+	Repo      string   `json:"repo,omitempty" desc:"Select a visible repository by bare name or canonical upstream/organization/name." format:"repo" sensitive:"false" position:"0"`
+	Status    string   `json:"status,omitempty" desc:"Filter by the committed public state; run success and publication delivery are separate facts." sensitive:"false" position:"0"`
+	Upstreams []string `json:"upstreams,omitempty" desc:"Select runs of repositories under these upstream names before pagination; omission includes every visible upstream." maxItems:"32" sensitive:"false" position:"0"`
+	View      string   `json:"view,omitempty" desc:"Choose all visible runs or the older history view while preserving the returned cursor." default:"all" sensitive:"false" position:"0"`
 }
 
 type RunLogsArgs struct {

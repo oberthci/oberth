@@ -279,6 +279,11 @@
         "Position": 0
       },
       {
+        "Name": "upstreams",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
         "Name": "view",
         "Sensitive": false,
         "Position": 0

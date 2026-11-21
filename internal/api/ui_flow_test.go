@@ -33,6 +33,24 @@ func TestUIBrowserFlowOverHTTP(t *testing.T) {
 	assertSuccess(t, rpc(f, "run_hold_list", map[string]any{"id": "12345678"}))
 }
 
+// The run list's upstream selector reaches run_list as one comma-separated
+// parameter that decodes to a list; more names than the bound are refused.
+func TestUIRunListUpstreamsQuery(t *testing.T) {
+	list := &fake.Handler[apicontract.RunListArgs, apicontract.RunPage]{Value: apicontract.RunPage{Runs: []apicontract.RunRecord{}}}
+	f := setup(t, func(_ *api.Config, b *apicontract.Bindings) { b.RunList.Handler = list })
+	assertSuccess(t, request(f, "GET", "/api/runs?limit=50&repo=origin/team/widget&upstreams=origin,mirror", nil))
+	inputs, _, _ := list.Observed()
+	if len(inputs) != 1 || strings.Join(inputs[0].Upstreams, " ") != "origin mirror" || inputs[0].Repo != "origin/team/widget" {
+		t.Fatalf("upstreams did not reach run_list: %+v", inputs)
+	}
+	if w := request(f, "GET", "/api/runs?upstreams="+strings.Repeat("u,", 32)+"u", nil); w.Code != 400 {
+		t.Fatalf("33 upstreams accepted: %d %s", w.Code, w.Body.String())
+	}
+	if inputs, _, _ = list.Observed(); len(inputs) != 1 {
+		t.Fatal("refused query reached run_list")
+	}
+}
+
 func TestUIRefusalAndAuthenticationFlow(t *testing.T) {
 	refused := publicerr.New(publicerr.Conflict, "This run cannot be cancelled.", "Read the current run.", nil)
 	refused.Detail = "complete server detail"
