@@ -35,7 +35,7 @@ func TestStatusReasonsAreShortCatalogueLiterals(t *testing.T) {
 			entries += catalogueLiterals(t, fn, sharedCatalogueBindings(t, fn))
 			catalogues++
 		}
-		if slices.Contains([]string{"literalMessages", "parameterMessages", "nativeMessages"}, fn.Name.Name) {
+		if slices.Contains([]string{"literalMessages", "parameterMessages", "nativeMessages", "grantMessages"}, fn.Name.Name) {
 			entries += catalogueLiterals(t, fn, nil)
 			catalogues++
 		}
@@ -43,7 +43,7 @@ func TestStatusReasonsAreShortCatalogueLiterals(t *testing.T) {
 			assertReasonLiteral(t, fn)
 		}
 	}
-	if catalogues != 4 || entries != len(messages()) {
+	if catalogues != 5 || entries != len(messages()) {
 		t.Fatal("catalogue coverage mismatch", catalogues, entries, len(messages()))
 	}
 }

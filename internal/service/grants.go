@@ -23,7 +23,7 @@ func grantInput(q apicontract.AccessAllowArgs) (stateport.GrantChange, error) {
 	}
 	g := stateport.GrantChange{Kind: kind, Repository: q.Repo, File: q.Workflow, Step: q.Step, Path: q.Secret, Tier: q.Tier}
 	switch kind {
-	case stateport.GrantStorePath, stateport.GrantSecret, stateport.GrantConfigMap, stateport.GrantImagePull, stateport.GrantAudience:
+	case stateport.GrantStorePath, stateport.GrantSecret, stateport.GrantConfigMap, stateport.GrantImagePull, stateport.GrantDevice, stateport.GrantAudience:
 		if e := grantTuple(q, g); e != nil {
 			return g, e
 		}

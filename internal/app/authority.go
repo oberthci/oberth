@@ -87,7 +87,7 @@ func (a authoritySnapshot) apply(ctx context.Context, g stateport.GrantChange) e
 		return nil
 	}
 
-	kind := map[stateport.GrantKind]string{stateport.GrantStorePath: "secret", stateport.GrantSecret: "cluster-secret", stateport.GrantConfigMap: "configmap", stateport.GrantImagePull: "image-pull-secret", stateport.GrantPVC: "pvc", stateport.GrantAudience: "identity"}[g.Kind]
+	kind := map[stateport.GrantKind]string{stateport.GrantStorePath: "secret", stateport.GrantSecret: "cluster-secret", stateport.GrantConfigMap: "configmap", stateport.GrantImagePull: "image-pull-secret", stateport.GrantPVC: "pvc", stateport.GrantDevice: "device", stateport.GrantAudience: "identity"}[g.Kind]
 	if kind == "" {
 		return fmt.Errorf("unknown authority kind %q", g.Kind)
 	}

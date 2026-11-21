@@ -196,8 +196,8 @@ func (g *graph) missingGrant(n *node, kind, value, where string) {
 	switch kind {
 	case "secret", "identity":
 		code = "grant"
-	case "pvc":
-		code = "pvc"
+	case "pvc", deviceGrant:
+		code = kind
 	}
 	f := finding(where, code)
 	key := workflowpolicy.GrantKey{Key: identityname.Key{Repository: g.request.Repository, File: g.request.SelectedFile, Step: n.template.Name}, Path: value}

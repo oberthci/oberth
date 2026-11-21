@@ -34,6 +34,20 @@ func TestAuthorityAdapterPreservesTierAndExactStepGrants(t *testing.T) {
 
 }
 
+func TestDeviceGrantReachesAdmissionAsExactStepEvidence(t *testing.T) {
+	t.Parallel()
+	q := admissioncontract.PrepareRequest{}
+	p := argoworkflow.Policy{PVCClaims: map[string]bool{}}
+	g := stateport.GrantChange{Kind: stateport.GrantDevice, Repository: "origin/team/widget", File: ".oberth/build.yaml", Step: "vm-test", Path: "devices.kubevirt.io/kvm"}
+	if err := (authoritySnapshot{request: &q, policy: &p, revision: "7"}).apply(t.Context(), g); err != nil {
+		t.Fatal(err)
+	}
+	want := admissioncontract.GrantEvidence{Repository: g.Repository, File: g.File, Step: g.Step, Path: g.Path, Kind: "device", Revision: "7", State: admissioncontract.StateVerified}
+	if len(q.Grants) != 1 || q.Grants[0] != want || len(p.PVCClaims) != 0 {
+		t.Fatal("device grant changed on its way to admission", q.Grants, p.PVCClaims)
+	}
+}
+
 func TestCapabilityJSONFromServiceReachesAdmission(t *testing.T) {
 	t.Parallel()
 	a := AuthorityReader{config: AuthorityConfig{ServerNamespace: "oberth", ArgoNamespace: "argo", Namespace: "ci"}}

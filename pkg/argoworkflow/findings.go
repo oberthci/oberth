@@ -21,7 +21,7 @@ func validGrantRequest(key workflowpolicy.GrantKey) bool {
 }
 
 func grantableRequest(key workflowpolicy.GrantKey, kind, value string) bool {
-	return validGrantRequest(key) && (kind == "secret" || kind == "identity" || publicClaim(value))
+	return validGrantRequest(key) && (kind == "secret" || kind == "identity" || kind == deviceGrant || publicClaim(value))
 }
 
 func (g *graph) commandFile() string {

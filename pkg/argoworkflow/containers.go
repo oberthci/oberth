@@ -50,6 +50,7 @@ func (g *graph) container(c containerAt, n *node, where string, allowed map[stri
 		}
 	}
 	g.environment(c.container, n, where)
+	g.devices(c.container, n, where)
 	g.mounts(c.container.VolumeMounts, c.container.VolumeDevices, where, allowed)
 }
 func reservedContainer(name string, main bool) bool {

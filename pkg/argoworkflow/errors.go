@@ -25,6 +25,7 @@ func messages() map[string]message {
 	catalogue := literalMessages()
 	maps.Copy(catalogue, parameterMessages())
 	maps.Copy(catalogue, nativeMessages())
+	maps.Copy(catalogue, grantMessages())
 	catalogue["store_config"] = message{reason, remedy}
 	catalogue["store_unverified"] = message{"Secret store configuration is unverified", remedy}
 	return catalogue
@@ -45,6 +46,17 @@ func nativeMessages() map[string]message {
 		"native_more": {"more native faults remain", "The 20 faults listed are a sample; fix them and validate again to see the rest."},
 		"native_work": {"native validation exceeds its work limit", "Reduce independent validation scopes and references to at most 65,536 inspection operations."},
 		"native":      {"native Workflow schema validation failed", "Correct the native template, input or invocation described in the detail."},
+	}
+}
+
+// grantMessages are the refusals of a field that needs an administrator grant.
+func grantMessages() map[string]message {
+	return map[string]message{
+		"shared_grant": {"shared templates inherit no consumer grants", "Remove the selector or put this step in the repository file before granting it."},
+		"read":         {"field reads unapproved cluster data", "Remove the field, or ask the operator to grant this cluster object to this step."},
+		"grant":        {"credential declaration has no exact operator grant", "Ask the operator to approve this repository, file, step, path and exact audience."},
+		"pvc":          {"PVC has no repository grant", "Use an allowed repository PVC, or ask the operator for its exact CI or release grant."},
+		"device":       {"device resource has no step grant", "Remove the request, or ask the operator to grant this resource to this step."},
 	}
 }
 
@@ -76,7 +88,6 @@ func literalMessages() map[string]message {
 		"image":                 {"image is outside the allowed registries", "Use an image under an allowed prefix or ask the operator to allow this registry."},
 		"http":                  {"HTTP templates are not supported", "Call the endpoint from a container step instead."},
 		"plugin":                {"plugin templates are not supported", "Call the endpoint from a container step instead."},
-		"shared_grant":          {"shared templates inherit no consumer grants", "Remove the selector or put this step in the repository file before granting it."},
 		"cluster_kind":          {"cluster-scoped kinds cannot be changed by a pipeline", "Grant only namespaced resource kinds."},
 		"projection":            {"projected source type is not supported", "Use downward API, a granted Secret or ConfigMap, or an Oberth token projection."},
 		"volume":                {"volume source type is not supported", "Use a granted PVC instead."},
@@ -88,7 +99,6 @@ func literalMessages() map[string]message {
 		"release_parameter":     {"release parameter belongs to the server", "Remove this argument or global output; a verified release supplies its value."},
 		"reserved":              {"field belongs to Oberth or the native executor", "Remove this field or rename it outside the reserved names."},
 		"host":                  {"field grants access to the node", "Remove host access and use Pod-local storage, networking and containers."},
-		"read":                  {"field reads unapproved cluster data", "Remove the field, or ask the operator to grant this cluster object to this step."},
 		"patch":                 {"Pod patch can replace the assigned identity", "Remove podSpecPatch and declare native fields directly."},
 		"identity":              {"verified execution accounts are required", "Ask the operator to configure and verify the pipeline and resource accounts."},
 		"reference":             {"named namespaced template reference is required", "Use a literal namespaced templateRef and an existing named template."},
@@ -100,11 +110,9 @@ func literalMessages() map[string]message {
 		"source_result":         {"result of a source step is not readable", "Write the value to a file and use an output parameter."},
 		"artifact":              {"artifact origin or destination is unsafe", "Use an ordinary artifact location or the source plugin, and literal paths outside protected credentials."},
 		"path":                  {"path is reserved, unclean or overlaps source", "Choose a clean path somewhere else, outside reserved paths and source mounts."},
-		"grant":                 {"credential declaration has no exact operator grant", "Ask the operator to approve this repository, file, step, path and exact audience."},
 		"audience":              {"identity token audience is empty", "Set an explicit audience and ask the operator to grant that exact audience."},
 		"token":                 {"credential projection must be read-only in the main container", "Use one granted audience, 600–3600 seconds, and one read-only main mount; keep helpers separate."},
 		"resource_namespace":    {"resource manifest has no namespace", "Set metadata.namespace explicitly to the granted deployment namespace."},
-		"pvc":                   {"PVC has no repository grant", "Use an allowed repository PVC, or ask the operator for its exact CI or release grant."},
 		"capability":            {"resource object, namespace or action is not granted", "Grant the exact namespace, action and account; use at most 32 kinds with names of at most 63 bytes."},
 		"resource":              {"resource manifest envelope is invalid", "Use one inline object with exact envelope keys and only Workflow identity substitutions."},
 		"schedule":              {"schedule entry must match the exact run trigger", "Use a literal entry of at most 64 bytes only for a schedule trigger."},

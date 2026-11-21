@@ -62,7 +62,7 @@ func checkGrantKinds(t *testing.T, f AdministrationFixture) {
 	ctx := t.Context()
 	f.Repository(t, "origin/team/hidden")
 	initial := administrationState(t, f)
-	kinds := []stateport.GrantKind{stateport.GrantStorePath, stateport.GrantSecret, stateport.GrantConfigMap, stateport.GrantImagePull, stateport.GrantPVC, stateport.GrantAudience, stateport.GrantCapability}
+	kinds := []stateport.GrantKind{stateport.GrantStorePath, stateport.GrantSecret, stateport.GrantConfigMap, stateport.GrantImagePull, stateport.GrantPVC, stateport.GrantDevice, stateport.GrantAudience, stateport.GrantCapability}
 	for _, kind := range kinds {
 		g := administrativeGrant(kind)
 		out, err := f.Port.ChangeGrant(ctx, administrativeAction(string(kind)), g)

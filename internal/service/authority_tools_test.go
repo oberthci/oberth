@@ -18,7 +18,7 @@ func TestGrantKindsAndCapabilityRefusals(t *testing.T) {
 	t.Parallel()
 	p := people(t)
 	ctx := t.Context()
-	for _, kind := range []string{"store_path", "secret", "configmap", "image_pull_secret", "identity"} {
+	for _, kind := range []string{"store_path", "secret", "configmap", "image_pull_secret", "device", "identity"} {
 		q := apicontract.AccessAllowArgs{Repo: repository, Kind: kind, Workflow: ".oberth/build.yaml", Step: "build", Secret: "same/path"}
 		if kind == "identity" {
 			q.Secret, q.Audience = "identity", "same/path"
@@ -29,10 +29,10 @@ func TestGrantKindsAndCapabilityRefusals(t *testing.T) {
 		}
 	}
 	snapshot, e := p.state.Grants(ctx, nil)
-	if e != nil || len(snapshot.Grants) != 5 || len(p.publish.Snapshot.Grants) != 5 {
+	if e != nil || len(snapshot.Grants) != 6 || len(p.publish.Snapshot.Grants) != 6 {
 		t.Fatal("grant kinds collapsed", snapshot, e)
 	}
-	for _, q := range []apicontract.AccessAllowArgs{{Repo: repository, Kind: "unknown"}, {Repo: repository, Workflow: "../escape", Step: "build", Secret: "path"}, {Repo: repository, Workflow: ".oberth/build.yaml", Secret: "path"}, {Repo: repository, Kind: "pvc", Claim: "claim", Tier: "other"}} {
+	for _, q := range []apicontract.AccessAllowArgs{{Repo: repository, Kind: "unknown"}, {Repo: repository, Workflow: "../escape", Step: "build", Secret: "path"}, {Repo: repository, Workflow: ".oberth/build.yaml", Secret: "path"}, {Repo: repository, Kind: "pvc", Claim: "claim", Tier: "other"}, {Repo: repository, Kind: "device", Workflow: ".oberth/build.yaml", Step: "build", Secret: "devices.kubevirt.io/kvm", Tier: "ci"}} {
 		if _, e = p.f.s.PrepareAccessAllow(ctx, adminCaller(), q); e == nil {
 			t.Fatal("invalid grant accepted", q)
 		}

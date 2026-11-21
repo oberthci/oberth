@@ -77,7 +77,7 @@ Revocation cannot retract copied data. Issue bodies are plain text.
 ## Grants and secrets
 
 Use `oberth access list` before changing grants: it identifies repository, file, step and secret
-path, not stored values or proof of a read. Follow
+path, not stored values or proof of a read. A `device` grant hands one step a node's device. Follow
 [secret writes](pipelines.md#secrets-and-identity). `oberth access revoke` revokes the grant and
 deletes its value in both tiers. If it reports `Grant revoked; secret still stored.`, repair the
 store and repeat. Revocation cannot retract read material. `oberth access dismiss` handles pending

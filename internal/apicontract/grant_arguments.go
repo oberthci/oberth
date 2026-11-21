@@ -13,7 +13,7 @@ func grantSelectors() []string {
 // is store_path; an unknown kind has no row.
 func GrantArguments(kind string) ([]string, bool) {
 	switch kind {
-	case "", "store_path", "secret", "configmap", "image_pull_secret":
+	case "", "store_path", "secret", "configmap", "image_pull_secret", "device":
 		return []string{"repo", "workflow", "step", "secret"}, true
 	case "identity":
 		return []string{"repo", "workflow", "step", "secret", "audience"}, true

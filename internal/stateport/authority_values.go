@@ -23,13 +23,14 @@ const (
 	GrantConfigMap  GrantKind = "configmap"
 	GrantImagePull  GrantKind = "image_pull_secret"
 	GrantPVC        GrantKind = "pvc"
+	GrantDevice     GrantKind = "device"
 	GrantAudience   GrantKind = "identity"
 	GrantCapability GrantKind = "capability"
 )
 
 func (k GrantKind) Valid() bool {
 	switch k {
-	case GrantStorePath, GrantSecret, GrantConfigMap, GrantImagePull, GrantPVC, GrantAudience, GrantCapability:
+	case GrantStorePath, GrantSecret, GrantConfigMap, GrantImagePull, GrantPVC, GrantDevice, GrantAudience, GrantCapability:
 		return true
 	}
 	return false
