@@ -47,9 +47,10 @@ func Classify(err error) *Error {
 		}
 		return strings.Compare(a.remedy, b.remedy)
 	})
+	command, contexts := classifiedCommand(tree.refusals, selected.err.Code(), contexts)
 	slices.Sort(details)
 	slices.Sort(contexts)
-	return &Error{ID: id, Context: slices.Compact(contexts), Detail: strings.Join(slices.Compact(details), "\n"), code: selected.err.Code(), details: slices.Compact(messages), cause: err}
+	return &Error{ID: id, Context: slices.Compact(contexts), Detail: strings.Join(slices.Compact(details), "\n"), code: selected.err.Code(), details: slices.Compact(messages), command: command, cause: err}
 }
 
 // Permanent reports whether every refusal in err's tree is the caller's to fix.

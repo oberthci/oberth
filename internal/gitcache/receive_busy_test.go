@@ -11,6 +11,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitcache/gittest"
+	"github.com/oberthci/oberth/internal/publicerr"
 )
 
 func TestPendingDeliveryDoesNotClaimUnreadPushWasSaved(t *testing.T) {
@@ -43,12 +44,23 @@ func TestPendingDeliveryDoesNotClaimUnreadPushWasSaved(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "previous push needs attention") || !strings.Contains(err.Error(), "oberth receive outbox") || strings.Contains(err.Error(), "push saved") {
 		t.Fatal("misleading second-push refusal", err)
 	}
+	requireRetryCommand(t, err, r.Repository)
 	after, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatal("unread push changed the reservation", err)
 	}
 	if refs := f.Git(t, f.Store(), "for-each-ref", "--format=%(refname)", "refs/heads"); strings.Contains(refs, "second") {
 		t.Fatal("unread push moved refs", refs)
+	}
+}
+
+// requireRetryCommand checks that the refusal, as a pusher reads it, names the
+// administrator's retry of this repository's delivery.
+func requireRetryCommand(t *testing.T, err error, repository string) {
+	t.Helper()
+	command := "Administrator: oberth receive outbox retry --repo '" + repository + "'"
+	if !strings.Contains(err.Error(), command) || !strings.Contains(publicerr.Classify(err).Error(), command) {
+		t.Fatal("busy refusal does not name the administrator's retry", err)
 	}
 }
 

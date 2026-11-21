@@ -39,6 +39,7 @@ type Error struct {
 	Detail  string
 	code    Code
 	details []message
+	command string
 	cause   error
 }
 
@@ -92,6 +93,9 @@ func (e *Error) Error() string {
 	if e != nil && e.Detail != "" {
 		text += "\n" + e.Detail
 	}
+	if command := e.Command(); command != "" {
+		text += "\n" + AdministratorLine(command)
+	}
 	return text
 }
 
@@ -117,7 +121,7 @@ func (e *Error) MarshalJSON() ([]byte, error) {
 		Reason  string   `json:"reason"`
 		Remedy  string   `json:"remedy"`
 		Detail  string   `json:"detail,omitempty"`
-	}{e.ID, e.Context, e.Code(), e.Reason(), e.Remedy(), e.detailText()})
+	}{e.ID, e.publicContext(), e.Code(), e.Reason(), e.Remedy(), e.detailText()})
 }
 func unknown(cause error) *Error {
 	return &Error{code: Invariant, cause: cause}

@@ -9,6 +9,7 @@ import (
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/identityname"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -113,7 +114,7 @@ func (g *graph) credentials(n *node) {
 		}
 		f := finding(n.path, code)
 		f.Installation = true
-		f.Command = "oberth secretstore check"
+		f.Command = publicerr.SecretStoreCheckCommand()
 		g.findings = append(g.findings, f)
 	}
 }

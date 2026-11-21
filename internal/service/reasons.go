@@ -114,7 +114,7 @@ func diagnostics() []diagnostic {
 		{publicerr.Forbidden, "This run cannot provide publication evidence.", "Use an unassisted passing run for the exact commit."},
 		{publicerr.Unavailable, "Publication was interrupted.", "Wait for recovery or run publish_retry on this publication."},
 		{publicerr.InvalidInput, "The fresh default-branch promotion policy is invalid.", "Correct .oberth/promotion.yaml on the default branch and retry."},
-		{publicerr.Forbidden, "This repository does not allow uplink promotion.", "Ask an administrator to enable uplinks_may_promote in the default-branch policy."},
+		{publicerr.Forbidden, "This repository does not allow uplink promotion.", "Ask an administrator to promote it, or to enable uplinks_may_promote in the default-branch policy."},
 		{publicerr.Forbidden, "The exact source lacks passing unassisted branch evidence.", "Push and pass branch CI for this exact commit, then promote again."},
 		{publicerr.Conflict, "The source conflicts with the current default branch.", "Resolve the conflicts on a branch, pass CI and promote its exact commit."},
 		{publicerr.Forbidden, "Sync cannot publish this protected branch or run.", "Use promote for the default branch and release admission for tags."},
@@ -143,6 +143,21 @@ func issueReadAlone(id int64) *publicerr.Error {
 func refuse(p problem) *publicerr.Error {
 	d := diagnostics()[p]
 	return publicerr.New(d.code, d.reason, d.remedy, nil)
+}
+
+// archivedRepository carries the command that reactivates the caller's own repository.
+func archivedRepository(repo string) error {
+	return refuse(archived).WithCommand(publicerr.UnarchiveCommand(repo))
+}
+
+// uplinkPromotion carries the administrator's promotion of the exact requested
+// commit, which the default-branch policy does not restrict.
+func uplinkPromotion(repo, sha string) error {
+	p := refuse(promotionForbidden)
+	if validID(sha) {
+		p = p.WithCommand(publicerr.PromoteCommand(repo, sha))
+	}
+	return p
 }
 
 // grantArgument names the access argument a grant kind needs or refuses.

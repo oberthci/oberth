@@ -72,7 +72,7 @@ func (s *Service) decidePromotion(ctx context.Context, a actor.Actor, q apicontr
 	}
 	d.repo = r
 	if r.Archived {
-		return d, refuse(archived)
+		return d, archivedRepository(r.Canonical)
 	}
 	head, policy, err := s.promotionPolicy(ctx, r.Canonical)
 	if err != nil {
@@ -80,7 +80,7 @@ func (s *Service) decidePromotion(ctx context.Context, a actor.Actor, q apicontr
 	}
 	d.head = head
 	if !a.Admin && !policy.UplinksMayPromote {
-		return d, refuse(promotionForbidden)
+		return d, uplinkPromotion(r.Canonical, q.SHA)
 	}
 	if q.Branch != "" && q.Branch != head.Name && q.Branch != strings.TrimPrefix(head.Name, "refs/heads/") {
 		return d, bad("branch")

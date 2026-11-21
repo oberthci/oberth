@@ -5,6 +5,7 @@ import "github.com/oberthci/oberth/internal/publicerr"
 // RefusalError keeps fixed guidance separate from internal field attribution.
 type RefusalError struct {
 	reason, remedy string
+	command        string
 	Field          string
 	Detail         string
 }
@@ -16,10 +17,19 @@ func (e *RefusalError) Error() string {
 	if e.Detail != "" {
 		text += " " + e.Detail
 	}
+	if e.command != "" {
+		text += "\n" + publicerr.AdministratorLine(e.command)
+	}
 	return text
 }
 func (e *RefusalError) Unwrap() error {
-	return publicerr.New(publicerr.InvalidInput, e.reason, e.remedy, nil)
+	return publicerr.New(publicerr.InvalidInput, e.reason, e.remedy, nil).WithCommand(e.command)
+}
+
+// pushBusy refuses a push while the repository's earlier delivery waits for
+// an administrator, and names the retry of that delivery.
+func pushBusy(repository string) error {
+	return &RefusalError{reason: reasonPushBusy, remedy: remedyPushBusy, command: publicerr.ReceiveRetryCommand(repository), Field: "previous receive"}
 }
 
 // Conditions that callers can remedy have their own literal guidance.
@@ -39,8 +49,6 @@ func refusalText(field string) (string, string) {
 		return reasonForward, remedyForward
 	case "newer local head":
 		return reasonMoved, remedyMoved
-	case "previous receive":
-		return reasonPushBusy, remedyPushBusy
 	case "pending receive":
 		return reasonPending, remedyPending
 	}

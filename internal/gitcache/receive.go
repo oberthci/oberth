@@ -86,7 +86,7 @@ func (c *Cache) Receive(ctx context.Context, r ReceiveRequest) error {
 		return err
 	}
 	defer func() { <-c.repositoryGate(p + "/receive") }()
-	if err = c.beforeReceive(ctx, p, r.Deliver); err != nil {
+	if err = c.beforeReceive(ctx, p, r); err != nil {
 		return c.reportReceiveFailure(r.Diagnostics, err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -107,14 +107,14 @@ func acquireReceive(ctx context.Context, slot chan struct{}, diagnostics io.Writ
 	return acquireContext(ctx, slot)
 }
 
-func (c *Cache) beforeReceive(ctx context.Context, p string, deliver func(context.Context, ReceiveEvent) ([]string, error)) error {
+func (c *Cache) beforeReceive(ctx context.Context, p string, r ReceiveRequest) error {
 	c.activeMu.Lock()
 	blocked := c.replayProblems[p] != ""
 	c.activeMu.Unlock()
 	if blocked {
-		return refuse("previous receive")
+		return pushBusy(r.Repository)
 	}
-	_, err := c.replay(ctx, p, deliver)
+	_, err := c.replay(ctx, p, r.Deliver)
 	if err == nil {
 		return nil
 	}
@@ -125,7 +125,7 @@ func (c *Cache) beforeReceive(ctx context.Context, p string, deliver func(contex
 	var delivery *deliveryPendingError
 	var cleanup *receiveCleanupPendingError
 	if errors.As(err, &delivery) || errors.As(err, &cleanup) {
-		return refuse("previous receive")
+		return pushBusy(r.Repository)
 	}
 	return err
 }

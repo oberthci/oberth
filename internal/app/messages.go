@@ -113,7 +113,7 @@ func refusal(code string, err error) *Refusal {
 		e.Detail = err.Error()
 		var public *publicerr.Error
 		if errors.As(err, &public) {
-			e.Problems = []admissioncontract.Finding{{Code: code, Reason: public.Reason(), Remedy: public.Remedy()}}
+			e.Problems = []admissioncontract.Finding{{Code: code, Reason: public.Reason(), Remedy: public.Remedy(), Command: public.Command()}}
 			e.Detail = public.Detail
 		}
 	}

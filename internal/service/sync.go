@@ -35,7 +35,7 @@ func (s *Service) syncIntent(ctx context.Context, a actor.Actor, q apicontract.S
 		return model.Publication{}, err
 	}
 	if r.Archived {
-		return model.Publication{}, refuse(archived)
+		return model.Publication{}, archivedRepository(r.Canonical)
 	}
 	head, err := s.syncHead(ctx, r.Canonical, q)
 	if err != nil {

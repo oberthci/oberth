@@ -61,7 +61,8 @@ func (s *Service) writeSecret(ctx context.Context, a actor.Actor, q apicontract.
 		return secretGranted(g, q)
 	})
 	if !granted {
-		return apicontract.Receipt{}, secretRefusal("grant")
+		grant := publicerr.Grant{Repo: q.Repo, File: q.Workflow, Step: q.Step, Path: q.Secret}
+		return apicontract.Receipt{}, secretRefusal("grant").WithCommand(publicerr.AccessAllowCommand("", grant))
 	}
 	account, err := s.secretAccount(identityname.Key{Repository: q.Repo, File: q.Workflow, Step: q.Step})
 	if err != nil {
@@ -108,7 +109,7 @@ func secretGranted(g stateport.GrantChange, q apicontract.SecretPutArgs) bool {
 	return g.Kind == stateport.GrantStorePath && !g.Revoke && !g.Dismiss && g.Repository == q.Repo && g.File == q.Workflow && g.Step == q.Step && g.Path == q.Secret
 }
 
-func secretRefusal(code string) error {
+func secretRefusal(code string) *publicerr.Error {
 	reason, remedy := "Secret store refused the write.", "Run oberth secretstore check, then retry."
 	kind := publicerr.Unavailable
 	switch code {

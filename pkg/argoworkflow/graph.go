@@ -9,6 +9,7 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"github.com/oberthci/oberth/internal/admissioncontract"
+	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/pkg/argoworkflow/defaults"
 )
@@ -84,7 +85,7 @@ func (g *graph) refuse(path, code string) {
 		if repo == "" {
 			repo = "<repo>"
 		}
-		f.Command = "oberth check --repo " + shellQuote(repo) + " --local " + shellQuote(g.commandFile())
+		f.Command = publicerr.CheckCommand(repo, g.commandFile())
 	}
 	g.findings = append(g.findings, f)
 }

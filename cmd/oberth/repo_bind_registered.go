@@ -75,12 +75,7 @@ func unavailableRepository(sources []apicontract.Upstream, u *url.URL, upstream 
 	if source, found := matchingUpstream(sources, u); found {
 		upstream = source.Name
 	}
-	command := "Administrator: oberth repo add " + shellArgument(u.Redacted())
-	if upstream != "" {
-		command += " --upstream " + shellArgument(upstream)
-	}
-	problem.Context = []string{command}
-	return problem
+	return problem.WithCommand(publicerr.RepoAddCommand(u.Redacted(), upstream))
 }
 
 func matchingUpstream(sources []apicontract.Upstream, u *url.URL) (apicontract.Upstream, bool) {

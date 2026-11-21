@@ -25,7 +25,7 @@ func (s *Service) Decide(ctx context.Context, e RefUpdate) (Decision, error) {
 		return Decision{}, err
 	}
 	if repo.Archived {
-		return Decision{}, refuse(archived)
+		return Decision{}, archivedRepository(repo.Canonical)
 	}
 	policy, err := s.c.Authority.KeyPolicy(ctx, a)
 	if err != nil {

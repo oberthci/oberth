@@ -9,6 +9,7 @@ import (
 
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"github.com/oberthci/oberth/internal/admissioncontract"
+	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 )
 
@@ -21,10 +22,6 @@ func validGrantRequest(key workflowpolicy.GrantKey) bool {
 
 func grantableRequest(key workflowpolicy.GrantKey, kind, value string) bool {
 	return validGrantRequest(key) && (kind == "secret" || kind == "identity" || publicClaim(value))
-}
-
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 func (g *graph) commandFile() string {
@@ -88,7 +85,7 @@ func (g *graph) missingCapability(path, namespace string, kind ResourceKind) {
 	g.requiredResources(&capability, kind)
 	raw, _ := json.Marshal(capability)
 	text := strings.NewReplacer(`\u003c`, "<", `\u003e`, ">").Replace(string(raw))
-	f.Command = "oberth workflow capability grant --repo " + shellQuote(repo) + " --capability " + shellQuote(text) + " --reason '<reason>'"
+	f.Command = publicerr.CapabilityGrantCommand(repo, text)
 	g.findings = append(g.findings, f)
 }
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/oberthci/oberth/internal/admissioncontract"
+	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/runtimeconfig"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 )
@@ -197,26 +198,17 @@ func templateYAMLFailure(cause error) bool {
 	return errors.As(cause, &syntax) || errors.As(cause, &typed) || errors.As(cause, &yaml)
 }
 func grantCommand(key workflowpolicy.GrantKey, kind string, release bool) string {
-	quote := shellQuote
 	if key.Repository == "" {
 		key.Repository = "<repo>"
 	}
-	command := "oberth access allow "
-	if kind == "pvc" {
-		tier := "ci"
-		if release {
-			tier = "release"
-		}
-		return command + "--kind pvc --tier " + tier + " " + quote(key.Repository) + " " + quote(key.Path)
+	grant := publicerr.Grant{Repo: key.Repository, File: key.File, Step: key.Step, Path: key.Path, Audience: key.Audience}
+	switch kind {
+	case "pvc":
+		return publicerr.ClaimAllowCommand(key.Repository, key.Path, release)
+	case "secret":
+		return publicerr.SecretPutCommand(grant)
 	}
-	if kind == "secret" {
-		return "oberth secret put --repo " + quote(key.Repository) + " --file " + quote(key.File) + " --step " + quote(key.Step) + " " + quote(key.Path) + " < <value-file>"
-	}
-	command += "--kind " + kind + " "
-	if key.Audience != "" {
-		command += "--audience " + quote(key.Audience) + " "
-	}
-	return command + quote(key.Repository) + " " + quote(key.File) + " " + quote(key.Step) + " " + quote(key.Path)
+	return publicerr.AccessAllowCommand(kind, grant)
 }
 
 func fileError(file string, err error) error {
