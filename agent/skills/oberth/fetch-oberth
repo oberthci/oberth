@@ -70,8 +70,8 @@ metadata_max=1048576
 # Generated from internal/releaseverify/release-cosign.pub by hack/release-pin.sh.
 cat > "$work/key" <<'OBERTH_RELEASE_PUBLIC_KEY'
 -----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE3PSDzfeovoxWRuZbit+NI8n5i4iQ
-3FGkRQnqaqKCzr2nShsjuHacVJK99ioJijpUUTPgKomr6hroJXi66Uj+Dg==
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+BjAXSPpjHKAdd9JXvEnpjv7iU9R
+4F/r3R2ylhe6PT3fXw3o/Va3i/qdzcEqH2aQnWyPREAHCnpaCc7LPux8BQ==
 -----END PUBLIC KEY-----
 OBERTH_RELEASE_PUBLIC_KEY
 openssl pkey -pubin -in "$work/key" -noout >/dev/null 2>&1 ||
