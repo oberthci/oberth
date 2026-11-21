@@ -9398,7 +9398,7 @@
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
     "docs/plans/c2-service-actions-and-history.md": "2bb78bb7ead2d62bc02a8b27ab219f5ff1bc61f505d29069ada6eea25590d2f8",
     "docs/plans/c3-wiring-and-submission.md": "c6e9feb88ec2e679a8435d686121a5ce7690e02abb3327549fcd0741974ac7d2",
-    "docs/plans/c4-admission-rules-and-plan.md": "64a9661d37c4189e6fea3bbb01e46e776f8d71ffc5dfff50e14b8b9bb5617905",
+    "docs/plans/c4-admission-rules-and-plan.md": "98ebfc0aefe1f869168ae36a4e3d2033a5ac52a7e377be3746bc38d880beb1b4",
     "docs/plans/c5-native-execution.md": "f82bcf8ee9b7264bfbb2c2be78740cd85eddcf9c11275aec5b89a2198a67c325",
     "docs/plans/c6-source-delivery.md": "4c93189706cde61d604d43941c357e037384817f9eb3559a483d98ee63630768",
     "docs/plans/c7-durable-state.md": "da4f70a16006b127881cb38d17c14f078d049951087470080cb4b49c8488a957",
@@ -12835,7 +12835,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c4-admission-rules-and-plan.md:216",
+      "spec": "docs/plans/c4-admission-rules-and-plan.md:218",
       "markers": [
         "**Delta:**"
       ],

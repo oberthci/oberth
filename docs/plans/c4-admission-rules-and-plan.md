@@ -190,7 +190,9 @@ Oberth owns the executor token projection. Template patches cannot touch that
 volume or executor containers.
 
 Admission refuses host paths, host namespaces, privileged containers and the server’s
-accounts or volumes in every carrier, including defaults. Additional sysctl,
+accounts or volumes in every carrier, including defaults. A container resource other than
+cpu, memory, ephemeral-storage and hugepages, such as a device plugin's device, needs an
+exact device grant for its repository, file and step. Additional sysctl,
 downward-field, archive and output-exposure restrictions are optional and off by
 default. Authored field names are case-sensitive; another spelling cannot widen a grant
 or replace a recorded source input.
