@@ -149,7 +149,7 @@ func prepareCachePaths(config Config) error {
 // it ends running first clones and waits for them before releasing it.
 func (c *Cache) Close() error {
 	c.stopDelivery()
-	c.clones.wait.Wait()
+	c.clones.close()
 	return c.rootLock.Close()
 }
 

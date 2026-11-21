@@ -29,7 +29,18 @@ type firstClone struct {
 type firstClones struct {
 	mu      sync.Mutex
 	running map[string]*firstClone
+	closed  bool
 	wait    sync.WaitGroup
+}
+
+// close refuses every later clone, then waits for the ones that started: a
+// clone starts under mu only while closed is false, so none starts once Wait
+// has begun.
+func (f *firstClones) close() {
+	f.mu.Lock()
+	f.closed = true
+	f.mu.Unlock()
+	f.wait.Wait()
 }
 
 // awaitClone waits within ctx for the first clone of repository, starting it
@@ -75,6 +86,11 @@ func (c *Cache) startClone(repository, p string) *firstClone {
 		return clone
 	}
 	clone := &firstClone{done: make(chan struct{})}
+	if c.clones.closed || c.ctx.Err() != nil {
+		clone.err = unavailable("initialize", context.Canceled)
+		close(clone.done)
+		return clone
+	}
 	c.clones.running[p] = clone
 	c.clones.wait.Go(func() {
 		ctx, cancel := context.WithTimeout(c.ctx, c.budgets.firstClone)

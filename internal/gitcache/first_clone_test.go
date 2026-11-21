@@ -161,6 +161,55 @@ func TestFirstCloneEndsAtItsBound(t *testing.T) {
 	}
 }
 
+// Once Close has begun no first clone starts: an Init afterwards fails
+// without cloning, and Inits racing Close leave no clone behind (run with
+// -race, which also checks the wait against a late start).
+func TestNoFirstCloneStartsOnceCloseBegins(t *testing.T) {
+	f := gittest.New(t)
+	cfg := reviewConfig(t, f)
+	_, log := slowForge(t, f, &cfg)
+	var mu sync.Mutex
+	upstreamReads := 0
+	upstream := cfg.Upstream
+	cfg.Upstream = func(ctx context.Context, repo string) (gitcache.Remote, error) {
+		mu.Lock()
+		upstreamReads++
+		mu.Unlock()
+		return upstream(ctx, repo)
+	}
+	closed, err := gitcache.New(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = closed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = closed.Init(t.Context(), gittest.Repository); err == nil {
+		t.Fatal("a closed cache cloned")
+	}
+	mu.Lock()
+	reads := upstreamReads
+	mu.Unlock()
+	if started, _ := os.ReadFile(log); len(started) != 0 || reads != 0 {
+		t.Fatal("a clone started after Close", string(started), reads)
+	}
+	for range 20 {
+		c, err := gitcache.New(t.Context(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		racing := make(chan error, 1)
+		go func() { racing <- shortInit(t, c) }()
+		if err = c.Close(); err != nil {
+			t.Fatal(err)
+		}
+		<-racing
+	}
+	if _, err = os.Stat(filepath.Join(cfg.Root, "origin", "team", "widget.git", "HEAD")); !os.IsNotExist(err) {
+		t.Fatal("a clone racing Close was published", err)
+	}
+}
+
 func TestCloseEndsARunningFirstClone(t *testing.T) {
 	f := gittest.New(t)
 	cfg := reviewConfig(t, f)
