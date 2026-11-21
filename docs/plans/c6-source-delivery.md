@@ -242,7 +242,7 @@ repositories. A manual schedule trigger uses ordinary admission; force bypasses 
   require 1856 MiB below the chart's 2 GiB default scratch limit. Stream blobs directly
   into local archives; remove Git scratch before releasing its slot. Directories/files
   are 0700/0600. Startup removes owned interrupted exports before serving; cleanup
-  failure refuses startup. C9 guards configured chart capacity.
+  failure refuses startup. C9 guards configured chart capacity. A first clone runs under the server lifetime for at most 30 minutes within the one-minute idle bound, one per repository; a caller whose deadline passes is told it continues, and a clone that ends after its caller left announces its refs only while the repository is registered under the same ID.
 
 - Plugin trust is an explicit HTTPS origin/CA/server name, without proxies, redirects or
   system-root fallback. Dial/TLS handshakes have 10-second bounds; response-header wait
