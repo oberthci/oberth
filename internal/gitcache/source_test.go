@@ -117,25 +117,48 @@ func TestRestoreRepinsBeforeDeletingOrphans(t *testing.T) {
 // repository: another repository is collected, archived and removable.
 func TestGoneOwnerStopsCollectionOnlyInItsRepository(t *testing.T) {
 	t.Parallel()
-	f := gittest.New(t)
-	gone := f.Bindings(strings.Repeat("a", 40))
-	gone[0].Revision.Repository = "origin/team/other"
-	c := f.Cache(t, func(context.Context, string) (gitcache.OwnerPage, error) {
-		return gitcache.OwnerPage{Owners: []gitcache.Owner{{ID: "gone", Bindings: gone}, {ID: "live", Bindings: f.Bindings(f.Commit)}}}, nil
-	})
-	if err := c.Init(t.Context(), "origin/team/other"); err != nil {
+	for _, root := range []string{"cache", "./cache/./"} {
+		t.Run(root, func(t *testing.T) {
+			t.Parallel()
+			f := gittest.New(t)
+			gone := f.Bindings(strings.Repeat("a", 40))
+			gone[0].Revision.Repository = "origin/team/other"
+			c := goneOwnerCache(t, f, f.Root+"/"+root, []gitcache.Owner{{ID: "gone", Bindings: gone}, {ID: "live", Bindings: f.Bindings(f.Commit)}})
+			if err := c.Keep(t.Context(), "orphan", f.Bindings(f.Commit)); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.GC(t.Context()); err == nil || !strings.Contains(err.Error(), "other.git") || strings.Contains(err.Error(), "widget.git") {
+				t.Fatal("gone owner's repository was collected, or another one was stopped", err)
+			}
+			refs := f.Git(t, f.Store(), "for-each-ref", "--format=%(refname)")
+			if strings.Contains(refs, "/orphan/") || !strings.Contains(refs, "/live/") {
+				t.Fatal(refs)
+			}
+		})
+	}
+}
+
+// goneOwnerCache builds a cache at root, which may be spelled uncleanly, holding
+// the fixture repository and an empty second one.
+func goneOwnerCache(t *testing.T, f *gittest.Fixture, root string, owners []gitcache.Owner) *gitcache.Cache {
+	t.Helper()
+	c, err := gitcache.New(t.Context(), gitcache.Config{
+		Root: root, Scratch: filepath.Join(f.Root, "scratch"), Binary: f.Binary,
+		LiveOwners: func(context.Context, string) (gitcache.OwnerPage, error) { return gitcache.OwnerPage{Owners: owners}, nil },
+		Upstream: func(context.Context, string) (gitcache.Remote, error) {
+			return gitcache.Remote{RepositoryID: 1, URL: f.Bare, DefaultBranch: "refs/heads/main"}, nil
+		}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Keep(t.Context(), "orphan", f.Bindings(f.Commit)); err != nil {
-		t.Fatal(err)
+	t.Cleanup(func() { _ = c.Close() })
+	for _, repo := range []string{gittest.Repository, "origin/team/other"} {
+		if err = c.Init(t.Context(), repo); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := c.GC(t.Context()); err == nil || !strings.Contains(err.Error(), "other.git") || strings.Contains(err.Error(), "widget.git") {
-		t.Fatal("gone owner's repository was collected, or another one was stopped", err)
-	}
-	refs := f.Git(t, f.Store(), "for-each-ref", "--format=%(refname)")
-	if strings.Contains(refs, "/orphan/") || !strings.Contains(refs, "/live/") {
-		t.Fatal(refs)
-	}
+	f.Git(t, f.Store(), "fetch", f.Bare, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
+	return c
 }
 func TestKeepVerifiesAllRootsBeforeTransaction(t *testing.T) {
 	t.Parallel()

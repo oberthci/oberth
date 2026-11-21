@@ -53,7 +53,7 @@ func (c *Cache) refreshRetention(ctx context.Context, p string) error {
 
 type collection struct {
 	live    map[string]bool
-	stalled map[string]error // repository path -> a live owner's gone source
+	stalled map[string]error // cleaned repository path -> a live owner's gone source
 	epoch   uint64
 }
 
@@ -62,7 +62,7 @@ func (c *Cache) collect(ctx context.Context, p string, snapshot collection) erro
 		return err
 	}
 	defer c.unlock(p)
-	if err := snapshot.stalled[p]; err != nil {
+	if err := snapshot.stalled[filepath.Clean(p)]; err != nil {
 		return err
 	}
 	active, err := c.restoreReceive(ctx, p, snapshot.live)
@@ -153,7 +153,7 @@ func (c *Cache) restoreOwners(ctx context.Context) (collection, error) {
 func (c *Cache) stall(snapshot collection, owner Owner, cause error) {
 	for repo := range bindingRoots(owner.Bindings) {
 		if p, err := c.path(repo); err == nil {
-			snapshot.stalled[p] = cause
+			snapshot.stalled[filepath.Clean(p)] = cause
 		}
 	}
 }
