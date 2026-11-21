@@ -4,10 +4,24 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"github.com/oberthci/oberth/internal/workflowpolicy"
+	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 )
+
+var errNoValue = errors.New("no value stored")
+
+// missingValue names the granted path that has no value and the command that
+// stores one; the step knows its path but not its repository, file or step,
+// which stay placeholders.
+func missingValue(path string) error {
+	problem := publicerr.New(publicerr.NotFound, "No value is stored for this path.", "An administrator stores one for this repository, file and step with secret put.", nil)
+	problem.Context = []string{"Path: " + path}
+	return problem.WithCommand(publicerr.SecretPutCommand(publicerr.Grant{Repo: "<repo>", File: "<file>", Step: "<step>", Path: path}))
+}
 
 // Writer satisfies the service's Put/Delete capability; it cannot read secrets.
 type Writer struct {
@@ -120,6 +134,9 @@ func (c *Client) Fetch(ctx context.Context, cfg Config, jwt []byte, paths []stri
 	defer func() { err = joinRevoke(ctx, c, token, err) }()
 	for _, path := range paths {
 		value, e := c.fetchOne(ctx, token, "/"+cfg.Mount+"/steps/"+name+"/"+path)
+		if errors.Is(e, errNoValue) {
+			return values, missingValue(path)
+		}
 		if e != nil {
 			return values, e
 		}
@@ -128,14 +145,20 @@ func (c *Client) Fetch(ctx context.Context, cfg Config, jwt []byte, paths []stri
 	return values, nil
 }
 
+// fetchOne reads one granted value. The store answers 404 for a path that
+// was granted but never written, which is the operator's missing secret put.
 func (c *Client) fetchOne(ctx context.Context, token []byte, path string) ([]byte, error) {
 	var r struct {
 		Data struct {
 			Value *string `json:"value"`
 		} `json:"data"`
 	}
-	if _, err := c.JSON(ctx, Request{Method: "GET", Path: path, Token: token}, &r); err != nil {
+	status, err := c.JSON(ctx, Request{Method: "GET", Path: path, Token: token, Accept: http.StatusNotFound}, &r)
+	if err != nil {
 		return nil, err
+	}
+	if status == http.StatusNotFound {
+		return nil, errNoValue
 	}
 	if r.Data.Value == nil {
 		return nil, refuse("response", nil)

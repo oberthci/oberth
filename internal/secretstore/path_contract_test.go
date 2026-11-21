@@ -2,9 +2,12 @@ package secretstore_test
 
 import (
 	"encoding/base64"
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 )
 
@@ -65,6 +68,33 @@ func checkFetchedPath(t *testing.T, path string, valid bool) {
 	}
 	if !valid && (len(backend.Calls) != 0 || values != nil) {
 		t.Fatal("refused fetch contacted store")
+	}
+}
+
+// fetchNames fetches oberth/policy/names for step-one, with or without a value.
+func fetchNames(t *testing.T, stored bool) (map[string][]byte, error) {
+	t.Helper()
+	writer, backend := boundedWriter(t)
+	backend.Resources = map[string]map[string]any{}
+	if stored {
+		backend.Resources["/oberth/steps/step-one/oberth/policy/names"] = map[string]any{"value": "dmFsdWU="}
+	}
+	claim := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"system:serviceaccount:oberth-runs:step-one"}`))
+	return writer.Client.Fetch(t.Context(), config(), []byte("header."+claim+".signature"), []string{"oberth/policy/names"})
+}
+
+func TestFetchOfGrantedPathWithoutValueNamesThePathAndSecretPut(t *testing.T) {
+	if values, err := fetchNames(t, true); err != nil || string(values["oberth/policy/names"]) != "value" {
+		t.Fatal("stored value was not delivered", err)
+	}
+	values, err := fetchNames(t, false)
+	var problem *publicerr.Error
+	if !errors.As(err, &problem) || values != nil || problem.Code() != publicerr.NotFound {
+		t.Fatal("a missing value was not reported as missing", err)
+	}
+	want := publicerr.SecretPutCommand(publicerr.Grant{Repo: "<repo>", File: "<file>", Step: "<step>", Path: "oberth/policy/names"})
+	if problem.Reason() != "No value is stored for this path." || !strings.Contains(problem.Remedy(), "secret put") || !slices.Equal(problem.Context, []string{"Path: oberth/policy/names"}) || want == "" || problem.Command() != want {
+		t.Fatal("missing value message differs", problem.Reason(), problem.Remedy(), problem.Context, problem.Command())
 	}
 }
 
