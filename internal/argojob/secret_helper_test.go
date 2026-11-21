@@ -16,7 +16,7 @@ import (
 	core "k8s.io/api/core/v1"
 )
 
-const secretHelperTestImage = "oberthci/oberth@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+const secretHelperTestImage = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 func TestSecretHelperPreparedPayload(t *testing.T) {
 	t.Parallel()
@@ -150,7 +150,7 @@ func checkHelperInstaller(t *testing.T, init wf.UserContainer) {
 
 func TestSecretHelperImageFaultRequiresOperator(t *testing.T) {
 	t.Parallel()
-	for _, image := range []string{"", "oberthci/oberth:dev", "oberthci/oberth@sha256:bad"} {
+	for _, image := range []string{"", "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:dev", "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:bad"} {
 		for _, declared := range []bool{false, true} {
 			w := secretSelectionWorkflow("container", declared)
 			w.Spec.Templates[2].Container.ReadinessProbe = &core.Probe{ProbeHandler: core.ProbeHandler{Exec: &core.ExecAction{Command: []string{"true"}}}}

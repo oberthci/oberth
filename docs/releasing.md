@@ -119,17 +119,17 @@ bash hack/release.sh sign
 "$RELEASE_TOOL" verify --dir "$RELEASE_DIR" --version "$VERSION"
 ```
 
-Signing prints “Release signature verified.”; local verification prints “Release verified.”
-Log in with a private password file, then push to the public repositories in the signed chart:
+Signing prints “Release signature verified.”; local verification prints “Release verified.” Log in
+as `oauth2accesstoken` with a short-lived access token or `_json_key` with a service-account key:
 
 ```sh
 export DOCKER_CONFIG="$RELEASE_PRIVATE/registry"
-go tool -modfile=hack/tools/crane.mod crane auth login index.docker.io -u "<registry-user>" \
-  --password-stdin < "<registry-password-file>"
+go tool -modfile=hack/tools/crane.mod crane auth login europe-west4-docker.pkg.dev \
+  -u "<registry-user>" --password-stdin < "<registry-password-file>"
 go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth.oci" \
-  "oberthci/oberth:$VERSION"
+  "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:$VERSION"
 go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth-source-plugin.oci" \
-  "oberthci/oberth-source-plugin:$VERSION"
+  "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin:$VERSION"
 "$RELEASE_TOOL" publish --dir "$RELEASE_DIR" --version "$VERSION" --origin "$RELEASE_ORIGIN" \
   --token-file "<publish-token-file>"
 bash hack/release.sh verify

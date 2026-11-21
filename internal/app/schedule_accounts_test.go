@@ -70,7 +70,7 @@ func assertScheduledSecretAccount(t *testing.T, f *fixture, accounts map[string]
 		w.Spec.Templates[0].Container.Command = []string{"oberth", "secretstore", "exec", "--", "true"}
 		return gitport.File{Path: file, Blob: strings.Repeat("c", 40), Mode: 0100644, Bytes: document(w)}, nil
 	}
-	f.d.Preparation.HelperImage = "oberthci/oberth@sha256:" + strings.Repeat("b", 64)
+	f.d.Preparation.HelperImage = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:" + strings.Repeat("b", 64)
 	s := f.new(t)
 	p, err := s.PrepareSchedule(t.Context(), r)
 	if err != nil {

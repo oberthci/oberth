@@ -116,8 +116,8 @@ spec:
           - -ec
           - |
             export DOCKER_CONFIG="$OBERTH_SECRETS_DIR/oberth/data/release/registry"
-            go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth.oci" "oberthci/oberth:$VERSION"
-            go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth-source-plugin.oci" "oberthci/oberth-source-plugin:$VERSION"
+            go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth.oci" "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:$VERSION"
+            go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth-source-plugin.oci" "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin:$VERSION"
         env:
           - {name: RELEASE_DIR, value: /work/shared/dist}
         volumeMounts: [{name: cache, mountPath: /cache}]

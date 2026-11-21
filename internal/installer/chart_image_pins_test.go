@@ -14,10 +14,10 @@ func TestRenderedImagesArePinned(t *testing.T) {
 	for _, release := range []bool{false, true} {
 		t.Run(map[bool]string{false: "development", true: "release"}[release], func(t *testing.T) {
 			var values map[string]any
-			products := []string{"oberthci/oberth:dev", "oberthci/oberth-source-plugin:dev"}
+			products := []string{"europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:dev", "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin:dev"}
 			if release {
 				values = map[string]any{"imageDigest": "sha256:" + strings.Repeat("b", 64), "sourcePluginImageDigest": "sha256:" + strings.Repeat("c", 64)}
-				products = []string{"oberthci/oberth@sha256:" + strings.Repeat("b", 64), "oberthci/oberth-source-plugin@sha256:" + strings.Repeat("c", 64)}
+				products = []string{"europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:" + strings.Repeat("b", 64), "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin@sha256:" + strings.Repeat("c", 64)}
 			}
 			assertRenderedImagePins(t, rendered(t, values), products)
 		})

@@ -2,9 +2,9 @@ nodePorts:
   https: 30443
   ssh: 30022
 sharedWorkflowDefinitions: []
-imageRepository: oberthci/oberth
+imageRepository: europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth
 imageDigest: unset
-sourcePluginImageRepository: oberthci/oberth-source-plugin
+sourcePluginImageRepository: europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin
 sourcePluginImageDigest: unset
 targetSchema: 6
 runs:

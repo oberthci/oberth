@@ -56,7 +56,7 @@ func TestRenderedPluginAndDefaultsUsePinnedController(t *testing.T) {
 		t.Fatal("controller cannot load installed registration", err)
 	}
 	drivers, err := native.GetArtifactDrivers([]wf.ArtifactPluginName{"oberth"})
-	if err != nil || len(drivers) != 1 || drivers[0].Image != "oberthci/oberth-source-plugin@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" {
+	if err != nil || len(drivers) != 1 || drivers[0].Image != "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" {
 		t.Fatal("source plugin is not registered with the pinned controller", drivers, err)
 	}
 	if !reflect.DeepEqual(native.Images[drivers[0].Image].Entrypoint, []string{"/usr/local/bin/oberth-source-plugin"}) {

@@ -38,7 +38,7 @@ func TestPinnedImagesAndInternalSourceService(t *testing.T) {
 	request := f.charts.Previews[0]
 	objects := rendered(t, request.Values)
 	cm := object(t, objects, "ConfigMap", "oberth-controller-config")["data"].(map[string]any)
-	if !strings.Contains(cm["artifactDrivers"].(string), "oberthci/oberth-source-plugin:dev") {
+	if !strings.Contains(cm["artifactDrivers"].(string), "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin:dev") {
 		t.Fatal(cm)
 	}
 	controller := object(t, objects, "Deployment", "oberth-controller-workflow-controller")

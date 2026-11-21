@@ -93,7 +93,7 @@ func (f *composedFixture) prepareSecretCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings.HelperImage = "oberthci/oberth@sha256:" + strings.Repeat("b", 64)
+	settings.HelperImage = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:" + strings.Repeat("b", 64)
 	settings.Routes[gittest.Repository] = append(settings.Routes[gittest.Repository], workflowpolicy.ReleaseRoute{Pattern: "ship-*", File: ".oberth/deploy.yaml"})
 	f.config.Runtime, err = json.Marshal(settings)
 	if err != nil {

@@ -113,7 +113,7 @@ func TestManualReleaseGuideCoversTheWholeHandoffWithinBudget(t *testing.T) {
 	for _, fact := range []string{
 		"built commit must be that public pinned commit", "scripts create no tag",
 		"strictly above", "12 GiB", "eight minutes", "0.7 GiB", "$TMPDIR",
-		"403 or 404 means no floor", "crane auth login index.docker.io", "--password-stdin", "make, grep and",
+		"403 or 404 means no floor", "crane auth login europe-west4-docker.pkg.dev", "--password-stdin", "make, grep and",
 		`grep -E '"commit"|sha256:' "$RELEASE_DIR/release.json"`,
 		"prepare-signing", "sign offline", "Release bytes built.", "Release signature verified.",
 		"Release verified.", "file count and destination", "Finalize prints where `latest` points",

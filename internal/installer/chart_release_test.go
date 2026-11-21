@@ -46,14 +46,14 @@ func TestSignedChartFactsReplaceHistoricalDefaults(t *testing.T) {
 	objects := rendered(t, values)
 	server := jsonOf(t, object(t, objects, "Deployment", "oberth"))
 	config := serverJSON(t, objects)
-	source := "oberthci/oberth-source-plugin@sha256:" + strings.Repeat("c", 64)
+	source := "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin@sha256:" + strings.Repeat("c", 64)
 	protocol := stateport.DefaultProtocol()
-	if !strings.Contains(server, "oberthci/oberth@sha256:"+strings.Repeat("b", 64)) || !reflect.DeepEqual(config["protocol"], map[string]any{"schema_identity": protocol.SchemaIdentity, "audit_domain": protocol.AuditDomain}) {
+	if !strings.Contains(server, "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:"+strings.Repeat("b", 64)) || !reflect.DeepEqual(config["protocol"], map[string]any{"schema_identity": protocol.SchemaIdentity, "audit_domain": protocol.AuditDomain}) {
 		t.Fatal("product or protocol came from history")
 	}
 	controller := object(t, objects, "ConfigMap", "oberth-controller-config")["data"].(map[string]any)
 	trust := object(t, objects, "ConfigMap", "oberth-source")["data"].(map[string]any)["source.json"].(string)
-	if config["runtime"].(map[string]any)["helper_image"] != "oberthci/oberth@sha256:"+strings.Repeat("b", 64) || !strings.Contains(controller["executor"].(string), "quay.io/argoproj/argoexec:v4.0.8") || !strings.Contains(trust, source) {
+	if config["runtime"].(map[string]any)["helper_image"] != "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:"+strings.Repeat("b", 64) || !strings.Contains(controller["executor"].(string), "quay.io/argoproj/argoexec:v4.0.8") || !strings.Contains(trust, source) {
 		t.Fatal("runtime facts came from history")
 	}
 	if !strings.Contains(jsonOf(t, object(t, objects, "Deployment", "oberth-controller-workflow-controller")), "quay.io/argoproj/workflow-controller:v4.0.8") || !strings.Contains(jsonOf(t, object(t, objects, "StatefulSet", "oberth-store")), "docker.io/openbao/openbao:2.7.2") {

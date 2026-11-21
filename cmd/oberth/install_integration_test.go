@@ -53,7 +53,7 @@ func assertLocalReviewImages(t *testing.T, output []byte) {
 	var review struct {
 		Images map[string]string `json:"images"`
 	}
-	want := map[string]string{"server": "oberthci/oberth:dev", "source": "oberthci/oberth-source-plugin:dev"}
+	want := map[string]string{"server": "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:dev", "source": "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin:dev"}
 	if err := json.Unmarshal(output, &review); err != nil || !reflect.DeepEqual(review.Images, want) {
 		t.Fatal("JSON dry run omitted image references", err, string(output))
 	}

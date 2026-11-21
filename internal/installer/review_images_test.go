@@ -12,11 +12,11 @@ func TestImageReferencesAppearInJSONAndDetailOnly(t *testing.T) {
 	for _, kind := range []string{"local", "signed"} {
 		t.Run(kind, func(t *testing.T) {
 			f := setup(t)
-			want := map[string]string{"server": "oberthci/oberth:dev", "source": "oberthci/oberth-source-plugin:dev"}
+			want := map[string]string{"server": "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:dev", "source": "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin:dev"}
 			if kind == "signed" {
 				f.release = loadFixture(t, releaseFixture(t))
-				want["server"] = "oberthci/oberth@sha256:" + strings.Repeat("b", 64)
-				want["source"] = "oberthci/oberth-source-plugin@sha256:" + strings.Repeat("c", 64)
+				want["server"] = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:" + strings.Repeat("b", 64)
+				want["source"] = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin@sha256:" + strings.Repeat("c", 64)
 			}
 			plan := prepare(t, f)
 			raw, err := json.Marshal(plan)
