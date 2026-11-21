@@ -54,9 +54,10 @@ steps may create or replace files, but changes stay in that Pod. Outputs disappe
 it unless declared. The build example writes an archive on temporary `emptyDir` storage. For Git,
 use `safe.directory=/work/src` as shown: this trusts the directory's owner without changing
 permissions. Oberth adds that setting for main-source steps while retaining your settings; pins
-receive no hook. Explicit per-command configuration is portable. The pin example uses kind `pin`, a
-full repository name and full commit ID. It arrives under `/work/sources/<name>` without `.git`; no
-Git history commands work there. The fixed revision must be visible and permitted to the run.
+receive no hook. Explicit per-command configuration is portable. A pin (kind `pin`, full repository
+name and commit ID on the producer's default history) arrives under `/work/sources/<name>` without
+`.git`. An administrator allows each pair, a repository's own older commits included, with
+`oberth upgrade --source-pin <consumer>=<producer>`; a refused push prints it for its pair.
 
 ## Pass refs as data
 

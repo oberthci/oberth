@@ -2,6 +2,7 @@ package installer
 
 import (
 	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"net"
 	"net/netip"
 	"net/url"
@@ -26,7 +27,11 @@ type Choices struct {
 	PodFloor          *bool
 	Egress            *bool
 	Store             *bool
-	Values            map[string]any
+	// SourcePins adds consumer and producer pairs to the saved source pin
+	// policy; ClearSourcePins drops the saved pairs first.
+	SourcePins      workflowpolicy.SourcePolicy
+	ClearSourcePins bool
+	Values          map[string]any
 }
 
 const defaultNamespace = "oberth"

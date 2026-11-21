@@ -1,9 +1,8 @@
 # Operate Oberth
 
-`oberth system status` shows installation readiness; `oberth commit status <ref>` shows CI. The
-browser Status screen adds version, run counts and detail. See [installation](install.md) for
-upgrades, backups and unseal.
-Keep Git policy and rewrites compatible with the bound remote; `oberth repo add` rechecks.
+`oberth system status` shows readiness; `oberth commit status <ref>` shows CI; the browser Status
+screen adds version, run counts and detail. [Installation](install.md) covers upgrades, backups and
+unseal. Keep Git policy and rewrites compatible with the bound remote; `oberth repo add` rechecks.
 
 ## Read a failure
 
@@ -34,8 +33,7 @@ printed state. For code failures, inspect step logs and fix before pushing again
 new run, not another attempt. A moved branch may require pushing the intended commit again. Release
 reruns require an administrator. Automated retry follows the [agent instructions](agents.md).
 
-Held-step assist is disabled in this release. The following applies only after it is enabled through
-review and real-cluster checks; it is not an available recovery path here.
+Held-step assist is disabled in this release; the rest of this section applies once it is enabled.
 `oberth run hold list <run>` shows held-since and approximate time left, or unknown availability.
 Inspect with `run hold exec`, push an authored fix, then use `run hold release`. There is no
 in-place retry or file-patch tool. Inspection uses the step's identity and mounts; it can change
@@ -55,9 +53,8 @@ Open the push's watch link. Runs, Repositories, Issues and Status have separate 
 a bearer for this installation or a certificate already configured in the browser. On its
 administrator profile, create a short-lived credential in a new private directory outside Git.
 Browser-only registration needs no SSH key. Add `--ssh-public-key` only when also allowing Git
-pushes, and choose an unused identity name.
-`<upstream>` is the first component of a full repository name; its scope includes every repository
-there and is not limited to browser reads. An empty array removes scope restrictions.
+pushes; pick an unused identity name. `<upstream>` is the first component of a full repository
+name; its scope covers every repository there, not only browser reads; `[]` lifts the limit.
 
 ```sh
 mkdir -m 700 <private-directory>
@@ -87,6 +84,8 @@ store and repeat. Revocation cannot retract read material. `oberth access dismis
 requests; approved/revoked grants need revoke. Annotations, projections and public CAs grant
 nothing. Audit records a request, not stored success. Inspect and approve resource grants with the
 [resource recipe](pipelines.md#kubernetes-resources-and-virtual-machines).
+Allow pin pairs with the repeatable `oberth upgrade --source-pin <consumer>=<producer>`; upgrades
+keep saved pairs, `--no-source-pins` drops them first, and `--detail` lists them.
 Install configures the bundled store's static rules and installation audience; grants need no
 synchronization or chart upgrade. Its contents are not in any backup; no store snapshot procedure
 or operator token ships. Put secrets again from secure originals after loss. Keep approved paths,

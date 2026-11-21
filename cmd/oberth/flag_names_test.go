@@ -191,6 +191,8 @@ func printedCommands() []printedCommand {
 			func(a []string) map[string]string { return map[string]string{"kind": "pvc", "tier": "release", "repo": a[0], "claim": a[1]} }, nil},
 		{"secret put", []string{"origin/team/widget", ".oberth/build.yaml", "build", "registry/key"}, func(a []string) string { return publicerr.SecretPutCommand(grant(a)) },
 			func(a []string) map[string]string { return map[string]string{"repo": a[0], "file": a[1], "step": a[2], "arg0": a[3]} }, []int{3}},
+		{"upgrade source pin", []string{"origin/team/widget", "origin/team/source"}, func(a []string) string { return publicerr.SourcePinCommand(a[0], a[1]) },
+			func(a []string) map[string]string { return map[string]string{"source-pin": a[0] + "=" + a[1]} }, []int{0, 1}},
 		{"workflow capability grant", []string{"origin/team/widget", "ci"}, func(a []string) string { return publicerr.CapabilityGrantCommand(a[0], namespaceJSON(a[1])) },
 			func(a []string) map[string]string {
 				return map[string]string{"repo": a[0], "capability": namespaceJSON(a[1]), "reason": "<reason>"}

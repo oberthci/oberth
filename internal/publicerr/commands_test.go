@@ -24,6 +24,7 @@ func TestCommandsQuoteEveryValueAsOneShellWord(t *testing.T) {
 		{ClaimAllowCommand("r", "cache", true), "oberth access allow --kind pvc --tier release 'r' 'cache'"},
 		{SecretPutCommand(Grant{Repo: "r", File: "f", Step: "s", Path: "p"}), "oberth secret put --repo 'r' --file 'f' --step 's' 'p' < <value-file>"},
 		{CapabilityGrantCommand("r", `{"namespace":"ci"}`), `oberth workflow capability grant --repo 'r' --capability '{"namespace":"ci"}' --reason '<reason>'`},
+		{SourcePinCommand("origin/team/widget", "origin/team/it's"), `oberth upgrade --source-pin 'origin/team/widget=origin/team/it'\''s'`},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("got  %s\nwant %s", tc.got, tc.want)
@@ -43,6 +44,11 @@ func TestNamesThatReadAsFlagsTakeTheirFlagFormOrPrintNothing(t *testing.T) {
 		{PromoteCommand("r", "-abc"), ""},
 		{IssueDeleteCommand(-1), ""},
 		{RepoAddCommand("-u", "origin"), ""},
+		{SourcePinCommand("-x/team/widget", "origin/team/source"), ""},
+		{SourcePinCommand("origin/team/widget", "--source-pin=origin/team/widget"), ""},
+		{SourcePinCommand("origin/team/widget=origin/team/other", "origin/team/source"), ""},
+		{SourcePinCommand("origin/team/widget", "origin/team/a=b"), ""},
+		{SourcePinCommand("", "origin/team/source"), ""},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("got  %q\nwant %q", tc.got, tc.want)

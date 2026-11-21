@@ -156,6 +156,18 @@ func CapabilityGrantCommand(repo, capability string) string {
 	return newLine("workflow capability grant").flag("repo", repo).flag("capability", capability).flag("reason", "<reason>").String()
 }
 
+// SourcePinCommand lets the consumer's pipelines pin commits of the producer
+// its own pipeline names. The pair is one consumer=producer value, so a name
+// that begins with "-", holds "=" or is empty prints no command.
+func SourcePinCommand(consumer, producer string) string {
+	for _, name := range []string{consumer, producer} {
+		if name == "" || flagLike(name) || strings.Contains(name, "=") {
+			return ""
+		}
+	}
+	return newLine("upgrade").flag("source-pin", consumer+"="+producer).String()
+}
+
 // commandLine collects the words of one command in order; unsafe marks a
 // value that would be read as a flag and has no flag form.
 type commandLine struct {

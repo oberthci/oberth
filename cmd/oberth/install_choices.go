@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 	"strconv"
+	"strings"
 
 	"github.com/oberthci/oberth/internal/installer"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 )
 
 func (r installationRequest) text(name string) string {
@@ -37,7 +39,20 @@ func (r installationRequest) choices() installer.Choices {
 		case "external-store":
 			value := false
 			c.Store, c.StoreAddress = &value, f.Value.String()
+		case "no-source-pins":
+			c.ClearSourcePins = r.enabled(f.Name)
+		case "source-pin":
+			c.SourcePins = sourcePins(f.Value.(*sourcePinFlag).pairs)
 		}
 	})
 	return c
+}
+
+func sourcePins(pairs []string) workflowpolicy.SourcePolicy {
+	policy := workflowpolicy.SourcePolicy{}
+	for _, pair := range pairs {
+		consumer, producer, _ := strings.Cut(pair, "=")
+		policy[consumer] = append(policy[consumer], producer)
+	}
+	return policy
 }

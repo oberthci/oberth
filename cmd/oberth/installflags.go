@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"io"
 	"math"
+	"strings"
 )
 
 type installationCommand struct {
@@ -57,6 +59,11 @@ func installationFlags(name string) *flag.FlagSet {
 	}
 	addInstallerInputs(f, name)
 	switch name {
+	case "install", "upgrade":
+		f.Var(&sourcePinFlag{}, "source-pin", "Allow CONSUMER=PRODUCER source pins; repeatable, kept by later upgrades.")
+		f.Bool("no-source-pins", false, "Drop the saved source pins before adding --source-pin pairs.")
+	}
+	switch name {
 	case "install", "upgrade", "rollback":
 		f.Bool("dry-run", false, "Review without applying.")
 	}
@@ -65,6 +72,26 @@ func installationFlags(name string) *flag.FlagSet {
 		f.Bool("yes", false, "Apply the reviewed operation.")
 	}
 	return f
+}
+
+// sourcePinFlag collects repeated CONSUMER=PRODUCER pairs in order; the
+// installer validates both names.
+type sourcePinFlag struct{ pairs []string }
+
+func (f *sourcePinFlag) String() string {
+	if f == nil {
+		return ""
+	}
+	return strings.Join(f.pairs, ",")
+}
+
+func (f *sourcePinFlag) Set(value string) error {
+	consumer, producer, ok := strings.Cut(value, "=")
+	if !ok || consumer == "" || producer == "" {
+		return errors.New("use --source-pin CONSUMER=PRODUCER")
+	}
+	f.pairs = append(f.pairs, value)
+	return nil
 }
 
 func addInstallerInputs(f *flag.FlagSet, name string) {

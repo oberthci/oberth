@@ -10,11 +10,12 @@ import (
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/stateport"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 )
 
 type Submitter struct {
 	d                Deps
-	policy           map[string][]string
+	policy           workflowpolicy.SourcePolicy
 	mu               sync.Mutex
 	receives         map[string]acceptance
 	ctx              context.Context

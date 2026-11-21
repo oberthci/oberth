@@ -26,18 +26,26 @@ func values(r Release, c Choices, stored map[string]any) (map[string]any, error)
 		return nil, problem("choices", nil)
 	}
 	v := chosenValues(merge(operatorValues(stored), c.Values), c)
+	runtime := map[string]any{
+		"controller_namespace": c.Namespace,
+		"controller_configmap": "oberth-controller-config",
+	}
+	pins, err := sourcePins(c, stored)
+	if err != nil {
+		return nil, err
+	}
+	if pins != nil {
+		runtime["source_policy"] = pins
+	}
 	server := map[string]any{
-		"public": map[string]any{"url": c.URL, "ssh_port": c.SSHPort},
-		"runtime": map[string]any{
-			"controller_namespace": c.Namespace,
-			"controller_configmap": "oberth-controller-config",
-		},
+		"public":  map[string]any{"url": c.URL, "ssh_port": c.SSHPort},
+		"runtime": runtime,
 	}
 	v = merge(v, map[string]any{
 		"pipeline": map[string]any{"namespace": c.PipelineNamespace},
 		"server":   server,
 	})
-	v, err := storeAddress(v, c)
+	v, err = storeAddress(v, c)
 	if err != nil {
 		return nil, err
 	}

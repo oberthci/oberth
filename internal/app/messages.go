@@ -34,7 +34,7 @@ func messages() map[string]message {
 		"unavailable":     {"admission is unavailable", "Try the push again when the dependency is available."},
 		"decision":        {"ref was refused", "Follow the reported remedy before pushing again."},
 		"prepare":         {"pipeline admission failed", "Fix every reported finding, then push again."},
-		"pin":             {"source producer is not allowed", "Ask the operator to allow this consumer and producer pair."},
+		"pin":             {"source producer is not allowed", "Ask an administrator to allow this consumer and producer pair."},
 		"reachable":       {"source commit is not on default history", "Choose a commit reachable from the producer's default branch."},
 		"policy":          {"source policy is invalid", "Use canonical repository pairs within the documented policy bounds."},
 		"timeout":         {"admission timed out", "Try the push again."},
@@ -103,6 +103,19 @@ func (e *Refusal) listFindings() {
 	listed := *public
 	listed.Context = []string{strings.Join(e.findings(), "\n")}
 	e.cause = &listed
+}
+// withCommand attaches the administrator command that resolves this refusal
+// to the line a push prints and to its public form; "" attaches none.
+func (e *Refusal) withCommand(command string) *Refusal {
+	if command == "" {
+		return e
+	}
+	e.Problems = []admissioncontract.Finding{{Code: e.Code, Reason: e.Reason(), Remedy: e.Remedy(), Command: command}}
+	var public *publicerr.Error
+	if errors.As(e.cause, &public) {
+		_ = public.WithCommand(command)
+	}
+	return e
 }
 func refusal(code string, err error) *Refusal {
 	if code == "decision" && !publicerr.Permanent(err) {

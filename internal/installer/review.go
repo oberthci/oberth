@@ -72,6 +72,7 @@ func review(p *Plan, release string) []string {
 		}
 		lines = append(lines, setting.label+": "+value+" ("+setting.flag+")")
 	}
+	lines = append(lines, reviewSourcePins(p.history.Choices.Values, values, p.history.Deployed.Number > 0)...)
 	lines = append(lines, "Profile: "+p.directory,
 		"Files: installation.json, admin key/cert, CA, known_hosts, age/unseal keys",
 		"Admin: "+p.admin.action)
