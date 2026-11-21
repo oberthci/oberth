@@ -91,6 +91,11 @@ func (e *Executor) startChild(ctx context.Context, r stateport.Run, child *child
 		return kept
 	}
 	if kept != nil {
+		// Terminate first: until it succeeds the child stays untracked, so the
+		// next notice comes back here and terminates again.
+		if err := e.Terminate(ctx, runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.WorkflowUID})); err != nil {
+			return err
+		}
 		detail := kept.Error()
 		var public *publicerr.Error
 		if errors.As(kept, &public) && public.Detail != "" {
@@ -98,10 +103,7 @@ func (e *Executor) startChild(ctx context.Context, r stateport.Run, child *child
 		}
 		child.refused = &Observation{Status: stepmodel.RunFailed, Phase: stepmodel.NativeError, Reason: reasonKeep, Detail: detail, Failure: &stepmodel.FailureRecord{Class: stepmodel.FailureUnknown, Retry: stepmodel.RetryHint{Action: stepmodel.RetryNone}}}
 	}
-	if err := e.restoreSnapshot(ctx, r, child); err != nil || kept == nil {
-		return err
-	}
-	return e.Terminate(ctx, runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.WorkflowUID}))
+	return e.restoreSnapshot(ctx, r, child)
 }
 
 func (e *Executor) acceptChild(ctx context.Context, p *admissioncontract.PreparedAdmission, proof nativebinding.ChildBinding) error {

@@ -19,6 +19,7 @@ import (
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/internal/stateport"
+	"github.com/oberthci/oberth/internal/stepmodel"
 	"github.com/oberthci/oberth/internal/store"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -75,6 +76,29 @@ func TestScheduledChildKeepsItsSourceUnderItsRunID(t *testing.T) {
 	bindings, ok := kept[f.child.Name]
 	if len(kept) != 1 || !ok || len(bindings) != 1 || !reflect.DeepEqual(bindings, retained.Admission.SourceBindings) {
 		t.Fatal("accepted child did not keep its source", kept)
+	}
+}
+
+// A child whose source is refused for good is terminated before it is
+// tracked, so a failed terminate is retried by the next notice.
+func TestRefusedChildTerminateIsRetriedOnTheNextNotice(t *testing.T) {
+	t.Parallel()
+	f := newChildFixture(t)
+	f.kept.err = publicerr.New(publicerr.Forbidden, "recorded source is gone", "Push again.", nil)
+	workflows := &nativefake.Workflows{Object: f.child.DeepCopy(), GetError: errors.New("native read failed")}
+	c := f.executorConfig()
+	c.Workflows = workflows
+	e := argojob.New(c)
+	e.ProcessForTest(t.Context(), f.child.Name)
+	run, err := f.s.Run(t.Context(), f.child.Name)
+	compositionOK(t, err)
+	if run.Status != stepmodel.RunRunning || workflows.Patches != 0 {
+		t.Fatal("failed terminate was not left for the next notice", run.Status, workflows.Patches)
+	}
+	workflows.GetError = nil
+	e.ProcessForTest(t.Context(), f.child.Name)
+	if workflows.Patches != 1 || workflows.Object.Spec.Shutdown != wf.ShutdownStrategyTerminate {
+		t.Fatal("next notice did not terminate the refused child", workflows.Patches, workflows.Object.Spec.Shutdown)
 	}
 }
 

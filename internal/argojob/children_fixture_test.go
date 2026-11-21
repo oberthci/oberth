@@ -116,6 +116,7 @@ func (f *childFixture) executorConfig() argojob.Config {
 type keptRoots struct {
 	mu    sync.Mutex
 	calls map[string][]sourcecontract.Binding
+	err   error
 }
 
 func (k *keptRoots) Keep(_ context.Context, owner string, bindings []sourcecontract.Binding) error {
@@ -125,7 +126,7 @@ func (k *keptRoots) Keep(_ context.Context, owner string, bindings []sourcecontr
 		k.calls = map[string][]sourcecontract.Binding{}
 	}
 	k.calls[owner] = bindings
-	return nil
+	return k.err
 }
 func (k *keptRoots) owners() map[string][]sourcecontract.Binding {
 	k.mu.Lock()
