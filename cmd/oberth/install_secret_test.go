@@ -60,7 +60,7 @@ func assertSecretPutGrantSequence(t *testing.T, refused bool) {
 
 func TestSecretPutStoresWhenGrantIsSavedButSchedulesDidNotSync(t *testing.T) {
 	bindings := fake.Bindings()
-	warning := "Saved, but this repository's schedules did not sync and stay paused; see oberth schedule list --repo origin/team/widget"
+	warning := "Saved; its schedules stay paused. Repeat this command when no error shows in oberth schedule list --repo origin/team/widget."
 	bindings.AccessAllow.Handler = &fake.Handler[apicontract.AccessAllowArgs, apicontract.Grant]{Value: apicontract.Grant{Status: "approved", Warning: warning}}
 	writes := 0
 	bindings.SecretPut.Handler = apicontract.HandlerFunc[apicontract.SecretPutArgs, apicontract.Receipt](func(_ context.Context, _ apicontract.Caller, q apicontract.SecretPutArgs) (apicontract.Call[apicontract.Receipt], error) {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/cronsync"
 	"github.com/oberthci/oberth/internal/gitport"
+	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/schedule"
 )
 
@@ -131,6 +132,11 @@ func TestAuthorityPublishedReportsUnsyncedSchedulesSeparately(t *testing.T) {
 	}
 	if !errors.Is(unsynced, unreadable) || !f.object(other, "nightly").Spec.Suspend {
 		t.Fatal("unsynced schedules must be reported and stay paused", unsynced)
+	}
+	// A manual resume meanwhile says the update is pending, not that it worked.
+	var resume *publicerr.Error
+	if err := f.c.SetPause(t.Context(), other, "nightly"); !errors.As(err, &resume) || resume.Reason() != "schedule update is pending" || !f.object(other, "nightly").Spec.Suspend {
+		t.Fatal("a resume during the authority pause did not refuse with the pending reason", err)
 	}
 	if f.object(f.repo, "nightly").Spec.Suspend {
 		t.Fatal("another repository was paused")

@@ -8,7 +8,7 @@ import (
 	"github.com/oberthci/oberth/internal/apicontract"
 )
 
-const unsyncedWarning = "Saved, but this repository's schedules did not sync and stay paused; see oberth schedule list --repo " + repository
+const unsyncedWarning = "Saved; its schedules stay paused. Repeat this command when no error shows in oberth schedule list --repo " + repository + "."
 
 // A grant succeeds or fails on its own work: once saved and published it
 // succeeds, and the schedule reconciliation it triggers is a separate line.

@@ -52,13 +52,14 @@ func grantGiven(q apicontract.AccessAllowArgs) func(string) bool {
 // was applied but its repository's schedules were not re-admitted.
 type grantOutcome struct{ incomplete, unsynced bool }
 
-// warning is the separate line a saved change shows; empty when all applied.
+// warning is the separate line a saved change shows, a reason and the remedy
+// to repeat the administrator command; empty when all applied.
 func (o grantOutcome) warning(repo string) string {
 	switch {
 	case o.incomplete:
-		return warningAuthorityIncomplete
+		return warningAuthorityIncomplete + " " + warningAuthorityRetry
 	case o.unsynced:
-		return fmt.Sprintf(warningSchedulesPaused, repo)
+		return warningSchedulesPaused + " " + fmt.Sprintf(warningSchedulesRetry, repo)
 	}
 	return ""
 }

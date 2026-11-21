@@ -112,6 +112,14 @@ func checkCatalogueNode(n ast.Node) error {
 func checkReasonConstants(v *ast.ValueSpec) error {
 	var err error
 	for i, name := range v.Names {
+		if strings.HasPrefix(name.Name, "warning") {
+			if i >= len(v.Values) {
+				return fmt.Errorf("%s has no literal", name.Name)
+			}
+			if err = literalMessage(v.Values[i], 120); err != nil {
+				return fmt.Errorf("%s: %w", name.Name, err)
+			}
+		}
 		if strings.HasPrefix(name.Name, "reason") {
 			if i >= len(v.Values) {
 				err = fmt.Errorf("%s has no literal", name.Name)
@@ -124,6 +132,29 @@ func checkReasonConstants(v *ast.ValueSpec) error {
 		}
 	}
 	return err
+}
+
+// A grant warning is a reason of at most 40 characters and a remedy of at
+// most 120 with a typical repository name, each one sentence.
+func TestGrantWarningsFitTheMessageRules(t *testing.T) {
+	t.Parallel()
+	typical := "github/example-organization/example-repository"
+	for _, m := range []struct {
+		text  string
+		limit int
+	}{{warningAuthorityIncomplete, 40}, {warningAuthorityRetry, 120}, {warningSchedulesPaused, 40}, {fmt.Sprintf(warningSchedulesRetry, typical), 120}} {
+		if err := publicerr.CheckMessage(m.text, m.limit); err != nil {
+			t.Fatal(m.text, err)
+		}
+	}
+	src, err := os.ReadFile("reasons.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := strconv.Quote(strings.Repeat("x", 121))
+	if err := checkCatalogue([]byte(strings.Replace(string(src), strconv.Quote(warningAuthorityRetry), long, 1))); err == nil {
+		t.Fatal("an overlong warning constant passed the catalogue check")
+	}
 }
 
 func TestInvitationAddressRefusalIsCatalogued(t *testing.T) {

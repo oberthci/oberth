@@ -11,9 +11,11 @@ import (
 const (
 	reasonPromotionUnavailable     = "promotion record unavailable"
 	reasonPromotionEvidenceInvalid = "promotion evidence invalid"
-	warningAuthorityIncomplete     = "Authority application incomplete. Retry the grant or revocation."
+	warningAuthorityIncomplete     = "Authority application incomplete."
+	warningAuthorityRetry          = "Retry the grant or revocation."
 	remedyStaleLock                = "A run that ended still blocks this lock; restart the workflow controller to release it."
-	warningSchedulesPaused         = "Saved, but this repository's schedules did not sync and stay paused; see oberth schedule list --repo %s"
+	warningSchedulesPaused         = "Saved; its schedules stay paused."
+	warningSchedulesRetry          = "Repeat this command when no error shows in oberth schedule list --repo %s."
 	reasonIssueUpdated             = "issue updated"
 	reasonAuthorityIncomplete      = "authority application incomplete"
 	reasonPubPending               = "publication pending"
