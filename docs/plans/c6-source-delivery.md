@@ -207,9 +207,9 @@ of live run owners.
 
 ### Native schedules
 
-Native source-consuming schedules are refused for v0.24.0, including inherited
-inputs and pins. Existing parents suspend. A manual schedule trigger follows
-ordinary run admission; force bypasses neither source admission nor grants.
+Schedule parents stamp locator `scheduled`; Load resolves it to the caller Workflow's run with
+every ownership check. Pins refuse. A live owner with gone source stops deletion only in its
+repositories. A manual schedule trigger uses ordinary admission; force bypasses no source or grant.
 
 ### Git and endpoint budgets
 

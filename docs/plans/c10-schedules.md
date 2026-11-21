@@ -32,9 +32,9 @@ so the parent and every resulting Workflow use that installation's controller.
 A child run ID is its full native name, actor is oberth:scheduler and trigger is
 schedule. A committed parent/child proof permits recovery after orphaning;
 unproven orphans gain no authority. Preserve schedule_entry through rerun and
-observation. Source-consuming native schedules refuse, including inherited,
-referenced and pinned inputs; existing parents suspend. Reason is
-`scheduled source is not supported`, remedy `use a push or manual schedule trigger`.
+observation. A schedule consumes its own repository's source as a push of its branch;
+tag changes re-admit it. Children load via locator `scheduled`, Keep on acceptance and
+fail with the push reason if refused. Pins refuse: `scheduled source is not supported`.
 Manual triggers use ordinary admission; force skips only explicit user pause.
 
 **Delta:** C1/C2/C11 expose scoped schedule_list and /api/schedules with collection envelopes;
@@ -104,7 +104,7 @@ causes, unchanged last spec and no unsafe deletion. Forced-suspension tests make
 intent/catalogue unreadable; snapshot tests reject catalogue reads; SetPause
 counts one intent read. Reentry and unreadable-relevance controls check deadlines.
 The schedule walk fires a non-source parent, records one child, restarts/adopts
-that same UID and refuses a source-bearing parent. Contract suites run against
+that same UID and fires a source parent whose child loads its commit. Contract suites run against
 in-memory and native Git/object adapters; unit tests alone claim no live firing.
 
 Creating a Workflow in the pipeline namespace is equivalent to firing a schedule
