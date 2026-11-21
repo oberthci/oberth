@@ -91,6 +91,7 @@ func (s *Service) decidePromotion(ctx context.Context, a actor.Actor, q apicontr
 	d.source, err = s.promotionSource(ctx, r.Canonical, q.SHA, policy.AllowWithoutBranchCI)
 	return d, err
 }
+
 // callerPolicy decides whether the caller may promote under the fresh policy.
 // An administrator promotes under the zero policy when the file is invalid,
 // branch CI required, so the tested commit that corrects it can land.

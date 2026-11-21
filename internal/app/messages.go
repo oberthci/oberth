@@ -104,6 +104,7 @@ func (e *Refusal) listFindings() {
 	listed.Context = []string{strings.Join(e.findings(), "\n")}
 	e.cause = &listed
 }
+
 // withCommand attaches the administrator command that resolves this refusal
 // to the line a push prints and to its public form; "" attaches none.
 func (e *Refusal) withCommand(command string) *Refusal {

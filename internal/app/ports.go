@@ -34,7 +34,7 @@ type Deps struct {
 	// Version is the running server's release version, which the printed
 	// source pin command keeps; "" for a development build.
 	Version      string
-	ReleaseFacts  func(context.Context, Request, string) (admissioncontract.ReleaseFacts, error)
+	ReleaseFacts func(context.Context, Request, string) (admissioncontract.ReleaseFacts, error)
 }
 
 // Source reads exact objects during its lifetime; Pin proves fresh default ancestry.
