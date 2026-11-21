@@ -219,7 +219,16 @@ func grantCommand(key workflowpolicy.GrantKey, kind string, release bool) string
 	case "secret":
 		return publicerr.SecretPutCommand(grant)
 	}
-	return publicerr.AccessAllowCommand(kind, grant)
+	return publicerr.AccessAllowCommand(grantKindName(kind), grant)
+}
+
+// grantKindName is the access allow kind that grants an evidence kind; the two
+// differ only where evidence "secret" already means a store path.
+func grantKindName(kind string) string {
+	if name, ok := map[string]string{"cluster-secret": "secret", "image-pull-secret": "image_pull_secret"}[kind]; ok {
+		return name
+	}
+	return kind
 }
 
 func fileError(file string, err error) error {

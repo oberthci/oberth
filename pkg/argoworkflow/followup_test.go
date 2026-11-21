@@ -152,7 +152,7 @@ func TestSharedPullSecretsUseEveryConsumerStepGrant(t *testing.T) {
 			}
 			_, err := Prepare(t.Context(), bad, policy, identityHooks())
 			requireCode(t, err, "read")
-			if !strings.Contains(err.Error(), "--kind image-pull-secret 'forge/org/repo' '.oberth/build.yaml' 'other' 'private'") {
+			if !strings.Contains(err.Error(), "--kind image_pull_secret 'forge/org/repo' '.oberth/build.yaml' 'other' 'private'") {
 				t.Fatal(err)
 			}
 		})

@@ -87,7 +87,7 @@ func TestGrantKindsNeverAliasAndEachCommandAdmitsSameDocument(t *testing.T) {
 			r := requestFor(t, w)
 			_, err := Prepare(t.Context(), r, Policy{}, identityHooks())
 			requireCode(t, err, "read")
-			command := "oberth access allow --kind " + kind + " 'forge/org/repo' '.oberth/build.yaml' 'main' 'deploy'"
+			command := "oberth access allow --kind " + grantKindName(kind) + " 'forge/org/repo' '.oberth/build.yaml' 'main' 'deploy'"
 			if !strings.Contains(err.Error(), command) {
 				t.Fatal("missing exact typed command", err)
 			}
@@ -122,7 +122,14 @@ func applyClusterGrantCommand(t *testing.T, r *admissioncontract.PrepareRequest,
 	if len(flags) != 5 || strings.Join(flags[:4], " ") != "oberth access allow --kind" || len(parts) != 9 {
 		t.Fatal("invalid grant command", command)
 	}
-	r.Grants = []admissioncontract.GrantEvidence{{Kind: flags[4], Repository: parts[1], File: parts[3], Step: parts[5], Path: parts[7], Revision: "operator-approval", State: admissioncontract.StateVerified}}
+	// The server stores the printed kind; admission reads it as its evidence kind.
+	kind := flags[4]
+	for _, evidence := range []string{"cluster-secret", "configmap", "image-pull-secret"} {
+		if grantKindName(evidence) == flags[4] {
+			kind = evidence
+		}
+	}
+	r.Grants = []admissioncontract.GrantEvidence{{Kind: kind, Repository: parts[1], File: parts[3], Step: parts[5], Path: parts[7], Revision: "operator-approval", State: admissioncontract.StateVerified}}
 }
 
 func TestProtectedClusterNamesStayRefusedWithExactGrants(t *testing.T) {

@@ -13,11 +13,12 @@ import (
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestAdmissionRemedyCommandsExistAndExecuteInTable(t *testing.T) {
-	for _, kind := range []string{"secret", "identity", "secret_key", "configmap_key", "pull_secret", "pvc", "pvc-release"} {
+	for _, kind := range []string{"secret", "identity", "secret_key", "configmap_key", "pull_secret", "pvc", "pvc-release", "device"} {
 		t.Run(kind, func(t *testing.T) { checkAdmissionRemedies(t, kind) })
 	}
 }
@@ -49,6 +50,7 @@ func checkAdmissionRemedies(t *testing.T, kind string) {
 			t.Fatal("recipe did not reach canonical binding")
 		}
 		assertGrantRecipe(t, inputs[0], kind)
+		assertServerGrantKind(t, inputs[0])
 	}
 	if count == 0 {
 		t.Fatal("fixture emitted no remedy command")
@@ -86,6 +88,17 @@ func remedyWords(t *testing.T, command string) []string {
 	}
 	return strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
 }
+
+// assertServerGrantKind checks a printed recipe against the server's own grant
+// table, which the fake handler does not consult.
+func assertServerGrantKind(t *testing.T, args apicontract.AccessAllowArgs) {
+	t.Helper()
+	values := map[string]string{"repo": args.Repo, "workflow": args.Workflow, "step": args.Step, "secret": args.Secret, "audience": args.Audience, "claim": args.Claim, "tier": args.Tier}
+	_, known := apicontract.GrantArguments(args.Kind)
+	if name, _ := apicontract.GrantArgumentProblem(args.Kind, func(n string) bool { return values[n] != "" }); !known || name != "" {
+		t.Fatalf("server refuses printed grant kind %q (%s): %+v", args.Kind, name, args)
+	}
+}
 func assertGrantRecipe(t *testing.T, args apicontract.AccessAllowArgs, kind string) {
 	t.Helper()
 	if strings.HasPrefix(kind, "pvc") {
@@ -122,6 +135,8 @@ func remedyWorkflow(kind string) (*wf.Workflow, argoworkflow.Policy) {
 		template.Container.Env = []core.EnvVar{{Name: "VALUE", ValueFrom: &core.EnvVarSource{ConfigMapKeyRef: &core.ConfigMapKeySelector{LocalObjectReference: core.LocalObjectReference{Name: "deploy"}, Key: "value"}}}}
 	case "pull_secret":
 		document.Spec.ImagePullSecrets = []core.LocalObjectReference{{Name: "registry"}}
+	case "device":
+		template.Container.Resources.Limits = core.ResourceList{"devices.kubevirt.io/kvm": resource.MustParse("1")}
 	case "pvc", "pvc-release":
 		policy.Release = kind == "pvc-release"
 		template.Volumes = []core.Volume{{Name: "data", VolumeSource: core.VolumeSource{PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "data"}}}}
