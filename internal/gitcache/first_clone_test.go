@@ -100,15 +100,16 @@ func TestFirstCloneThatEndsInTimeAnnouncesNothing(t *testing.T) {
 	}
 }
 
-// A late clone announces only a repository registered under the same ID from
-// its start to its end: an unregistered probe name, a repository removed
-// during the clone and one registered again under another ID have no readers.
+// A late clone announces a repository registered when it ends, under the ID
+// it started with or registered only meanwhile (an upstream check, then repo
+// add): an unregistered probe name, a repository removed during the clone and
+// one registered again under another ID have no readers.
 func TestLateCloneAnnouncesOnlyTheSameRegisteredRepository(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		start, end int64
 		announced  bool
-	}{{"registered", 1, 1, true}, {"unregistered", 0, 0, false}, {"removed", 1, 0, false}, {"replaced", 1, 2, false}} {
+	}{{"registered", 1, 1, true}, {"unregistered", 0, 0, false}, {"removed", 1, 0, false}, {"replaced", 1, 2, false}, {"registered during the clone", 0, 3, true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := gittest.New(t)
 			cfg := reviewConfig(t, f)

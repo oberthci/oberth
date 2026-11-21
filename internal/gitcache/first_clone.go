@@ -103,17 +103,24 @@ func (c *Cache) startClone(repository, p string) *firstClone {
 		left := clone.left
 		c.clones.mu.Unlock()
 		close(clone.done)
-		if err == nil && left && registered != 0 && c.registeredID(ctx, repository) == registered {
+		if err == nil && left && sameRepository(registered, c.registeredID(ctx, repository)) {
 			c.announceClone(ctx, repository)
 		}
 	})
 	return clone
 }
 
+// sameRepository reports whether a clone that started with catalogue ID start
+// ends for the repository registered as end: registered at the end, and
+// either under the ID it started with or registered only meanwhile (an
+// upstream check clones before repo add). A repository removed meanwhile, or
+// removed and added again under another ID, has no readers for this clone.
+func sameRepository(start, end int64) bool {
+	return end != 0 && (start == 0 || start == end)
+}
+
 // registeredID is the repository's catalogue ID as the upstream names it; 0
-// when it is not registered or cannot be read. A clone announces only a
-// repository registered under the same ID from its start to its end: a probe
-// of an unregistered name or a repository removed meanwhile has no readers.
+// when it is not registered or cannot be read.
 func (c *Cache) registeredID(ctx context.Context, repository string) int64 {
 	remote, err := c.remote(ctx, repository)
 	if err != nil {
