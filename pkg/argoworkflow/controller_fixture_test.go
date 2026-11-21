@@ -14,6 +14,7 @@ var controllerFixture = controllertest.New(map[string]string{
 	"oberth_source_driver_test.go":    "testdata/source_driver_test.go",
 	"oberth_source_copy_test.go":      "testdata/source_copy_test.go",
 	"oberth_installer_status_test.go": "testdata/installer_status_test.go",
+	"oberth_cancelled_locks_test.go":  "testdata/cancelled_locks_test.go",
 })
 
 func TestMain(m *testing.M) {

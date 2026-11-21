@@ -1,0 +1,709 @@
+[
+  {
+    "metadata": {
+      "name": "ended-heavy-stop",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "ended-heavy-stop",
+        "workflows.argoproj.io/completed": "true",
+        "workflows.argoproj.io/phase": "Failed"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "ended-heavy-stop",
+        "workflows.argoproj.io/pod-name-format": "v2"
+      }
+    },
+    "spec": {
+      "arguments": {},
+      "shutdown": "Stop"
+    },
+    "status": {
+      "phase": "Failed",
+      "startedAt": null,
+      "finishedAt": null,
+      "nodes": {
+        "ended-heavy-stop": {
+          "id": "ended-heavy-stop",
+          "name": "ended-heavy-stop",
+          "type": "DAG",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-stop-3520896358": {
+          "id": "ended-heavy-stop-3520896358",
+          "name": "ended-heavy-stop.d",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-stop-3554451596": {
+          "id": "ended-heavy-stop-3554451596",
+          "name": "ended-heavy-stop.b",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-stop-3571229215": {
+          "id": "ended-heavy-stop-3571229215",
+          "name": "ended-heavy-stop.c",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-stop-3604784453": {
+          "id": "ended-heavy-stop-3604784453",
+          "name": "ended-heavy-stop.a",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        }
+      }
+    }
+  },
+  {
+    "metadata": {
+      "name": "waiting-heavy-stop",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "waiting-heavy-stop",
+        "workflows.argoproj.io/completed": "false",
+        "workflows.argoproj.io/phase": "Running"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "waiting-heavy-stop",
+        "workflows.argoproj.io/pod-name-format": "v2"
+      }
+    },
+    "spec": {
+      "arguments": {}
+    },
+    "status": {
+      "phase": "Running",
+      "startedAt": null,
+      "finishedAt": null,
+      "nodes": {
+        "waiting-heavy-stop": {
+          "id": "waiting-heavy-stop",
+          "name": "waiting-heavy-stop",
+          "type": "DAG",
+          "phase": "Running",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "waiting-heavy-stop-3316298228": {
+          "id": "waiting-heavy-stop-3316298228",
+          "name": "waiting-heavy-stop.e",
+          "type": "Pod",
+          "phase": "Pending",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "waiting-heavy-stop-3366631085": {
+          "id": "waiting-heavy-stop-3366631085",
+          "name": "waiting-heavy-stop.f",
+          "type": "Pod",
+          "phase": "Pending",
+          "startedAt": null,
+          "finishedAt": null,
+          "synchronizationStatus": {
+            "waiting": "default/ConfigMap/oberth-sync-limits/heavy-stop"
+          }
+        }
+      },
+      "synchronization": {
+        "semaphore": {
+          "holding": [
+            {
+              "semaphore": "default/ConfigMap/oberth-sync-limits/heavy-stop",
+              "holders": [
+                "default/waiting-heavy-stop/waiting-heavy-stop-3316298228"
+              ]
+            }
+          ],
+          "waiting": [
+            {
+              "semaphore": "default/ConfigMap/oberth-sync-limits/heavy-stop",
+              "holders": [
+                "default/ended-heavy-stop/ended-heavy-stop-3520896358",
+                "default/waiting-heavy-stop/waiting-heavy-stop-3316298228"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "metadata": {
+      "name": "ended-heavy-terminate",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "ended-heavy-terminate",
+        "workflows.argoproj.io/completed": "true",
+        "workflows.argoproj.io/phase": "Failed"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "ended-heavy-terminate",
+        "workflows.argoproj.io/pod-name-format": "v2"
+      }
+    },
+    "spec": {
+      "arguments": {},
+      "shutdown": "Terminate"
+    },
+    "status": {
+      "phase": "Failed",
+      "startedAt": null,
+      "finishedAt": null,
+      "nodes": {
+        "ended-heavy-terminate": {
+          "id": "ended-heavy-terminate",
+          "name": "ended-heavy-terminate",
+          "type": "DAG",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-terminate-2870990033": {
+          "id": "ended-heavy-terminate-2870990033",
+          "name": "ended-heavy-terminate.d",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-terminate-2887767652": {
+          "id": "ended-heavy-terminate-2887767652",
+          "name": "ended-heavy-terminate.c",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-terminate-2904545271": {
+          "id": "ended-heavy-terminate-2904545271",
+          "name": "ended-heavy-terminate.b",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-terminate-2921322890": {
+          "id": "ended-heavy-terminate-2921322890",
+          "name": "ended-heavy-terminate.a",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        }
+      }
+    }
+  },
+  {
+    "metadata": {
+      "name": "waiting-heavy-terminate",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "waiting-heavy-terminate",
+        "workflows.argoproj.io/completed": "false",
+        "workflows.argoproj.io/phase": "Running"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "waiting-heavy-terminate",
+        "workflows.argoproj.io/pod-name-format": "v2"
+      }
+    },
+    "spec": {
+      "arguments": {}
+    },
+    "status": {
+      "phase": "Running",
+      "startedAt": null,
+      "finishedAt": null,
+      "nodes": {
+        "waiting-heavy-terminate": {
+          "id": "waiting-heavy-terminate",
+          "name": "waiting-heavy-terminate",
+          "type": "DAG",
+          "phase": "Running",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "waiting-heavy-terminate-2185606640": {
+          "id": "waiting-heavy-terminate-2185606640",
+          "name": "waiting-heavy-terminate.f",
+          "type": "Pod",
+          "phase": "Pending",
+          "startedAt": null,
+          "finishedAt": null,
+          "synchronizationStatus": {
+            "waiting": "default/ConfigMap/oberth-sync-limits/heavy-terminate"
+          }
+        },
+        "waiting-heavy-terminate-2235939497": {
+          "id": "waiting-heavy-terminate-2235939497",
+          "name": "waiting-heavy-terminate.e",
+          "type": "Pod",
+          "phase": "Pending",
+          "startedAt": null,
+          "finishedAt": null
+        }
+      },
+      "synchronization": {
+        "semaphore": {
+          "holding": [
+            {
+              "semaphore": "default/ConfigMap/oberth-sync-limits/heavy-terminate",
+              "holders": [
+                "default/waiting-heavy-terminate/waiting-heavy-terminate-2235939497"
+              ]
+            }
+          ],
+          "waiting": [
+            {
+              "semaphore": "default/ConfigMap/oberth-sync-limits/heavy-terminate",
+              "holders": [
+                "default/ended-heavy-terminate/ended-heavy-terminate-2870990033",
+                "default/waiting-heavy-terminate/waiting-heavy-terminate-2235939497"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "metadata": {
+      "name": "ended-heavy-retry",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "ended-heavy-retry",
+        "workflows.argoproj.io/completed": "true",
+        "workflows.argoproj.io/phase": "Failed"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "ended-heavy-retry",
+        "workflows.argoproj.io/pod-name-format": "v2"
+      }
+    },
+    "spec": {
+      "arguments": {},
+      "shutdown": "Stop"
+    },
+    "status": {
+      "phase": "Failed",
+      "startedAt": null,
+      "finishedAt": null,
+      "nodes": {
+        "ended-heavy-retry": {
+          "id": "ended-heavy-retry",
+          "name": "ended-heavy-retry",
+          "type": "DAG",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-retry-1631722885": {
+          "id": "ended-heavy-retry-1631722885",
+          "name": "ended-heavy-retry.b(0)",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-retry-3238208704": {
+          "id": "ended-heavy-retry-3238208704",
+          "name": "ended-heavy-retry.c(0)",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-retry-3388546163": {
+          "id": "ended-heavy-retry-3388546163",
+          "name": "ended-heavy-retry.a",
+          "type": "Retry",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-retry-3405323782": {
+          "id": "ended-heavy-retry-3405323782",
+          "name": "ended-heavy-retry.b",
+          "type": "Retry",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-retry-3422101401": {
+          "id": "ended-heavy-retry-3422101401",
+          "name": "ended-heavy-retry.c",
+          "type": "Retry",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-retry-3438879020": {
+          "id": "ended-heavy-retry-3438879020",
+          "name": "ended-heavy-retry.d",
+          "type": "Retry",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-retry-3859266558": {
+          "id": "ended-heavy-retry-3859266558",
+          "name": "ended-heavy-retry.a(0)",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-retry-3928049575": {
+          "id": "ended-heavy-retry-3928049575",
+          "name": "ended-heavy-retry.d(0)",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        }
+      }
+    }
+  },
+  {
+    "metadata": {
+      "name": "waiting-heavy-retry",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "waiting-heavy-retry",
+        "workflows.argoproj.io/completed": "false",
+        "workflows.argoproj.io/phase": "Running"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "waiting-heavy-retry",
+        "workflows.argoproj.io/pod-name-format": "v2"
+      }
+    },
+    "spec": {
+      "arguments": {}
+    },
+    "status": {
+      "phase": "Running",
+      "startedAt": null,
+      "finishedAt": null,
+      "nodes": {
+        "waiting-heavy-retry": {
+          "id": "waiting-heavy-retry",
+          "name": "waiting-heavy-retry",
+          "type": "DAG",
+          "phase": "Running",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "waiting-heavy-retry-463929656": {
+          "id": "waiting-heavy-retry-463929656",
+          "name": "waiting-heavy-retry.e",
+          "type": "Pod",
+          "phase": "Pending",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "waiting-heavy-retry-514262513": {
+          "id": "waiting-heavy-retry-514262513",
+          "name": "waiting-heavy-retry.f",
+          "type": "Pod",
+          "phase": "Pending",
+          "startedAt": null,
+          "finishedAt": null
+        }
+      },
+      "synchronization": {
+        "semaphore": {
+          "holding": [
+            {
+              "semaphore": "default/ConfigMap/oberth-sync-limits/heavy-retry",
+              "holders": [
+                "default/waiting-heavy-retry/waiting-heavy-retry-463929656",
+                "default/waiting-heavy-retry/waiting-heavy-retry-514262513"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "metadata": {
+      "name": "ended-heavy-failed",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "ended-heavy-failed",
+        "workflows.argoproj.io/completed": "true",
+        "workflows.argoproj.io/phase": "Failed"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "ended-heavy-failed",
+        "workflows.argoproj.io/pod-name-format": "v2"
+      }
+    },
+    "spec": {
+      "arguments": {}
+    },
+    "status": {
+      "phase": "Failed",
+      "startedAt": null,
+      "finishedAt": null,
+      "nodes": {
+        "ended-heavy-failed": {
+          "id": "ended-heavy-failed",
+          "name": "ended-heavy-failed",
+          "type": "DAG",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-failed-706035235": {
+          "id": "ended-heavy-failed-706035235",
+          "name": "ended-heavy-failed.d",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-failed-756368092": {
+          "id": "ended-heavy-failed-756368092",
+          "name": "ended-heavy-failed.a",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-failed-789923330": {
+          "id": "ended-heavy-failed-789923330",
+          "name": "ended-heavy-failed.c",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "ended-heavy-failed-806700949": {
+          "id": "ended-heavy-failed-806700949",
+          "name": "ended-heavy-failed.b",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        }
+      }
+    }
+  },
+  {
+    "metadata": {
+      "name": "waiting-heavy-failed",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "waiting-heavy-failed",
+        "workflows.argoproj.io/completed": "false",
+        "workflows.argoproj.io/phase": "Running"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "waiting-heavy-failed",
+        "workflows.argoproj.io/pod-name-format": "v2"
+      }
+    },
+    "spec": {
+      "arguments": {}
+    },
+    "status": {
+      "phase": "Running",
+      "startedAt": null,
+      "finishedAt": null,
+      "nodes": {
+        "waiting-heavy-failed": {
+          "id": "waiting-heavy-failed",
+          "name": "waiting-heavy-failed",
+          "type": "DAG",
+          "phase": "Running",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "waiting-heavy-failed-176292896": {
+          "id": "waiting-heavy-failed-176292896",
+          "name": "waiting-heavy-failed.f",
+          "type": "Pod",
+          "phase": "Pending",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "waiting-heavy-failed-226625753": {
+          "id": "waiting-heavy-failed-226625753",
+          "name": "waiting-heavy-failed.e",
+          "type": "Pod",
+          "phase": "Pending",
+          "startedAt": null,
+          "finishedAt": null
+        }
+      },
+      "synchronization": {
+        "semaphore": {
+          "holding": [
+            {
+              "semaphore": "default/ConfigMap/oberth-sync-limits/heavy-failed",
+              "holders": [
+                "default/waiting-heavy-failed/waiting-heavy-failed-176292896",
+                "default/waiting-heavy-failed/waiting-heavy-failed-226625753"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "metadata": {
+      "name": "mutex-pending-stop",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "mutex-pending-stop",
+        "workflows.argoproj.io/completed": "false",
+        "workflows.argoproj.io/phase": "Pending"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "mutex-pending-stop"
+      }
+    },
+    "spec": {
+      "arguments": {},
+      "shutdown": "Stop"
+    },
+    "status": {
+      "phase": "Pending",
+      "startedAt": null,
+      "finishedAt": null,
+      "synchronization": {
+        "mutex": {
+          "waiting": [
+            {
+              "mutex": "default/Mutex/release",
+              "holder": "default/mutex-holder"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "metadata": {
+      "name": "mutex-pending-terminate",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "mutex-pending-terminate",
+        "workflows.argoproj.io/completed": "true",
+        "workflows.argoproj.io/phase": "Succeeded"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "mutex-pending-terminate"
+      }
+    },
+    "spec": {
+      "arguments": {},
+      "shutdown": "Terminate"
+    },
+    "status": {
+      "phase": "Succeeded",
+      "startedAt": null,
+      "finishedAt": null,
+      "nodes": {
+        "mutex-pending-terminate": {
+          "id": "mutex-pending-terminate",
+          "name": "mutex-pending-terminate",
+          "type": "Pod",
+          "phase": "Failed",
+          "startedAt": null,
+          "finishedAt": null
+        }
+      }
+    }
+  },
+  {
+    "metadata": {
+      "name": "mutex-holder",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "mutex-holder",
+        "workflows.argoproj.io/completed": "false",
+        "workflows.argoproj.io/phase": "Running"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "mutex-holder",
+        "workflows.argoproj.io/pod-name-format": "v2"
+      }
+    },
+    "spec": {
+      "arguments": {}
+    },
+    "status": {
+      "phase": "Running",
+      "startedAt": null,
+      "finishedAt": null,
+      "nodes": {
+        "mutex-holder": {
+          "id": "mutex-holder",
+          "name": "mutex-holder",
+          "type": "Pod",
+          "phase": "Pending",
+          "startedAt": null,
+          "finishedAt": null
+        }
+      },
+      "synchronization": {
+        "mutex": {
+          "holding": [
+            {
+              "mutex": "default/Mutex/release",
+              "holder": "default/mutex-holder"
+            }
+          ]
+        }
+      }
+    }
+  }
+]

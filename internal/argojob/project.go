@@ -174,6 +174,11 @@ func runStatus(w *wf.Workflow) (stepmodel.RunStatus, string) {
 	case wf.WorkflowRunning:
 		return stepmodel.RunRunning, reasonRunning
 	case wf.WorkflowSucceeded:
+		// Terminate releases a Workflow still pending on a workflow-level lock
+		// by marking it Succeeded; its entry node never succeeded.
+		if root, ok := w.Status.Nodes[w.Name]; w.Spec.Shutdown != "" && (!ok || root.Phase != wf.NodeSucceeded) {
+			return stepmodel.RunCancelled, reasonStopped
+		}
 		return stepmodel.RunPassed, reasonPassed
 	case wf.WorkflowFailed, wf.WorkflowError:
 		if w.Spec.Shutdown != "" {

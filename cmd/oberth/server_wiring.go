@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +9,7 @@ import (
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/app"
+	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/gitport"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/nativebinding"
@@ -128,15 +128,5 @@ func (o *serverOwners) Locks(ctx context.Context) ([]service.Lock, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := []service.Lock{}
-	for _, w := range rows.Items {
-		if w.Status.Synchronization == nil || names[w.Labels[nativebinding.RepositoryLabel]] == "" {
-			continue
-		}
-		raw, _ := json.Marshal(w.Status.Synchronization)
-		if string(raw) != "{}" {
-			out = append(out, service.Lock{Repo: names[w.Labels[nativebinding.RepositoryLabel]], RunID: w.Annotations[nativebinding.RunIDAnnotation], Name: w.Name, Waiting: w.Status.Phase == wf.WorkflowPending})
-		}
-	}
-	return out, nil
+	return runLocks(argojob.LockFacts(rows.Items), names, lockClearCommand(o.c.config.ArgoNamespace)), nil
 }

@@ -12,10 +12,15 @@ type OutboxResult struct {
 }
 
 // LockState contains only current authorized native holders and waiters.
+// Stale lists ended runs the workflow controller still counts as holders;
+// Remedy and Command then say how an administrator releases them.
 type LockState struct {
 	Lock    string   `json:"lock"`
 	Holders []string `json:"holders"`
 	Waiters []string `json:"waiters"`
+	Stale   []string `json:"stale,omitempty"`
+	Remedy  string   `json:"remedy,omitempty"`
+	Command string   `json:"command,omitempty"`
 }
 type SyncStatus struct {
 	Locks []LockState `json:"locks"`

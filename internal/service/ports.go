@@ -70,9 +70,12 @@ type Git interface {
 	ListRefs(context.Context, string) ([]gitport.Ref, error)
 	ReleaseTag(context.Context, stateport.Repository, gitport.Ref) (gitport.Ref, error)
 }
+// Lock is one run's place on one native lock: a holder, a waiter, or, when
+// Clear is set, a run that has ended while the workflow controller still counts
+// a unit for it; Clear is then the exact command that releases that unit.
 type Lock struct {
-	Repo, RunID, Name string
-	Waiting           bool
+	Repo, RunID, Name, Clear string
+	Waiting                  bool
 }
 
 // Starter is implemented by wiring: prepare, accept and start under its lifetime.

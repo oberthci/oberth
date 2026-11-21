@@ -9,9 +9,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// controllerDeployment is argoNative.fullnameOverride plus the subchart's
+// ControllerDeployment is argoNative.fullnameOverride plus the subchart's
 // controller name: the workflow controller Deployment the chart renders.
-const controllerDeployment = "oberth-controller-workflow-controller"
+const ControllerDeployment = "oberth-controller-workflow-controller"
 
 // ControllerRestart is printed after an upgrade or rollback whose apply changed
 // the workflow controller's Pod template; the readiness wait has by then seen
@@ -38,7 +38,7 @@ func (e *Engine) watchController(ctx context.Context, namespace string) func() b
 }
 
 func (e *Engine) controllerTemplate(ctx context.Context, namespace string) (corev1.PodTemplateSpec, bool) {
-	d, err := e.Cluster.Client.AppsV1().Deployments(namespace).Get(ctx, controllerDeployment, metav1.GetOptions{})
+	d, err := e.Cluster.Client.AppsV1().Deployments(namespace).Get(ctx, ControllerDeployment, metav1.GetOptions{})
 	if err != nil {
 		return corev1.PodTemplateSpec{}, false
 	}
@@ -50,7 +50,7 @@ func (e *Engine) controllerTemplate(ctx context.Context, namespace string) (core
 // template rolled out, so no Pod of the earlier controller still serves.
 func (e *Engine) waitController(ctx context.Context, namespace string) error {
 	for {
-		d, err := e.Cluster.Client.AppsV1().Deployments(namespace).Get(ctx, controllerDeployment, metav1.GetOptions{})
+		d, err := e.Cluster.Client.AppsV1().Deployments(namespace).Get(ctx, ControllerDeployment, metav1.GetOptions{})
 		if err == nil && rolledOut(d) {
 			return nil
 		}

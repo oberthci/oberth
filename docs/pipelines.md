@@ -71,8 +71,8 @@ Use Argo steps, DAG dependencies, retry rules, synchronization and `activeDeadli
 Semaphore keys belong in `oberth-sync-limits`. Oberth adds no ordering or capacity queue. Template
 retries are attempts of one step; reruns are new runs. Memory limits are configured bounds, not
 usage measurements; inspect detail for out-of-memory termination or eviction. `oberth lock status`
-shows Argo lock holders. The single global run cap is Argo `parallelism`, set by installation
-`runs.parallel` (default 4; 0 unlimited). Workflow limits add no Oberth cap.
+shows lock holders, waiters and `stale` ended runs. The single global run cap is Argo `parallelism`,
+set by installation `runs.parallel` (default 4; 0 unlimited). Workflow limits add no Oberth cap.
 
 ## Cache and outputs
 
