@@ -21,7 +21,8 @@ func assemble(ctx context.Context, c *composition, life *lifecycle, builders con
 	}
 	// Replayed pushes may submit work, so wiring recovers before this phase.
 	life.add(Part{Name: "pending pushes", Recover: c.replayPending})
-	life.add(Part{Name: "schedules", Recover: c.schedules.SyncAll})
+	c.startupPassDone = make(chan struct{})
+	life.add(Part{Name: "schedules", Run: c.startupSchedules})
 	if c.auth == nil {
 		c.auth = storeAuth{c.store}
 	}

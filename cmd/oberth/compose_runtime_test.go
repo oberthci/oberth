@@ -141,6 +141,9 @@ func (f *composedFixture) bindClient(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+// waitStarted waits until the server reports ready and its startup schedule
+// pass, which runs after that, has ended: composed tests start from a
+// quiescent server.
 func (f *composedFixture) waitStarted(t *testing.T, done <-chan error) {
 	t.Helper()
 	select {
@@ -149,6 +152,13 @@ func (f *composedFixture) waitStarted(t *testing.T, done <-chan error) {
 		t.Fatalf("server failed: %v; %s", err, f.trace.String())
 	case <-time.After(10 * time.Second):
 		t.Fatalf("server not ready: %s", f.trace.String())
+	}
+	select {
+	case <-f.owners.c.startupPassDone:
+	case err := <-done:
+		t.Fatalf("server failed: %v; %s", err, f.trace.String())
+	case <-time.After(10 * time.Second):
+		t.Fatalf("startup schedule pass did not end: %s", f.trace.String())
 	}
 }
 

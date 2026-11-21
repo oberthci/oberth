@@ -20,20 +20,27 @@ func (f *fixture) statusError(c *cronsync.Syncer, repo cronsync.Repository) stri
 	return status.Error
 }
 
-// A notice for a repository the catalogue no longer knows reconciles every
-// repository, each within its own attempt: a slow first repository fails
-// alone and the next still syncs inside the notice's shared bound.
-func TestUnknownRepositoryPassGivesEachRepositoryItsOwnAttempt(t *testing.T) {
-	for _, attempt := range []time.Duration{time.Minute, 0} {
-		t.Run(map[bool]string{true: "own attempt", false: "shared bound only"}[attempt > 0], func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) { slowFirstRepositoryPass(t, attempt) })
-		})
+// A full pass, from a notice for a repository the catalogue no longer knows
+// or from startup, reconciles every repository, each within its own attempt:
+// a slow first repository fails alone and the next still syncs inside the
+// caller's shared bound.
+func TestFullPassGivesEachRepositoryItsOwnAttempt(t *testing.T) {
+	passes := map[string]func(*cronsync.Syncer, context.Context) error{
+		"unknown key": func(c *cronsync.Syncer, ctx context.Context) error { return c.RefsChanged(ctx, "origin/team/removed", nil) },
+		"startup":     func(c *cronsync.Syncer, ctx context.Context) error { return c.SyncAll(ctx) },
+	}
+	for name, pass := range passes {
+		for _, attempt := range []time.Duration{time.Minute, 0} {
+			t.Run(name+map[bool]string{true: "/own attempt", false: "/shared bound only"}[attempt > 0], func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) { slowFirstRepositoryPass(t, attempt, pass) })
+			})
+		}
 	}
 }
 
-// slowFirstRepositoryPass runs the unknown-key pass under a 90-second notice
-// bound while the first repository's Git never answers.
-func slowFirstRepositoryPass(t *testing.T, attempt time.Duration) {
+// slowFirstRepositoryPass runs a full pass under a 90-second bound while the
+// first repository's Git never answers.
+func slowFirstRepositoryPass(t *testing.T, attempt time.Duration, pass func(*cronsync.Syncer, context.Context) error) {
 	f := newFixture(t)
 	other := f.otherRepository()
 	f.sync()
@@ -52,7 +59,7 @@ func slowFirstRepositoryPass(t *testing.T, attempt time.Duration) {
 	notice, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 	before := len(f.calls)
-	_ = c.RefsChanged(notice, "origin/team/removed", nil)
+	_ = pass(c, notice)
 	f.gitHook = nil
 	synced := slices.ContainsFunc(f.calls[before:], func(call cronsync.Preparation) bool { return call.Repository.ID == other.ID })
 	if f.statusError(c, f.repo) == "" || f.statusError(c, other) != "" {

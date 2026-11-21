@@ -12,10 +12,11 @@ import (
 // refNoticeBound bounds the schedule reconciliation one ref notice starts.
 const refNoticeBound = 2 * time.Minute
 
-// repositoryAttempt bounds each repository when a notice names a repository
-// the catalogue no longer knows and every repository is reconciled: room for
-// a 15-second refresh plus admission, so one slow repository cannot use up
-// refNoticeBound for the others.
+// repositoryAttempt bounds each repository whenever every repository is
+// reconciled (the startup pass after readiness, or a notice naming a
+// repository the catalogue no longer knows): room for a 15-second refresh
+// plus admission, so one slow repository or first clone cannot hold the
+// others. A first clone it gives up on continues and announces its refs.
 const repositoryAttempt = 30 * time.Second
 
 // refNotices hands the cache's moved refs to schedule reconciliation outside

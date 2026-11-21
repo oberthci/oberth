@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -24,6 +25,25 @@ func (o *serverOwners) scheduleConfig() {
 		return o.wiring.PrepareSchedule(ctx, app.Request{RepositoryID: p.Repository.ID, Repository: p.Repository.Qualified, Ref: p.Revision, Trigger: model.TriggerSchedule, ScheduleEntry: p.Entry.Name, Actor: actor.Actor{Identity: "schedule", AuthMethod: "system"}})
 	}}
 }
+// startupSchedules reconciles every repository's schedules once the server
+// reports ready, under the server's lifetime: a first clone, a slow forge or
+// unreadable schedule Git can neither delay nor fail the start. As with a ref
+// notice, failures go to the log and to each repository's schedule state,
+// and the next relevant event retries them.
+func (c *composition) startupSchedules(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.health.readySignal:
+	}
+	if err := c.schedules.SyncAll(ctx); err != nil && ctx.Err() == nil {
+		_, _ = fmt.Fprintln(c.diagnostic, err)
+	}
+	close(c.startupPassDone)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func (o *serverOwners) scheduleRepositories(ctx context.Context) ([]cronsync.Repository, error) {
 	rows, err := o.repositories(ctx, nil)
 	out := make([]cronsync.Repository, 0, len(rows))

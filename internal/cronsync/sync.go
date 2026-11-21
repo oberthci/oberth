@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -66,13 +65,10 @@ func (c *Syncer) declarationAt(ctx context.Context, repo Repository, resolve fun
 	result, err := schedule.Parse(file.Bytes, c.config.Limits, c.config.Now())
 	return result, publicerr.Classify(err)
 }
-func (c *Syncer) syncAll(ctx context.Context) error { return c.pass(ctx, 0) }
-
-// pass reconciles every repository. With a non-zero attempt each repository
-// gets its own bound, so a slow one uses up only its own time; a repository
-// the pass no longer reaches within ctx keeps its state rather than being
-// recorded as failed.
-func (c *Syncer) pass(ctx context.Context, attempt time.Duration) error {
+// syncAll reconciles every repository, each within its own RepositoryAttempt,
+// so a slow one uses up only its own time; a repository the pass no longer
+// reaches within ctx keeps its state rather than being recorded as failed.
+func (c *Syncer) syncAll(ctx context.Context) error {
 	c.fullSyncFailed = true
 	repos, err := c.config.Repositories(ctx)
 	if err != nil {
@@ -91,7 +87,7 @@ func (c *Syncer) pass(ctx context.Context, attempt time.Duration) error {
 			failures = append(failures, err)
 			continue
 		}
-		failures = append(failures, c.attempt(ctx, attempt, repo, objects))
+		failures = append(failures, c.attempt(ctx, repo, objects))
 	}
 	for i := range objects {
 		object := &objects[i]
@@ -104,24 +100,24 @@ func (c *Syncer) pass(ctx context.Context, attempt time.Duration) error {
 	return errors.Join(failures...)
 }
 
-func (c *Syncer) attempt(ctx context.Context, bound time.Duration, repo Repository, objects []wfv1.CronWorkflow) error {
-	if bound > 0 {
+func (c *Syncer) attempt(ctx context.Context, repo Repository, objects []wfv1.CronWorkflow) error {
+	if c.config.RepositoryAttempt > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, bound)
+		ctx, cancel = context.WithTimeout(ctx, c.config.RepositoryAttempt)
 		defer cancel()
 	}
 	return c.syncRepository(ctx, repo, objects)
 }
 
 // syncOne reconciles one repository. A key the catalogue no longer knows
-// runs a pass in which each repository has its own RepositoryAttempt.
+// runs the full pass, which carries a renamed repository.
 func (c *Syncer) syncOne(ctx context.Context, key string) error {
 	repo, found, err := c.config.Repository(ctx, key)
 	if err != nil {
 		return problem(catalogFailure, err)
 	}
 	if !found {
-		return c.pass(ctx, c.config.RepositoryAttempt)
+		return c.syncAll(ctx)
 	}
 	objects, err := c.list(ctx)
 	if err != nil {
