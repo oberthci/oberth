@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/admissioncontract"
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/sourcecontract"
 )
 
 func TestInspectionPlaceholdersRequireOfflineValidation(t *testing.T) {
@@ -35,6 +37,41 @@ func TestInspectionPlaceholdersRequireOfflineValidation(t *testing.T) {
 
 		}
 		assertOfflineParameterFallbacks(t, offline)
+	}
+}
+
+// A schedule parent serves many runs, so its children carry the fixed scheduled
+// locator; a run carries its own ID; a workflow without source carries none.
+func TestScheduleParentStampsScheduledSourceLocator(t *testing.T) {
+	for _, c := range []struct {
+		mode    admissioncontract.Mode
+		trigger string
+		source  bool
+		want    string
+	}{
+		{admissioncontract.ModeInspect, "schedule", true, sourcecontract.ScheduledLocator},
+		{admissioncontract.ModeSubmit, "schedule", true, "run-1"},
+		{admissioncontract.ModeSubmit, "branch", true, "run-1"},
+		{admissioncontract.ModeInspect, "schedule", false, ""},
+	} {
+		w := simpleWorkflow()
+		r := requestFor(t, w)
+		r.Mode, r.Trigger, r.RunID = c.mode, model.RunTrigger(c.trigger), "run-1"
+		if c.mode == admissioncontract.ModeInspect {
+			r.RunID = ""
+		}
+		g := newGraph(t.Context(), w, r, Policy{})
+		g.inventory = &sourceInventory{usesSource: c.source}
+		g.stampParameters(w, r)
+		value, present := "", false
+		for _, p := range w.Spec.Arguments.Parameters {
+			if p.Name == "oberth-source" {
+				value, present = p.Value.String(), true
+			}
+		}
+		if value != c.want || present != c.source {
+			t.Fatal("source locator differs", c, value, present)
+		}
 	}
 }
 

@@ -32,7 +32,7 @@ func (e *Executor) changed(name string) {
 }
 
 func (e *Executor) discoverChild(ctx context.Context, name string) {
-	if e.config.Children == nil || e.config.ChildRuns == nil || e.config.Cache == nil {
+	if e.config.Children == nil || e.config.ChildRuns == nil || e.config.Keeper == nil || e.config.Cache == nil {
 		e.queue.Forget(name)
 		return
 	}

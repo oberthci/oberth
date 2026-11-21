@@ -146,12 +146,23 @@ func (s *Server) authorize(ctx context.Context, header string, request LoadReque
 		return Run{}, empty, 0, &Failure{Code: "unavailable", Reason: "auth-cap"}
 	}
 	defer s.workflow(caller, -1)
-	run, err := s.config.Run(phase, request.Locator)
+	id := runID(caller, request.Locator)
+	run, err := s.config.Run(phase, id)
 	if err != nil {
 		return run, empty, 0, err
 	}
-	binding, index, err := selectBinding(run, caller, request)
+	binding, index, err := selectBinding(run, caller, LoadRequest{Locator: id, Descriptor: request.Descriptor})
 	return run, binding, index, err
+}
+
+// runID is the run a locator names. A schedule child's run ID is its own
+// Workflow name, so the scheduled locator names the caller's own run; the
+// recorded Workflow name and UID are still checked against the caller.
+func runID(caller Caller, locator string) string {
+	if locator == sourcecontract.ScheduledLocator {
+		return caller.Workflow
+	}
+	return locator
 }
 func selectBinding(run Run, caller Caller, request LoadRequest) (sourcecontract.Binding, int, error) {
 	empty := sourcecontract.Binding{}

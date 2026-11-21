@@ -102,8 +102,14 @@ func (w *childRefusalLog) Write(p []byte) (int, error) {
 
 func (f *composedFixture) prepareScheduledObservation(t *testing.T) string {
 	t.Helper()
+	return f.prepareScheduledDocument(t, strings.ReplaceAll(starterWorkflow(), containerimage.Utility, "oberth.ci/build:1"))
+}
+
+// prepareScheduledDocument commits document as the build pipeline with one
+// nightly schedule on the default branch and returns that commit.
+func (f *composedFixture) prepareScheduledDocument(t *testing.T, document string) string {
+	t.Helper()
 	f.prepareCommit(t)
-	document := strings.ReplaceAll(starterWorkflow(), containerimage.Utility, "oberth.ci/build:1")
 	f.git.Write(t, ".oberth/build.yaml", []byte(document))
 	f.git.Write(t, schedule.FileName, []byte("schedules: [{name: nightly, cron: '0 3 * * *'}]\n"))
 	commit := f.git.CommitFile(t, "scheduled admission")

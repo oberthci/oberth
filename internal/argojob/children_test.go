@@ -5,16 +5,19 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/argojob"
 	nativefake "github.com/oberthci/oberth/internal/argojob/fake"
 	"github.com/oberthci/oberth/internal/cronsync"
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/store"
 	core "k8s.io/api/core/v1"
@@ -43,6 +46,35 @@ func TestScheduledChildRecordedOnceAcrossReplayAndRestart(t *testing.T) {
 	compositionOK(t, err)
 	if len(runs) != 1 || len(events.Events) != 1 || runs[0].Origin.Actor != "oberth:scheduler" || runs[0].Origin.ScheduleEntry != "nightly" || runs[0].ID != f.child.Name || proof.Run.SpecSHA256 != retained.Admission.SpecDigest {
 		t.Fatal("child was not committed exactly once", runs, events, proof)
+	}
+}
+
+// An accepted child keeps its sealed source roots under its own run ID, as a
+// pushed run does before Create.
+func TestScheduledChildKeepsItsSourceUnderItsRunID(t *testing.T) {
+	t.Parallel()
+	f := newChildFixture(t)
+	f.config.Admit = func(_ context.Context, r cronsync.Preparation) (*admissioncontract.PreparedAdmission, error) {
+		v := childAdmission(r)
+		v.SourceBindings = []sourcecontract.Binding{{Path: "main", Revision: sourcecontract.Revision{Repository: r.Repository.Qualified, Commit: r.Revision.CommitSHA}}}
+		p, err := admissioncontract.Seal(v)
+		f.prepared = p
+		return p, err
+	}
+	syncer, err := cronsync.New(f.config)
+	compositionOK(t, err)
+	f.syncer = syncer
+	compositionOK(t, f.syncer.SyncAll(t.Context()))
+	f.parent, err = f.native.Get(t.Context(), f.parent.Name, meta.GetOptions{})
+	compositionOK(t, err)
+	f.child = f.fire(t)
+	compositionOK(t, f.executor().RecordChildForTest(t.Context(), f.child))
+	retained, err := f.s.Run(t.Context(), f.child.Name)
+	compositionOK(t, err)
+	kept := f.kept.owners()
+	bindings, ok := kept[f.child.Name]
+	if len(kept) != 1 || !ok || len(bindings) != 1 || !reflect.DeepEqual(bindings, retained.Admission.SourceBindings) {
+		t.Fatal("accepted child did not keep its source", kept)
 	}
 }
 

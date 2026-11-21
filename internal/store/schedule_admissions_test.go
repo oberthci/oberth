@@ -32,7 +32,6 @@ func TestScheduleRetentionRefusesNonScheduleAdmissions(t *testing.T) {
 		"run":     func(v *admissioncontract.PreparedView) { v.RunID = "run" },
 		"trigger": func(v *admissioncontract.PreparedView) { v.Trigger = "branch" },
 		"entry":   func(v *admissioncontract.PreparedView) { v.ScheduleEntry = "" },
-		"source":  func(v *admissioncontract.PreparedView) { v.SourceBindings = []sourcecontract.Binding{{}} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, v, _ := scheduleStore(t)
@@ -43,6 +42,21 @@ func TestScheduleRetentionRefusesNonScheduleAdmissions(t *testing.T) {
 	s, _, _ := scheduleStore(t)
 	requireCode(t, s.RetainSchedule(t.Context(), nil), publicerr.InvalidInput)
 	requireCode(t, s.RetainSchedule(t.Context(), &admissioncontract.PreparedAdmission{}), publicerr.InvalidInput)
+}
+
+// A source-consuming schedule is retained with its sealed source bindings,
+// which its children load and keep.
+func TestScheduleRetentionKeepsSourceBindings(t *testing.T) {
+	t.Parallel()
+	s, v, id := scheduleStore(t)
+	v.SourceBindings = []sourcecontract.Binding{{Path: "main"}}
+	p := sealView(t, v)
+	requireOK(t, s.RetainSchedule(t.Context(), p))
+	got, err := s.ScheduleAdmission(t.Context(), id, v.ScheduleEntry, p.View().Digest)
+	requireOK(t, err)
+	if len(got.SourceBindings) != 1 || got.SourceBindings[0].Path != "main" {
+		t.Fatal("schedule admission lost its source bindings", got.SourceBindings)
+	}
 }
 
 func TestScheduleRetentionKeepsCurrentAndPrevious(t *testing.T) {

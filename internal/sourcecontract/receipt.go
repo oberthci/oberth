@@ -20,6 +20,11 @@ type Receipt struct {
 
 func (r Receipt) Clone() Receipt { return r }
 
+// ScheduledLocator is the source locator every child of a schedule carries.
+// One sealed parent serves many runs, so it cannot name one; the source
+// endpoint selects the run named by the caller's own Workflow instead.
+const ScheduledLocator = "scheduled"
+
 // Binding is an exact source declaration, immutable once sealed in prepared
 // admission. Revision and Export describe the frozen checkout, not authority
 // to load it. Clone detaches the tag snapshot.

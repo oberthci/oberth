@@ -114,8 +114,8 @@ token is not an operator token. Follow [operator inputs](install.md#unseal-after
 `.oberth/schedule.yaml` on the default branch contains a `schedules` list. Each entry has a unique
 `name`, numeric five-field `cron`, optional `branch` and `timezone`, and Argo `concurrencyPolicy`.
 UTC is default; named shortcuts and seconds refuse. Each entry selects its branch's build pipeline,
-never a release. Scheduled runs cannot consume repository source in this release. A branch on the
-forge is found too; push others: `git push oberth <branch>`. Put `{{...}}` only in `spec.templates`;
+never a release, with a push's grants and source at the head last admitted. A branch on the forge
+is found too; push others: `git push oberth <branch>`. Put `{{...}}` only in `spec.templates`;
 keep other `spec` fields literal: Pod metadata, arguments, volumes and `templateDefaults`.
 A branch cannot contain `{{`. Pushed runs have neither restriction. Preparation refuses before
 publishing and names the field. Reason: `schedule field must be literal`:

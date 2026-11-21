@@ -22,7 +22,10 @@ func requestFixture(t *testing.T, f *fixture) cronsync.Preparation {
 	}
 	return cronsync.Preparation{Repository: f.repo, Entry: file.Entries[0], Revision: gitport.Ref{Name: "refs/heads/main", ObjectSHA: strings.Repeat("a", 40), CommitSHA: strings.Repeat("a", 40)}}
 }
-func TestScheduledSourceRefusalNamesEntryAndStep(t *testing.T) {
+// A source-consuming admission becomes an active parent with its sealed spec;
+// when the entry's branch is gone the parent is suspended, its spec unchanged,
+// and the entry shows the existing branch refusal.
+func TestScheduledSourceParentIsAdmittedAndSuspendsWithoutBranch(t *testing.T) {
 	f := newFixture(t)
 	request := requestFixture(t, f)
 	view := prepared(request)
@@ -41,11 +44,17 @@ func TestScheduledSourceRefusalNamesEntryAndStep(t *testing.T) {
 	}
 	f.sync()
 	status, err := f.c.Status(t.Context(), f.repo, "nightly")
-	want := "scheduled source is not supported - use a push or manual schedule trigger\nentry \"nightly\": field \"source\" has value step \"main\": use a push or manual schedule trigger."
-	if err != nil || status.Error != "schedule file is invalid" || status.Detail != want || len(f.native.Actions()) != 0 {
-		t.Fatal(status, err)
+	admitted := f.object(f.repo, "nightly")
+	if err != nil || status.Error != "" || admitted.Spec.Suspend || !reflect.DeepEqual(admitted.Spec.WorkflowSpec, sealed.View().Workflow.Spec) {
+		t.Fatal("source schedule was not admitted", status, err)
 	}
-
+	f.put(f.repo, "schedules: [{name: nightly, cron: '0 3 * * *', branch: absent}]")
+	f.sync()
+	status, err = f.c.Status(t.Context(), f.repo, "nightly")
+	suspended := f.object(f.repo, "nightly")
+	if err != nil || status.Error != "schedule branch not found" || !suspended.Spec.Suspend || !reflect.DeepEqual(suspended.Spec.WorkflowSpec, admitted.Spec.WorkflowSpec) {
+		t.Fatal("absent branch did not suspend the source schedule", status, err)
+	}
 }
 func TestSealedSpecAndCapturedTemplatesStayUnchangedAcrossValidation(t *testing.T) {
 	f := newFixture(t)

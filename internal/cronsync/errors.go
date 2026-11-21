@@ -15,7 +15,6 @@ const (
 	foreignParent
 	pendingSync
 	badPrepared
-	sourceRefused
 	childMismatch
 	suspensionUnknown
 	publicationFailed
@@ -41,7 +40,6 @@ func messages() []message {
 		{publicerr.Forbidden, "schedule belongs to another owner", "Choose a schedule managed by Oberth in this repository."},
 		{publicerr.Unavailable, "schedule update is pending", "Retry after schedule permissions and preparation recover."},
 		{publicerr.Invariant, "schedule details do not match", "Prepare this exact repository, revision and schedule entry."},
-		{publicerr.InvalidInput, "scheduled source is not supported", "use a push or manual schedule trigger"},
 		{publicerr.Forbidden, "scheduled run could not be verified", "Check the run's schedule and its current permissions before adopting it."},
 		{publicerr.Unavailable, "some schedules may still run", "Retry the permissions change after all schedules can be paused."},
 		{publicerr.Unavailable, "schedule permissions were not updated", "Retry the permissions change; schedules remain paused."},

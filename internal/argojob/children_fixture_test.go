@@ -2,8 +2,10 @@ package argojob_test
 
 import (
 	"context"
+	"maps"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -21,6 +23,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/schedule"
+	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -36,6 +39,7 @@ type childFixture struct {
 	parent   *wf.CronWorkflow
 	child    *wf.Workflow
 	prepared *admissioncontract.PreparedAdmission
+	kept     keptRoots
 }
 
 func newChildFixture(t *testing.T) *childFixture {
@@ -104,6 +108,27 @@ func orphanOptions() meta.DeleteOptions {
 }
 func (f *childFixture) executor() *argojob.Executor { return argojob.New(f.executorConfig()) }
 func (f *childFixture) executorConfig() argojob.Config {
-	return argojob.Config{Runs: f.s, ChildRuns: f.s, Children: f.syncer, Progress: f.s, Now: compositionClock,
+	return argojob.Config{Runs: f.s, ChildRuns: f.s, Keeper: &f.kept, Children: f.syncer, Progress: f.s, Now: compositionClock,
 		Workflows: &nativefake.Workflows{Object: f.child}, Cache: &nativefake.Cache{WorkflowObject: f.child}}
+}
+
+// keptRoots records each Keep call as its owner and bindings.
+type keptRoots struct {
+	mu    sync.Mutex
+	calls map[string][]sourcecontract.Binding
+}
+
+func (k *keptRoots) Keep(_ context.Context, owner string, bindings []sourcecontract.Binding) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.calls == nil {
+		k.calls = map[string][]sourcecontract.Binding{}
+	}
+	k.calls[owner] = bindings
+	return nil
+}
+func (k *keptRoots) owners() map[string][]sourcecontract.Binding {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return maps.Clone(k.calls)
 }

@@ -122,6 +122,13 @@ func (f *composedFixture) deliverSource(t *testing.T, r stateport.Run) string {
 }
 func (f *composedFixture) deliverSourceThrough(t *testing.T, r stateport.Run, dial func(context.Context, string, string) (net.Conn, error)) string {
 	t.Helper()
+	return f.deliverLocated(t, r, r.ID, dial)
+}
+
+// deliverLocated loads r's source from its own Pod with the locator its
+// Workflow spec stamps, and checks the unpacked tree is the admitted commit.
+func (f *composedFixture) deliverLocated(t *testing.T, r stateport.Run, locator string, dial func(context.Context, string, string) (net.Conn, error)) string {
+	t.Helper()
 	pod := f.sourcePod(t, r)
 	f.kube.PrependReactor("create", "tokenreviews", func(action ktest.Action) (bool, runtime.Object, error) {
 		review := action.(ktest.CreateAction).GetObject().(*auth.TokenReview).DeepCopy()
@@ -139,7 +146,7 @@ func (f *composedFixture) deliverSourceThrough(t *testing.T, r stateport.Run, di
 	}
 
 	destination := filepath.Join(t.TempDir(), "source")
-	f.loadSourcePlugin(t, pluginRequest{RunID: r.ID, TokenFile: token, Destination: destination, Dial: dial})
+	f.loadSourcePlugin(t, pluginRequest{Locator: locator, TokenFile: token, Destination: destination, Dial: dial})
 	unpacked := t.TempDir()
 	extract := exec.CommandContext(t.Context(), "tar", "-xzf", destination, "-C", unpacked)
 	if output, err := extract.CombinedOutput(); err != nil {

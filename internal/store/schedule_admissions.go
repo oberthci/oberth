@@ -59,7 +59,7 @@ func (s *Store) PublishSchedule(ctx context.Context, id int64, entry string, kee
 }
 
 func validScheduleAdmission(v admissioncontract.PreparedView) bool {
-	return v.RunID == "" && v.Trigger == model.TriggerSchedule && v.ScheduleEntry != "" && len(v.SourceBindings) == 0
+	return v.RunID == "" && v.Trigger == model.TriggerSchedule && v.ScheduleEntry != ""
 }
 
 // ScheduleAdmission distinguishes an unseen entry from a superseded digest.

@@ -63,6 +63,7 @@ type Config struct {
 	SecretStore        runtimeconfig.SecretDelivery
 	Children           Children
 	ChildRuns          ChildRuns
+	Keeper             Keeper
 	ObservationTimeout time.Duration
 	Metrics            *Metrics
 	Progress           ProgressStore

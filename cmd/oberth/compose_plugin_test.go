@@ -16,7 +16,7 @@ import (
 )
 
 type pluginRequest struct {
-	RunID, TokenFile, Destination string
+	Locator, TokenFile, Destination string
 	Dial                          func(context.Context, string, string) (net.Conn, error)
 }
 
@@ -42,7 +42,7 @@ func loadPluginArtifact(t *testing.T, socket string, q pluginRequest) (*artifact
 	defer connection.Close()
 	op, stop := context.WithTimeout(t.Context(), 15*time.Second)
 	defer stop()
-	input := &artifact.Artifact{Plugin: &artifact.PluginArtifact{Name: "oberth", Key: q.RunID, Configuration: `{"version":1,"kind":"main"}`}}
+	input := &artifact.Artifact{Plugin: &artifact.PluginArtifact{Name: "oberth", Key: q.Locator, Configuration: `{"version":1,"kind":"main"}`}}
 	return artifact.NewArtifactServiceClient(connection).Load(op, &artifact.LoadArtifactRequest{InputArtifact: input, Path: q.Destination}, grpc.WaitForReady(true))
 }
 

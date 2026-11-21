@@ -43,7 +43,7 @@ func TestSourcePluginExecutableRefusesAbsentMountedToken(t *testing.T) {
 	go func() { done <- process.Wait() }()
 	defer joinPlugin(t, process, done, cancel)
 	destination := filepath.Join(t.TempDir(), "source")
-	response, err := loadPluginArtifact(t, socket, pluginRequest{RunID: "absent-token", Destination: destination})
+	response, err := loadPluginArtifact(t, socket, pluginRequest{Locator: "absent-token", Destination: destination})
 	if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), mounted) || response.GetSuccess() {
 		t.Fatalf("mounted-token refusal was not clean or named: %v; %s", err, trace.String())
 	}

@@ -16,7 +16,6 @@ import (
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/schedule"
-	"github.com/oberthci/oberth/internal/sourcecontract"
 )
 
 func authorError() error {
@@ -149,7 +148,7 @@ func TestForeignParentNeverMutates(t *testing.T) {
 		t.Fatal("foreign parent mutated")
 	}
 }
-func TestPreparedBindingsAndSourceGuard(t *testing.T) {
+func TestPreparedBindingsGuard(t *testing.T) {
 	f := newFixture(t)
 	file, err := schedule.Parse([]byte("schedules: [{name: nightly, cron: '* * * * *'}]"), schedule.Limits{}, f.now)
 	if err != nil {
@@ -164,7 +163,6 @@ func TestPreparedBindingsAndSourceGuard(t *testing.T) {
 		func(v *admissioncontract.PreparedView) { v.ScheduleEntry = "other" },
 		func(v *admissioncontract.PreparedView) { v.CommitSHA = strings.Repeat("b", 40) },
 		func(v *admissioncontract.PreparedView) { v.Repository = "origin/team/other" },
-		func(v *admissioncontract.PreparedView) { v.SourceBindings = []sourcecontract.Binding{{Path: "main"}} },
 	} {
 		view := prepared(request)
 		change(&view)
@@ -187,13 +185,13 @@ func TestPreparedBindingsAndSourceGuard(t *testing.T) {
 		}
 	}
 }
-func TestScheduledSourceRefusalSuspendsSpecifically(t *testing.T) {
+func TestPermanentAdmissionRefusalSuspendsParent(t *testing.T) {
 	f := newFixture(t)
 	f.sync()
-	f.admitErr = publicerr.New(publicerr.InvalidInput, "scheduled source is not supported", "Remove source steps or trigger manually.", nil)
+	f.admitErr = publicerr.New(publicerr.InvalidInput, "pipeline is invalid", "Fix the pipeline and push again.", nil)
 	f.sync()
 	object := f.object(f.repo, "nightly")
 	if !object.Spec.Suspend {
-		t.Fatal("specific source refusal lost")
+		t.Fatal("specific admission refusal lost")
 	}
 }

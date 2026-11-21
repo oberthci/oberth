@@ -1,7 +1,6 @@
 package cronsync
 
 import (
-	"fmt"
 	"github.com/argoproj/argo-workflows/v4/util/instanceid"
 	"maps"
 
@@ -48,11 +47,6 @@ func render(namespace, instanceID string, request Preparation, prepared *admissi
 	view := prepared.View()
 	if view.Workflow == nil || namespace == "" || !preparedMatches(view, request) {
 		return nil, problem(badPrepared, nil)
-	}
-	if len(view.SourceBindings) > 0 {
-		refusal := problem(sourceRefused, nil)
-		refusal.Detail = fmt.Sprintf("entry %q: field %q has value step %q: %s.", request.Entry.Name, "source", view.SourceBindings[0].Path, messages()[sourceRefused].remedy)
-		return nil, refusal
 	}
 	name, err := nativebinding.CronName(request.Repository.ID, request.Entry.Name)
 	if err != nil {

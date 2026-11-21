@@ -10,6 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
@@ -19,6 +20,11 @@ import (
 type Children interface {
 	ChildBinding(context.Context, *wf.Workflow) (nativebinding.ChildBinding, bool, bool, error)
 	VerifyChild(*wf.Workflow, nativebinding.ChildBinding) error
+}
+
+// Keeper pins a run's admitted source roots; it is idempotent.
+type Keeper interface {
+	Keep(context.Context, string, []sourcecontract.Binding) error
 }
 
 // ChildRuns commits child custody and the ordinary run in one acceptance.
@@ -90,6 +96,11 @@ func (e *Executor) acceptChild(ctx context.Context, p *admissioncontract.Prepare
 	r := result.Runs[0]
 	if terminalChild(r) {
 		return nil
+	}
+	// The run is stored first, so a crash before Keep is repaired by the
+	// cache's collection pass, which pins every stored live run.
+	if err = e.config.Keeper.Keep(ctx, r.ID, v.SourceBindings); err != nil {
+		return err
 	}
 	child, err := boundChild(r, proof)
 	if err != nil {

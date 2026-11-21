@@ -5,6 +5,7 @@ import (
 
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"github.com/oberthci/oberth/internal/admissioncontract"
+	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 )
 
@@ -16,12 +17,16 @@ type stampedParameter struct {
 // Parameter names, presence and offline values have one owner for every caller.
 func (g *graph) stampedParameters(r admissioncontract.PrepareRequest) []stampedParameter {
 	parent := admissioncontract.ScheduleParent(r.Mode, r.Trigger)
+	locator := r.RunID
+	if parent {
+		locator = sourcecontract.ScheduledLocator
+	}
 	return []stampedParameter{
 		{"oberth-ref", r.Ref, "refs/heads/unverified", parent},
 		{"oberth-sha", r.CommitSHA, strings.Repeat("0", 40), parent},
 		{"oberth-schedule", r.ScheduleEntry, "", r.ScheduleEntry != ""},
 		{"oberth-secretstore-address", g.policy.SecretstoreAddress, "https://secretstore.invalid", g.policy.SecretstoreAddress != "" || g.offlineValidation},
-		{"oberth-source", r.RunID, strings.Repeat("0", 32), g.inventory.usesSource},
+		{"oberth-source", locator, strings.Repeat("0", 32), g.inventory.usesSource},
 		{"oberth-trigger", string(r.Trigger), "branch", true},
 	}
 }
