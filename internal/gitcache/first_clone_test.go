@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -96,6 +97,44 @@ func TestFirstCloneThatEndsInTimeAnnouncesNothing(t *testing.T) {
 	c := reviewNew(t, cfg)
 	if err := c.Init(t.Context(), gittest.Repository); err != nil || announced != 0 {
 		t.Fatal("a waited-for clone was announced or failed", announced, err)
+	}
+}
+
+// A late clone announces only a repository registered under the same ID from
+// its start to its end: an unregistered probe name, a repository removed
+// during the clone and one registered again under another ID have no readers.
+func TestLateCloneAnnouncesOnlyTheSameRegisteredRepository(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		start, end int64
+		announced  bool
+	}{{"registered", 1, 1, true}, {"unregistered", 0, 0, false}, {"removed", 1, 0, false}, {"replaced", 1, 2, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := gittest.New(t)
+			cfg := reviewConfig(t, f)
+			release, _ := slowForge(t, f, &cfg)
+			var mu sync.Mutex
+			id := tc.start
+			cfg.Upstream = func(context.Context, string) (gitcache.Remote, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				return gitcache.Remote{URL: f.Bare, DefaultBranch: "refs/heads/main", RepositoryID: id}, nil
+			}
+			announced := false
+			cfg.RefChanged = func(context.Context, string, []gitcache.RefUpdate) { announced = true }
+			c := reviewNew(t, cfg)
+			if err := shortInit(t, c); err == nil {
+				t.Fatal("a gated clone finished")
+			}
+			mu.Lock()
+			id = tc.end
+			mu.Unlock()
+			release()
+			gitcache.WaitFirstClones(c)
+			if announced != tc.announced {
+				t.Fatal("announcement differs from the registration", announced)
+			}
+		})
 	}
 }
 

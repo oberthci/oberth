@@ -60,6 +60,7 @@ func (c *Cache) startClone(repository, p string) *firstClone {
 	c.clones.wait.Go(func() {
 		ctx, cancel := context.WithTimeout(c.ctx, c.budgets.firstClone)
 		defer cancel()
+		registered := c.registeredID(ctx, repository)
 		err := c.cloneOnce(ctx, repository, p)
 		c.clones.mu.Lock()
 		delete(c.clones.running, p)
@@ -67,11 +68,23 @@ func (c *Cache) startClone(repository, p string) *firstClone {
 		left := clone.left
 		c.clones.mu.Unlock()
 		close(clone.done)
-		if err == nil && left {
+		if err == nil && left && registered != 0 && c.registeredID(ctx, repository) == registered {
 			c.announceClone(ctx, repository)
 		}
 	})
 	return clone
+}
+
+// registeredID is the repository's catalogue ID as the upstream names it; 0
+// when it is not registered or cannot be read. A clone announces only a
+// repository registered under the same ID from its start to its end: a probe
+// of an unregistered name or a repository removed meanwhile has no readers.
+func (c *Cache) registeredID(ctx context.Context, repository string) int64 {
+	remote, err := c.remote(ctx, repository)
+	if err != nil {
+		return 0
+	}
+	return remote.RepositoryID
 }
 
 // cloneOnce clones unless an earlier clone published the repository after its
