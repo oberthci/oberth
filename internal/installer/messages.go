@@ -105,6 +105,7 @@ func problems() map[string]Problem {
 		"url":                {Reason: "The public server URL is invalid.", Remedy: "Use an HTTPS origin without credentials, a path, query or fragment."},
 		"ssh-port":           {Reason: "The SSH port is outside 1 through 65535.", Remedy: "Pass --ssh-port with a port between 1 and 65535."},
 		"parallel":           {Reason: "Parallel runs cannot be negative.", Remedy: "Pass --parallel 0 for unlimited runs, or a positive number."},
+		"source-pins-completion": {Reason: "An interrupted upgrade must be finished first.", Remedy: "Run oberth upgrade to finish it, then run it again with --source-pin or --no-source-pins."},
 		"source-pins":        {Reason: "The source pin policy is invalid.", Remedy: "Pass --source-pin consumer=producer with canonical repositories within the policy bounds."},
 		"store-url":          {Reason: "The external secret store URL is invalid.", Remedy: "Pass --external-store with an HTTPS address without credentials, query or fragment."},
 		"cluster":            {Reason: "The cluster request failed.", Remedy: "Check the selected context, login and permissions, then retry."},

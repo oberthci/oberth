@@ -125,6 +125,29 @@ func TestRollbackRestoresTheSourcePins(t *testing.T) {
 	}
 }
 
+// Completing an interrupted upgrade applies no chart, so it refuses a pin
+// change instead of reviewing one it would drop; plain completion still works.
+func TestCompletionRefusesSourcePinChanges(t *testing.T) {
+	t.Parallel()
+	f, m, target := pendingWithOlderBackups(t)
+	f.engine.CheckEndpoint = func(context.Context, installer.Profile) error { return nil }
+	for _, c := range []installer.Choices{
+		{Context: f.choices.Context, SourcePins: workflowpolicy.SourcePolicy{"origin/team/widget": {"origin/team/source"}}},
+		{Context: f.choices.Context, ClearSourcePins: true},
+	} {
+		_, err := m.PlanUpgrade(t.Context(), target, c, installer.UpgradeOptions{})
+		var problem *installer.Problem
+		if !errors.As(err, &problem) || problem.Code != "source-pins-completion" {
+			t.Fatal("completion accepted a pin change", err)
+		}
+	}
+	complete, err := m.PlanUpgrade(t.Context(), target, f.choices, installer.UpgradeOptions{})
+	if err != nil {
+		t.Fatal("plain completion refused", err)
+	}
+	complete.Plan.Close()
+}
+
 func upgradeFixtureAfter(t *testing.T, f *fixture) installer.Maintenance {
 	t.Helper()
 	f.charts.History.Deployed.Version = "v0.0.9"

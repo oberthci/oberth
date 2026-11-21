@@ -201,6 +201,10 @@ func (m *Maintenance) selectCompletedUpgrade(ctx context.Context, target Release
 func (m Maintenance) upgradeRoute(ctx context.Context, p *Plan, r Release, repair *Record) (*UpgradePlan, *Record, error) {
 	if repair != nil && repair.State == "completed" {
 		if repair.TargetVersion == r.Version() && p.history.Latest.Status == "deployed" {
+			// Completion applies no chart, so a pin change would be reviewed and dropped.
+			if p.choices.ClearSourcePins || len(p.choices.SourcePins) > 0 {
+				return nil, nil, problem("source-pins-completion", nil)
+			}
 			if err := m.Engine.storeReady(ctx, p); err != nil {
 				return nil, nil, err
 			}
