@@ -138,6 +138,29 @@ func TestLateCloneAnnouncesOnlyTheSameRegisteredRepository(t *testing.T) {
 	}
 }
 
+// A first clone ends at its own bound even when its caller waits longer: the
+// error is transient, nothing is published, and the next Init clones again.
+func TestFirstCloneEndsAtItsBound(t *testing.T) {
+	f := gittest.New(t)
+	cfg := reviewConfig(t, f)
+	_, log := slowForge(t, f, &cfg)
+	c := reviewNew(t, cfg)
+	gitcache.SetFirstCloneBound(c, 300*time.Millisecond)
+	for attempt := 1; attempt <= 2; attempt++ {
+		err := c.Init(t.Context(), gittest.Repository)
+		if err == nil || publicerr.Permanent(err) {
+			t.Fatal("a clone past its bound did not end with a transient error", err)
+		}
+		if _, err = os.Stat(filepath.Join(cfg.Root, "origin", "team", "widget.git", "HEAD")); !os.IsNotExist(err) {
+			t.Fatal("a clone ended by its bound was published", err)
+		}
+		started, err := os.ReadFile(log)
+		if err != nil || strings.Count(string(started), "clone") != attempt {
+			t.Fatal("the next Init did not start a new clone", attempt, string(started), err)
+		}
+	}
+}
+
 func TestCloseEndsARunningFirstClone(t *testing.T) {
 	f := gittest.New(t)
 	cfg := reviewConfig(t, f)
