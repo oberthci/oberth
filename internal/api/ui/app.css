@@ -185,3 +185,58 @@ main > button { margin-bottom: 12px; }
 }
 [data-theme="light"] { color-scheme: light; }
 [data-theme="dark"] { color-scheme: dark; }
+
+/* Two more themes: the same interface reduced to type, hairlines and one
+   light. Each sets the nine colour tokens; the shared rules after them only
+   take things away (fills, corners, shadows, pills, the bar on the log) and
+   set labels as small spaced capitals. */
+:root[data-theme="mono"] {
+ color-scheme: dark;
+ --bg: #0b0b0c;
+ --panel: #0b0b0c;
+ --fg: #e8e7e2;
+ --muted: #9a9994;
+ --line: #2e2e2f;
+ --accent: #ffffff;
+ --passed: #b4b3ad;
+ --failed: #ffffff;
+ --running: #ffffff;
+}
+:root[data-theme="color"] {
+ color-scheme: dark;
+ --bg: #081014;
+ --panel: #081014;
+ --fg: #e9e2d4;
+ --muted: #8fa09d;
+ --line: #1c2f36;
+ --accent: #f0a45c;
+ --passed: #5fd3c6;
+ --failed: #ff5fa8;
+ --running: #f0a45c;
+}
+:root:is([data-theme="mono"], [data-theme="color"]) {
+ --shadow: transparent;
+ :not(.mark) { border-radius: 0 !important; }
+ /* labels */
+ nav a, button, label, #signin label, summary, .back, .row.head, .card-name, .steps::before, main > h1, #signin h1 { font-size: 10.5px; font-weight: 400; letter-spacing: .2em; text-transform: uppercase; }
+ input, select { font-size: 12px; }
+ h1, h2, h3, .brand, .repos a.row > span:first-child { font-weight: 400; }
+ /* tabs: a word and one hairline */
+ nav { align-self: stretch; gap: 4px 22px; }
+ nav a { height: auto; min-height: 30px; min-width: 0; padding: 0; border-width: 0 0 1px; border-color: transparent; background: none; }
+ nav a[aria-current="page"] { border-color: var(--accent); }
+ /* status: a mark and the word; only failed and running light the word */
+ .state { padding: 0; border: 0; background: none; font-weight: 600; }
+ .state:not(.failed, .running) { color: var(--muted); }
+ .mark.running { background: none; }
+ .runs a.row:has(.failed) { box-shadow: inset 2px 0 var(--failed); }
+ /* surfaces: frames, no fills, no bar on the log */
+ .row.head { background: none; }
+ .log > pre { padding-top: 12px; }
+ .log > pre::before { content: none; }
+ /* room */
+ main { padding-block: 40px 72px; }
+ main > h1 { margin-bottom: 28px; }
+ .cards { align-items: start; }
+ .card-value { font-size: 30px; font-weight: 400; }
+}

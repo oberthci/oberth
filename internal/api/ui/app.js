@@ -422,7 +422,7 @@ function statusScreen(view) {
    ...Object.entries(counts).map(([name, count]) => h("div", {class: "card"}, h("p", {class: "card-name"}, h("span", {class: "mark " + name, "aria-hidden": "true"}), "Runs " + name), h("p", {class: "card-value " + name}, String(count))))));
  };
 }
-const themes = ["auto", "light", "dark"], themeButton = document.querySelector("#theme");
+const themes = ["auto", "light", "dark", "mono", "color"], themeButton = document.querySelector("#theme");
 function theme(value) {
  document.documentElement.dataset.theme = value;
  themeButton.textContent = "Theme: " + value; localStorage.setItem("oberth.theme", value);

@@ -21,19 +21,38 @@ func luminance(hex string) float64 {
 	}
 	return value
 }
+// palettes reads each token's value per theme: light and dark from the paired
+// tokens, then one value from each added theme's own block, which must set
+// every token exactly once.
+func palettes(t *testing.T, css string) (map[string][]string, int) {
+	t.Helper()
+	colours := map[string][]string{}
+	for _, pair := range regexp.MustCompile(`--([a-z]+): light-dark\(#([0-9a-f]{6}), #([0-9a-f]{6})\)`).FindAllStringSubmatch(css, -1) {
+		colours[pair[1]] = []string{pair[2], pair[3]}
+	}
+	blocks := regexp.MustCompile(`:root\[data-theme="[a-z]+"\] \{([^}]*)\}`).FindAllStringSubmatch(css, -1)
+	for index, block := range blocks {
+		for _, value := range regexp.MustCompile(`(?m)^ --([a-z]+): #([0-9a-f]{6});$`).FindAllStringSubmatch(block[1], -1) {
+			colours[value[1]] = append(colours[value[1]], value[2])
+		}
+		for name, values := range colours {
+			if len(values) != 3+index {
+				t.Fatalf("%s has %d values", name, len(values))
+			}
+		}
+	}
+	return colours, 2 + len(blocks)
+}
 func TestUIColourTokens(t *testing.T) {
 	_, _, css := uiSources(t)
-	pairs := regexp.MustCompile(`--([a-z]+): light-dark\(#([0-9a-f]{6}), #([0-9a-f]{6})\)`).FindAllStringSubmatch(css, -1)
-	colours := map[string][2]string{}
-	for _, pair := range pairs {
-		colours[pair[1]] = [2]string{pair[2], pair[3]}
-	}
-	if len(colours) != 9 || len(regexp.MustCompile(`#[0-9a-f]{6}`).FindAllString(css, -1)) != 18 {
+	colours, found := palettes(t, css)
+	const themes = 4 // light, dark, mono, color
+	if len(colours) != 9 || found != themes || len(regexp.MustCompile(`#[0-9a-f]{6}`).FindAllString(css, -1)) != 9*themes {
 		t.Fatal("colour outside paired tokens")
 	}
 	for _, name := range []string{"fg", "muted", "accent", "passed", "failed", "running"} {
 		for _, background := range []string{"bg", "panel"} {
-			for theme := range 2 {
+			for theme := range themes {
 				a, b := luminance(colours[name][theme]), luminance(colours[background][theme])
 				contrast := (math.Max(a, b) + 0.05) / (math.Min(a, b) + 0.05)
 				if contrast < 4.5 {

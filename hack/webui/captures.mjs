@@ -6,8 +6,8 @@ export async function captures(client){
 const results=[];
  for(const width of [360,1280]){
   await cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
-  for(const theme of ['light','dark']){
-   await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme},{name:'prefers-reduced-motion',value:'reduce'}]});
+  for(const theme of ['light','dark','mono','color']){
+   await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme==='light'?'light':'dark'},{name:'prefers-reduced-motion',value:'reduce'}]});
    for(const [page,path,selector] of [['runs','/runs','.runs a.row'],['run','/runs/22222222','.steps a.row']]){
     await loaded(path,selector);
     await evaluate(`document.getAnimations().forEach(animation=>animation.cancel());document.documentElement.dataset.theme=${JSON.stringify(theme)};`);
