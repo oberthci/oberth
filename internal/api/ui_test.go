@@ -163,21 +163,46 @@ func TestUIFieldsAreContractFields(t *testing.T) {
 func TestUINeverTruncates(t *testing.T) {
 	html, js, css := uiSources(t)
 	for _, source := range []string{html, js, css} {
-		for _, forbidden := range []string{"ellipsis", "line-clamp", "…", "overflow:hidden", "overflow: hidden"} {
-			if strings.Contains(source, forbidden) {
-				t.Fatal("truncation", forbidden)
-			}
-		}
-		if regexp.MustCompile(`["'][^"'\n]*\.\.\.["']`).MatchString(source) {
-			t.Fatal("truncated literal")
+		if strings.Contains(source, "line-clamp") || strings.Contains(source, "…") || regexp.MustCompile(`["'][^"'\n]*\.\.\.["']`).MatchString(source) {
+			t.Fatal("truncation or a truncated literal")
 		}
 	}
-	if regexp.MustCompile(`(?i)overflow(?:-[xy])?\s*:\s*(?:clip|hidden)\b|(?:max-height|line-clamp)\s*:`).MatchString(css) {
+	for _, source := range []string{html, js} {
+		if regexp.MustCompile(`ellipsis|overflow:\s*hidden`).MatchString(source) {
+			t.Fatal("truncation outside the stylesheet")
+		}
+	}
+	if selector := clippingOutsideNames(css); selector != "" {
+		t.Fatal("CSS clips text outside repository and ref names", selector)
+	}
+	if regexp.MustCompile(`(?i)(?:max-height|line-clamp)\s*:`).MatchString(css) {
 		t.Fatal("CSS clips text")
 	}
-	if strings.Count(css, "40ch") < 3 || !strings.Contains(css, "pre-wrap") || !strings.Contains(css, "overflow-wrap: anywhere") {
-		t.Fatal("full reasons/logs cannot wrap")
+	for _, room := range []string{"minmax(calc(40ch", ".runs .row > .message { white-space: normal; }", "pre-wrap", "overflow-wrap: anywhere"} {
+		if !strings.Contains(css, room) {
+			t.Fatal("full reasons/logs cannot wrap", room)
+		}
 	}
+}
+
+// clippingOutsideNames returns the first CSS selector that clips text but is not
+// a repository or ref name in a fixed-width list cell (each carries its whole
+// name as a title). Reasons, messages and logs are never cut.
+func clippingOutsideNames(css string) string {
+	names := map[string]bool{".runs .row > .repo": true, ".runs .row > .ref": true, ".repo-filter": true, ".repo-group": true}
+	rules := regexp.MustCompile(`/\*[\s\S]*?\*/`).ReplaceAllString(css, "")
+	clips := regexp.MustCompile(`(?i)text-overflow|overflow(?:-[xy])?\s*:\s*(?:clip|hidden)\b`)
+	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(rules, -1) {
+		if !clips.MatchString(rule[2]) {
+			continue
+		}
+		for _, selector := range strings.Split(rule[1], ",") {
+			if !names[strings.TrimSpace(selector)] {
+				return strings.TrimSpace(selector)
+			}
+		}
+	}
+	return ""
 }
 func TestUINoPollingTimers(t *testing.T) {
 	_, js, _ := uiSources(t)

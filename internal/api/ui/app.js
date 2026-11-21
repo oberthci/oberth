@@ -7,6 +7,8 @@ const copy = {
  accepted: ["Request accepted."], cancel: ["Cancel this run?"], abandon: ["Release this held step?"],
  emptySteps: ["This run has no planned steps."], emptyLog: ["This step wrote no output."],
  network: ["Oberth is not reachable.", "Check that the server is running, then reload this page."],
+ reconnecting: ["Reconnecting to Oberth.", "Live updates retry by themselves."],
+ ready: ["Server ready."], notReady: ["Server unavailable."], unknown: ["Server status."],
  live: ["Live updates stopped.", "They resume when the server answers again."],
  logBound: ["Earlier live output is outside this view.", "Use Earlier output to read the retained log."],
 };
@@ -34,20 +36,27 @@ function showError(error, target = notice) {
  return message;
 }
 async function exchange(path, options = {}) {
- let response;
- response = await fetch(path, {...options, credentials: "same-origin", redirect: "error", headers: {
-   Accept: "application/json", ...(localStorage.getItem("oberth.token") ? {Authorization: "Bearer " + localStorage.getItem("oberth.token")} : {}), ...options.headers,
-  }});
+ let response, value;
+ try {
+  response = await fetch(path, {...options, credentials: "same-origin", redirect: "error", headers: {
+    Accept: "application/json", ...(localStorage.getItem("oberth.token") ? {Authorization: "Bearer " + localStorage.getItem("oberth.token")} : {}), ...options.headers,
+   }});
+  if (!response.ok) value = await response.json();
+ } catch (error) { if (error.name !== "AbortError") reached(false); throw error; }
+ reached(!unavailable(response.status));
  if (!response.ok) {
-  const value = await response.json();
   if (response.status === 401) {
    value.signin = !localStorage.getItem("oberth.token");
    signin.hidden = false; main.hidden = true; showError(value); screen?.controller.abort(); screen?.logs?.abort();
   }
-  throw Object.assign(new Error(), value, {refused: true, retry: retryAfter(response.headers.get("Retry-After"))});
+  throw Object.assign(new Error(), value, {refused: true, status: response.status, retry: retryAfter(response.headers.get("Retry-After"))});
  }
  return response;
 }
+// Connection trouble (no answer, a non-JSON answer, or a gateway or drain status)
+// shows only in the header light; background reads retry it quietly.
+const unavailable = status => [502, 503, 504].includes(status);
+const trouble = error => !error.reason || unavailable(error.status);
 function retryAfter(value) { return /^\d+$/.test(value || "") ? Number(value) * 1000 : 5000; }
 async function get(path, signal) { return (await exchange(path, {signal})).json(); }
 async function call(name, args, signal) {
@@ -84,10 +93,13 @@ function when(run) {
  const at = run.started_at || run.created_at;
  return h("span", {class: "when", title: fullTimes(run)}, h("time", {datetime: at, title: fullTime(at)}, time(at)), run.started_at ? " · " : "", clock(run));
 }
+// A run's useful time on one line: when it finished and how long it took, when it
+// started and how long it has run, or when it was queued.
 function runWhen(run) {
- const at = run.started_at || run.created_at;
- return h("span", {class: "when", title: fullTimes(run)}, clock(run), h("span", {class: "at"}, h("span", {class: "at-word"}, run.started_at ? "started at " : "queued at "), h("time", {datetime: at, title: fullTime(at)}, time(at))));
+ const at = run.finished_at || run.started_at || run.created_at, word = run.finished_at ? null : run.started_at ? "started " : "queued ";
+ return h("span", {class: "when", title: fullTimes(run)}, word && h("span", {class: "at-word"}, word), h("time", {datetime: at, title: fullTime(at)}, time(at)), run.started_at ? [" · ", clock(run)] : null);
 }
+function refName(ref) { return ref.startsWith("refs/tags/") ? "tag " + ref.slice(10) : ref.replace(/^refs\/heads\//, ""); }
 function state(status) { return h("span", {class: "state " + status}, h("span", {class: "mark " + status, "aria-hidden": "true"}), status + " "); }
 function runIdentity(run) {
  return h("p", {class: "identity", "aria-label": "Run and commit"}, h("span", {title: "Run ID"}, "run " + run.id.slice(0, 8)), " · ", h("span", {title: "Commit ID"}, "commit " + (run.commit_sha ? run.commit_sha.slice(0, 12) : "unknown")));
@@ -131,7 +143,7 @@ async function redraw(view) {
   }
   if (view.actionAccepted && !signal.aborted) releaseActions(view);
   return !signal.aborted;
- } catch (error) { if (!signal.aborted) view.readError = showError(error); return false; }
+ } catch (error) { if (!signal.aborted && !trouble(error)) view.readError = showError(error); return false; }
 }
 function waitRetry(milliseconds, signal) {
  return new Promise(resolve => {
@@ -151,18 +163,16 @@ async function live(view) {
   while (!signal.aborted) {
    try {
     const page = await call("events_wait", {...view.filter, after_id: view.cursor, timeout_s: 25, limit: 200}, signal);
-    view.cursor = page.next_after_id; view.liveFailures = 0; view.liveError?.remove(); view.readError?.remove();
+    view.cursor = page.next_after_id; view.liveError?.remove(); view.readError?.remove();
     if (page.events.length || page.gap) {
      await waitRetry(readSpacing, signal);
      if (!signal.aborted) await refresh(view);
     }
    } catch (error) {
     if (signal.aborted) break;
-    // One cut long poll is retried quietly; a refusal, or a second failure in a row, is shown.
-    view.liveFailures = (view.liveFailures || 0) + 1;
-    if (error.reason || view.liveFailures > 1) {
-     if (!error.reason) view.readError?.remove();
-     view.liveError?.remove();
+    // Connection trouble is retried quietly (the header light shows it); a refusal is shown.
+    view.liveError?.remove();
+    if (!trouble(error)) {
      view.liveError = showError(error, h("div"));
      view.liveError.append(empty(copy.live)); notice.append(view.liveError);
     }
@@ -194,7 +204,12 @@ async function route() {
   else if (parts[0] === "status") statusScreen(view);
   if (view.controller.signal.aborted) return;
   await refresh(view); if (view.filter) live(view);
- } catch (error) { if (!view.controller.signal.aborted) showError(error); }
+ } catch (error) {
+  if (view.controller.signal.aborted) return;
+  if (!trouble(error)) { showError(error); return; }
+  await waitRetry(error.retry ?? 5000, view.controller.signal);
+  if (!view.controller.signal.aborted) route();
+ }
 }
 // A canonical name is upstream/organization/name. Lists show the name under an
 // upstream/organization header, and more of the prefix only where two visible
@@ -234,9 +249,10 @@ async function runsScreen(view) {
  const chosen = query.has("upstreams") ? query.get("upstreams").split(",") : upstreams;
  const visible = names.filter(name => chosen.includes(upstreamOf(name))), labels = shortNames(visible), groups = [...Map.groupBy(visible, groupOf)];
  main.append(h("h1", {}, "Runs"),
-  h("aside", {class: "repo-side", "aria-label": "Repositories"}, upstreams.length > 1 ? upstreamChoice(query, upstreams, chosen) : null, h("p", {class: "side-head"}, "Repositories"),
+  upstreams.length > 1 ? upstreamChoice(query, upstreams, chosen) : null,
+  h("aside", {class: "repo-side", "aria-label": "Repositories"}, h("p", {class: "side-head"}, "Repositories"),
    h("a", {class: "repo-filter", href: link("repo", ""), "aria-current": repo ? null : "true"}, "All repos"),
-   groups.flatMap(([group, members]) => [h("p", {class: "repo-group"}, group), ...members.map(name =>h("a", {class: "repo-filter", href: link("repo", name), title: name, "aria-label": name, "aria-current": name === repo ? "true" : null}, labels.get(name)))])),
+   groups.flatMap(([group, members]) => [h("p", {class: "repo-group", title: group}, group), ...members.map(name =>h("a", {class: "repo-filter", href: link("repo", name), title: name, "aria-label": name, "aria-current": name === repo ? "true" : null}, labels.get(name)))])),
   h("div", {class: "filters"},
    h("label", {}, "Repository", h("select", {onchange: change("repo")}, h("option", {value: ""}, "all"),
     groups.map(([group, members]) => h("optgroup", {label: group}, members.map(name => h("option", {value: name, selected: name === repo ? "" : null}, labels.get(name))))))),
@@ -245,8 +261,9 @@ async function runsScreen(view) {
  view.read = async () => {
   const page = await get("/api/runs?" + params({limit: 50, repo: query.get("repo"), ref: query.get("ref"), status: query.get("status"), upstreams: query.get("upstreams"), before: query.get("before")}), signal);
   if (signal.aborted) return;
-  replace(region, page.runs.length ? [h("div", {class: "row head", "aria-hidden": "true"}, ["STATUS", "RUN", "WHEN", "MESSAGE"].map(text => h("span", {}, text))),
-   ...page.runs.map(run => h("a", {class: "row", href: "/runs/" + encodeURIComponent(run.id), "data-key": run.id}, runWhen(run), h("span", {class: "run-label"}, state(run.status), h("span", {class: "name"}, h("b", {class: "repo"}, run.repo), h("span", {class: "ref"}, run.ref))), h("span", {class: "message"}, run.display_reason))),
+  replace(region, page.runs.length ? [h("div", {class: "row head", "aria-hidden": "true"}, ["STATUS", "REPOSITORY", "REF", "WHEN", "MESSAGE"].map(text => h("span", {}, text))),
+   ...page.runs.map(run => h("a", {class: "row", href: "/runs/" + encodeURIComponent(run.id), "data-key": run.id}, state(run.status), h("b", {class: "repo", title: run.repo}, labels.get(run.repo) || run.repo),
+    h("span", {class: "ref", title: run.ref}, refName(run.ref)), runWhen(run), h("span", {class: "message", title: run.display_reason || null}, run.display_reason))),
    page.next_cursor ? h("a", {class: "pager", href: "/runs?" + params({...Object.fromEntries(query), before: page.next_cursor})}, "Older runs") : null].filter(Boolean) : [empty(query.size ? copy.filteredRuns : copy.emptyRuns)]);
  };
 }
@@ -305,7 +322,7 @@ function chooseStep(view, step, path, pane, scroll) {
    if (!step.attempts?.some(attempt => attempt.node_id === item.node_id) || selectors.some(existing => existing.node_id === item.node_id && existing.container === item.container)) continue;
    selectors.push(item); selection.append(h("option", {value: selectors.length - 1}, item.node_id + " · " + item.container));
   }
- }).catch(error => { if (!view.controller.signal.aborted) showError(error); });
+ }).catch(error => { if (!view.controller.signal.aborted && !trouble(error)) showError(error); });
  loadLog(view, path, args, {controls, status, output, gutter}, false);
  document.querySelectorAll(".steps [data-key]").forEach(node => { if (node.dataset.key === step.plan_path) node.setAttribute("aria-current", "step"); else node.removeAttribute("aria-current"); });
  if (scroll && matchMedia("(max-width: 759px)").matches) pane.scrollIntoView({behavior: "instant"});
@@ -330,7 +347,8 @@ async function loadLog(view, path, args, regions, restart) {
     await streamLog(path, target, {regions, signal});
    } catch (error) {
     if (signal.aborted) return;
-    showError(error); await waitRetry(error.retry || 5000, signal);
+    if (!trouble(error)) showError(error);
+    await waitRetry(error.retry || 5000, signal);
    }
   }
  } finally {
@@ -437,8 +455,7 @@ function runActions(view, run, repositories, holds) {
  if (["queued", "running"].includes(run.status)) region.append(action("Cancel", () => call("run_cancel", args, signal), view, {question: copy.cancel[0]}));
  if (["passed", "failed", "cancelled"].includes(run.status)) region.append(action("Rerun", () => call("run_rerun", args, signal), view, {rerun: true}));
  const repository = repositories.find(repo => repo.repo === run.repo);
- const branch = ref => ref.replace(/^refs\/heads\//, "");
- if (run.status === "passed" && run.commit_sha && repository?.default_branch && branch(run.ref) !== branch(repository.default_branch)) region.append(action("Promote", () => call("promote", {repo: run.repo, sha: run.commit_sha, reason: "web UI"}, signal), view));
+ if (run.status === "passed" && run.commit_sha && repository?.default_branch && refName(run.ref) !== refName(repository.default_branch)) region.append(action("Promote", () => call("promote", {repo: run.repo, sha: run.commit_sha, reason: "web UI"}, signal), view));
  for (const hold of holds) region.append(h("span", {}, "Step " + (hold.step || "main") + ": " + (hold.availability_unknown ? "availability unknown" : "held since " + time(hold.held_since) + " · about " + Math.max(0, Math.ceil((hold.remaining_ms || 0) / 1000)) + "s left")),
   action("Release", () => call("run_hold_abandon", {...args, step: hold.step}, signal), view, {question: copy.abandon[0]}));
  return region;
@@ -515,10 +532,28 @@ document.addEventListener("keydown", event => {
   if (rows[next]) { event.preventDefault(); rows[next].focus(); }
  }
 });
-// The top bar's server light and version come from the same status read the Status page makes.
-const server = document.querySelector("#server");
-if (localStorage.getItem("oberth.token")) get("/api/status").then(status => {
- server.querySelector(".mark").className = "mark " + (status.ready ? "passed" : "failed");
- server.querySelector(".ver").textContent = status.version; server.title = status.ready ? "Server ready" : "Server unavailable";
-}).catch(() => {});
+// The top bar's light carries the connection: normal; reconnecting after two failed
+// requests in a row; unreachable once requests have failed for 30 s. Any answer resets it,
+// and the version and readiness come from the status read the Status page makes.
+const server = document.querySelector("#server"), connection = {failures: 0, since: 0, ready: null}, unreachableAfter = 30000;
+function reached(ok) {
+ const was = server.dataset.state || "normal";
+ if (ok) connection.failures = 0;
+ else if (!connection.failures++) connection.since = performance.now();
+ server.dataset.state = ok ? "normal" : performance.now() - connection.since >= unreachableAfter ? "unreachable" : connection.failures > 1 ? "reconnecting" : "normal";
+ paintServer();
+ if (ok && was !== "normal") readStatus();
+}
+function paintServer() {
+ const state = server.dataset.state || "normal", ready = connection.ready;
+ const words = state === "unreachable" ? copy.network : state === "reconnecting" ? copy.reconnecting : ready === null ? copy.unknown : ready ? copy.ready : copy.notReady;
+ server.querySelector(".mark").className = "mark " + (state === "reconnecting" ? "running" : state === "unreachable" || ready === false ? "failed" : ready ? "passed" : "");
+ server.title = words.join(" ");
+ server.setAttribute("aria-label", words.join(" ") + " Version " + (server.querySelector(".ver").textContent || "unknown") + ".");
+}
+function readStatus() {
+ get("/api/status").then(status => { connection.ready = status.ready; server.querySelector(".ver").textContent = status.version; paintServer(); }).catch(() => {});
+}
+server.querySelector(".reload").addEventListener("click", event => { event.preventDefault(); location.reload(); });
+if (localStorage.getItem("oberth.token")) readStatus();
 route();

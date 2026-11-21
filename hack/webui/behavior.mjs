@@ -74,14 +74,16 @@ async function idleAndRecovery(client){
    if(path.startsWith('/api/runs?'))return new Response(JSON.stringify({reason:'Read unavailable.',remedy:'Retry the read.'}),{status:503});
    if(path!=='/mcp')return original(path,options);
    uiRecovery.waits++;
-   if(uiRecovery.waits===1)return new Response(JSON.stringify({reason:'Live unavailable.',remedy:'Retry the wait.'}),{status:503,headers:{'Retry-After':'1'}});
+   if(uiRecovery.waits===1)return new Response(JSON.stringify({reason:'Live refused.',remedy:'Retry the wait.'}),{status:403,headers:{'Retry-After':'1'}});
    if(uiRecovery.waits===2)return new Response(JSON.stringify({result:{isError:false,structuredContent:{events:[],next_after_id:18}}}));
    return new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));
   };
   view.waiting.abort();
  })()`);
  await pause(100);
- check((await client.evaluate(`notice.textContent`)).includes('Live updates stopped.'),'live failure was not shown');
+ const refused=await client.evaluate(`notice.textContent`);
+ // A refusal with a reason is shown at once; an unavailable read is connection trouble and stays quiet.
+ check(refused.includes('Live refused.')&&refused.includes('Live updates stopped.')&&!refused.includes('Read unavailable.'),'live refusal not shown, or a 503 read was '+refused);
  await pause(1200);
  const recovered=await client.evaluate(`(()=>{const result={notice:notice.textContent,waits:uiRecovery.waits};screen.controller.abort();window.fetch=uiRecovery.original;return result;})()`);
  check(recovered.waits===3&&recovered.notice==='','recovered observation retained a stale error');
@@ -115,18 +117,34 @@ async function actions(client,label,path,tool){
  return {second,blocked,rebuilt,refreshed};
 }
 
+// Connection trouble never fills the page: the header light turns amber after two
+// failed requests in a row, red with a reload link after 30 s, and back when the server answers.
 async function offline(client){
  await client.loaded('/runs','.runs a.row');await pause(20);
  const result=await client.evaluate(`(async()=>{
-  const original=fetch,view=screen;let maximum=0,reads=0,waits=0;
-  const count=()=>{maximum=Math.max(maximum,notice.textContent.split(copy.network[0]).length-1);};
-  const observer=new MutationObserver(count);observer.observe(notice,{subtree:true,childList:true});
+  const original=fetch,clock=performance.now,view=screen,theme=document.querySelector('#theme');let shift=0,reads=0,waits=0,notices=0;
+  const observer=new MutationObserver(()=>{if(notice.textContent)notices++;});observer.observe(notice,{subtree:true,childList:true,characterData:true});
+  const look=()=>({state:server.dataset.state,mark:server.querySelector('.mark').className,title:server.title,label:server.getAttribute('aria-label'),reload:getComputedStyle(server.querySelector('.reload')).visibility,version:getComputedStyle(server.querySelector('.ver')).visibility,theme:theme.getBoundingClientRect().left,width:server.getBoundingClientRect().width});
+  const before=look();
   window.fetch=async path=>{if(path==='/mcp')waits++;else reads++;throw Object.assign(new TypeError('offline'),{retry:25});};
-  try{view.lastRead=-Infinity;view.waiting.abort();await new Promise(resolve=>setTimeout(resolve,1150));count();return {maximum,reads,waits,notice:notice.textContent};}
-  finally{view.controller.abort();window.fetch=original;observer.disconnect();}
+  performance.now=()=>clock.call(performance)+shift;
+  try{
+   view.lastRead=-Infinity;view.waiting.abort();
+   await new Promise(resolve=>setTimeout(resolve,400));
+   const reconnecting=look();
+   shift=31000;await new Promise(resolve=>setTimeout(resolve,1300));
+   const unreachable=look();
+   window.fetch=original;await new Promise(resolve=>setTimeout(resolve,1500));
+   return {before,reconnecting,unreachable,after:look(),reads,waits,notices,notice:notice.textContent};
+  }finally{view.controller.abort();window.fetch=original;performance.now=clock;observer.disconnect();}
  })()`);
  check(result.reads>=2&&result.waits>=2,'offline check missed the read/wait retry cycle '+JSON.stringify(result));
- check(result.maximum===1&&result.notice.split('Oberth is not reachable.').length===2,'offline notice appeared more than once');
+ check(result.notices===0&&result.notice==='','connection trouble filled the page '+JSON.stringify(result));
+ check(result.before.state==='normal'&&result.before.mark==='mark passed'&&result.before.reload==='hidden','header did not start normal '+JSON.stringify(result.before));
+ check(result.reconnecting.state==='reconnecting'&&result.reconnecting.mark==='mark running'&&result.reconnecting.title.startsWith('Reconnecting to Oberth.')&&result.reconnecting.reload==='hidden','two failures did not show reconnecting '+JSON.stringify(result.reconnecting));
+ check(result.unreachable.state==='unreachable'&&result.unreachable.mark==='mark failed'&&result.unreachable.title.includes('reload this page')&&result.unreachable.label.startsWith('Oberth is not reachable.')&&result.unreachable.reload==='visible'&&result.unreachable.version==='hidden','30 s of failures did not show unreachable with reload '+JSON.stringify(result.unreachable));
+ check(result.after.state==='normal'&&result.after.mark==='mark passed'&&result.after.reload==='hidden','header did not recover by itself '+JSON.stringify(result.after));
+ check([result.reconnecting,result.unreachable,result.after].every(state=>state.theme===result.before.theme&&state.width===result.before.width),'header moved when the connection changed '+JSON.stringify(result));
  return result;
 }
 
@@ -275,7 +293,7 @@ async function repositoryListAndChips(client){
  return {side,chips};
 }
 
-const sideState=`({search:location.search,repos:Array.from(document.querySelectorAll('.repo-side a')).map(link=>link.title||link.textContent),groups:Array.from(document.querySelectorAll('.repo-group')).map(node=>node.textContent),runs:Array.from(document.querySelectorAll('.runs a.row .repo')).map(node=>node.textContent),boxes:Array.from(document.querySelectorAll('.upstreams label')).map(label=>[label.textContent,label.querySelector('input').checked,label.querySelector('input').disabled]),options:Array.from(document.querySelectorAll('.filters option')).map(option=>option.value)})`;
+const sideState=`({search:location.search,repos:Array.from(document.querySelectorAll('.repo-side a')).map(link=>link.title||link.textContent),groups:Array.from(document.querySelectorAll('.repo-group')).map(node=>node.textContent),runs:Array.from(document.querySelectorAll('.runs a.row .repo')).map(node=>node.title),boxes:Array.from(document.querySelectorAll('.upstreams label')).map(label=>[label.textContent,label.querySelector('input').checked,label.querySelector('input').disabled]),options:Array.from(document.querySelectorAll('.filters option')).map(option=>option.value)})`;
 const clickUpstream=name=>`Array.from(document.querySelectorAll('.upstreams label')).find(label=>label.textContent===${JSON.stringify(name)}).querySelector('input').click()`;
 
 async function upstreamSelector(client){
@@ -319,6 +337,22 @@ async function shortNameCollisions(client){
  return {all,origin};
 }
 
+// A long repository or ref name ends in an ellipsis with its whole value as the title;
+// branch refs lose refs/heads/, tags read "tag <name>", and the row stays one line.
+async function runCells(client){
+ await client.loaded('/runs','.runs a.row');await pause(20);
+ const result=await client.evaluate(`(async()=>{
+  const original=fetch,long='origin/team/'+'a-very-long-repository-name'.repeat(2),run=(id,repo,ref,status)=>({id:id.repeat(32/id.length),repo,ref,status,created_at:'2026-11-16T14:00:00Z',started_at:'2026-11-16T14:00:00Z',finished_at:'2026-11-16T14:04:00Z',object_sha:'1234',display_reason:''});
+  window.fetch=(path,options)=>path.startsWith('/api/runs?')?Promise.resolve(new Response(JSON.stringify({runs:[run('a','origin/team/api','refs/heads/feature/x','passed'),run('b','origin/team/api','refs/tags/v1.2','passed'),run('c',long,'refs/heads/'+'topic-'.repeat(12),'failed')]}))):original(path,options);
+  try{await screen.read();
+   return Array.from(document.querySelectorAll('.runs a.row')).map(row=>({repo:row.querySelector('.repo').textContent,repoTitle:row.querySelector('.repo').title,ref:row.querySelector('.ref').textContent,refTitle:row.querySelector('.ref').title,cut:['repo','ref'].map(name=>{const cell=row.querySelector('.'+name);return cell.scrollWidth>cell.clientWidth&&getComputedStyle(cell).textOverflow==='ellipsis';}),height:row.getBoundingClientRect().height,when:row.querySelector('.when').textContent}));}
+  finally{screen.controller.abort();window.fetch=original;}
+ })()`);
+ check(result[0].repo==='api'&&result[0].repoTitle==='origin/team/api'&&result[0].ref==='feature/x'&&result[0].refTitle==='refs/heads/feature/x'&&result[1].ref==='tag v1.2'&&result[0].when==='15:04 · 4m 0s','short repository, ref or finish time wrong '+JSON.stringify(result));
+ check(result[2].repoTitle.endsWith('name')&&result[2].cut[0]&&result[2].cut[1]&&!result[0].cut[0]&&result.every(row=>row.height===result[0].height),'long names were not cut with an ellipsis on one line '+JSON.stringify(result));
+ return result;
+}
+
 async function lineNumbers(client){
  await client.loaded('/runs/22222222','.steps a.row');
  await settle(client,`Boolean(document.querySelector('.terminal .gutter')?.textContent)`,'log');
@@ -346,9 +380,9 @@ async function lineNumbers(client){
 async function liveHiccup(client){
  await client.loaded('/runs','.runs a.row');await pause(20);
  const result=await client.evaluate(`(async()=>{
-  const original=fetch,view=screen,plan=['fail','ok','fail','ok','fail','fail','ok'];let calls=0,early=false,late=false;
-  const observer=new MutationObserver(()=>{if(notice.textContent.includes(copy.live[0])){if(calls<=5)early=true;else late=true;}});
-  observer.observe(notice,{subtree:true,childList:true,characterData:true});
+  const original=fetch,view=screen,plan=['fail','ok','fail','ok','fail','fail','ok'];let calls=0,shown=false;const states=new Set();
+  const observer=new MutationObserver(()=>{if(notice.textContent)shown=true;states.add(server.dataset.state);});
+  observer.observe(notice,{subtree:true,childList:true,characterData:true});observer.observe(server,{attributes:true});
   window.fetch=(path,options)=>{
    if(path!=='/mcp'||JSON.parse(options.body).params.name!=='events_wait')return original(path,options);
    const step=plan[calls++];
@@ -360,10 +394,11 @@ async function liveHiccup(client){
    view.waiting.abort();
    for(let i=0;i<800&&calls<8;i++)await new Promise(resolve=>setTimeout(resolve,10));
    await new Promise(resolve=>setTimeout(resolve,50));
-   return {calls,early,late,final:notice.textContent};
+   return {calls,shown,states:[...states],final:notice.textContent};
   }finally{observer.disconnect();view.controller.abort();window.fetch=original;}
  })()`);
- check(result.calls===8&&!result.early&&result.late&&result.final==='','one cut live update was not quiet, or two in a row were not shown '+JSON.stringify(result));
+ // Each cut wait is followed by a read the server answers, so the connection never counts as lost.
+ check(result.calls===8&&!result.shown&&result.states.every(state=>state==='normal')&&result.final==='','a cut live update that the next read recovers was not quiet '+JSON.stringify(result));
  return result;
 }
 
@@ -382,6 +417,7 @@ export async function behavior(client){
  result.pieces=await repositoryListAndChips(client);
  result.upstreams=await upstreamSelector(client);
  result.shortNames=await shortNameCollisions(client);
+ result.runCells=await runCells(client);
  result.lineNumbers=await lineNumbers(client);
  result.liveHiccup=await liveHiccup(client);
  result.signout=await signout(client);

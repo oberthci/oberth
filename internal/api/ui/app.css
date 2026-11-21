@@ -57,7 +57,7 @@ h1 { font-size: 18px; line-height: 1.25; margin: 4px 0 14px; }
 h2 { font-size: 14px; margin: 0; }
 p { margin: 6px 0; }
 pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
-.mono, .runs .name, .when, .duration, .identity, .terminal, .brand { font-family: var(--mono); }
+.mono, .runs a.row, .repo-filter, .repo-group, .when, .duration, .identity, .terminal, .brand { font-family: var(--mono); }
 details { margin: 6px 0; }
 summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 details pre { padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2); font-size: 12px; }
@@ -90,16 +90,19 @@ details pre { padding: 10px 12px; border: 1px solid var(--line); border-radius: 
 a.row:hover { background: var(--panel2); text-decoration: none; }
 a.row:focus-visible { outline-offset: -2px; }
 .row.head { padding-top: 8px; padding-bottom: 8px; background: var(--panel2); color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; border-radius: 8px 8px 0 0; }
-.runs { display: grid; grid-template-columns: 12ch minmax(10ch, 1fr) max-content minmax(40ch, 1.5fr); column-gap: 12px; }
-.runs .row { grid-column: 1 / -1; grid-template-columns: subgrid; }
-.run-label { display: contents; }
+/* Every run is one 22px line of five columns. A repository or ref name too long
+   for its column ends in an ellipsis and keeps the whole name as its title; a
+   reason is never cut: the 40-character rule always fits its column (the row's
+   12px inset comes out of the first and last columns). */
+.runs { display: grid; grid-template-columns: calc(12ch + 12px) minmax(4ch, 18ch) minmax(4ch, 24ch) max-content minmax(calc(40ch + 13px), 1fr); column-gap: 12px; }
+.runs .row { grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; padding-block: 7px; line-height: 22px; overflow-wrap: normal; }
+.runs .row > * { min-width: 0; white-space: nowrap; }
+.runs .row > .repo, .runs .row > .ref { overflow: hidden; text-overflow: ellipsis; }
+.runs .row > .message { white-space: normal; }
+.runs .row > .state { justify-self: start; align-self: center; }
 .runs > .pager, .runs > .empty { grid-column: 1 / -1; }
-.runs .state { grid-column: 1; grid-row: 1; justify-self: start; }
-.runs .name { grid-column: 2; grid-row: 1; }
-.runs .when { grid-column: 3; grid-row: 1; }
-.runs .message { grid-column: 4; grid-row: 1; }
-.message { min-width: 40ch; min-height: 1lh; }
 .when { color: var(--muted); font-size: 12px; }
+.runs .when { font-size: inherit; }
 .pager { display: block; margin-top: 10px; font-size: 12px; }
 .runs > .pager { margin: 0; padding: 10px 12px; }
 .repos .row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 3fr) 96px; }
@@ -141,46 +144,51 @@ main > button { margin-bottom: 12px; }
 .terminal::before { content: ""; grid-column: 1 / -1; height: 34px; margin: 0 0 12px; border-bottom: 1px solid var(--tline); border-radius: 8px 8px 0 0; background: radial-gradient(circle at 16px 50%, var(--failed) 4px, transparent 4.5px), radial-gradient(circle at 30px 50%, var(--running) 4px, transparent 4.5px), radial-gradient(circle at 44px 50%, var(--passed) 4px, transparent 4.5px), var(--tbar); }
 
 /* runs page: repository list on the left, status chips above the table */
-main:has(> .repo-side) { display: grid; grid-template-columns: 208px minmax(0, 1fr); grid-template-areas: "head head" ". filters" "side runs" "side foot"; grid-template-rows: auto auto auto 1fr; column-gap: 14px; align-items: start; }
+main:has(> .repo-side) { display: grid; grid-template-columns: 208px minmax(0, 1fr); grid-template-areas: "head head" "upst filters" "side runs" "side foot"; grid-template-rows: auto auto auto 1fr; column-gap: 14px; align-items: start; }
 main:has(> .repo-side) > h1 { grid-area: head; }
 main:has(> .repo-side) > .filters { grid-area: filters; }
+main:has(> .repo-side) > .upstreams { grid-area: upst; }
 main:has(> .repo-side) > .runs, main:has(> .repo-side) > .empty { grid-area: runs; }
 main:has(> .repo-side) .filters > label { display: none; }
 .repo-side { grid-area: side; position: sticky; top: 64px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-.side-head { display: flex; align-items: center; height: 38px; margin: 0; padding: 0 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 700; }
-.repo-filter { display: block; padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--fg); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.side-head { display: flex; align-items: center; height: 37px; margin: 0; padding: 0 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 700; }
+/* Side rows share the table's rhythm: a 22px line, 7px above and below, one rule. */
+.repo-filter { display: block; padding: 7px 12px; border-bottom: 1px solid var(--line); color: var(--fg); line-height: 22px; }
+.repo-filter, .repo-group { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .repo-filter:hover { background: var(--panel2); text-decoration: none; }
 .repo-filter:last-child { border-bottom: 0; border-radius: 0 0 8px 8px; }
 .repo-filter[aria-current="true"] { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); font-weight: 700; }
-.repo-group { margin: 0; padding: 5px 12px; border-bottom: 1px solid var(--line); background: var(--panel2); color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.repo-group { margin: 0; padding: 2px 12px; border-bottom: 1px solid var(--line); background: var(--panel2); color: var(--muted); font-size: 11px; line-height: 20px; }
 .repo-group ~ .repo-filter { padding-left: 20px; }
-.upstreams { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 8px 12px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
-.upstreams > .side-word { flex-basis: 100%; font-weight: 700; }
-.upstreams label { display: inline-flex; align-items: center; gap: 6px; color: var(--fg); cursor: pointer; }
+/* Upstream checkboxes are chips in the row of the status chips, above the list. */
+.upstreams { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--muted); font-size: 12px; }
+.upstreams > .side-word { display: none; }
+.upstreams label { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
+.upstreams label:hover { border-color: var(--edge); color: var(--fg); }
+.upstreams label:has(:checked) { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .upstreams input { margin: 0; }
 .upstreams label:has(:disabled) { cursor: default; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { display: inline-flex; align-items: center; height: 30px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; }
 .chip:hover { border-color: var(--edge); color: var(--fg); text-decoration: none; }
 .chip[aria-current="true"] { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.runs .name, .runs .when { display: grid; }
-.runs .ref { color: var(--muted); font-size: 12px; }
-.runs .duration { min-height: 1lh; color: var(--fg); }
-.runs .at { font-size: 11px; }
+.runs .ref { color: var(--muted); }
 .runs-foot { grid-area: foot; margin: 10px 0 0; color: var(--muted); font-size: 11px; }
 .failed-step { margin-right: 1ch; color: var(--failed); }
 .log .toolbar label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .server { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
-.server .mark:not(.passed, .failed) { color: var(--muted); }
+.server .mark:not(.passed, .failed, .running) { color: var(--muted); }
+/* The version and the reload link share one slot, so the header never moves. */
+.server .slot { display: inline-grid; }
+.server .slot > * { grid-area: 1 / 1; }
+.server .reload, .server[data-state="unreachable"] .ver { visibility: hidden; }
+.server[data-state="unreachable"] .reload { visibility: visible; }
 @media (max-width: 1099px) {
  main:has(> .repo-side) { display: block; }
  .repo-side { display: none; }
  main:has(> .repo-side) .filters > label { display: flex; }
- /* Only the upstream checkboxes stay, as one row above the filters. */
- .repo-side:has(> .upstreams) { display: block; position: static; margin-bottom: 12px; background: none; border: 0; }
- .repo-side > :not(.upstreams) { display: none; }
- .upstreams { padding: 0; border: 0; gap: 8px 14px; }
- .upstreams > .side-word { flex-basis: auto; font-weight: 400; }
+ .upstreams > .side-word { display: inline; margin-right: 2px; }
+ .runs .at-word { display: none; }
 }
 
 /* issue detail */
@@ -212,23 +220,24 @@ main:has(> .repo-side) .filters > label { display: none; }
  .filters select { flex: 1; }
  .runs { display: block; }
  .runs .row.head { display: none; }
- .runs .row { grid-template-columns: minmax(0, 1fr) max-content; gap: 0 8px; min-height: calc(2lh + 21px); padding: 10px 12px; font-size: 12px; line-height: 22px; }
+ /* A phone keeps the status, repository, ref and time on the first line; a
+    message, when there is one, takes the second. */
+ .runs .row { grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr) auto; grid-template-areas: "state repo ref when" "message message message message"; gap: 0 6px; padding: 7px 8px; font-size: 12px; }
  .runs .row:first-of-type { border-radius: 8px 8px 0 0; }
- .runs .run-label { display: flex; align-items: center; grid-column: 1 / -1; grid-row: 1; }
- .runs .run-label > .name { min-width: 0; }
- .runs .state, .runs .name { margin-right: 6px; vertical-align: top; }
- .runs .row { padding: 10px 8px; }
- .runs .state { padding: 0 6px; gap: 5px; }
- .runs .when { grid-column: 2; grid-row: 2; font-size: 11px; line-height: 22px; }
- .runs .message { grid-column: 1; grid-row: 2; min-width: min(40ch, 100%); font-size: 11px; }
- .runs .name { display: inline; }
- .runs .ref { font-size: inherit; }
- .runs .ref::before, .runs .duration:not(:empty)::before { content: "\00B7"; margin: 0 1ch; color: var(--muted); }
- .runs .when { display: flex; }
- .runs .at { order: -1; font-size: inherit; }
- .runs .at-word { display: none; }
- .runs .duration { min-height: 0; color: inherit; }
+ .runs .row > .state { grid-area: state; padding: 0 6px; gap: 5px; }
+ .runs .row > .repo { grid-area: repo; }
+ .runs .row > .ref { grid-area: ref; }
+ .runs .row > .when { grid-area: when; }
+ .runs .row > .message { grid-area: message; }
+ .runs .message:empty { display: none; }
+ .runs .ref::before { content: "\00B7"; margin-right: 6px; color: var(--muted); }
  .server-name { display: none; }
+ /* A phone header has no room for the version or a reload word: the light alone
+    shows the state, and when unreachable the light itself is the reload link. */
+ .server { position: relative; }
+ .server .slot { position: absolute; inset: -12px -8px; }
+ .server .ver { display: none; }
+ .server .reload { color: transparent; }
  .chips { gap: 6px; }
  .run-head { padding: 12px 12px 10px; }
  .run-head > h1 + p { flex-basis: calc(100% + 24px); margin: 8px -12px 4px; padding: 8px 12px; }
@@ -246,7 +255,6 @@ main:has(> .repo-side) .filters > label { display: none; }
  main:has(> .run-layout) { max-width: none; position: relative; }
  main:has(> .runs) > h1 { position: absolute; width: 1px; height: 1px; margin: 0; clip-path: inset(50%); white-space: nowrap; }
  nav a { min-width: 72px; text-transform: lowercase; }
- .runs { grid-template-columns: 150px minmax(10ch, 1.6fr) max-content minmax(40ch, 1fr); }
  .runs .state, .repos .state { height: 22px; }
  .run-head { border-width: 0 0 1px; border-radius: 0; }
  .run-head > h1 .state { height: 20px; border-radius: 11px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
@@ -256,16 +264,11 @@ main:has(> .repo-side) .filters > label { display: none; }
   .steps { border-width: 0 1px 0 0; border-radius: 0 0 8px 8px; }
   .log { padding: 12px 18px 0; }
   .brand { flex: 0 0 214px; margin-right: 0; }
-  .runs .row { line-height: 18px; }
-  .runs .row:not(.head) { padding-top: 10px; padding-bottom: 10px; }
   .back { position: absolute; top: 30px; right: 36px; margin: 0; }
  }
- /* A whole 40-character reason and its time share one 360px line in
-    monospace only at 10px with these insets. */
  @media (max-width: 759px) {
   main { padding-inline: 8px; }
-  .runs .row { gap: 0 4px; padding-inline: 6px; }
-  .runs .when, .runs .message { font-size: 10px; }
+  .runs .row { padding-inline: 6px; }
   nav a { padding: 0 2px; font-size: 11px; }
  }
 }
