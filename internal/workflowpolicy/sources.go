@@ -65,11 +65,14 @@ func (p SourcePolicy) Allows(consumer, producer string) bool {
 	return slices.Contains(p[consumer], producer)
 }
 
-// Pairs counts the distinct allowed consumer and producer pairs.
-func (p SourcePolicy) Pairs() int {
-	n := 0
-	for _, producers := range p {
-		n += len(slices.Compact(slices.Sorted(slices.Values(producers))))
+// Pairs lists the distinct allowed pairs, sorted, each in the
+// CONSUMER=PRODUCER form the installer's --source-pin takes.
+func (p SourcePolicy) Pairs() []string {
+	var pairs []string
+	for consumer, producers := range p {
+		for _, producer := range producers {
+			pairs = append(pairs, consumer+"="+producer)
+		}
 	}
-	return n
+	return slices.Compact(slices.Sorted(slices.Values(pairs)))
 }

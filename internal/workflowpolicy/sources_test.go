@@ -1,6 +1,9 @@
 package workflowpolicy
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestSourcePolicyAllowsOnlyListedPairs(t *testing.T) {
 	policy, err := ParseSourcePolicy([]byte(`{"origin/team/cli":["origin/team/cli","origin/team/lib","origin/team/lib"]}`))
@@ -20,11 +23,11 @@ func TestSourcePolicyAllowsOnlyListedPairs(t *testing.T) {
 			t.Errorf("%s <- %s: want %t", tc.consumer, tc.producer, tc.want)
 		}
 	}
-	if policy.Pairs() != 2 {
-		t.Fatal("pairs counted twice", policy.Pairs())
+	if got := policy.Pairs(); !slices.Equal(got, []string{"origin/team/cli=origin/team/cli", "origin/team/cli=origin/team/lib"}) {
+		t.Fatal("pairs listed wrongly", got)
 	}
 	empty, err := ParseSourcePolicy(nil)
-	if err != nil || empty.Allows("origin/team/cli", "origin/team/cli") || empty.Pairs() != 0 {
+	if err != nil || empty.Allows("origin/team/cli", "origin/team/cli") || len(empty.Pairs()) != 0 {
 		t.Fatal("empty policy allowed a pair", err)
 	}
 }

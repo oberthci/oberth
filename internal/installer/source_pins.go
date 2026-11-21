@@ -63,18 +63,29 @@ func savedSourcePins(stored map[string]any) (workflowpolicy.SourcePolicy, error)
 	return policy, err
 }
 
-// reviewSourcePins counts the pin pairs, and on an installed release how the
-// count changes, when the saved or the reviewed values hold any; --detail
-// lists each pair.
+// reviewSourcePins counts the reviewed pin pairs when the saved or the
+// reviewed values hold any, and on an installed release names each pair the
+// operation adds or removes; --detail lists every pair.
 func reviewSourcePins(before, after map[string]any, installed bool) []string {
-	old, _ := savedSourcePins(before)
-	next, _ := savedSourcePins(after)
-	if old.Pairs() == 0 && next.Pairs() == 0 {
+	saved, _ := savedSourcePins(before)
+	reviewed, _ := savedSourcePins(after)
+	old, next := saved.Pairs(), reviewed.Pairs()
+	if len(old) == 0 && len(next) == 0 {
 		return nil
 	}
-	count := fmt.Sprint(next.Pairs())
-	if installed {
-		count = changedAnswer(old.Pairs(), next.Pairs())
+	lines := []string{fmt.Sprintf("Source pins: %d pairs (--source-pin C=P)", len(next))}
+	if !installed {
+		return lines
 	}
-	return []string{"Source pins: " + count + " pairs (--source-pin C=P)"}
+	for _, pair := range next {
+		if !slices.Contains(old, pair) {
+			lines = append(lines, "Source pin added: "+pair)
+		}
+	}
+	for _, pair := range old {
+		if !slices.Contains(next, pair) {
+			lines = append(lines, "Source pin removed: "+pair)
+		}
+	}
+	return lines
 }

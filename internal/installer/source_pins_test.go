@@ -29,7 +29,9 @@ type pinUpgrade struct {
 	release installer.Release
 }
 
-func (u pinUpgrade) run(t *testing.T, c installer.Choices, review string) {
+// run upgrades with c after checking that the review's source pin lines are
+// exactly want.
+func (u pinUpgrade) run(t *testing.T, c installer.Choices, want ...string) {
 	t.Helper()
 	m := u.m
 	plan, err := m.PlanUpgrade(t.Context(), u.release, c, installer.UpgradeOptions{NoBackup: true})
@@ -37,12 +39,22 @@ func (u pinUpgrade) run(t *testing.T, c installer.Choices, review string) {
 		t.Fatal(err)
 	}
 	defer plan.Plan.Close()
-	if !slices.Contains(plan.Plan.Review(), review) {
-		t.Fatalf("upgrade review lacks %q:\n%s", review, strings.Join(plan.Plan.Review(), "\n"))
+	if got := pinLines(plan.Plan.Review()); !slices.Equal(got, want) {
+		t.Fatalf("upgrade review pin lines %q, want %q", got, want)
 	}
 	if _, err = m.Upgrade(t.Context(), plan, plan.Plan.Digest(), func(installer.Phase) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func pinLines(review []string) []string {
+	var lines []string
+	for _, line := range review {
+		if strings.HasPrefix(line, "Source pin") {
+			lines = append(lines, line)
+		}
+	}
+	return lines
 }
 
 // The pairs are reviewed before anything is applied, applied as the server's
@@ -70,13 +82,20 @@ func TestSourcePinsRoundTripThroughInstallAndUpgrade(t *testing.T) {
 	if got := appliedSourcePins(t, f); !reflect.DeepEqual(got, want) {
 		t.Fatal("upgrade without the option dropped the saved pairs", got)
 	}
+	swapped := installer.Choices{Context: "test", ClearSourcePins: true, SourcePins: workflowpolicy.SourcePolicy{"origin/team/widget": {"origin/team/other", "origin/team/widget"}}}
+	u.run(t, swapped, "Source pins: 2 pairs (--source-pin C=P)", "Source pin added: origin/team/widget=origin/team/other", "Source pin removed: origin/team/widget=origin/team/source")
+	want = map[string]any{"origin/team/widget": []any{"origin/team/other", "origin/team/widget"}}
+	if got := appliedSourcePins(t, f); !reflect.DeepEqual(got, want) {
+		t.Fatal("a replaced pair was not applied", got)
+	}
 	added := installer.Choices{Context: "test", SourcePins: workflowpolicy.SourcePolicy{"origin/team/cli": {"origin/team/cli"}}}
-	u.run(t, added, "Source pins: 2 -> 3 pairs (--source-pin C=P)")
+	u.run(t, added, "Source pins: 3 pairs (--source-pin C=P)", "Source pin added: origin/team/cli=origin/team/cli")
 	want["origin/team/cli"] = []any{"origin/team/cli"}
 	if got := appliedSourcePins(t, f); !reflect.DeepEqual(got, want) {
 		t.Fatal("an added pair replaced the saved ones", got)
 	}
-	u.run(t, installer.Choices{Context: "test", ClearSourcePins: true}, "Source pins: 3 -> 0 pairs (--source-pin C=P)")
+	u.run(t, installer.Choices{Context: "test", ClearSourcePins: true}, "Source pins: 0 pairs (--source-pin C=P)",
+		"Source pin removed: origin/team/cli=origin/team/cli", "Source pin removed: origin/team/widget=origin/team/other", "Source pin removed: origin/team/widget=origin/team/widget")
 	if got, _ := appliedSourcePins(t, f).(map[string]any); len(got) != 0 {
 		t.Fatal("cleared pairs were applied", got)
 	}
