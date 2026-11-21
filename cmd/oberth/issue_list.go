@@ -27,12 +27,13 @@ func renderIssues(out io.Writer, page map[string]any, detail bool) error {
 	if err := renderFacts(out, "issues", issues, detail); err != nil {
 		return err
 	}
-	for _, next := range []struct{ field, label, flag string }{{"next_before", "Older", "--before"}, {"next_after", "Newer", "--after"}} {
-		if cursor := pageNumber(page[next.field]); cursor != "" {
-			if err := writeWrapped(out, next.label+" page: oberth issue list "+next.flag+" "+cursor); err != nil {
-				return err
-			}
+	if cursor := pageNumber(page["next_before"]); cursor != "" {
+		if err := writeWrapped(out, "Older page: oberth issue list --before "+cursor); err != nil {
+			return err
 		}
+	}
+	if cursor := pageNumber(page["next_after"]); cursor != "" {
+		return writeWrapped(out, "Newer page: oberth issue list --after "+cursor)
 	}
 	return nil
 }
