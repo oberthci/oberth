@@ -39,8 +39,10 @@ type LockFact struct {
 // names is stale only when that count also names every live holder and the
 // Workflow was stopped or terminated: the pinned controller leaks a unit only
 // when a shutdown ends a Workflow, while a Workflow that ended by itself has
-// released its units even if a waiter's older count still names it. Rows are
-// decompressed in place so node lock status is read.
+// released its units even if a waiter's older count still names it. A leak is
+// left unlisted once another run holds the lock after the waiter's last write:
+// the listing errs towards silence, never towards a remedy for a free unit.
+// Rows are decompressed in place so node lock status is read.
 func LockFacts(ctx context.Context, rows []wf.Workflow) ([]LockFact, error) {
 	c := lockCollector{byKey: make(map[string]*wf.Workflow, len(rows)), live: map[string][]string{}, out: []LockFact{}}
 	for i := range rows {

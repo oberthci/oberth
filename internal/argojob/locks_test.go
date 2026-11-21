@@ -112,6 +112,22 @@ func TestLockFactsRunEndedByItselfIsNeverStale(t *testing.T) {
 	}
 }
 
+// A later run that holds the lock after the waiter's last write hides a real
+// leak: the count does not name it, so nothing is listed. Silence, not a
+// false remedy, is the error this reading allows.
+func TestLockFactsLeakUnlistedBehindALaterHolder(t *testing.T) {
+	t.Parallel()
+	rows := cancelledLocks(t)
+	i := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == "waiting-heavy-stop" })
+	late := *rows[i].DeepCopy()
+	late.Name, late.Status.Nodes = "late", nil
+	late.Status.Synchronization = &wf.SynchronizationStatus{Semaphore: &wf.SemaphoreStatus{Holding: []wf.SemaphoreHolding{{Semaphore: "default/ConfigMap/oberth-sync-limits/heavy-stop", Holders: []string{"default/late/late-1"}}}}}
+	got := facts(t, append(rows, late))
+	if slices.Contains(got, "default/ConfigMap/oberth-sync-limits/heavy-stop stale ended-heavy-stop") || !slices.Contains(got, "default/ConfigMap/oberth-sync-limits/heavy-stop holder late") {
+		t.Fatal("a count older than a live holder was trusted", got)
+	}
+}
+
 // A waiting entry counts only while the Workflow is Pending or a node still
 // waits for that lock: once its node holds, the leaked unit's waiter is no
 // waiter and its count, however it reads, names nothing stale.
