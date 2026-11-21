@@ -35,7 +35,10 @@ type promotionDecision struct {
 	source stateport.Run
 }
 
-func (s *Service) promotionPolicy(ctx context.Context, repo string) (gitport.Ref, promotionPolicy, error) {
+// promotionPolicy reads the fresh default-branch policy. A policy file that
+// does not decode reports invalid with the zero policy, the most restrictive
+// one: no field of such a file is ever read, so it can never widen promotion.
+func (s *Service) promotionPolicy(ctx context.Context, repo string) (gitport.Ref, promotionPolicy, bool, error) {
 	head, file, err := s.c.Source.DefaultFile(ctx, repo, ".oberth/promotion.yaml")
 	var absent *gitport.AbsentError
 	missing := errors.As(err, &absent) && absent.Path == ".oberth/promotion.yaml"
@@ -44,25 +47,25 @@ func (s *Service) promotionPolicy(ctx context.Context, repo string) (gitport.Ref
 		if errors.As(err, &outage) {
 			err = publicerr.New(publicerr.Unavailable, outage.Reason(), outage.Remedy(), err)
 		}
-		return head, promotionPolicy{}, err
+		return head, promotionPolicy{}, false, err
 	}
 	if head.Validate() != nil || !strings.HasPrefix(head.Name, "refs/heads/") {
-		return head, promotionPolicy{}, refuse(promotionPolicyInvalid)
+		return head, promotionPolicy{}, false, refuse(promotionPolicyInvalid)
 	}
 	if missing {
-		return head, promotionPolicy{}, nil
+		return head, promotionPolicy{}, false, nil
 	}
 	var policy promotionPolicy
 	decoder := yaml.NewDecoder(bytes.NewReader(file.Bytes))
 	decoder.KnownFields(true)
 	if decoder.Decode(&policy) != nil {
-		return head, policy, refuse(promotionPolicyInvalid)
+		return head, promotionPolicy{}, true, nil
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return head, policy, refuse(promotionPolicyInvalid)
+		return head, promotionPolicy{}, true, nil
 	}
-	return head, policy, nil
+	return head, policy, false, nil
 }
 func (s *Service) decidePromotion(ctx context.Context, a actor.Actor, q apicontract.PromoteArgs) (promotionDecision, error) {
 	d := promotionDecision{caller: a}
@@ -74,14 +77,11 @@ func (s *Service) decidePromotion(ctx context.Context, a actor.Actor, q apicontr
 	if r.Archived {
 		return d, archivedRepository(r.Canonical)
 	}
-	head, policy, err := s.promotionPolicy(ctx, r.Canonical)
+	head, policy, err := s.callerPolicy(ctx, a, r.Canonical, q.SHA)
 	if err != nil {
 		return d, err
 	}
 	d.head = head
-	if !a.Admin && !policy.UplinksMayPromote {
-		return d, uplinkPromotion(r.Canonical, q.SHA)
-	}
 	if q.Branch != "" && q.Branch != head.Name && q.Branch != strings.TrimPrefix(head.Name, "refs/heads/") {
 		return d, bad("branch")
 	}
@@ -90,6 +90,23 @@ func (s *Service) decidePromotion(ctx context.Context, a actor.Actor, q apicontr
 	}
 	d.source, err = s.promotionSource(ctx, r.Canonical, q.SHA, policy.AllowWithoutBranchCI)
 	return d, err
+}
+// callerPolicy decides whether the caller may promote under the fresh policy.
+// An administrator promotes under the zero policy when the file is invalid,
+// branch CI required, so the tested commit that corrects it can land.
+func (s *Service) callerPolicy(ctx context.Context, a actor.Actor, repo, sha string) (gitport.Ref, promotionPolicy, error) {
+	head, policy, invalid, err := s.promotionPolicy(ctx, repo)
+	switch {
+	case err != nil:
+		return head, policy, err
+	case a.Admin:
+		return head, policy, nil
+	case invalid:
+		return head, policy, invalidPromotionPolicy(repo, sha)
+	case !policy.UplinksMayPromote:
+		return head, policy, uplinkPromotion(repo, sha)
+	}
+	return head, policy, nil
 }
 func (s *Service) promotionSource(ctx context.Context, repo, sha string, allowUntested bool) (stateport.Run, error) {
 	if !validID(sha) {
