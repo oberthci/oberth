@@ -58,6 +58,7 @@ func TestComposedCancelledRunLeavesNoLockHolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.waitRun(t, func(r stateport.Run) bool { return r.Status == stepmodel.RunCancelled })
+	// The later run holds the one free unit with step e while step f still waits.
 	got := f.lockStatus(t, lock)
 	if !slices.Equal(got.Holders, []string{"waiting-heavy-stop"}) || !slices.Equal(got.Waiters, []string{"waiting-heavy-stop"}) || !slices.Equal(got.Stale, []string{run.ID}) {
 		t.Fatal("cancelled run is listed as a holder or its stale unit is hidden", got)

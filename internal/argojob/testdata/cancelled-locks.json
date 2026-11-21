@@ -590,6 +590,173 @@
   },
   {
     "metadata": {
+      "name": "handover-a",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "handover-a",
+        "workflows.argoproj.io/completed": "true",
+        "workflows.argoproj.io/phase": "Succeeded"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "handover-a",
+        "workflows.argoproj.io/pod-name-format": "v2"
+      }
+    },
+    "spec": {
+      "arguments": {}
+    },
+    "status": {
+      "phase": "Succeeded",
+      "startedAt": null,
+      "finishedAt": null,
+      "nodes": {
+        "handover-a": {
+          "id": "handover-a",
+          "name": "handover-a",
+          "type": "DAG",
+          "phase": "Succeeded",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "handover-a-2860461221": {
+          "id": "handover-a-2860461221",
+          "name": "handover-a.a",
+          "type": "Pod",
+          "phase": "Succeeded",
+          "startedAt": null,
+          "finishedAt": null
+        }
+      }
+    }
+  },
+  {
+    "metadata": {
+      "name": "handover-b",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "handover-b",
+        "workflows.argoproj.io/completed": "false",
+        "workflows.argoproj.io/phase": "Running"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "handover-b",
+        "workflows.argoproj.io/pod-name-format": "v2"
+      }
+    },
+    "spec": {
+      "arguments": {}
+    },
+    "status": {
+      "phase": "Running",
+      "startedAt": null,
+      "finishedAt": null,
+      "nodes": {
+        "handover-b": {
+          "id": "handover-b",
+          "name": "handover-b",
+          "type": "DAG",
+          "phase": "Running",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "handover-b-140099689": {
+          "id": "handover-b-140099689",
+          "name": "handover-b.b",
+          "type": "Pod",
+          "phase": "Pending",
+          "startedAt": null,
+          "finishedAt": null
+        }
+      },
+      "synchronization": {
+        "semaphore": {
+          "holding": [
+            {
+              "semaphore": "default/ConfigMap/oberth-sync-limits/handover",
+              "holders": [
+                "default/handover-b/handover-b-140099689"
+              ]
+            }
+          ],
+          "waiting": [
+            {
+              "semaphore": "default/ConfigMap/oberth-sync-limits/handover",
+              "holders": [
+                "default/handover-a/handover-a-2860461221"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "metadata": {
+      "name": "handover-c",
+      "namespace": "default",
+      "creationTimestamp": null,
+      "labels": {
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "1",
+        "oberth.ci/run": "handover-c",
+        "workflows.argoproj.io/completed": "false",
+        "workflows.argoproj.io/phase": "Running"
+      },
+      "annotations": {
+        "oberth.ci/run-id": "handover-c",
+        "workflows.argoproj.io/pod-name-format": "v2"
+      }
+    },
+    "spec": {
+      "arguments": {}
+    },
+    "status": {
+      "phase": "Running",
+      "startedAt": null,
+      "finishedAt": null,
+      "nodes": {
+        "handover-c": {
+          "id": "handover-c",
+          "name": "handover-c",
+          "type": "DAG",
+          "phase": "Running",
+          "startedAt": null,
+          "finishedAt": null
+        },
+        "handover-c-2715782229": {
+          "id": "handover-c-2715782229",
+          "name": "handover-c.c",
+          "type": "Pod",
+          "phase": "Pending",
+          "startedAt": null,
+          "finishedAt": null,
+          "synchronizationStatus": {
+            "waiting": "default/ConfigMap/oberth-sync-limits/handover"
+          }
+        }
+      },
+      "synchronization": {
+        "semaphore": {
+          "waiting": [
+            {
+              "semaphore": "default/ConfigMap/oberth-sync-limits/handover",
+              "holders": [
+                "default/handover-a/handover-a-2860461221"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "metadata": {
       "name": "mutex-pending-stop",
       "namespace": "default",
       "creationTimestamp": null,

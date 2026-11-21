@@ -128,5 +128,9 @@ func (o *serverOwners) Locks(ctx context.Context) ([]service.Lock, error) {
 	if err != nil {
 		return nil, err
 	}
-	return runLocks(argojob.LockFacts(rows.Items), names, lockClearCommand(o.c.config.ArgoNamespace)), nil
+	facts, err := argojob.LockFacts(ctx, rows.Items)
+	if err != nil {
+		return nil, err
+	}
+	return runLocks(facts, names, lockClearCommand(o.c.config.ArgoNamespace)), nil
 }

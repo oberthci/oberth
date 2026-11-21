@@ -29,8 +29,8 @@ type lockCase struct {
 
 // The pinned controller's lock bookkeeping around a cancelled run. Each case
 // ends one run as described above, then a later run with two steps asks for
-// the same semaphore; then runs waiting for a workflow-level mutex are stopped
-// or terminated. The Workflows are written as the controller left them,
+// the same semaphore; then an ordinary hand-over of a one-unit lock; then runs
+// waiting for a workflow-level mutex are stopped or terminated. The Workflows are written as the controller left them,
 // reduced to the fields lock status and run status read.
 func TestOberthCancelledRunLocks(t *testing.T) {
 	ctx := logging.TestContext(t.Context())
@@ -44,6 +44,7 @@ func TestOberthCancelledRunLocks(t *testing.T) {
 	for _, c := range cases {
 		limits.Data[c.key] = "2"
 	}
+	limits.Data["handover"] = "1"
 	if _, err := controller.kubeclientset.CoreV1().ConfigMaps("default").Create(ctx, limits, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -56,6 +57,7 @@ func TestOberthCancelledRunLocks(t *testing.T) {
 		observed = append(observed, *reduced(holder), *reduced(waiter))
 		checkRestartFrees(ctx, t, controller, c)
 	}
+	observed = append(observed, handOver(ctx, t, controller)...)
 	first := lockRun(ctx, t, controller, mutexWorkflow("mutex-holder"))
 	for _, c := range []lockCase{{key: "mutex-pending-stop", mode: wfv1.ShutdownStrategyStop}, {key: "mutex-pending-terminate", mode: wfv1.ShutdownStrategyTerminate}} {
 		pending := lockRun(ctx, t, controller, mutexWorkflow(c.key))
@@ -69,6 +71,29 @@ func TestOberthCancelledRunLocks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(os.Getenv("OBERTH_CONTROLLER_CASES"), "cancelled-locks.json"), append(raw, '\n'), 0600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// handOver is the ordinary case beside the leak: a one-unit lock held by
+// handover-a, which ends by itself, while handover-b and handover-c wait. Only
+// the head of the queue, b, is woken and takes the unit; c is not reconciled
+// again. Nothing leaks: a restarted controller has no unit either.
+func handOver(ctx context.Context, t *testing.T, controller *WorkflowController) []wfv1.Workflow {
+	t.Helper()
+	c := lockCase{key: "handover"}
+	a := lockRun(ctx, t, controller, semaphoreWorkflow("handover-a", c, "a"))
+	makePodsPhase(ctx, newWorkflowOperationCtx(ctx, a, controller), apiv1.PodRunning)
+	a = lockRun(ctx, t, controller, a)
+	b := lockRun(ctx, t, controller, semaphoreWorkflow("handover-b", c, "b"))
+	waiting := lockRun(ctx, t, controller, semaphoreWorkflow("handover-c", c, "c"))
+	makePodsPhase(ctx, newWorkflowOperationCtx(ctx, a, controller), apiv1.PodSucceeded)
+	for range 3 {
+		if a = lockRun(ctx, t, controller, a); a.Status.Fulfilled() {
+			break
+		}
+	}
+	b = lockRun(ctx, t, controller, b)
+	checkRestartFrees(ctx, t, controller, c)
+	return []wfv1.Workflow{*reduced(a), *reduced(b), *reduced(waiting)}
 }
 
 // checkRestartFrees proves the remedy: the running controller has no unit left

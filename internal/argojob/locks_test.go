@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -29,9 +30,14 @@ func cancelledLocks(t *testing.T) []wf.Workflow {
 }
 
 // facts renders LockFacts as "lock role workflow" lines for comparison.
-func facts(rows []wf.Workflow) []string {
+func facts(t *testing.T, rows []wf.Workflow) []string {
+	t.Helper()
+	read, err := argojob.LockFacts(t.Context(), rows)
+	if err != nil {
+		t.Fatal(err)
+	}
 	out := []string{}
-	for _, f := range argojob.LockFacts(rows) {
+	for _, f := range read {
 		out = append(out, f.Lock+" "+string(f.Role)+" "+f.Workflow.Name)
 	}
 	slices.Sort(out)
@@ -42,11 +48,16 @@ func facts(rows []wf.Workflow) []string {
 // of a semaphore ends with no lock status of its own, yet the controller still
 // counts one unit for it: the later waiter names it. Lock status never lists
 // the ended run as a holder and lists it as stale. A run whose steps retry, or
-// fail without a cancel, leaves nothing behind.
+// fail without a cancel, leaves nothing behind. In the ordinary hand-over the
+// run that took the unit keeps its waiting entry and is no waiter, and the
+// waiter not yet woken still names the ended holder, which is not stale because
+// that count does not name the live holder.
 func TestLockFactsOfTheControllerWriteForCancelledRuns(t *testing.T) {
 	t.Parallel()
-	got := facts(cancelledLocks(t))
+	got := facts(t, cancelledLocks(t))
 	want := []string{
+		"default/ConfigMap/oberth-sync-limits/handover holder handover-b",
+		"default/ConfigMap/oberth-sync-limits/handover waiter handover-c",
 		"default/ConfigMap/oberth-sync-limits/heavy-failed holder waiting-heavy-failed",
 		"default/ConfigMap/oberth-sync-limits/heavy-retry holder waiting-heavy-retry",
 		"default/ConfigMap/oberth-sync-limits/heavy-stop holder waiting-heavy-stop",
@@ -70,13 +81,31 @@ func TestLockFactsStaleOnlyForListedEndedWorkflows(t *testing.T) {
 	rows := cancelledLocks(t)
 	live := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == "ended-heavy-stop" })
 	rows[live].Status.Phase = wf.WorkflowRunning
-	if got := facts(rows); slices.Contains(got, "default/ConfigMap/oberth-sync-limits/heavy-stop stale ended-heavy-stop") {
+	if got := facts(t, rows); slices.Contains(got, "default/ConfigMap/oberth-sync-limits/heavy-stop stale ended-heavy-stop") {
 		t.Fatal("running Workflow reported stale", got)
 	}
 	rows = slices.Delete(rows, live, live+1)
-	for _, f := range argojob.LockFacts(rows) {
-		if f.Workflow.Name == "ended-heavy-stop" {
+	for _, f := range facts(t, rows) {
+		if strings.HasSuffix(f, " ended-heavy-stop") {
 			t.Fatal("deleted Workflow reported", f)
+		}
+	}
+}
+
+// A waiting entry counts only while the Workflow is Pending or a node still
+// waits for that lock: once its node holds, the leaked unit's waiter is no
+// waiter and its count, however it reads, names nothing stale.
+func TestLockFactsWaiterOnlyWhileWaiting(t *testing.T) {
+	t.Parallel()
+	rows := cancelledLocks(t)
+	i := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == "waiting-heavy-stop" })
+	for id, n := range rows[i].Status.Nodes {
+		n.SynchronizationStatus = nil
+		rows[i].Status.Nodes[id] = n
+	}
+	for _, f := range facts(t, rows) {
+		if strings.HasPrefix(f, "default/ConfigMap/oberth-sync-limits/heavy-stop ") && !strings.HasSuffix(f, " holder waiting-heavy-stop") {
+			t.Fatal("a Workflow that no longer waits produced", f)
 		}
 	}
 }
