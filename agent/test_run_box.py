@@ -55,8 +55,13 @@ def check_projection(contract):
         raise ValueError("run status contract drift")
     if "runs" not in struct_fields("internal/apicontract/results.go", "RunPage"):
         raise ValueError("missing run list envelope")
+    results = (ROOT / "internal/apicontract/results.go").read_text()
+    record = results.split("type RunRecord struct {", 1)[1].split("\n}", 1)[0]
+    page = results.split("type RunPage struct {", 1)[1].split("\n}", 1)[0]
+    if not re.search(r"^\tstepmodel\.RunSummary$", record, re.M) or not re.search(r"^\tRuns\s+\[\]RunRecord\s", page, re.M):
+        raise ValueError("run record no longer carries the run projection fields")
     catalogue = (ROOT / "internal/apicontract/tools_runs.go").read_text()
-    for tool, result in (("run_get", "stepmodel.RunSummary"), ("run_list", "RunPage")):
+    for tool, result in (("run_get", "RunRecord"), ("run_list", "RunPage")):
         if not re.search(re.escape(result) + r'[^\n]+?tool:"' + tool + r'"', catalogue):
             raise ValueError("CLI command result contract drift")
 
