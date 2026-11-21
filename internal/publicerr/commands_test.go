@@ -31,6 +31,28 @@ func TestCommandsQuoteEveryValueAsOneShellWord(t *testing.T) {
 	}
 }
 
+func TestNamesThatReadAsFlagsTakeTheirFlagFormOrPrintNothing(t *testing.T) {
+	for _, tc := range []struct{ got, want string }{
+		{AccessAllowCommand("", Grant{Repo: "r", File: "f", Step: "--step=*", Path: "p"}), "oberth access allow --step='--step=*' 'r' 'f' 'p'"},
+		{AccessAllowCommand("", Grant{Repo: "--repo=x", File: "--kind", Step: "pvc", Path: "-k"}), "oberth access allow --repo='--repo=x' --workflow='--kind' --secret='-k' 'pvc'"},
+		{ClaimAllowCommand("r", "-c", false), "oberth access allow --kind pvc --tier ci --claim='-c' 'r'"},
+		{SecretPutCommand(Grant{Repo: "r", File: "f", Step: "-s", Path: "p"}), "oberth secret put --repo 'r' --file 'f' --step='-s' 'p' < <value-file>"},
+		{ReceiveRetryCommand("--json"), "oberth receive outbox retry --repo='--json'"},
+		{SecretPutCommand(Grant{Repo: "r", File: "f", Step: "s", Path: "-p"}), ""},
+		{UnarchiveCommand("-r"), ""},
+		{PromoteCommand("r", "-abc"), ""},
+		{IssueDeleteCommand(-1), ""},
+		{RepoAddCommand("-u", "origin"), ""},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("got  %q\nwant %q", tc.got, tc.want)
+		}
+	}
+	if New(Forbidden, "Refused.", "Ask an administrator.", nil).WithCommand(UnarchiveCommand("-r")).Command() != "" {
+		t.Fatal("a refusal carried an unsafe command")
+	}
+}
+
 func TestAdministratorCommandTravelsAfterContextAndKeepsBounds(t *testing.T) {
 	plain := New(Forbidden, "The repository is archived.", "Ask an administrator to unarchive the repository.", nil)
 	raw, _ := json.Marshal(plain)

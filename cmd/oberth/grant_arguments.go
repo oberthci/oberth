@@ -23,9 +23,16 @@ func grantArgumentProblems(command, kind string, given func(string) bool) []stri
 		kind = "store_path"
 	}
 	takes, _ := apicontract.GrantArguments(kind)
-	usage := "usage: oberth " + command + " <repo>"
+	usage := "usage: oberth " + command
+	if command != "access allow" {
+		usage += " <repo>"
+	}
 	if kind != "store_path" {
 		usage += " --kind " + kind
+	}
+	if command == "access allow" {
+		// access allow takes no flag after a positional name, so its line gives every selector as a flag.
+		usage += " --repo <repo>"
 	}
 	for _, selector := range takes[1:] {
 		usage += " --" + selector + " " + grantPlaceholders()[selector]

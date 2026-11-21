@@ -20,7 +20,7 @@ func TestDecidingGrantRecipesRetainNamedFields(t *testing.T) {
 	}{
 		{"pvc", []string{"--kind", "pvc", "--tier", "ci", "source/team/widget", "build-cache"}, apicontract.AccessAllowArgs{Kind: "pvc", Tier: "ci", Repo: "source/team/widget", Claim: "build-cache"}},
 		{"named-tuple", []string{"--repo", "source/team/widget", "--workflow", ".oberth/build.yaml", "--step", "build", "registry/key"}, apicontract.AccessAllowArgs{Repo: "source/team/widget", Workflow: ".oberth/build.yaml", Step: "build", Secret: "registry/key"}},
-		{"mixed-tuple", []string{"source/team/widget", "--workflow", ".oberth/build.yaml", "build", "registry/key"}, apicontract.AccessAllowArgs{Repo: "source/team/widget", Workflow: ".oberth/build.yaml", Step: "build", Secret: "registry/key"}},
+		{"flags-then-names", []string{"--workflow", ".oberth/build.yaml", "source/team/widget", "build", "registry/key"}, apicontract.AccessAllowArgs{Repo: "source/team/widget", Workflow: ".oberth/build.yaml", Step: "build", Secret: "registry/key"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := fake.Bindings()

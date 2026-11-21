@@ -134,6 +134,11 @@ func installationArgs(row installationCommand, flags *flag.FlagSet, args []strin
 		}
 		return args[separator+1:], nil
 	}
+	if row.name == "secret put" {
+		if err := selectorOrder(flags, args, false); err != nil {
+			return nil, err
+		}
+	}
 	return parseFlow(flags, args)
 }
 

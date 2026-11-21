@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"slices"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/apicontract"
@@ -29,10 +30,30 @@ func grantFlags() *flag.FlagSet {
 	return f
 }
 func allowAccess(s *flowSession, args []string) error {
-	f := grantFlags()
-	rest, err := parseFlow(f, args)
+	request, err := grantRequest(args)
 	if err != nil {
 		return err
+	}
+	if err = s.invoke("access_allow", request, nil); err != nil {
+		return err
+	}
+	if s.options.json {
+		return nil
+	}
+	return s.app.render(s.last, false, s.options)
+}
+
+// grantRequest reads the grant an access allow command names: selector flags
+// first, then the names by position, each position skipped once its flag is set.
+func grantRequest(args []string) (apicontract.AccessAllowArgs, error) {
+	var request apicontract.AccessAllowArgs
+	f := grantFlags()
+	if err := selectorOrder(f, args, true, "reason"); err != nil {
+		return request, err
+	}
+	rest, err := parseFlow(f, args)
+	if err != nil {
+		return request, err
 	}
 	values := map[string]string{}
 	f.Visit(func(entry *flag.Flag) { values[strings.ReplaceAll(entry.Name, "-", "_")] = entry.Value.String() })
@@ -46,24 +67,44 @@ func allowAccess(s *flowSession, args []string) error {
 		values[name], rest = rest[0], rest[1:]
 	}
 	if len(rest) != 0 {
-		return usageProblems{"Too many grant arguments; run oberth help access allow."}
+		return request, usageProblems{"Too many grant arguments; run oberth help access allow."}
 	}
 	if problems := grantArgumentProblems("access allow", values["kind"], func(name string) bool { return values[name] != "" }); problems != nil {
-		return usageProblems(problems)
+		return request, usageProblems(problems)
 	}
 	raw, err := json.Marshal(values)
 	if err != nil {
-		return err
+		return request, err
 	}
-	var request apicontract.AccessAllowArgs
-	if err = json.Unmarshal(raw, &request); err != nil {
-		return err
+	err = json.Unmarshal(raw, &request)
+	return request, err
+}
+
+// selectorOrder refuses a grant flag that is given twice or, when ordered,
+// after a positional word. A pasted name that begins with "-" is read as a
+// flag once the shell removes its quotes; in either place it would select
+// another grant than the one printed. Flags named in free (such as a reason)
+// may go anywhere.
+func selectorOrder(f *flag.FlagSet, args []string, ordered bool, free ...string) error {
+	seen := map[string]bool{}
+	positional := false
+	for i := 0; i < len(args); i++ {
+		if !strings.HasPrefix(args[i], "-") {
+			positional = true
+			continue
+		}
+		name, _, attached := strings.Cut(strings.TrimLeft(args[i], "-"), "=")
+		entry := f.Lookup(name)
+		if entry == nil {
+			continue
+		}
+		if !slices.Contains(free, name) && (ordered && positional || seen[name]) {
+			return usageProblems{"Give each grant flag once, before the positional names; write a name that begins with - as its flag: --step='<name>'."}
+		}
+		seen[name] = true
+		if boolean, ok := entry.Value.(interface{ IsBoolFlag() bool }); !attached && (!ok || !boolean.IsBoolFlag()) {
+			i++
+		}
 	}
-	if err = s.invoke("access_allow", request, nil); err != nil {
-		return err
-	}
-	if s.options.json {
-		return nil
-	}
-	return s.app.render(s.last, false, s.options)
+	return nil
 }

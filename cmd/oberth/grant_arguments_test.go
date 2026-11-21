@@ -19,9 +19,9 @@ func TestAccessArgumentErrorsNameTheFlag(t *testing.T) {
 		{[]string{"access", "revoke", "o/t/w", "--workflow", ".oberth/build.yaml", "--step", "private", "--secret", "walk/value", "--tier", "ci"}, "--tier does not apply to kind store_path", "oberth access revoke <repo> --workflow <file> --step <step> --secret <path>"},
 		{[]string{"access", "revoke", "o/t/w", "--kind", "pvc", "--claim", "data"}, "missing --tier for kind pvc", "oberth access revoke <repo> --kind pvc --claim <claim> --tier <ci|release>"},
 		{[]string{"access", "revoke", "o/t/w", "--kind", "identity", "--workflow", ".oberth/build.yaml", "--step", "build", "--secret", "identity"}, "missing --audience for kind identity", "oberth access revoke <repo> --kind identity --workflow <file> --step <step> --secret <path> --audience <audience>"},
-		{[]string{"access", "allow", "o/t/w", ".oberth/build.yaml"}, "missing --step for kind store_path", "oberth access allow <repo> --workflow <file> --step <step> --secret <path>"},
-		{[]string{"access", "allow", "--kind", "pvc", "o/t/w", "data"}, "missing --tier for kind pvc", "oberth access allow <repo> --kind pvc --claim <claim> --tier <ci|release>"},
-		{[]string{"access", "allow", "o/t/w", ".oberth/build.yaml", "build", "key", "--tier", "ci"}, "--tier does not apply to kind store_path", "oberth access allow <repo> --workflow <file> --step <step> --secret <path>"},
+		{[]string{"access", "allow", "o/t/w", ".oberth/build.yaml"}, "missing --step for kind store_path", "oberth access allow --repo <repo> --workflow <file> --step <step> --secret <path>"},
+		{[]string{"access", "allow", "--kind", "pvc", "o/t/w", "data"}, "missing --tier for kind pvc", "oberth access allow --kind pvc --repo <repo> --claim <claim> --tier <ci|release>"},
+		{[]string{"access", "allow", "--tier", "ci", "o/t/w", ".oberth/build.yaml", "build", "key"}, "--tier does not apply to kind store_path", "oberth access allow --repo <repo> --workflow <file> --step <step> --secret <path>"},
 		{[]string{"access", "dismiss", "--repo", "o/t/w", "--step", "build", "--secret", "key"}, "missing --workflow", ""},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {

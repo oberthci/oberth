@@ -11,13 +11,19 @@ import (
 // single-quoted shell word, so it pastes as written. A constructor takes only
 // the refused object's own public names, never a secret, a token or another
 // repository's name; a value the administrator chooses is a <placeholder>.
+//
+// A value that begins with "-" would be read by oberth as a flag after the
+// shell removes the quotes, and could select another grant. Such a value is
+// printed attached to its own flag (--step='-x'), before every positional
+// word; a value that has no flag form makes the constructor return "", so no
+// command is printed.
 
 // AdministratorLine is how every view prints an administrator command.
 func AdministratorLine(command string) string { return "Administrator: " + command }
 
 // WithCommand records the complete command an administrator runs to resolve
 // this refusal. Views print it as its own line after the context, so reason
-// and remedy keep their bounds.
+// and remedy keep their bounds. An empty command records none.
 func (e *Error) WithCommand(command string) *Error {
 	e.command = command
 	return e
@@ -63,50 +69,54 @@ func classifiedCommand(refusals []refusal, code Code, contexts []string) (string
 
 // UnarchiveCommand reactivates an archived repository.
 func UnarchiveCommand(repo string) string {
-	return line("repo unarchive", quote(repo))
+	return newLine("repo unarchive").arg(repo).String()
 }
 
 // PromoteCommand promotes an exact tested commit as an administrator.
 func PromoteCommand(repo, sha string) string {
-	return line("promote", quote(sha), "--repo", quote(repo))
+	return newLine("promote").arg(sha).flag("repo", repo).String()
 }
 
-// IssueDeleteCommand deletes one issue.
+// IssueDeleteCommand deletes one issue; issue IDs start at 1.
 func IssueDeleteCommand(id int64) string {
-	return line("issue delete", strconv.FormatInt(id, 10))
+	if id < 1 {
+		return ""
+	}
+	return newLine("issue delete").word(strconv.FormatInt(id, 10)).String()
 }
 
 // ReceiveRetryCommand retries the recorded push delivery of one repository.
 func ReceiveRetryCommand(repo string) string {
-	return line("receive outbox retry", "--repo", quote(repo))
+	return newLine("receive outbox retry").flag("repo", repo).String()
 }
 
 // RepoAddCommand registers a forge repository, optionally under an upstream.
 func RepoAddCommand(address, upstream string) string {
-	if upstream == "" {
-		return line("repo add", quote(address))
+	c := newLine("repo add").arg(address)
+	if upstream != "" {
+		c.flag("upstream", upstream)
 	}
-	return line("repo add", quote(address), "--upstream", quote(upstream))
+	return c.String()
 }
 
 // RepoAddTrustCommand registers a forge repository after its host key is
 // verified; repin replaces a changed key.
 func RepoAddTrustCommand(address, knownHosts, upstream string, repin bool) string {
-	words := []string{quote(address), "--known-hosts", quote(knownHosts), "--expected-host-fingerprint", "VERIFIED_FINGERPRINT", "--upstream", quote(upstream)}
+	c := newLine("repo add").arg(address).flag("known-hosts", knownHosts).word("--expected-host-fingerprint", "VERIFIED_FINGERPRINT").flag("upstream", upstream)
 	if repin {
-		words = append(words, "--repin")
+		c.word("--repin")
 	}
-	return line("repo add", words...)
+	return c.String()
 }
 
 // CheckCommand inspects a local pipeline file against a repository.
 func CheckCommand(repo, file string) string {
-	return line("check", "--repo", quote(repo), "--local", quote(file))
+	return newLine("check").flag("repo", repo).flag("local", file).String()
 }
 
 // SecretStoreCheckCommand checks the configured secret store.
 func SecretStoreCheckCommand() string {
-	return line("secretstore check")
+	return newLine("secretstore check").String()
 }
 
 // Grant names one exact access declaration: the repository, file, step and
@@ -116,15 +126,14 @@ type Grant struct{ Repo, File, Step, Path, Audience string }
 // AccessAllowCommand approves a grant of the given kind; the empty kind is
 // the secret store path grant.
 func AccessAllowCommand(kind string, g Grant) string {
-	var words []string
+	c := newLine("access allow")
 	if kind != "" {
-		words = append(words, "--kind", kind)
+		c.word("--kind", kind)
 	}
 	if g.Audience != "" {
-		words = append(words, "--audience", quote(g.Audience))
+		c.flag("audience", g.Audience)
 	}
-	words = append(words, quote(g.Repo), quote(g.File), quote(g.Step), quote(g.Path))
-	return line("access allow", words...)
+	return c.selectors([2]string{"repo", g.Repo}, [2]string{"workflow", g.File}, [2]string{"step", g.Step}, [2]string{"secret", g.Path}).String()
 }
 
 // ClaimAllowCommand approves a persistent volume claim for the CI or release tier.
@@ -133,23 +142,75 @@ func ClaimAllowCommand(repo, claim string, release bool) string {
 	if release {
 		tier = "release"
 	}
-	return line("access allow", "--kind", "pvc", "--tier", tier, quote(repo), quote(claim))
+	return newLine("access allow").word("--kind", "pvc", "--tier", tier).selectors([2]string{"repo", repo}, [2]string{"claim", claim}).String()
 }
 
 // SecretPutCommand stores a granted secret; the value is read from standard
 // input and never appears in the command.
 func SecretPutCommand(g Grant) string {
-	return line("secret put", "--repo", quote(g.Repo), "--file", quote(g.File), "--step", quote(g.Step), quote(g.Path), "<", "<value-file>")
+	return newLine("secret put").flag("repo", g.Repo).flag("file", g.File).flag("step", g.Step).arg(g.Path).word("<", "<value-file>").String()
 }
 
 // CapabilityGrantCommand grants a workflow capability given as its JSON text.
 func CapabilityGrantCommand(repo, capability string) string {
-	return line("workflow capability grant", "--repo", quote(repo), "--capability", quote(capability), "--reason", quote("<reason>"))
+	return newLine("workflow capability grant").flag("repo", repo).flag("capability", capability).flag("reason", "<reason>").String()
 }
 
-func line(path string, words ...string) string {
-	return strings.Join(append([]string{"oberth", path}, words...), " ")
+// commandLine collects the words of one command in order; unsafe marks a
+// value that would be read as a flag and has no flag form.
+type commandLine struct {
+	words  []string
+	unsafe bool
 }
+
+func newLine(path string) *commandLine { return &commandLine{words: []string{"oberth", path}} }
+
+// word adds fixed words this file writes: flag names, modes and placeholders.
+func (c *commandLine) word(words ...string) *commandLine {
+	c.words = append(c.words, words...)
+	return c
+}
+
+// flag adds a named value; one that begins with "-" is attached to the flag,
+// so no argument reader takes it for a flag of its own.
+func (c *commandLine) flag(name, value string) *commandLine {
+	if flagLike(value) {
+		return c.word("--" + name + "=" + quote(value))
+	}
+	return c.word("--"+name, quote(value))
+}
+
+// arg adds a positional value that has no flag form.
+func (c *commandLine) arg(value string) *commandLine {
+	c.unsafe = c.unsafe || flagLike(value)
+	return c.word(quote(value))
+}
+
+// selectors adds positional names that also have flag forms, in the order the
+// command reads them: each one that begins with "-" is given as its flag
+// before the rest, which stay positional; the reader skips a name already set.
+func (c *commandLine) selectors(pairs ...[2]string) *commandLine {
+	for _, p := range pairs {
+		if flagLike(p[1]) {
+			c.flag(p[0], p[1])
+		}
+	}
+	for _, p := range pairs {
+		if !flagLike(p[1]) {
+			c.word(quote(p[1]))
+		}
+	}
+	return c
+}
+
+func (c *commandLine) String() string {
+	if c.unsafe {
+		return ""
+	}
+	return strings.Join(c.words, " ")
+}
+
+func flagLike(value string) bool { return strings.HasPrefix(value, "-") }
 
 func quote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
