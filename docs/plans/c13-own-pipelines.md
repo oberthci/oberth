@@ -143,7 +143,7 @@ Installation policy follows [C9 invariant 7](c9-install-and-upgrade.md#invariant
    become green through wrapper success. No vulnerability scanners run in the
    own pipelines. Assist remains off pending review and real-cluster checks;
    runs with an audited inspection exec or an armed step without a succeeded final
-   native result lose evidence eligibility. Asking for assist alone does not.
+   native result lose evidence eligibility. Asking for assist alone does not. Tests on the gittest fixture run the packaged static Git, exported from the run's checked base and named in `OBERTH_TEST_GIT`, so they wait for the base pull: a failed pull leaves the push without a test result, and the wait is free only while the `go` semaphore is 1.
 4. Resource requests, limits, scratch, deadlines, parallelism and synchronization remain
    YAML-owned. Keep native workflow/publication locks where already authored. No server
    queue, CPU math, capacity gate or injected release lock. Configured build and release
