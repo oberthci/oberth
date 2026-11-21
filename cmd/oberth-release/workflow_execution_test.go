@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -54,7 +55,8 @@ exit 1
 	body = []byte(strings.Replace(string(body), "case \"$*\" in", `case "$*" in
   *'version --short') cat hack/lint-version | sed 's/^v//'; exit;;
   'env GOARCH') echo amd64; exit;;
-  'test '*|'vet '*|tool\ *) exit;;`, 1))
+  'test '*) printf '%s' "${OBERTH_TEST_GIT:-}" > "$FIXTURE_ROOT/test-git"; exit;;
+  'vet '*|tool\ *) exit;;`, 1))
 	if err := os.WriteFile(p, body, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -97,24 +99,48 @@ func TestWorkflowGoStepsExecuteTheirWrittenScripts(t *testing.T) {
 			continue
 		}
 		t.Run(task.Name, func(t *testing.T) {
-			dir := workflowFixture(t)
-			values := workflowValues(dir)
-			values["TARGET"] = task.Arguments.Parameters[0].Value.String()
-			if task.Name == "release-bytes-build" {
-				configureBaseFixture(t, dir)
-				if output, err := executeWorkflowTemplate(t, wf, wf.GetTemplateByName("prepare-base"), values); err != nil {
-					t.Fatal("written base predecessor failed", err, string(output))
-				}
-			}
-			output, err := executeWorkflowTemplate(t, wf, wf.GetTemplateByName(task.Template), values)
-			if err != nil {
-				t.Fatalf("workflow script failed: %v\n%s", err, output)
-			}
+			dir, target := executeGoStep(t, wf, task)
 			if task.Name == "release-bytes-build" {
 				assertCompileCaches(t, dir, map[string]int{filepath.Join(dir, "cache", "build"): 6})
 				assertCandidateVersion(t, dir)
 			}
+			if target == "test" {
+				assertTestsUseBaseGit(t, dir)
+			}
 		})
+	}
+}
+
+// executeGoStep runs one Go task's written script after its written predecessor.
+func executeGoStep(t *testing.T, wf *wfv1.Workflow, task wfv1.DAGTask) (string, string) {
+	t.Helper()
+	dir := workflowFixture(t)
+	values := workflowValues(dir)
+	values["TARGET"] = task.Arguments.Parameters[0].Value.String()
+	if task.Depends == "prepare-base" {
+		configureBaseFixture(t, dir)
+		if output, err := executeWorkflowTemplate(t, wf, wf.GetTemplateByName("prepare-base"), values); err != nil {
+			t.Fatal("written base predecessor failed", err, string(output))
+		}
+	}
+	output, err := executeWorkflowTemplate(t, wf, wf.GetTemplateByName(task.Template), values)
+	if err != nil {
+		t.Fatalf("workflow script failed: %v\n%s", err, output)
+	}
+	return dir, values["TARGET"]
+}
+
+// The pipeline's Git cache tests run the Git the release ships, not the build image's.
+func assertTestsUseBaseGit(t *testing.T, dir string) {
+	t.Helper()
+	exported := filepath.Join(dir, "shared/git/git")
+	body, err := os.ReadFile(exported)
+	if err != nil || !bytes.Equal(body, fixtureGit(runtime.GOARCH)) {
+		t.Fatal("test step did not export the checked base Git", err)
+	}
+	found, err := os.ReadFile(filepath.Join(dir, "test-git"))
+	if err != nil || strings.TrimSpace(string(found)) != exported {
+		t.Fatal("tests do not name the base Git as their test Git", err, string(found))
 	}
 }
 func assertCompileCaches(t *testing.T, dir string, want map[string]int) {

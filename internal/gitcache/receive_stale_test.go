@@ -26,6 +26,7 @@ func TestReceiveStaleOldNeverFencesRepository(t *testing.T) {
 func checkStaleReceive(t *testing.T, mixed bool) {
 	t.Helper()
 	f := gittest.New(t)
+	f.RequireBatchedReceive(t)
 	cfg := reviewConfig(t, f)
 	cfg.PreReceive = func(context.Context, gitcache.ReceiveEvent, *gitcache.ReceiveSource) error { return nil }
 	c := thirdInit(t, cfg)

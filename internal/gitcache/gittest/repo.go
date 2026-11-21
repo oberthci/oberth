@@ -12,9 +12,16 @@ import (
 type Fixture struct{ Root, Work, Bare, Binary, Commit string }
 
 func New(t *testing.T) *Fixture { return NewFormat(t, "sha1") }
+
+// NewFormat uses the Git named by OBERTH_TEST_GIT, the packaged Git the product
+// runs, and otherwise the first git on PATH.
 func NewFormat(t *testing.T, format string) *Fixture {
 	t.Helper()
-	binary, err := exec.LookPath("git")
+	binary := os.Getenv("OBERTH_TEST_GIT")
+	var err error
+	if binary == "" {
+		binary, err = exec.LookPath("git")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

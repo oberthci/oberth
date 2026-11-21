@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -91,6 +92,26 @@ func baseFiles(base v1.Image, pin staticgit.Record) (map[string][]byte, error) {
 		}
 	}
 	return files, nil
+}
+// exportGit writes this machine's base Git, checked against its qualified pin,
+// into a new directory, so a build tests with exactly the Git it ships.
+func exportGit(o options, index v1.ImageIndex) error {
+	image, err := baseImage(index, runtime.GOARCH)
+	if err != nil {
+		return err
+	}
+	pin, err := o.git(staticgit.Architecture(runtime.GOARCH))
+	if err != nil {
+		return err
+	}
+	files, err := baseFiles(image, pin)
+	if err != nil {
+		return err
+	}
+	if err = os.Mkdir(o.gitOut, 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(o.gitOut, "git"), files["usr/bin/git"], 0755)
 }
 func images(o options, base v1.ImageIndex) (map[string]string, error) {
 	digests := make(map[string]string)

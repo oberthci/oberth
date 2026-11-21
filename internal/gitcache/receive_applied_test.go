@@ -51,6 +51,7 @@ func TestReceiveAppliedProcessBudget(t *testing.T) {
 
 func TestReceiveUnchangedCommandHasNoEvent(t *testing.T) {
 	f, c, next := completionFixture(t)
+	f.RequireBatchedReceive(t)
 	calls := 0
 	push := func(old, new string) {
 		r := fourthAgentPush(t, f, []gitcache.RefUpdate{{Ref: "refs/heads/topic", OldSHA: old, NewSHA: new}}, nil)

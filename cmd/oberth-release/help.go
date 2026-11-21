@@ -21,6 +21,7 @@ func releaseFlags(o *options) *flag.FlagSet {
 	flags.StringVar(&o.origin, "origin", "", "release origin")
 	flags.StringVar(&o.token, "token-file", "", "delegated token file")
 	flags.StringVar(&o.receipt, "receipt", "", "clean verification receipt")
+	flags.StringVar(&o.gitOut, "git-out", "", "new directory for this machine's checked base Git")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "Usage: oberth-release <operation> [flags]")
 		fmt.Fprintln(flags.Output(), usage.Remedy())

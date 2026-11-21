@@ -99,3 +99,7 @@ work volume using `hack/prepare-base.sh`. It restores the pinned root index byte
 from the downloaded blob, verifies the layout with `check.sh`, then exposes it to
 byte builds. Missing or mismatched inputs refuse; the shared compilation caches
 hold no release base, and a prepared base from another run is never a fallback.
+The build's test step runs `check.sh --git-out` to write this machine's checked
+base Git and names it in `OBERTH_TEST_GIT`, so the tests built on the gittest
+fixture use the Git the release ships; tests that call git from PATH keep the
+image's Git.

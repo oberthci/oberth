@@ -40,7 +40,9 @@ spec:
     - name: build
       dag:
         tasks:
-          - {name: go-tests-pass-with-race, template: go, arguments: {parameters: [{name: target, value: test}]}}
+          # Tests take the shipped Git from the prepared base: if the base pull fails, the push
+          # gets no test result. The wait costs no wall time only while the go semaphore is 1.
+          - {name: go-tests-pass-with-race, template: go, depends: prepare-base, arguments: {parameters: [{name: target, value: test}]}}
           - {name: prepare-base, template: prepare-base}
           - {name: release-bytes-build, template: go, depends: prepare-base, arguments: {parameters: [{name: target, value: build-bytes}]}}
           - {name: lint-and-guards-pass, template: lint-and-guards-pass, depends: release-bytes-build}
@@ -65,6 +67,10 @@ spec:
           - |
             mkdir -p "$GOTMPDIR"
             candidate=$(git rev-parse HEAD | python3 -c 'import sys; print("v0.0." + str(int(sys.stdin.read().strip()[:15], 16)))')
+            if [ "$TARGET" = test ]; then
+              bash hack/base-image/check.sh --base "$RELEASE_BASE" --pin .oberth/pins/base-image.digest --git-out "$RELEASE_SHARED/git"
+              export OBERTH_TEST_GIT="$RELEASE_SHARED/git/git"
+            fi
             make "$TARGET" VERSION="$candidate"
             if [ "$TARGET" = build-bytes ]; then
               cp "$RELEASE_DIR/oberth-linux-$(go env GOARCH)" "$RELEASE_SHARED/oberth"

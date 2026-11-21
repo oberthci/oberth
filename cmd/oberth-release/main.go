@@ -21,7 +21,7 @@ type options struct {
 	publicKey                              string
 	replaceKey                             bool
 	dir, base, pin, chart, version, commit string
-	origin, token, receipt                 string
+	origin, token, receipt, gitOut         string
 	git                                    func(staticgit.Architecture) (staticgit.Record, error)
 }
 type refusal string
@@ -189,8 +189,10 @@ func checkBase(o options) error {
 		return err
 	}
 	fmt.Fprintln(os.Stdout, "Base index:", hash.String())
-	_, err = checkedBase(o)
-	return err
+	if _, err = checkedBase(o); err != nil || o.gitOut == "" {
+		return err
+	}
+	return exportGit(o, index)
 }
 func writeKey(candidate string) error {
 	key, err := releaseverify.PublicKey()

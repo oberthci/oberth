@@ -125,7 +125,8 @@ if [ "$1" = build ] && [ "${2:-}" = -buildvcs=false ] && [ "${3:-}" = -o ]; then
   cat > "$4" <<'CHECK'
 #!/bin/sh
 [ "$1" = base ] && [ "$2" = --base ] && [ "$4" = --pin ] || exit 97
-exec env GORACE=atexit_sleep_ms=0 BASE_CHECK_HELPER=1 BASE_CHECK_LAYOUT="$3" BASE_CHECK_PIN="$5" "$BASE_TEST_BINARY" -test.run=^TestPrepareBaseChecker$ -test.timeout=30s -test.count=1
+[ "$#" = 5 ] || { [ "$#" = 7 ] && [ "$6" = --git-out ]; } || exit 98
+exec env GORACE=atexit_sleep_ms=0 BASE_CHECK_HELPER=1 BASE_CHECK_LAYOUT="$3" BASE_CHECK_PIN="$5" BASE_CHECK_GIT_OUT="${7:-}" "$BASE_TEST_BINARY" -test.run=^TestPrepareBaseChecker$ -test.timeout=30s -test.count=1
 CHECK
   chmod 700 "$4"
   exit
@@ -166,7 +167,7 @@ func TestPrepareBaseChecker(t *testing.T) {
 	if os.Getenv("BASE_CHECK_HELPER") != "1" {
 		return
 	}
-	err := checkBase(options{base: os.Getenv("BASE_CHECK_LAYOUT"), pin: os.Getenv("BASE_CHECK_PIN"), git: fixturePin})
+	err := checkBase(options{base: os.Getenv("BASE_CHECK_LAYOUT"), pin: os.Getenv("BASE_CHECK_PIN"), gitOut: os.Getenv("BASE_CHECK_GIT_OUT"), git: fixturePin})
 	if err != nil {
 		t.Fatal(err)
 	}
