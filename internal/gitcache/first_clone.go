@@ -38,15 +38,34 @@ type firstClones struct {
 // ends, the next caller sees the clone or starts a new one after a failure.
 func (c *Cache) awaitClone(ctx context.Context, repository, p string) error {
 	clone := c.startClone(repository, p) //nolint:contextcheck // The cache lifetime owns the clone, not the caller who waits for it.
+	return c.waitClone(ctx, clone, p)
+}
+
+func (c *Cache) waitClone(ctx context.Context, clone *firstClone, p string) error {
 	select {
 	case <-clone.done:
 		return clone.err
 	case <-ctx.Done():
-		c.clones.mu.Lock()
-		clone.left = true
-		c.clones.mu.Unlock()
+		if !c.leave(clone, p) {
+			<-clone.done
+			return clone.err
+		}
 		return &gitport.CloneUnfinishedError{Cause: context.Cause(ctx)}
 	}
+}
+
+// leave marks that a caller stopped waiting while the clone still runs, so
+// the clone announces its refs when it ends. It reports false when the clone
+// had already ended: the caller then takes its result like any waiter, and
+// no outcome falls between "continues" and an announcement.
+func (c *Cache) leave(clone *firstClone, p string) bool {
+	c.clones.mu.Lock()
+	defer c.clones.mu.Unlock()
+	if c.clones.running[p] != clone {
+		return false
+	}
+	clone.left = true
+	return true
 }
 
 func (c *Cache) startClone(repository, p string) *firstClone {
