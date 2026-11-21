@@ -196,8 +196,32 @@ async function route() {
   await refresh(view); if (view.filter) live(view);
  } catch (error) { if (!view.controller.signal.aborted) showError(error); }
 }
-function select(label, values, current, onchange) {
- return h("label", {}, label, h("select", {onchange}, values.map(([value, text]) => h("option", {value, selected: value === current ? "" : null}, text))));
+// A canonical name is upstream/organization/name. Lists show the name under an
+// upstream/organization header, and more of the prefix only where two visible
+// names would otherwise read the same.
+const upstreamOf = repo => repo.split("/")[0];
+const groupOf = repo => repo.split("/").slice(0, 2).join("/");
+function shortNames(repos) {
+ const cut = (repo, depth) => repo.split("/").slice(depth).join("/");
+ return new Map(repos.map(repo => {
+  let depth = 2;
+  while (depth > 0 && repos.some(other => other !== repo && cut(other, depth) === cut(repo, depth))) depth--;
+  return [repo, cut(repo, depth)];
+ }));
+}
+// One checkbox per upstream; the address holds the selection (absent means all).
+// The last checked box cannot be cleared, so the list never selects nothing.
+function upstreamChoice(query, upstreams, chosen) {
+ const choose = (name, on) => {
+  const next = upstreams.filter(item => item === name ? on : chosen.includes(item));
+  query.delete("before");
+  if (next.length === upstreams.length) query.delete("upstreams"); else query.set("upstreams", next.join(","));
+  if (query.get("repo") && !next.includes(upstreamOf(query.get("repo")))) query.delete("repo");
+  navigate("/runs?" + query);
+ };
+ const checked = upstreams.filter(name => chosen.includes(name));
+ return h("div", {class: "upstreams", role: "group", "aria-label": "Upstreams"}, h("span", {class: "side-word", "aria-hidden": "true"}, "Upstreams"),
+  upstreams.map(name => h("label", {}, h("input", {type: "checkbox", checked: chosen.includes(name) ? "" : null, disabled: checked.length === 1 && checked[0] === name ? "" : null, onchange: event => choose(name, event.target.checked)}), name)));
 }
 async function runsScreen(view) {
  const query = new URLSearchParams(location.search), signal = view.controller.signal;
@@ -206,15 +230,20 @@ async function runsScreen(view) {
  const change = key => event => { query.delete("before"); query.set(key, event.target.value); navigate("/runs?" + query); };
  const link = (key, value) => "/runs?" + params({...Object.fromEntries(query), before: null, [key]: value});
  const repo = query.get("repo") || "", status = query.get("status") || "";
+ const names = repos.repositories.map(item => item.repo).sort(), upstreams = [...new Set(names.map(upstreamOf))];
+ const chosen = query.has("upstreams") ? query.get("upstreams").split(",") : upstreams;
+ const visible = names.filter(name => chosen.includes(upstreamOf(name))), labels = shortNames(visible), groups = [...Map.groupBy(visible, groupOf)];
  main.append(h("h1", {}, "Runs"),
-  h("aside", {class: "repo-side", "aria-label": "Repositories"}, h("p", {class: "side-head"}, "Repositories"),
-   [["", "All repos"], ...repos.repositories.map(item => [item.repo, item.repo])].map(([value, text]) => h("a", {class: "repo-filter", href: link("repo", value), "aria-current": value === repo ? "true" : null}, text))),
+  h("aside", {class: "repo-side", "aria-label": "Repositories"}, upstreams.length > 1 ? upstreamChoice(query, upstreams, chosen) : null, h("p", {class: "side-head"}, "Repositories"),
+   h("a", {class: "repo-filter", href: link("repo", ""), "aria-current": repo ? null : "true"}, "All repos"),
+   groups.flatMap(([group, members]) => [h("p", {class: "repo-group"}, group), ...members.map(name =>h("a", {class: "repo-filter", href: link("repo", name), title: name, "aria-label": name, "aria-current": name === repo ? "true" : null}, labels.get(name)))])),
   h("div", {class: "filters"},
-   select("Repository", [["", "all"], ...repos.repositories.map(item => [item.repo, item.repo])], repo, change("repo")),
+   h("label", {}, "Repository", h("select", {onchange: change("repo")}, h("option", {value: ""}, "all"),
+    groups.map(([group, members]) => h("optgroup", {label: group}, members.map(name => h("option", {value: name, selected: name === repo ? "" : null}, labels.get(name))))))),
    h("div", {class: "chips", role: "group", "aria-label": "Status"}, ["", "queued", "running", "passed", "failed", "cancelled"].map(value => h("a", {class: "chip", href: link("status", value), "aria-current": value === status ? "true" : null}, value || "all")))));
  const region = h("div", {class: "runs"}); main.append(region, h("p", {class: "runs-foot"}, "Newest first · 50 runs per page"));
  view.read = async () => {
-  const page = await get("/api/runs?" + params({limit: 50, repo: query.get("repo"), ref: query.get("ref"), status: query.get("status"), before: query.get("before")}), signal);
+  const page = await get("/api/runs?" + params({limit: 50, repo: query.get("repo"), ref: query.get("ref"), status: query.get("status"), upstreams: query.get("upstreams"), before: query.get("before")}), signal);
   if (signal.aborted) return;
   replace(region, page.runs.length ? [h("div", {class: "row head", "aria-hidden": "true"}, ["STATUS", "RUN", "WHEN", "MESSAGE"].map(text => h("span", {}, text))),
    ...page.runs.map(run => h("a", {class: "row", href: "/runs/" + encodeURIComponent(run.id), "data-key": run.id}, runWhen(run), h("span", {class: "run-label"}, state(run.status), h("span", {class: "name"}, h("b", {class: "repo"}, run.repo), h("span", {class: "ref"}, run.ref))), h("span", {class: "message"}, run.display_reason))),

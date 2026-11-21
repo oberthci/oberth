@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -59,7 +60,7 @@ func uiExample(t *testing.T) *fixture {
 		{RunSummary: stepmodel.RunSummary{ID: "11111111", Repo: "origin/team/api", Ref: "main", Status: stepmodel.RunPassed, CreatedAt: at, StartedAt: &at, FinishedAt: &end, CommitSHA: &sha, ObjectSHA: sha}, RunCause: model.RunCause{Actor: "owner", Trigger: model.TriggerPromotion}},
 		{RunSummary: stepmodel.RunSummary{ID: "22222222", Repo: "origin/team/api", Ref: "fix-login", Status: stepmodel.RunFailed, DisplayReason: "test failed: exit 2", CreatedAt: at, StartedAt: &at, FinishedAt: &end, CommitSHA: &sha, ObjectSHA: sha, Failure: &stepmodel.FailureRecord{Step: "x-test", Name: "test", NodeID: "attempt-two"}}, RunCause: model.RunCause{Actor: "worker", Trigger: model.TriggerBranch, AssistRequested: true}},
 		{RunSummary: stepmodel.RunSummary{ID: "33333333", Repo: "origin/team/web", Ref: "feature/search", Status: stepmodel.RunRunning, DisplayReason: "waiting for an available build node soon", CreatedAt: at, StartedAt: &at, CommitSHA: &sha, ObjectSHA: sha}, RunCause: model.RunCause{Actor: "oberth:scheduler", Trigger: model.TriggerSchedule, ScheduleEntry: "nightly"}},
-		{RunSummary: stepmodel.RunSummary{ID: "44444444", Repo: "origin/team/web", Ref: "main", Status: stepmodel.RunQueued, DisplayReason: "waiting for execution", CreatedAt: at, ObjectSHA: sha}, RunCause: model.RunCause{Actor: "worker", Trigger: model.TriggerBranch, RerunOf: strings.Repeat("22222222", 4)}},
+		{RunSummary: stepmodel.RunSummary{ID: "44444444", Repo: "mirror/tools/cli", Ref: "main", Status: stepmodel.RunQueued, DisplayReason: "waiting for execution", CreatedAt: at, ObjectSHA: sha}, RunCause: model.RunCause{Actor: "worker", Trigger: model.TriggerBranch, RerunOf: strings.Repeat("22222222", 4)}},
 	}
 	for index := range runs {
 		runs[index].ID = strings.Repeat(runs[index].ID, 4)
@@ -71,7 +72,7 @@ func uiExample(t *testing.T) *fixture {
 		if token := os.Getenv("OBERTH_UI_TOKEN"); token != "" {
 			c.Auth = exampleAuth{Authenticator: c.Auth, token: token}
 		}
-		b.RunList.Handler = &fake.Handler[apicontract.RunListArgs, apicontract.RunPage]{Value: apicontract.RunPage{Runs: runs}}
+		b.RunList.Handler = exampleRunList(runs)
 		b.RunGet.Handler = apicontract.HandlerFunc[apicontract.RunGetArgs, apicontract.RunRecord](func(_ context.Context, _ apicontract.Caller, args apicontract.RunGetArgs) (apicontract.Call[apicontract.RunRecord], error) {
 			return func(context.Context) (apicontract.RunRecord, error) {
 				for _, run := range runs {
@@ -89,7 +90,7 @@ func uiExample(t *testing.T) *fixture {
 				return fallback, nil
 			}, nil
 		})
-		b.RepoList.Handler = &fake.Handler[apicontract.RepoListArgs, apicontract.RepoPage]{Value: apicontract.RepoPage{Repositories: []apicontract.Repository{{Repo: runs[0].Repo, DefaultBranch: "main", BranchCount: new(3), LatestRun: &runs[0].RunSummary}, {Repo: runs[2].Repo, DefaultBranch: "main", LatestRun: &runs[2].RunSummary}}}}
+		b.RepoList.Handler = &fake.Handler[apicontract.RepoListArgs, apicontract.RepoPage]{Value: apicontract.RepoPage{Repositories: []apicontract.Repository{{Repo: runs[0].Repo, DefaultBranch: "main", BranchCount: new(3), LatestRun: &runs[0].RunSummary}, {Repo: runs[2].Repo, DefaultBranch: "main", LatestRun: &runs[2].RunSummary}, {Repo: runs[3].Repo, DefaultBranch: "main"}}}}
 		b.RunLogs.Handler = &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{Value: apicontract.LogResult{Content: "Running the authored test command\nFAIL pkg/check 0.40s\nexpected status 200, received 500\n<script>this is log text</script>\n", Meta: logcontract.Meta{ScanComplete: true, BytesExact: true}}}
 		b.RunRerun.Handler = &fake.Handler[apicontract.RunRerunArgs, apicontract.Receipt]{Value: apicontract.Receipt{ID: "55555555"}}
 		refused := publicerr.New(publicerr.Conflict, "This run cannot be cancelled.", "Read the current run.", nil)
@@ -143,6 +144,23 @@ func exampleHoldList(at time.Time) apicontract.HandlerFunc[apicontract.RunHoldLi
 				rows = append(rows, model.LiveHold{HeldNotice: model.HeldNotice{RunID: q.ID, Step: "test", NodeID: "node", PodUID: "pod-uid", HeldSince: at.Add(-time.Hour), TTLSeconds: 1200}, PodName: "held-pod", RemainingMS: 600000, AvailabilityUnknown: strings.HasPrefix(q.ID, "22222222")})
 			}
 			return apicontract.HoldPage{Holds: rows}, nil
+		}, nil
+	}
+}
+
+// exampleRunList narrows the fixed runs to the requested upstreams, as the
+// server does before paging, so the browser check sees server-side filtering.
+func exampleRunList(runs []apicontract.RunRecord) apicontract.HandlerFunc[apicontract.RunListArgs, apicontract.RunPage] {
+	return func(_ context.Context, _ apicontract.Caller, q apicontract.RunListArgs) (apicontract.Call[apicontract.RunPage], error) {
+		return func(context.Context) (apicontract.RunPage, error) {
+			page := apicontract.RunPage{Runs: []apicontract.RunRecord{}}
+			for _, run := range runs {
+				upstream, _, _ := strings.Cut(run.Repo, "/")
+				if len(q.Upstreams) == 0 || slices.Contains(q.Upstreams, upstream) {
+					page.Runs = append(page.Runs, run)
+				}
+			}
+			return page, nil
 		}, nil
 	}
 }

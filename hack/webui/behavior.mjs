@@ -259,20 +259,64 @@ async function settle(client,test,label){
 async function repositoryListAndChips(client){
  await client.loaded('/runs','.runs a.row');await pause(20);
  const mark=client.requests.length;
- await client.evaluate(`Array.from(document.querySelectorAll('.repo-side a')).find(link=>link.textContent==='origin/team/web').click()`);
+ await client.evaluate(`Array.from(document.querySelectorAll('.repo-side a')).find(link=>link.title==='origin/team/web').click()`);
  await settle(client,`location.search==='?repo=origin%2Fteam%2Fweb'&&Boolean(document.querySelector('.runs a.row'))`,'repository choice');
- const side=await client.evaluate(`Array.from(document.querySelectorAll('.repo-side a')).map(link=>[link.textContent,link.getAttribute('aria-current')])`);
- check(JSON.stringify(side)===JSON.stringify([['All repos',null],['origin/team/api',null],['origin/team/web','true']]),'chosen repository not marked '+JSON.stringify(side));
+ const side=await client.evaluate(`Array.from(document.querySelectorAll('.repo-side a')).map(link=>[link.title||link.textContent,link.getAttribute('aria-current')])`);
+ check(JSON.stringify(side)===JSON.stringify([['All repos',null],['mirror/tools/cli',null],['origin/team/api',null],['origin/team/web','true']]),'chosen repository not marked '+JSON.stringify(side));
  check(client.requests.slice(mark).some(request=>request.path==='/api/runs'&&new URL(request.url).searchParams.get('repo')==='origin/team/web'),'repository list did not filter the run list');
  const chipMark=client.requests.length;
  await client.evaluate(`Array.from(document.querySelectorAll('.chips a')).find(link=>link.textContent==='failed').click()`);
  await settle(client,`new URLSearchParams(location.search).get('status')==='failed'&&Boolean(document.querySelector('.runs a.row'))`,'status chip');
- const chips=await client.evaluate(`({search:location.search,current:Array.from(document.querySelectorAll('.chips a[aria-current="true"]')).map(link=>link.textContent),side:document.querySelector('.repo-side a[aria-current="true"]').textContent})`);
+ const chips=await client.evaluate(`({search:location.search,current:Array.from(document.querySelectorAll('.chips a[aria-current="true"]')).map(link=>link.textContent),side:document.querySelector('.repo-side a[aria-current="true"]').title})`);
  check(chips.search==='?repo=origin%2Fteam%2Fweb&status=failed'&&JSON.stringify(chips.current)==='["failed"]'&&chips.side==='origin/team/web','chip choice lost the address or the repository '+JSON.stringify(chips));
  check(client.requests.slice(chipMark).some(request=>{const query=new URL(request.url).searchParams;return request.path==='/api/runs'&&query.get('status')==='failed'&&query.get('repo')==='origin/team/web';}),'status chip did not filter the run list');
  await client.evaluate(`Array.from(document.querySelectorAll('.chips a')).find(link=>link.textContent==='all').click()`);
  await settle(client,`location.search==='?repo=origin%2Fteam%2Fweb'`,'all chip');
  return {side,chips};
+}
+
+const sideState=`({search:location.search,repos:Array.from(document.querySelectorAll('.repo-side a')).map(link=>link.title||link.textContent),groups:Array.from(document.querySelectorAll('.repo-group')).map(node=>node.textContent),runs:Array.from(document.querySelectorAll('.runs a.row .repo')).map(node=>node.textContent),boxes:Array.from(document.querySelectorAll('.upstreams label')).map(label=>[label.textContent,label.querySelector('input').checked,label.querySelector('input').disabled]),options:Array.from(document.querySelectorAll('.filters option')).map(option=>option.value)})`;
+const clickUpstream=name=>`Array.from(document.querySelectorAll('.upstreams label')).find(label=>label.textContent===${JSON.stringify(name)}).querySelector('input').click()`;
+
+async function upstreamSelector(client){
+ await client.loaded('/runs','.runs a.row');await pause(20);
+ const all=await client.evaluate(sideState);
+ check(all.search===''&&all.runs.length===4&&JSON.stringify(all.boxes)===JSON.stringify([['mirror',true,false],['origin',true,false]])&&all.repos.length===4,'default did not select every upstream '+JSON.stringify(all));
+ const mark=client.requests.length;
+ await client.evaluate(clickUpstream('mirror'));
+ await settle(client,`location.search==='?upstreams=origin'&&document.querySelectorAll('.runs a.row').length===3`,'upstream choice');
+ const origin=await client.evaluate(sideState);
+ check(JSON.stringify(origin.repos)===JSON.stringify(['All repos','origin/team/api','origin/team/web'])&&JSON.stringify(origin.groups)==='["origin/team"]'&&JSON.stringify(origin.options)===JSON.stringify(['','origin/team/api','origin/team/web']),'unchecked upstream kept its repositories '+JSON.stringify(origin));
+ check(origin.runs.every(repo=>repo.startsWith('origin/'))&&JSON.stringify(origin.boxes)===JSON.stringify([['mirror',false,false],['origin',true,true]]),'unchecked upstream kept its runs, or the last box can be cleared '+JSON.stringify(origin));
+ check(client.requests.slice(mark).some(request=>request.path==='/api/runs'&&new URL(request.url).searchParams.get('upstreams')==='origin'),'upstream choice was not filtered by the server');
+ await client.evaluate(`history.back()`);
+ await settle(client,`location.search===''&&document.querySelectorAll('.runs a.row').length===4&&document.querySelectorAll('.upstreams input:checked').length===2`,'back button');
+ // A link reproduces the view; a chosen repository goes when its upstream is unchecked.
+ await client.loaded('/runs?upstreams=mirror&repo=mirror%2Ftools%2Fcli','.runs a.row');
+ const linked=await client.evaluate(sideState);
+ check(JSON.stringify(linked.boxes)===JSON.stringify([['mirror',true,true],['origin',false,false]])&&JSON.stringify(linked.runs)==='["mirror/tools/cli"]','a link did not reproduce the upstream view '+JSON.stringify(linked));
+ await client.evaluate(clickUpstream('origin'));
+ await settle(client,`location.search==='?repo=mirror%2Ftools%2Fcli'&&document.querySelectorAll('.upstreams input:checked').length===2`,'second upstream');
+ await client.evaluate(clickUpstream('mirror'));
+ await settle(client,`location.search==='?upstreams=origin'`,'chosen repository dropped with its upstream');
+ return {all,origin,linked};
+}
+
+async function shortNameCollisions(client){
+ await client.loaded('/runs','.runs a.row');await pause(20);
+ const listed=search=>client.evaluate(`(async()=>{
+  const original=fetch,repos=['origin/team/web','origin/team/api','mirror/tools/cli','mirror/tools/api','mirror/team/web'];
+  window.fetch=(path,options)=>path.startsWith('/api/repos?')?Promise.resolve(new Response(JSON.stringify({repositories:repos.map(repo=>({repo}))}))):original(path,options);
+  try{history.replaceState(null,'',${JSON.stringify('/runs'+search)});await route();
+   return {links:Array.from(document.querySelectorAll('.repo-side a')).map(link=>[link.textContent,link.getAttribute('aria-label')]),groups:Array.from(document.querySelectorAll('.repo-group')).map(node=>node.textContent),options:Array.from(document.querySelectorAll('.filters optgroup')).map(group=>[group.label,Array.from(group.children).map(option=>option.textContent)])};}
+  finally{screen.controller.abort();window.fetch=original;}
+ })()`);
+ const all=await listed('');
+ check(JSON.stringify(all.links)===JSON.stringify([['All repos',null],['mirror/team/web','mirror/team/web'],['tools/api','mirror/tools/api'],['cli','mirror/tools/cli'],['team/api','origin/team/api'],['origin/team/web','origin/team/web']])&&JSON.stringify(all.groups)===JSON.stringify(['mirror/team','mirror/tools','origin/team']),'colliding short names were not told apart '+JSON.stringify(all));
+ check(JSON.stringify(all.options)===JSON.stringify([['mirror/team',['mirror/team/web']],['mirror/tools',['tools/api','cli']],['origin/team',['team/api','origin/team/web']]]),'repository select differs from the list '+JSON.stringify(all.options));
+ const origin=await listed('?upstreams=origin');
+ check(JSON.stringify(origin.links)===JSON.stringify([['All repos',null],['api','origin/team/api'],['web','origin/team/web']]),'hidden repositories still lengthened short names '+JSON.stringify(origin));
+ return {all,origin};
 }
 
 async function lineNumbers(client){
@@ -336,6 +380,8 @@ export async function behavior(client){
  result.refusedRerun=await refusedRerun(client);
  result.logs=await logAppend(client);
  result.pieces=await repositoryListAndChips(client);
+ result.upstreams=await upstreamSelector(client);
+ result.shortNames=await shortNameCollisions(client);
  result.lineNumbers=await lineNumbers(client);
  result.liveHiccup=await liveHiccup(client);
  result.signout=await signout(client);
