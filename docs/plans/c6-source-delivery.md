@@ -207,7 +207,7 @@ of live run owners.
 
 ### Native schedules
 
-Schedule parents stamp locator `scheduled`; Load resolves it to the caller Workflow's run with
+**Delta:** Schedule parents stamp locator `scheduled`; Load resolves it to the caller Workflow's run with
 every ownership check. Pins refuse. A live owner with gone source stops deletion only in its
 repositories. A manual schedule trigger uses ordinary admission; force bypasses no source or grant.
 

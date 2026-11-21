@@ -4,7 +4,7 @@ Source evidence pin: 5e1200a2. Release oracle: the released v0.23.4 tag once pub
 
 Regenerate: python3 hack/plans/parity.py --reference /path/to/old-checkout --rewrite /path/to/REWRITE.md. Portable self-check: python3 hack/plans/parity.py --check.
 Only extracted REWRITE.md §4 issue-table cells are hashed; unrelated prose/line numbers are not inputs. SHA256 a894a915ff94061a92cc88abdf96f9a76b292cf1e899d3cf96f62a1fa31d64e0.
-Spec input: docs/plans/dispositions.json (override --dispositions); SHA256 7a56fe9c78ea1d0d8fa7dac0fafda5d9188df8ce2613d7811a1d32489fecc385; 110 marked Delta locations.
+Spec input: docs/plans/dispositions.json (override --dispositions); SHA256 42230f228c82103145a1a0df86edad8c77ad4746fb35fba198a0d4aef1b3b9be; 111 marked Delta locations.
 Sweep input: docs/plans/sweeps.json (override --sweeps, --sweep-dir); SHA256 9491f4c23060f639f680275de382e69e7a25f79de60c40fd611d9bc58b03941e; 32 findings.
 Dependency input: docs/plans/dependencies.json; SHA256 291559e601f49b5177a07f6b68950dc51dcdff31ef1aa3282fc263e6e34c9375. JSON consumer permissions, recorded reference ownership and intended package acyclicity are checked on every run.
 
@@ -9628,7 +9628,7 @@ Schema replay finds 51 current reference tables. No live database is read. Inspe
 | #1604, #1628 | C4 | Opaque checked binding; baseline may precede the fix; REWRITE.md §4 (#1604, #1628) | KEEP | needs test |  |
 | #1606 | C13 | Own pipeline YAML after the v0.23.0 deploy (AD-23); baseline may precede the fix; REWRITE.md §4 (#1606) | CHANGE: Carry native-source Go VCS stamping policy (-buildvcs=false for unsuitable source metadata), cold private-cache budgets/deadlines and scoped source Git from the four named hotfix commits.; docs/plans/c13-own-pipelines.md:141 | needs test |  |
 | #1610 | C9 | Terraform release WIF bindings; baseline may precede the fix; REWRITE.md §4 (#1610) | KEEP | needs test |  |
-| #1616 | C6 | Scheduled (CronWorkflow) source delivery; baseline may precede the fix; REWRITE.md §4 (#1616) | KEEP: source-consuming native schedules refused for v0.24.0; docs/plans/c6-source-delivery.md:178 | needs test |  |
+| #1616 | C6 | Scheduled (CronWorkflow) source delivery; baseline may precede the fix; REWRITE.md §4 (#1616) | CHANGE: Scheduled children load the sealed source of their own repository through the scheduled locator; pins refuse in schedules.; docs/plans/c6-source-delivery.md:210 | needs test |  |
 | #1627 (+ 1627b) | C13 | Cold rest budget as a pre-tag check; release diagnostics; baseline may precede the fix; REWRITE.md §4 (#1627 (+ 1627b)) | KEEP | needs test |  |
 | #1629 | C4 | Refuse `/work/src` without source input; baseline may precede the fix; REWRITE.md §4 (#1629) | KEEP | needs test |  |
 | #1630 | C5 | Remove the wait postStart sleep; baseline may precede the fix; REWRITE.md §4 (#1630) | KEEP | needs test |  |

@@ -9400,7 +9400,7 @@
     "docs/plans/c3-wiring-and-submission.md": "3554fde5b2a08f22cf7554103bb5f8ee7d199cb93f08878c23f32ca5236c1f77",
     "docs/plans/c4-admission-rules-and-plan.md": "64a9661d37c4189e6fea3bbb01e46e776f8d71ffc5dfff50e14b8b9bb5617905",
     "docs/plans/c5-native-execution.md": "f82bcf8ee9b7264bfbb2c2be78740cd85eddcf9c11275aec5b89a2198a67c325",
-    "docs/plans/c6-source-delivery.md": "e6280502ccc699792d5d694e3b7d7c64a90ffba83c37e1825cc7098488bc4e6a",
+    "docs/plans/c6-source-delivery.md": "4c93189706cde61d604d43941c357e037384817f9eb3559a483d98ee63630768",
     "docs/plans/c7-durable-state.md": "da4f70a16006b127881cb38d17c14f078d049951087470080cb4b49c8488a957",
     "docs/plans/c8-logs.md": "d406f3a01f449719be4aa255d628b908e9a8a1e33230f3c21b9b50ce0e74a61d",
     "docs/plans/c9-install-and-upgrade.md": "ffe5000d2d415e4729d71d7574c04b2f52c02801708ac717f32555548c05e228"
@@ -13291,6 +13291,25 @@
           "reason": "Deliver the admission-time tested commit, own ref, default head and tags; omit other branch heads and retain tag objects including noncommit targets."
         }
       ]
+    },
+    {
+      "spec": "docs/plans/c6-source-delivery.md:210",
+      "markers": [
+        "**Delta:**"
+      ],
+      "scope": "behaviour",
+      "basis": "**Delta:** Schedule parents stamp locator `scheduled`; Load resolves it to the caller Workflow's run with every ownership check. Pins refuse. A live owner with gone source stops deletion only in its repositories. A manual schedule trigger uses ordinary admission; force bypasses no source or grant.",
+      "rows": [
+        {
+          "category": "Folded issues",
+          "name": "#1616",
+          "disposition": "CHANGE",
+          "reason": "Scheduled children load the sealed source of their own repository through the scheduled locator; pins refuse in schedules.",
+          "basis": "**Delta:** Schedule parents stamp locator `scheduled`; Load resolves it to the caller Workflow's run with every ownership check. Pins refuse. A live owner with gone source stops deletion only in its repositories. A manual schedule trigger uses ordinary admission; force bypasses no source or grant.",
+          "item": 127
+        }
+      ],
+      "predicates": []
     },
     {
       "spec": "docs/plans/c6-source-delivery.md:222",

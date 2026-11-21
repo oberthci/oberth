@@ -92,8 +92,8 @@ current code or examples.
 
 ## Current contracts
 
-- Native source-consuming schedules are refused for v0.24.0; manual schedule
-  triggers use ordinary run admission. Native non-source schedules remain active.
+- Native schedules consume their own repository's source; pinned inputs refuse. Manual
+  schedule triggers use ordinary run admission. Native non-source schedules stay active.
 - The first release has no restore or uninstall command. Backup is safekeeping;
   removal follows the install guide's native procedure.
 - The first release is made by hand under C13's first-release limits.
