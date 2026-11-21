@@ -132,10 +132,10 @@ oberth schedule resume --repo <repo> --entry <entry>
 oberth schedule trigger --repo <repo> --entry <entry>
 ```
 
-Pause suppresses future admission, not accepted work. `oberth schedule list` shows each entry's
+Pause stops future admission, not accepted work. `oberth schedule list` shows each entry's
 repository, pause state and any refusal. The list does not predict the next occurrence.
-Argo handles firing and overlap; Oberth adds no timer queue. `oberth lock status` shows Argo
-synchronization holders.
+Argo fires and handles overlap; Oberth adds no timer. `oberth lock status` shows lock holders.
+Set `activeDeadlineSeconds` on scheduled pipelines: a run Oberth never records waits till then.
 
 ## Events and cursors
 
