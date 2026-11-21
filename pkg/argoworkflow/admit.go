@@ -234,11 +234,19 @@ func reservedKey(key string) bool {
 func (g *graph) podMetadata(m *wfv1.Metadata, where string) {
 	g.metadataKeys(where+".labels", m.Labels, true)
 	for _, key := range sortedKeys(m.Annotations) {
-		if reservedKey(key) {
-			g.refuse(where+".annotations["+key+"]", "reserved")
+		at := fmt.Sprintf("%s.annotations[%q]", where, key)
+		switch {
+		case reservedKey(key):
+			g.refuse(at, "reserved")
+		case strings.HasPrefix(key, cdiAnnotationPrefix):
+			g.refuse(at, "device_annotation")
 		}
 	}
 }
+
+// cdiAnnotationPrefix names Container Device Interface requests, which a
+// runtime may turn into host devices without the device plugin's allocation.
+const cdiAnnotationPrefix = "cdi.k8s.io/"
 
 func (g *graph) templateContainers(n *node) {
 	t := n.template

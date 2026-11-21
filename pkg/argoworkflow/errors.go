@@ -52,11 +52,12 @@ func nativeMessages() map[string]message {
 // grantMessages are the refusals of a field that needs an administrator grant.
 func grantMessages() map[string]message {
 	return map[string]message{
-		"shared_grant": {"shared templates inherit no consumer grants", "Remove the selector or put this step in the repository file before granting it."},
-		"read":         {"field reads unapproved cluster data", "Remove the field, or ask the operator to grant this cluster object to this step."},
-		"grant":        {"credential declaration has no exact operator grant", "Ask the operator to approve this repository, file, step, path and exact audience."},
-		"pvc":          {"PVC has no repository grant", "Use an allowed repository PVC, or ask the operator for its exact CI or release grant."},
-		"device":       {"device resource has no step grant", "Remove the request, or ask the operator to grant this resource to this step."},
+		"shared_grant":      {"shared templates inherit no consumer grants", "Remove the selector or put this step in the repository file before granting it."},
+		"read":              {"field reads unapproved cluster data", "Remove the field, or ask the operator to grant this cluster object to this step."},
+		"grant":             {"credential declaration has no exact operator grant", "Ask the operator to approve this repository, file, step, path and exact audience."},
+		"pvc":               {"PVC has no repository grant", "Use an allowed repository PVC, or ask the operator for its exact CI or release grant."},
+		"device":            {"device resource has no step grant", "Remove the request, or ask the operator to grant this resource to this step."},
+		"device_annotation": {"device annotations bypass device grants", "Remove the annotation; request the device under resources and ask for its device grant."},
 	}
 }
 

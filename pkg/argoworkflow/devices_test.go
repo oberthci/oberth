@@ -164,3 +164,41 @@ func TestSharedTemplateDeviceRequestInheritsNoGrant(t *testing.T) {
 	_, err := Prepare(t.Context(), r, Policy{TemplateGetter: getterFor(map[string]*wfv1.WorkflowTemplate{"shared": shared})}, identityHooks())
 	requireCode(t, err, "shared_grant")
 }
+
+// A device grant names a resource the device plugin allocates; a runtime
+// device annotation would bypass it, so no grant admits one.
+func TestDeviceAnnotationsAreRefusedInEveryPodMetadata(t *testing.T) {
+	t.Parallel()
+	const key = "cdi.k8s.io/probe"
+	annotation := func() *wfv1.Metadata {
+		return &wfv1.Metadata{Annotations: map[string]string{key: "kubevirt.io/kvm=kvm", "example.test/note": "kept"}}
+	}
+	for at, place := range map[string]func(*wfv1.Workflow){
+		`spec.podMetadata`:                func(w *wfv1.Workflow) { w.Spec.PodMetadata = annotation() },
+		`spec.templates["main"].metadata`: func(w *wfv1.Workflow) { w.Spec.Templates[0].Metadata = *annotation() },
+		`spec.artifactGC.podMetadata`: func(w *wfv1.Workflow) {
+			w.Spec.ArtifactGC = &wfv1.WorkflowLevelArtifactGC{ArtifactGC: wfv1.ArtifactGC{PodMetadata: annotation()}}
+		},
+		`spec.templateDefaults.metadata`: func(w *wfv1.Workflow) { w.Spec.TemplateDefaults = &wfv1.Template{Metadata: *annotation()} },
+	} {
+		t.Run(at, func(t *testing.T) {
+			t.Parallel()
+			w := simpleWorkflow()
+			place(w)
+			r := requestFor(t, w)
+			r.Grants = []admissioncontract.GrantEvidence{deviceGrantFor("main"), deviceGrantFor("*")}
+			_, err := Prepare(t.Context(), r, Policy{}, identityHooks())
+			for _, f := range admissionFindings(t, err) {
+				if f.Path == at+`.annotations["`+key+`"]` && f.Code == "device_annotation" && f.Command == "" {
+					return
+				}
+			}
+			t.Fatal(err)
+		})
+	}
+	w := simpleWorkflow()
+	w.Spec.PodMetadata = &wfv1.Metadata{Annotations: map[string]string{"example.test/cdi.k8s.io": "x", "k8s.io/note": "x"}}
+	if _, err := Prepare(t.Context(), requestFor(t, w), Policy{}, identityHooks()); err != nil {
+		t.Fatal("ordinary annotation refused", err)
+	}
+}
