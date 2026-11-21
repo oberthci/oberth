@@ -87,6 +87,12 @@ func (m Maintenance) rollbackPlan(ctx context.Context, r Record) (*Plan, error) 
 		return nil, problem("restore-proof", nil)
 	}
 	c := deployedChoices(Choices{Context: r.Context, Namespace: r.Namespace, Values: operatorValues(merge(earlier.chart.Values, r.Source.Values))}, r.Source.Values)
+	// The source pins come from the recorded source revision, not from the
+	// revision being rolled back.
+	c.ClearSourcePins = true
+	if c.SourcePins, err = savedSourcePins(r.Source.Values); err != nil {
+		return nil, described("source-pins", err, "Saved policy: "+err.Error())
+	}
 	p, err := m.Engine.prepare(ctx, earlier, c, earlier.schema())
 	if err != nil {
 		return nil, err

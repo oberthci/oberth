@@ -90,6 +90,41 @@ func TestSourcePinsRoundTripThroughInstallAndUpgrade(t *testing.T) {
 	}
 }
 
+// A rollback applies the source revision's pairs: pairs the upgrade added go,
+// pairs it cleared come back.
+func TestRollbackRestoresTheSourcePins(t *testing.T) {
+	t.Parallel()
+	saved := workflowpolicy.SourcePolicy{"origin/team/widget": {"origin/team/source"}}
+	for name, tc := range map[string]struct {
+		install, upgrade installer.Choices
+		want             any
+	}{
+		"added":   {installer.Choices{Context: "test"}, installer.Choices{Context: "test", SourcePins: saved}, map[string]any{}},
+		"cleared": {installer.Choices{Context: "test", SourcePins: saved}, installer.Choices{Context: "test", ClearSourcePins: true}, map[string]any{"origin/team/widget": []any{"origin/team/source"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := setup(t)
+			f.choices = tc.install
+			apply(t, f, prepare(t, f))
+			m := upgradeFixtureAfter(t, &f)
+			plan, err := m.PlanUpgrade(t.Context(), f.release, tc.upgrade, installer.UpgradeOptions{NoBackup: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer plan.Plan.Close()
+			if _, err = m.Upgrade(t.Context(), plan, plan.Plan.Digest(), func(installer.Phase) error { return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if err = m.Rollback(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if got := appliedSourcePins(t, f); !reflect.DeepEqual(got, tc.want) {
+				t.Fatal("rollback applied the rolled-back pairs", got)
+			}
+		})
+	}
+}
+
 func upgradeFixtureAfter(t *testing.T, f *fixture) installer.Maintenance {
 	t.Helper()
 	f.charts.History.Deployed.Version = "v0.0.9"
