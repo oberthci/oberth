@@ -37,7 +37,7 @@ func TestBridgeConcurrentRequests(t *testing.T) {
 		close(cancelled)
 		return apicontract.EventResult{}, ctx.Err()
 	}}
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "run1", Status: stepmodel.RunFailed}}
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run1", Status: stepmodel.RunFailed}}}
 	h := server(t, b)
 	p := newBridgePeer(t, bridgeProfile(t, streamingTransport(h)))
 	init := p.initialize()

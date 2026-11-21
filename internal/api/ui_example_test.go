@@ -55,11 +55,11 @@ func uiExample(t *testing.T) *fixture {
 		{Path: "x-test", Name: "test", Status: stepmodel.StepFailed, StartedAt: &at, FinishedAt: &end, AttemptCount: 2, DisplayReason: "test failed: exit 2", Detail: "The test command exited with code 2.", Attempts: []stepmodel.StepAttempt{{NodeID: "attempt-one", Status: stepmodel.StepFailed}, {NodeID: "attempt-two", Status: stepmodel.StepFailed}}, Logs: []stepmodel.LogSelector{{NodeID: "attempt-two", Container: "main"}}},
 		{Path: "w-publish", Name: "publish", Status: stepmodel.StepPending},
 	}
-	runs := []stepmodel.RunSummary{
-		{ID: "11111111", Repo: "origin/team/api", Ref: "main", Status: stepmodel.RunPassed, CreatedAt: at, StartedAt: &at, FinishedAt: &end, CommitSHA: &sha, ObjectSHA: sha},
-		{ID: "22222222", Repo: "origin/team/api", Ref: "fix-login", Status: stepmodel.RunFailed, DisplayReason: "test failed: exit 2", CreatedAt: at, StartedAt: &at, FinishedAt: &end, CommitSHA: &sha, ObjectSHA: sha, Failure: &stepmodel.FailureRecord{Step: "x-test", Name: "test", NodeID: "attempt-two"}},
-		{ID: "33333333", Repo: "origin/team/web", Ref: "feature/search", Status: stepmodel.RunRunning, DisplayReason: "waiting for an available build node soon", CreatedAt: at, StartedAt: &at, CommitSHA: &sha, ObjectSHA: sha},
-		{ID: "44444444", Repo: "origin/team/web", Ref: "main", Status: stepmodel.RunQueued, DisplayReason: "waiting for execution", CreatedAt: at, ObjectSHA: sha},
+	runs := []apicontract.RunRecord{
+		{RunSummary: stepmodel.RunSummary{ID: "11111111", Repo: "origin/team/api", Ref: "main", Status: stepmodel.RunPassed, CreatedAt: at, StartedAt: &at, FinishedAt: &end, CommitSHA: &sha, ObjectSHA: sha}, RunCause: model.RunCause{Actor: "owner", Trigger: model.TriggerPromotion}},
+		{RunSummary: stepmodel.RunSummary{ID: "22222222", Repo: "origin/team/api", Ref: "fix-login", Status: stepmodel.RunFailed, DisplayReason: "test failed: exit 2", CreatedAt: at, StartedAt: &at, FinishedAt: &end, CommitSHA: &sha, ObjectSHA: sha, Failure: &stepmodel.FailureRecord{Step: "x-test", Name: "test", NodeID: "attempt-two"}}, RunCause: model.RunCause{Actor: "worker", Trigger: model.TriggerBranch}},
+		{RunSummary: stepmodel.RunSummary{ID: "33333333", Repo: "origin/team/web", Ref: "feature/search", Status: stepmodel.RunRunning, DisplayReason: "waiting for an available build node soon", CreatedAt: at, StartedAt: &at, CommitSHA: &sha, ObjectSHA: sha}, RunCause: model.RunCause{Actor: "oberth:scheduler", Trigger: model.TriggerSchedule, ScheduleEntry: "nightly"}},
+		{RunSummary: stepmodel.RunSummary{ID: "44444444", Repo: "origin/team/web", Ref: "main", Status: stepmodel.RunQueued, DisplayReason: "waiting for execution", CreatedAt: at, ObjectSHA: sha}, RunCause: model.RunCause{Actor: "worker", Trigger: model.TriggerBranch, RerunOf: strings.Repeat("22222222", 4)}},
 	}
 	for index := range runs {
 		runs[index].ID = strings.Repeat(runs[index].ID, 4)
@@ -72,8 +72,8 @@ func uiExample(t *testing.T) *fixture {
 			c.Auth = exampleAuth{Authenticator: c.Auth, token: token}
 		}
 		b.RunList.Handler = &fake.Handler[apicontract.RunListArgs, apicontract.RunPage]{Value: apicontract.RunPage{Runs: runs}}
-		b.RunGet.Handler = apicontract.HandlerFunc[apicontract.RunGetArgs, stepmodel.RunSummary](func(_ context.Context, _ apicontract.Caller, args apicontract.RunGetArgs) (apicontract.Call[stepmodel.RunSummary], error) {
-			return func(context.Context) (stepmodel.RunSummary, error) {
+		b.RunGet.Handler = apicontract.HandlerFunc[apicontract.RunGetArgs, apicontract.RunRecord](func(_ context.Context, _ apicontract.Caller, args apicontract.RunGetArgs) (apicontract.Call[apicontract.RunRecord], error) {
+			return func(context.Context) (apicontract.RunRecord, error) {
 				for _, run := range runs {
 					if strings.HasPrefix(run.ID, args.ID) {
 						return run, nil
@@ -89,7 +89,7 @@ func uiExample(t *testing.T) *fixture {
 				return fallback, nil
 			}, nil
 		})
-		b.RepoList.Handler = &fake.Handler[apicontract.RepoListArgs, apicontract.RepoPage]{Value: apicontract.RepoPage{Repositories: []apicontract.Repository{{Repo: runs[0].Repo, DefaultBranch: "main", BranchCount: new(3), LatestRun: &runs[0]}, {Repo: runs[2].Repo, DefaultBranch: "main", LatestRun: &runs[2]}}}}
+		b.RepoList.Handler = &fake.Handler[apicontract.RepoListArgs, apicontract.RepoPage]{Value: apicontract.RepoPage{Repositories: []apicontract.Repository{{Repo: runs[0].Repo, DefaultBranch: "main", BranchCount: new(3), LatestRun: &runs[0].RunSummary}, {Repo: runs[2].Repo, DefaultBranch: "main", LatestRun: &runs[2].RunSummary}}}}
 		b.RunLogs.Handler = &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{Value: apicontract.LogResult{Content: "Running the authored test command\nFAIL pkg/check 0.40s\nexpected status 200, received 500\n<script>this is log text</script>\n", Meta: logcontract.Meta{ScanComplete: true, BytesExact: true}}}
 		b.RunRerun.Handler = &fake.Handler[apicontract.RunRerunArgs, apicontract.Receipt]{Value: apicontract.Receipt{ID: "55555555"}}
 		refused := publicerr.New(publicerr.Conflict, "This run cannot be cancelled.", "Read the current run.", nil)

@@ -57,7 +57,7 @@ func TestBridgeForwardsEventsAndResumes(t *testing.T) {
 
 func TestBridgeAppendsDisplayAfterUnchangedJSON(t *testing.T) {
 	b := fake.Bindings()
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "run1", Status: stepmodel.RunFailed, DisplayReason: strings.Repeat("r", 40)}}
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run1", Status: stepmodel.RunFailed, DisplayReason: strings.Repeat("r", 40)}}}
 	h := server(t, b)
 	original := make(chan []byte, 1)
 	cfg := bridgeProfile(t, roundTrip(func(r *http.Request) (*http.Response, error) {

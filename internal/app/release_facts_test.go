@@ -106,7 +106,7 @@ func TestReleaseVersionUsesHighestSuccessfulRepositoryRelease(t *testing.T) {
 	} {
 		t.Run(tc.tag, func(t *testing.T) {
 			r, h := releaseRequest(), buildHistory()
-			old := stateport.Run{RunSummary: stepmodel.RunSummary{ID: "release", Repo: r.Repository, Ref: "refs/tags/" + tc.tag, Status: stepmodel.RunFailed}, Origin: model.RunOrigin{Trigger: model.TriggerTag}, Sequence: 2, Release: tc.release}
+			old := stateport.Run{RunSummary: stepmodel.RunSummary{ID: "release", Repo: r.Repository, Ref: "refs/tags/" + tc.tag, Status: stepmodel.RunFailed}, Origin: model.RunOrigin{RunCause: model.RunCause{Trigger: model.TriggerTag}}, Sequence: 2, Release: tc.release}
 			if tc.passed {
 				old.Status = stepmodel.RunPassed
 			}
@@ -184,13 +184,13 @@ func TestReleaseBuildUsesLatestResultAndVersionFloorCrossesPages(t *testing.T) {
 	_, err := app.VerifiedReleaseFacts(t.Context(), r, workflowpolicy.ReleaseFile, append(releaseHistory{failed}, h...))
 	expectRefusal(t, err, "release_build")
 	for i := stateport.RunPageLimit + 2; i > 1; i-- {
-		h = append(releaseHistory{{RunSummary: stepmodel.RunSummary{ID: "unrelated", Repo: r.Repository, Ref: "refs/tags/v1.0.0", Status: stepmodel.RunPassed}, Sequence: int64(i), Origin: model.RunOrigin{Trigger: model.TriggerTag}, Release: true}}, h...)
+		h = append(releaseHistory{{RunSummary: stepmodel.RunSummary{ID: "unrelated", Repo: r.Repository, Ref: "refs/tags/v1.0.0", Status: stepmodel.RunPassed}, Sequence: int64(i), Origin: model.RunOrigin{RunCause: model.RunCause{Trigger: model.TriggerTag}}, Release: true}}, h...)
 	}
 	// Keep the server's descending history order, with the higher version beyond page one.
 	for i := range h {
 		h[i].Sequence = int64(len(h) - i)
 	}
-	h[len(h)-1] = stateport.Run{RunSummary: stepmodel.RunSummary{Repo: r.Repository, Ref: "refs/tags/v9.0.0", Status: stepmodel.RunPassed}, Origin: model.RunOrigin{Trigger: model.TriggerTag}, Sequence: 1, Release: true}
+	h[len(h)-1] = stateport.Run{RunSummary: stepmodel.RunSummary{Repo: r.Repository, Ref: "refs/tags/v9.0.0", Status: stepmodel.RunPassed}, Origin: model.RunOrigin{RunCause: model.RunCause{Trigger: model.TriggerTag}}, Sequence: 1, Release: true}
 	_, err = app.VerifiedReleaseFacts(t.Context(), r, workflowpolicy.ReleaseFile, h)
 	expectRefusal(t, err, "release_old")
 }
@@ -200,7 +200,7 @@ func TestReleaseVersionFloorIncludesInFlightRuns(t *testing.T) {
 		for _, version := range []string{"v1.2.2", "v1.2.3", "v2.0.0"} {
 			t.Run(string(status)+"/"+version, func(t *testing.T) {
 				r, h := releaseRequest(), buildHistory()
-				old := stateport.Run{RunSummary: stepmodel.RunSummary{ID: "other-release", Repo: r.Repository, Ref: "refs/tags/" + version, Status: status}, Origin: model.RunOrigin{Trigger: model.TriggerTag}, Sequence: 2, Release: true}
+				old := stateport.Run{RunSummary: stepmodel.RunSummary{ID: "other-release", Repo: r.Repository, Ref: "refs/tags/" + version, Status: status}, Origin: model.RunOrigin{RunCause: model.RunCause{Trigger: model.TriggerTag}}, Sequence: 2, Release: true}
 				_, err := app.VerifiedReleaseFacts(t.Context(), r, workflowpolicy.ReleaseFile, append(releaseHistory{old}, h...))
 				blocked := version != "v1.2.2" && (status == stepmodel.RunQueued || status == stepmodel.RunRunning || status == stepmodel.RunPassed)
 				if blocked {
@@ -219,14 +219,14 @@ func TestReleaseRerunCannotPublishBelowCurrentVersionFloor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := stateport.Run{RunSummary: stepmodel.RunSummary{ID: "failed-release", Repo: r.Repository, Ref: r.Ref.Name, Status: stepmodel.RunFailed}, Origin: model.RunOrigin{Trigger: model.TriggerTag}, Release: true, Sequence: 1, HasAdmission: true, Admission: admissioncontract.PreparedView{Workflow: &wf.Workflow{}, Repository: r.Repository, Ref: r.Ref.Name, ObjectSHA: r.Ref.ObjectSHA, CommitSHA: r.Ref.CommitSHA, Trigger: r.Trigger, SelectedFile: workflowpolicy.ReleaseFile}}
+	old := stateport.Run{RunSummary: stepmodel.RunSummary{ID: "failed-release", Repo: r.Repository, Ref: r.Ref.Name, Status: stepmodel.RunFailed}, Origin: model.RunOrigin{RunCause: model.RunCause{Trigger: model.TriggerTag}}, Release: true, Sequence: 1, HasAdmission: true, Admission: admissioncontract.PreparedView{Workflow: &wf.Workflow{}, Repository: r.Repository, Ref: r.Ref.Name, ObjectSHA: r.Ref.ObjectSHA, CommitSHA: r.Ref.CommitSHA, Trigger: r.Trigger, SelectedFile: workflowpolicy.ReleaseFile}}
 	for name, value := range facts.Parameters() {
 		old.Admission.Workflow.Spec.Arguments.Parameters = append(old.Admission.Workflow.Spec.Arguments.Parameters, wf.Parameter{Name: name, Value: wf.AnyStringPtr(value)})
 	}
 	r.Original = &old
 	for _, status := range []stepmodel.RunStatus{stepmodel.RunPassed, stepmodel.RunRunning, stepmodel.RunQueued, stepmodel.RunFailed} {
 		t.Run(string(status), func(t *testing.T) {
-			newer := stateport.Run{RunSummary: stepmodel.RunSummary{ID: "newer-release", Repo: r.Repository, Ref: "refs/tags/v1.3.0", Status: status}, Origin: model.RunOrigin{Trigger: model.TriggerTag}, Release: true, Sequence: 2}
+			newer := stateport.Run{RunSummary: stepmodel.RunSummary{ID: "newer-release", Repo: r.Repository, Ref: "refs/tags/v1.3.0", Status: status}, Origin: model.RunOrigin{RunCause: model.RunCause{Trigger: model.TriggerTag}}, Release: true, Sequence: 2}
 			_, err := app.VerifiedReleaseFacts(t.Context(), r, workflowpolicy.ReleaseFile, releaseHistory{newer, old})
 			if status == stepmodel.RunFailed {
 				if err != nil {

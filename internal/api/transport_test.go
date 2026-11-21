@@ -138,7 +138,7 @@ func toolArgs(m apicontract.Metadata) map[string]any {
 }
 func TestStrictDecodeBeforePreparation(t *testing.T) {
 	f := setup(t, nil)
-	h := f.bindings.RunGet.Handler.(*fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary])
+	h := f.bindings.RunGet.Handler.(*fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord])
 	for _, body := range []string{`[]`, `null`, `{"id":"12345678","bad":1}`, `{"id":42}`, `{"id":"12345678"} {}`, `{`} {
 		w := request(f, "POST", "/api/admin/uplink-add", []byte(body))
 		if w.Code == 200 {
@@ -165,7 +165,7 @@ func TestViewPreservesReasonRemedyAndDetail(t *testing.T) {
 	detail := strings.Repeat("full native detail\n", 400)
 	run := stepmodel.RunSummary{ID: "12345678", Status: stepmodel.RunRunning, DisplayReason: strings.Repeat("r", 40), Detail: detail}
 	f := setup(t, func(_ *api.Config, b *apicontract.Bindings) {
-		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: run}
+		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: run}}
 	})
 	for _, w := range []*httptest.ResponseRecorder{request(f, "GET", "/api/runs/12345678", nil), rpc(f, "run_get", map[string]any{"id": "12345678"})} {
 		assertSuccess(t, w)
@@ -177,7 +177,7 @@ func TestViewPreservesReasonRemedyAndDetail(t *testing.T) {
 	e.Detail = detail
 	e.Context = []string{"Required public context."}
 	f = setup(t, func(_ *api.Config, b *apicontract.Bindings) {
-		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Error: e}
+		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Error: e}
 	})
 	w := request(f, "GET", "/api/runs/12345678", nil)
 	var got struct {
@@ -290,7 +290,7 @@ func TestRunLogsDefaultsPreserveExplicitWindows(t *testing.T) {
 }
 func TestUnknownErrorsHaveOnlyCorrelationReference(t *testing.T) {
 	f := setup(t, func(_ *api.Config, b *apicontract.Bindings) {
-		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Error: errors.New("private dependency credentials")}
+		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Error: errors.New("private dependency credentials")}
 	})
 	w := rpc(f, "run_get", map[string]any{"id": "12345678"})
 	if strings.Contains(w.Body.String(), "private dependency") || !strings.Contains(w.Body.String(), "Reference:") {
@@ -408,7 +408,7 @@ func TestWaitPreservesSelectorsForServiceResolution(t *testing.T) {
 func TestUnknownFailureReferenceMatchesItsFixedDiagnostic(t *testing.T) {
 	for _, tool := range []string{"run_get", "run_wait"} {
 		f := setup(t, func(_ *api.Config, b *apicontract.Bindings) {
-			b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Error: errors.New("private dependency")}
+			b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Error: errors.New("private dependency")}
 			b.RunWait.Handler = &fake.Handler[apicontract.RunWaitArgs, apicontract.WaitResult]{Error: errors.New("private dependency")}
 		})
 		w := rpc(f, tool, map[string]any{"id": "12345678"})

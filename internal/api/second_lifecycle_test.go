@@ -6,7 +6,6 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/api/fake"
 	"github.com/oberthci/oberth/internal/apicontract"
-	"github.com/oberthci/oberth/internal/stepmodel"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,10 +21,10 @@ func TestSecondConcurrentResourceBound(t *testing.T) {
 	entered := make(chan struct{}, n)
 	release := make(chan struct{})
 	f := setup(t, func(_ *api.Config, b *apicontract.Bindings) {
-		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Run: func(context.Context) (stepmodel.RunSummary, error) {
+		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Run: func(context.Context) (apicontract.RunRecord, error) {
 			entered <- struct{}{}
 			<-release
-			return stepmodel.RunSummary{}, nil
+			return apicontract.RunRecord{}, nil
 		}}
 	})
 	assertSuccess(t, initialize(f))

@@ -94,7 +94,7 @@ func TestDecidingLogDrainsAdvancingPages(t *testing.T) {
 	}
 	b.RunLogs.Handler = logs
 	step := stepmodel.RunStep{Path: "build", Name: "build", Status: stepmodel.StepPassed}
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "deadbeef", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{step}}}
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "deadbeef", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{step}}}}
 	app, out, diagnostic := fixture(t, b)
 	if code := app.run(t.Context(), []string{"log", "deadbeef", "build"}); code != 0 {
 		t.Fatal(code, diagnostic.String())

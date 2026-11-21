@@ -26,7 +26,7 @@ type runQuery struct {
 }
 
 // PrepareRunGet authorizes and resolves before transport opens a stream.
-func (s *Service) prepareRunGet(ctx context.Context, a actor.Actor, q runQuery) (func(context.Context) (stepmodel.RunSummary, error), error) {
+func (s *Service) prepareRunGet(ctx context.Context, a actor.Actor, q runQuery) (func(context.Context) (apicontract.RunRecord, error), error) {
 	a, err := s.allow(ctx, a, "run_get")
 	if err != nil {
 		return nil, err
@@ -35,13 +35,13 @@ func (s *Service) prepareRunGet(ctx context.Context, a actor.Actor, q runQuery) 
 	if err != nil {
 		return nil, err
 	}
-	return bounded(func(ctx context.Context) (stepmodel.RunSummary, error) { return s.runView(ctx, r, q) }), nil
+	return bounded(func(ctx context.Context) (apicontract.RunRecord, error) { return s.runView(ctx, r, q) }), nil
 }
 
-func (s *Service) runView(ctx context.Context, r stateport.Run, q runQuery) (stepmodel.RunSummary, error) {
+func (s *Service) runView(ctx context.Context, r stateport.Run, q runQuery) (apicontract.RunRecord, error) {
 	steps, err := s.c.Runs.Steps(ctx, r.ID)
 	if err != nil {
-		return r.RunSummary, err
+		return apicontract.RunRecord{}, err
 	}
 	for i := range steps {
 		if steps[i].DisplayReason == "" {
@@ -58,8 +58,15 @@ func (s *Service) runView(ctx context.Context, r stateport.Run, q runQuery) (ste
 	if end < len(steps) {
 		r.NextStepOffset = &end
 	}
-	return summary(r.RunSummary), nil
+	return record(r), nil
 }
+
+// record shows a resolved run with its recorded cause. Callers pass only runs
+// already resolved inside the caller's repository scope.
+func record(r stateport.Run) apicontract.RunRecord {
+	return apicontract.RunRecord{RunSummary: summary(r.RunSummary), RunCause: r.Origin.RunCause}
+}
+
 func (s *Service) listFilter(ctx context.Context, a actor.Actor, q runQuery) (stateport.RunFilter, error) {
 	if q.Before != "" && !validRunID(q.Before) {
 		return stateport.RunFilter{}, bad("before")
@@ -101,11 +108,11 @@ func (s *Service) prepareRunList(ctx context.Context, a actor.Actor, q runQuery)
 			return s.heldRunPage(ctx, f)
 		}
 		rows, err := s.c.Runs.Runs(ctx, f)
-		page := apicontract.RunPage{Runs: []stepmodel.RunSummary{}}
+		page := apicontract.RunPage{Runs: []apicontract.RunRecord{}}
 		for _, r := range rows {
 			r.Steps = nil
 			r.NextStepOffset = nil
-			page.Runs = append(page.Runs, summary(r.RunSummary))
+			page.Runs = append(page.Runs, record(r))
 		}
 		if len(rows) == f.Limit {
 			page.NextCursor = rows[len(rows)-1].ID

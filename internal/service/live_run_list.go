@@ -4,13 +4,12 @@ import (
 	"context"
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/stateport"
-	"github.com/oberthci/oberth/internal/stepmodel"
 	"time"
 )
 
 // heldRunPage filters live candidates before the requested page limit.
 func (s *Service) heldRunPage(ctx context.Context, f stateport.RunFilter) (apicontract.RunPage, error) {
-	page := apicontract.RunPage{Runs: []stepmodel.RunSummary{}}
+	page := apicontract.RunPage{Runs: []apicontract.RunRecord{}}
 	want := f.Limit
 	f.Limit = stateport.RunPageLimit
 	for {
@@ -26,7 +25,7 @@ func (s *Service) heldRunPage(ctx context.Context, f stateport.RunFilter) (apico
 			if len(holds) == 0 {
 				continue
 			}
-			page.Runs = append(page.Runs, summary(r.RunSummary))
+			page.Runs = append(page.Runs, record(r))
 			if len(page.Runs) == want {
 				page.NextCursor = r.ID
 				return page, nil

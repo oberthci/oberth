@@ -188,7 +188,7 @@ func TestBindingsDispatchCanonicalRunGet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		run, ok := output.(stepmodel.RunSummary)
+		run, ok := output.(apicontract.RunRecord)
 		if !ok || run.ID != runID || run.Repo != repository || run.Status != stepmodel.RunPassed {
 			t.Fatal("binding did not dispatch exact service handler", output)
 		}

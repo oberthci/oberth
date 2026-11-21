@@ -15,13 +15,13 @@ func TestLogWaitsForPlanWithZeroConfigCallbacks(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bindings := fake.Bindings()
 		calls := 0
-		bindings.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Run: func(context.Context) (stepmodel.RunSummary, error) {
+		bindings.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Run: func(context.Context) (apicontract.RunRecord, error) {
 			calls++
 			status := stepmodel.RunQueued
 			if calls > 1 {
 				status = stepmodel.RunPassed
 			}
-			return stepmodel.RunSummary{ID: "run", Status: status, Steps: []stepmodel.RunStep{}}, nil
+			return apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run", Status: status, Steps: []stepmodel.RunStep{}}}, nil
 		}}
 		app, out, diagnostic := fixture(t, bindings)
 		app.config.Now, app.config.Wait = nil, nil

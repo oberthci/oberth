@@ -171,13 +171,12 @@ func (s *Store) admittedRun(input stateport.Acceptance, repoID int64) stateport.
 			Status:    stepmodel.RunRunning,
 			CreatedAt: s.options.Clock().UTC(),
 		},
-		Origin: model.RunOrigin{
-			Actor:           r.Actor.Identity,
-			Trigger:         r.Trigger,
-			ScheduleEntry:   r.ScheduleEntry,
-			AssistRequested: r.Assist,
-			RerunOf:         input.RerunOf,
-		},
+		Origin: model.RunOrigin{RunCause: model.RunCause{
+			Actor:         r.Actor.Identity,
+			Trigger:       r.Trigger,
+			ScheduleEntry: r.ScheduleEntry,
+			RerunOf:       input.RerunOf,
+		}, AssistRequested: r.Assist},
 		Revision: 1,
 	}
 	applyAdmission(&result, input)

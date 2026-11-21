@@ -6,7 +6,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/api/fake"
 	"github.com/oberthci/oberth/internal/apicontract"
-	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
 func TestMCPRefusesInvalidUTF8BeforePreparation(t *testing.T) {
@@ -23,7 +22,7 @@ func TestMCPRefusesInvalidUTF8BeforePreparation(t *testing.T) {
 			f := setup(t, nil)
 			body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_get","arguments":{"id":"12345678` + tc.value + `"}}}`)
 			w := request(f, "POST", "/mcp", body)
-			h := f.bindings.RunGet.Handler.(*fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary])
+			h := f.bindings.RunGet.Handler.(*fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord])
 			inputs, _, calls := h.Observed()
 			if tc.valid {
 				assertSuccess(t, w)

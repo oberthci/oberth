@@ -11,9 +11,16 @@ import (
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
+// RunRecord is one run as run_get and run_list return it: the run projection
+// and the recorded cause of the run, both visible only inside the caller's scope.
+type RunRecord struct {
+	stepmodel.RunSummary
+	model.RunCause
+}
+
 type RunPage struct {
-	Runs       []stepmodel.RunSummary `json:"runs"`
-	NextCursor string                 `json:"next_cursor,omitempty"`
+	Runs       []RunRecord `json:"runs"`
+	NextCursor string      `json:"next_cursor,omitempty"`
 }
 type RunCounts struct {
 	Queued    int `json:"queued"`

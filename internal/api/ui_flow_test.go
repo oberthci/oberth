@@ -15,7 +15,7 @@ import (
 
 func TestUIBrowserFlowOverHTTP(t *testing.T) {
 	f := setup(t, func(_ *api.Config, b *apicontract.Bindings) {
-		b.RunList.Handler = &fake.Handler[apicontract.RunListArgs, apicontract.RunPage]{Value: apicontract.RunPage{Runs: []stepmodel.RunSummary{{ID: "12345678", DisplayReason: strings.Repeat("r", 40)}}}}
+		b.RunList.Handler = &fake.Handler[apicontract.RunListArgs, apicontract.RunPage]{Value: apicontract.RunPage{Runs: []apicontract.RunRecord{{RunSummary: stepmodel.RunSummary{ID: "12345678", DisplayReason: strings.Repeat("r", 40)}}}}}
 		b.IssueGet.Handler = &fake.Handler[apicontract.IssueGetArgs, model.Issue]{Value: model.Issue{ID: 42, Title: "<script>untrusted</script>", Body: "<b>plain text</b>"}}
 	})
 	for _, path := range []string{

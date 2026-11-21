@@ -21,7 +21,7 @@ func execute[T any](ctx context.Context, call apicontract.Call[T], err error) (T
 	}
 	return call(ctx)
 }
-func (s *testService) RunGet(ctx context.Context, a actor.Actor, q viewQuery) (stepmodel.RunSummary, error) {
+func (s *testService) RunGet(ctx context.Context, a actor.Actor, q viewQuery) (apicontract.RunRecord, error) {
 	call, err := s.PrepareRunGet(ctx, apicontract.Caller{Actor: a}, apicontract.RunGetArgs{ID: q.ID, StepOffset: q.Offset, StepLimit: q.Limit, View: func() string {
 		if q.Helpers {
 			return "full"
@@ -39,7 +39,8 @@ func (s *testService) PrepareRunList(ctx context.Context, a actor.Actor, q viewQ
 }
 func (s *testService) Status(ctx context.Context, a actor.Actor, q viewQuery) (stepmodel.RunSummary, error) {
 	if q.ID != "" && q.Repo == "" {
-		return s.RunGet(ctx, a, q)
+		run, err := s.RunGet(ctx, a, q)
+		return run.RunSummary, err
 	}
 	ref := q.Ref
 	if q.SHA != "" {

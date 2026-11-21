@@ -133,7 +133,7 @@ func TestLogRefusesStalledCursor(t *testing.T) {
 		}
 		return apicontract.LogResult{Meta: logcontract.Meta{HasMore: true, NextByteOffset: 5}}, nil
 	}}
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "run1", Status: stepmodel.RunRunning, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepRunning}}}}
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run1", Status: stepmodel.RunRunning, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepRunning}}}}}
 	app, _, diagnostic := fixture(t, b)
 	if app.run(t.Context(), []string{"log", "run1"}) != 1 || !strings.Contains(diagnostic.String(), "cursor did not advance") {
 		t.Fatal("stalled cursor accepted", diagnostic.String())

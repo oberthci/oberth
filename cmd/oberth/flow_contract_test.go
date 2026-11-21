@@ -345,7 +345,7 @@ func TestLogDrainsBeforeTerminalSummary(t *testing.T) {
 		return apicontract.LogResult{Content: "second\n"}, nil
 	}
 	b.RunLogs.Handler = logs
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPassed}}}}
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPassed}}}}}
 	app, out, diagnostic := fixture(t, b)
 	if code := app.run(context.Background(), []string{"log", "run"}); code != 0 || !strings.HasPrefix(out.String(), "== build ==\nfirst\nsecond\n") {
 		t.Fatalf("log drain %d: %s %s", code, out.String(), diagnostic.String())

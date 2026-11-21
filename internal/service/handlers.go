@@ -12,7 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
-func (s *Service) PrepareRunGet(ctx context.Context, c apicontract.Caller, q apicontract.RunGetArgs) (apicontract.Call[stepmodel.RunSummary], error) {
+func (s *Service) PrepareRunGet(ctx context.Context, c apicontract.Caller, q apicontract.RunGetArgs) (apicontract.Call[apicontract.RunRecord], error) {
 	if q.View != "" && q.View != "summary" && q.View != "full" && q.View != "dashboard" {
 		return nil, bad("view")
 	}

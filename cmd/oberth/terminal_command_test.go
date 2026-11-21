@@ -64,7 +64,7 @@ func runTerminalCommandChild(t *testing.T, kind string) {
 	t.Helper()
 	text := "\x1b[32mstep\x1b[0m\x1b]0;title\a\r\x1b[2J"
 	b := fake.Bindings()
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPassed}}}}
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPassed}}}}}
 	b.RunLogs.Handler = &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{Value: apicontract.LogResult{Content: text}}
 	b.IssueGet.Handler = &fake.Handler[apicontract.IssueGetArgs, model.Issue]{Value: model.Issue{ID: 1, Title: "title", Body: text}}
 	app, _, _ := fixture(t, b)

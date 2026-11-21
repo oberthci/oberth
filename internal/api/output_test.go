@@ -16,7 +16,7 @@ import (
 )
 
 func TestResponseByteLimitsAcceptNRefuseNPlusOne(t *testing.T) {
-	base := stepmodel.RunSummary{ID: "12345678"}
+	base := apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "12345678"}}
 	encoded, err := json.Marshal(base)
 	if err != nil {
 		t.Fatal(err)
@@ -25,7 +25,7 @@ func TestResponseByteLimitsAcceptNRefuseNPlusOne(t *testing.T) {
 		value := base
 		value.Detail = strings.Repeat("a", (4<<20)-len(encoded)-len(`,"detail":""`)+extra)
 		f := setup(t, func(_ *api.Config, b *apicontract.Bindings) {
-			b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: value}
+			b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: value}
 		})
 		registry, err := api.Builtin(f.bindings)
 		if err != nil {
@@ -58,7 +58,7 @@ func TestWireCatalogueCannotBeMutatedByCaller(t *testing.T) {
 func TestUIHandoffPreservesToolRunIdentityAndPlan(t *testing.T) {
 	run := stepmodel.RunSummary{ID: "12345678", Repo: "origin/team/widget", ObjectSHA: "tag-object", CommitSHA: new("tested-commit"), Status: stepmodel.RunRunning, Steps: []stepmodel.RunStep{{Name: "authored-build", Path: "entry/build", Status: stepmodel.StepPending}}}
 	f := setup(t, func(_ *api.Config, b *apicontract.Bindings) {
-		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: run}
+		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: run}}
 	})
 	w := request(f, "GET", "/api/runs/12345678?view=dashboard", nil)
 	assertSuccess(t, w)
@@ -105,7 +105,7 @@ func TestLogObservationStatesStayDistinctAndWhole(t *testing.T) {
 func TestRunDisplayStatesRemainSharedValues(t *testing.T) {
 	for _, state := range []stepmodel.RunStatus{stepmodel.RunQueued, stepmodel.RunRunning, stepmodel.RunPassed, stepmodel.RunFailed, stepmodel.RunCancelled} {
 		f := setup(t, func(_ *api.Config, b *apicontract.Bindings) {
-			b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "12345678", Status: state}}
+			b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "12345678", Status: state}}}
 		})
 		w := request(f, "GET", "/api/runs/12345678", nil)
 		assertSuccess(t, w)
@@ -151,14 +151,14 @@ func TestRegistryInventoriesMatchTheApprovedOperationTable(t *testing.T) {
 }
 
 func TestMCPFramingPreservesAFullEscapedPayload(t *testing.T) {
-	base := stepmodel.RunSummary{ID: "12345678"}
+	base := apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "12345678"}}
 	raw, err := json.Marshal(base)
 	if err != nil {
 		t.Fatal(err)
 	}
 	base.Detail = strings.Repeat(`"`, ((4<<20)-len(raw)-len(`,"detail":""`))/2)
 	f := setup(t, func(_ *api.Config, b *apicontract.Bindings) {
-		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: base}
+		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: base}
 	})
 	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": strings.Repeat("a", 128<<10), "method": "tools/call", "params": map[string]any{"name": "run_get", "arguments": map[string]string{"id": "12345678"}}})
 	if err != nil {

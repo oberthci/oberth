@@ -35,7 +35,7 @@ func TestLogAndIssueUseOneTerminalWriter(t *testing.T) {
 	for _, terminal := range []bool{false, true} {
 		for _, args := range [][]string{{"log", "run", "build"}, {"issue", "get", "1"}} {
 			b := fake.Bindings()
-			b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPassed}}}}
+			b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPassed}}}}}
 			b.RunLogs.Handler = &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{Value: apicontract.LogResult{Content: text}}
 			b.IssueGet.Handler = &fake.Handler[apicontract.IssueGetArgs, model.Issue]{Value: model.Issue{ID: 1, Title: "title", Body: text}}
 			app, out, diagnostic := fixture(t, b)

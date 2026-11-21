@@ -98,7 +98,7 @@ func (f *fixture) restart(t *testing.T) {
 }
 func (f *fixture) seed(status stepmodel.RunStatus) stateport.Run {
 	commit := head
-	r := stateport.Run{RunSummary: stepmodel.RunSummary{ID: runID, Repo: repository, Ref: "refs/heads/topic", ObjectSHA: head, CommitSHA: &commit, Status: status, CreatedAt: at()}, HasAdmission: true, Admission: admissioncontract.PreparedView{Plan: admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "build"}, {Path: "test"}}}}, Revision: 1, Origin: model.RunOrigin{Actor: caller().Identity, Trigger: model.TriggerBranch}}
+	r := stateport.Run{RunSummary: stepmodel.RunSummary{ID: runID, Repo: repository, Ref: "refs/heads/topic", ObjectSHA: head, CommitSHA: &commit, Status: status, CreatedAt: at()}, HasAdmission: true, Admission: admissioncontract.PreparedView{Plan: admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "build"}, {Path: "test"}}}}, Revision: 1, Origin: model.RunOrigin{RunCause: model.RunCause{Actor: caller().Identity, Trigger: model.TriggerBranch}}}
 	f.store.native.SeedRun(r)
 	f.store.native.SeedSteps(r.ID, []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPending}, {Path: "test", Name: "test", Status: stepmodel.StepPending}})
 	return r

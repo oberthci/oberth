@@ -20,8 +20,8 @@ func Bindings() apicontract.Bindings {
 func bindRun(b *apicontract.Bindings) {
 	b.Logs.Handler = &Handler[apicontract.LogsArgs, apicontract.LogResult]{Value: apicontract.LogResult{}}
 	b.RunCheck.Handler = &Handler[apicontract.RunCheckArgs, apicontract.RunCheckResult]{Value: apicontract.RunCheckResult{Findings: []apicontract.Finding{}, Checks: []apicontract.Check{}}}
-	b.RunGet.Handler = &Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{}}
-	b.RunList.Handler = &Handler[apicontract.RunListArgs, apicontract.RunPage]{Value: apicontract.RunPage{Runs: []stepmodel.RunSummary{}}}
+	b.RunGet.Handler = &Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{}}
+	b.RunList.Handler = &Handler[apicontract.RunListArgs, apicontract.RunPage]{Value: apicontract.RunPage{Runs: []apicontract.RunRecord{}}}
 	b.RunLogs.Handler = &Handler[apicontract.RunLogsArgs, apicontract.LogResult]{Value: apicontract.LogResult{}}
 	b.Status.Handler = &Handler[apicontract.StatusArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{}}
 	b.Wait.Handler = &Handler[apicontract.WaitArgs, apicontract.WaitResult]{Value: apicontract.WaitResult{}}

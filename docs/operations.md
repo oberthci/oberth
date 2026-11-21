@@ -14,8 +14,9 @@ oberth log <run> <step>
 ```
 Copy the run ID from push output or a list. Hexadecimal IDs accept unambiguous prefixes of at least
 eight characters; copy scheduled run IDs in full. Read the short reason, then expand Detail for the
-Pod name, full message and exit code. Show text whole: status reasons have at most 40 characters;
-refusals have an 80-character reason and 120-character remedy. Steps appear in plan order; see
+Pod name, full message and exit code. A run also shows what started it: trigger, schedule entry,
+rerun source and actor. Show text whole: status reasons have at most 40 characters; refusals have
+an 80-character reason and 120-character remedy. Steps appear in plan order; see
 [pending steps and counts](pipelines.md#plans-and-budgets). Missing duration is not zero. Select a
 step, attempt or container for logs; page through incomplete windows and earlier output. A `secret`
 tag means declared credential intent, not that a value was read. Runs may be Argo-queued, waiting

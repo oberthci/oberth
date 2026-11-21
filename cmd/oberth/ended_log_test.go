@@ -20,7 +20,7 @@ func TestEndedLogPrintsFailedInitOutputAndNativeMessage(t *testing.T) {
 	step := stepmodel.RunStep{Path: "build", Name: "build", Status: stepmodel.StepFailed, AttemptCount: 1, DisplayReason: "failed before starting", Detail: "source access forbidden by the controller\nExit code: 64", Attempts: []stepmodel.StepAttempt{{NodeID: "node", Status: stepmodel.StepFailed}}, Logs: []stepmodel.LogSelector{{NodeID: "node", Container: "main"}, {NodeID: "node", Container: "init-artifact-oberth"}}}
 	run := stepmodel.RunSummary{ID: nativeRun.ID, Status: stepmodel.RunFailed, DisplayReason: step.DisplayReason, Failure: &stepmodel.FailureRecord{Class: stepmodel.FailureInfrastructure, Step: step.Path, Name: step.Name}, Steps: []stepmodel.RunStep{step}}
 	b := fake.Bindings()
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: run}
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: run}}
 	saveReaderStep(t, reader, nativeRun, step)
 	captureReaderContainers(t, reader, nativeRun)
 	logs := &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{}

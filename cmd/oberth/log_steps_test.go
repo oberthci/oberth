@@ -14,10 +14,10 @@ import (
 
 func TestLogShowsEveryStepInPlanOrderAcrossPages(t *testing.T) {
 	b := fake.Bindings()
-	get := &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{}
-	get.Run = func(context.Context) (stepmodel.RunSummary, error) {
+	get := &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{}
+	get.Run = func(context.Context) (apicontract.RunRecord, error) {
 		inputs, _, _ := get.Observed()
-		page := stepmodel.RunSummary{ID: "run", Status: stepmodel.RunFailed}
+		page := apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunFailed}}
 		if inputs[len(inputs)-1].StepOffset == 0 {
 			page.Steps, page.NextStepOffset = []stepmodel.RunStep{{Path: "z-first", Name: "prepare", Status: stepmodel.StepPassed}}, new(1)
 		} else {
@@ -55,7 +55,7 @@ func TestLogShowsEveryStepInPlanOrderAcrossPages(t *testing.T) {
 
 func TestLogChangingFailureContainerRestartsItsOwnedCursor(t *testing.T) {
 	b := fake.Bindings()
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunFailed, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepFailed}}}}
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunFailed, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepFailed}}}}}
 	logs := &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{}
 	logs.Run = func(context.Context) (apicontract.LogResult, error) {
 		inputs, _, calls := logs.Observed()
@@ -83,7 +83,7 @@ func TestLogChangingFailureContainerRestartsItsOwnedCursor(t *testing.T) {
 
 func TestLogRootUsesItsNativeAttempt(t *testing.T) {
 	b := fake.Bindings()
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Name: "root", Status: stepmodel.StepPassed, Attempts: []stepmodel.StepAttempt{{NodeID: "root-node", Status: stepmodel.StepPassed}}}}}}
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Name: "root", Status: stepmodel.StepPassed, Attempts: []stepmodel.StepAttempt{{NodeID: "root-node", Status: stepmodel.StepPassed}}}}}}}
 	logs := &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{Value: apicontract.LogResult{Content: "root output\n"}}
 	b.RunLogs.Handler = logs
 	app, out, diagnostic := fixture(t, b)
@@ -99,8 +99,8 @@ func TestLogRootUsesItsNativeAttempt(t *testing.T) {
 func TestLogWaitsForAPlannedStepWithoutRepeatingItsHeading(t *testing.T) {
 	b := fake.Bindings()
 	waits := 0
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Run: func(context.Context) (stepmodel.RunSummary, error) {
-		run := stepmodel.RunSummary{ID: "run", Status: stepmodel.RunRunning, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPending}}}
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Run: func(context.Context) (apicontract.RunRecord, error) {
+		run := apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunRunning, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPending}}}}
 		if waits > 0 {
 			run.Status, run.Steps[0].Status = stepmodel.RunPassed, stepmodel.StepPassed
 		}
@@ -121,7 +121,7 @@ func TestLogWaitsForAPlannedStepWithoutRepeatingItsHeading(t *testing.T) {
 
 func TestLogNamesUnavailableOutputInsteadOfSilentlyFinishing(t *testing.T) {
 	b := fake.Bindings()
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPassed}}}}
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPassed}}}}}
 	b.RunLogs.Handler = &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{Value: apicontract.LogResult{Meta: logcontract.Meta{Reason: "step output is being copied"}}}
 	app, out, diagnostic := fixture(t, b)
 	if code := app.run(t.Context(), []string{"log", "run"}); code != 0 || !strings.Contains(out.String(), "== build ==\nstep output is being copied\n") {
@@ -131,7 +131,7 @@ func TestLogNamesUnavailableOutputInsteadOfSilentlyFinishing(t *testing.T) {
 
 func TestLogSkippedStepDoesNotReadANonexistentContainer(t *testing.T) {
 	b := fake.Bindings()
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Path: "lint", Name: "lint", Status: stepmodel.StepSkipped}}}}
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Path: "lint", Name: "lint", Status: stepmodel.StepSkipped}}}}}
 	logs := &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{}
 	b.RunLogs.Handler = logs
 	app, out, diagnostic := fixture(t, b)
@@ -145,7 +145,7 @@ func TestLogSkippedStepDoesNotReadANonexistentContainer(t *testing.T) {
 
 func TestLogWaitsForFinishedStepOutputStillBeingCopied(t *testing.T) {
 	b := fake.Bindings()
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPassed}}}}
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunPassed, Steps: []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPassed}}}}}
 	reads := 0
 	b.RunLogs.Handler = &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{Run: func(context.Context) (apicontract.LogResult, error) {
 		reads++
@@ -166,10 +166,10 @@ func TestLogWaitsForFinishedStepOutputStillBeingCopied(t *testing.T) {
 // single container of a run whose step has no plan path.
 func TestLogSelectsTheStepNameRunGetLists(t *testing.T) {
 	b := fake.Bindings()
-	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]{Value: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunFailed, Steps: []stepmodel.RunStep{
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run", Status: stepmodel.RunFailed, Steps: []stepmodel.RunStep{
 		{Path: "", Name: "main", Status: stepmodel.StepFailed, Attempts: []stepmodel.StepAttempt{{NodeID: "run-main"}}},
 		{Path: "other", Name: "other", Status: stepmodel.StepPassed},
-	}}}
+	}}}}
 	logs := &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{}
 	logs.Run = func(context.Context) (apicontract.LogResult, error) {
 		inputs, _, _ := logs.Observed()

@@ -6,17 +6,24 @@ import (
 	"github.com/oberthci/oberth/internal/actor"
 )
 
+// RunCause is what started a run, as recorded at acceptance: the trigger, the
+// identity that caused it, the schedule entry of a scheduled run and the run it
+// reruns. Run views show it unchanged.
+type RunCause struct {
+	Actor         string     `json:"actor"`
+	Trigger       RunTrigger `json:"trigger"`
+	ScheduleEntry string     `json:"schedule_entry"`
+	RerunOf       string     `json:"rerun_of"`
+}
+
 // RunOrigin holds attribution and execution identity alongside stepmodel.RunSummary.
 // C7 persists assist opt-in and the monotonic Assisted flag separately from verdict.
 type RunOrigin struct {
-	Actor           string     `json:"actor"`
-	Trigger         RunTrigger `json:"trigger"`
-	ScheduleEntry   string     `json:"schedule_entry"`
-	AssistRequested bool       `json:"assist_requested"`
-	Assisted        bool       `json:"assisted"`
-	RerunOf         string     `json:"rerun_of"`
-	WorkflowName    string     `json:"workflow_name"`
-	WorkflowUID     string     `json:"workflow_uid"`
+	RunCause
+	AssistRequested bool   `json:"assist_requested"`
+	Assisted        bool   `json:"assisted"`
+	WorkflowName    string `json:"workflow_name"`
+	WorkflowUID     string `json:"workflow_uid"`
 }
 
 // ReleaseReceipt identifies a delivered release, never a merely passing run.

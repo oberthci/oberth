@@ -4,7 +4,6 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/api/fake"
 	"github.com/oberthci/oberth/internal/apicontract"
-	"github.com/oberthci/oberth/internal/stepmodel"
 	"testing"
 )
 
@@ -16,7 +15,7 @@ func TestSecondTypedDefaultsDuplicatesRanges(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	in, _, _ := f.bindings.RunGet.Handler.(*fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]).Observed()
+	in, _, _ := f.bindings.RunGet.Handler.(*fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]).Observed()
 	for _, v := range in {
 		if v.StepLimit != 100 {
 			t.Error("default changed")
@@ -32,7 +31,7 @@ func TestSecondTypedDefaultsDuplicatesRanges(t *testing.T) {
 			t.Errorf("%s: %v", tc.raw, err)
 		}
 		if !tc.refuse {
-			v, _, _ := f.bindings.RunGet.Handler.(*fake.Handler[apicontract.RunGetArgs, stepmodel.RunSummary]).Observed()
+			v, _, _ := f.bindings.RunGet.Handler.(*fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]).Observed()
 			if v[len(v)-1].StepLimit != tc.want {
 				t.Error("duplicate standard semantics changed")
 			}

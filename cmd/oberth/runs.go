@@ -41,10 +41,8 @@ func renderRun(out io.Writer, run map[string]any, detail bool) error {
 	if err := writeWrapped(out, "Run "+publicText(run["id"])+"  "+publicText(run["status"])); err != nil {
 		return err
 	}
-	for _, key := range []string{"repo", "ref", "commit_sha", "display_reason", "next_step_offset"} {
-		if err := renderFacts(out, key, run[key], detail); err != nil {
-			return err
-		}
+	if err := renderRunFacts(out, run, detail); err != nil {
+		return err
 	}
 	if detail {
 		if err := renderFacts(out, "detail", run["detail"], true); err != nil {
@@ -63,6 +61,16 @@ func renderRun(out io.Writer, run map[string]any, detail bool) error {
 	}
 
 	return writeWrapped(out, "Logs: oberth log "+publicText(run["id"]))
+}
+
+// renderRunFacts shows where the run came from beside what it ran.
+func renderRunFacts(out io.Writer, run map[string]any, detail bool) error {
+	for _, key := range []string{"repo", "ref", "commit_sha", "trigger", "schedule_entry", "rerun_of", "actor", "display_reason", "next_step_offset"} {
+		if err := renderFacts(out, key, run[key], detail); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func renderFailure(out io.Writer, run map[string]any, detail bool) error {
