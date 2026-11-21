@@ -2,19 +2,64 @@ package cronsync
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/schedule"
 )
 
-// SyncAll reconciles startup or explicit repair without a server firing loop.
+// SyncAll reconciles every repository at startup, without a server firing
+// loop. It holds the lock for one repository at a time, so ref notices and
+// grants are served between repositories instead of waiting for the whole
+// pass; each repository reads a fresh native list, and orphans are pruned at
+// the end from a fresh catalogue. Resumes stay refused until the pass has
+// gone over every repository.
 func (c *Syncer) SyncAll(ctx context.Context) error {
+	var repos []Repository
+	if err := c.locked(ctx, func(ctx context.Context) error {
+		var err error
+		repos, _, err = c.passStart(ctx)
+		return err
+	}); err != nil {
+		return err
+	}
+	var failures []error
+	for _, repo := range repos {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		failures = append(failures, c.locked(ctx, func(ctx context.Context) error {
+			objects, err := c.list(ctx)
+			if err != nil {
+				return err
+			}
+			return c.attempt(ctx, repo, objects)
+		}))
+	}
+	failures = append(failures, c.locked(ctx, c.passEnd))
+	return errors.Join(failures...)
+}
+
+// passEnd prunes the parents of repositories that left the catalogue during
+// or before the pass and then lets resumes through.
+func (c *Syncer) passEnd(ctx context.Context) error {
+	repos, objects, err := c.passStart(ctx)
+	if err != nil {
+		return err
+	}
+	if err = c.removeOrphans(ctx, repos, objects); err == nil {
+		c.fullSyncFailed = false
+	}
+	return err
+}
+
+func (c *Syncer) locked(ctx context.Context, work func(context.Context) error) error {
 	if err := c.acquire(ctx); err != nil {
 		return err
 	}
 	defer c.release()
-	return c.syncAll(ctx)
+	return work(ctx)
 }
 
 // SyncRepository reconciles the complete declaration of one repository.

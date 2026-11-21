@@ -3,11 +3,14 @@ package cronsync_test
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/oberthci/oberth/internal/cronsync"
+	"github.com/oberthci/oberth/internal/gitport"
+	"github.com/oberthci/oberth/internal/schedule"
 )
 
 // statusError is the schedule list's error phrase for one entry.
@@ -68,6 +71,49 @@ func slowFirstRepositoryPass(t *testing.T, attempt time.Duration, pass func(*cro
 	if synced != (attempt > 0) {
 		t.Fatal("the other repository's sync depended on the slow one", attempt, synced)
 	}
+}
+
+// The startup pass holds the lock for one repository at a time: a
+// reconciliation asked for while the pass is on a slow repository is served
+// as soon as that repository is done, not after the whole pass. Two slow
+// repositories of one minute each; the waiting call has 70 seconds.
+func TestStartupPassServesOtherCallsBetweenRepositories(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newFixture(t)
+		other := f.otherRepository()
+		third := cronsync.Repository{ID: 9, Qualified: "origin/team/third", DefaultBranch: "slow"}
+		f.repos = append(f.repos, third)
+		ref := gitport.Ref{Name: "refs/heads/slow", ObjectSHA: strings.Repeat("f", 40), CommitSHA: strings.Repeat("f", 40)}
+		f.git.PutRef(third.Qualified, ref)
+		f.git.PutFile(gitport.Revision{Repository: third.Qualified, Commit: ref.CommitSHA}, gitport.File{Path: schedule.FileName, Mode: 0100644, Blob: strings.Repeat("e", 40), Bytes: []byte("schedules: [{name: nightly, cron: '0 3 * * *'}]")})
+		f.sync()
+		// The first and the third repository each take a minute, once.
+		slow := map[string]bool{"refs/heads/main": true, "refs/heads/slow": true}
+		entered := make(chan struct{}, 2)
+		f.gitHook = func(ctx context.Context, verb, name string) error {
+			if verb != "resolve" || !slow[name] {
+				return nil
+			}
+			delete(slow, name)
+			entered <- struct{}{}
+			select {
+			case <-time.After(time.Minute):
+			case <-ctx.Done():
+			}
+			return nil
+		}
+		pass := make(chan error, 1)
+		go func() { pass <- f.c.SyncAll(t.Context()) }()
+		<-entered
+		call, cancel := context.WithTimeout(t.Context(), 70*time.Second)
+		defer cancel()
+		if err := f.c.SyncRepository(call, other.Qualified); err != nil {
+			t.Fatal("a call during the startup pass waited for the whole pass", err)
+		}
+		if err := <-pass; err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 // Once the supplied context ends, repositories the pass has not reached keep

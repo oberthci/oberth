@@ -69,26 +69,46 @@ func (c *Syncer) declarationAt(ctx context.Context, repo Repository, resolve fun
 // so a slow one uses up only its own time; a repository the pass no longer
 // reaches within ctx keeps its state rather than being recorded as failed.
 func (c *Syncer) syncAll(ctx context.Context) error {
-	c.fullSyncFailed = true
-	repos, err := c.config.Repositories(ctx)
+	repos, objects, err := c.passStart(ctx)
 	if err != nil {
-		return unstarted{problem(catalogFailure, err)}
-	}
-	objects, err := c.list(ctx)
-	if err != nil {
-		return unstarted{err}
+		return err
 	}
 	c.fullSyncFailed = false
-	present := map[int64]bool{}
 	var failures []error
 	for _, repo := range repos {
-		present[repo.ID] = true
 		if err := ctx.Err(); err != nil {
 			failures = append(failures, err)
 			continue
 		}
 		failures = append(failures, c.attempt(ctx, repo, objects))
 	}
+	failures = append(failures, c.removeOrphans(ctx, repos, objects))
+	return errors.Join(failures...)
+}
+
+// passStart reads the complete catalogue and native list a full pass works
+// from; until the pass has gone over every repository, resumes are refused.
+func (c *Syncer) passStart(ctx context.Context) ([]Repository, []wfv1.CronWorkflow, error) {
+	c.fullSyncFailed = true
+	repos, err := c.config.Repositories(ctx)
+	if err != nil {
+		return nil, nil, unstarted{problem(catalogFailure, err)}
+	}
+	objects, err := c.list(ctx)
+	if err != nil {
+		return nil, nil, unstarted{err}
+	}
+	return repos, objects, nil
+}
+
+// removeOrphans deletes the owned parents of repositories absent from the
+// complete catalogue repos.
+func (c *Syncer) removeOrphans(ctx context.Context, repos []Repository, objects []wfv1.CronWorkflow) error {
+	present := map[int64]bool{}
+	for _, repo := range repos {
+		present[repo.ID] = true
+	}
+	var failures []error
 	for i := range objects {
 		object := &objects[i]
 		id, _, ok := owned(object)

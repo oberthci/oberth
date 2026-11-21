@@ -124,7 +124,8 @@ func TestSuspensionDoesNotReadPauseIntentOrCatalogue(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			listings := 1
+			// The startup pass reads the catalogue to start and again to prune.
+			listings := 2
 			if authority {
 				listings = 0
 				var unsynced error
