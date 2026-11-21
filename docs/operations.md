@@ -12,18 +12,16 @@ oberth run list
 oberth run get <run>
 oberth log <run> <step>
 ```
-Copy the run ID from push output or a list. Hexadecimal IDs accept unambiguous prefixes of at least
-eight characters; copy scheduled run IDs in full. Read the short reason, then expand Detail for the
-Pod name, full message and exit code. A run also shows what started it: trigger, schedule entry,
-rerun source, actor and whether assist was requested. Show text whole: status reasons have at most
-40 characters; refusals have an 80-character reason and 120-character remedy. Steps appear in plan
-order; see
-[pending steps and counts](pipelines.md#plans-and-budgets). Missing duration is not zero. Select a
-step, attempt or container for logs; page through incomplete windows and earlier output. A `secret`
-tag means declared credential intent, not that a value was read. Runs may be Argo-queued, waiting
-for a node, running, passed, failed or cancelled. Holds are live observations of eligible
-containers. Inspect reason and detail before acting. Passing and publication are separate facts:
-check publication if a tag has not reached the forge.
+Copy the run ID from push output or a list. Hexadecimal IDs accept unambiguous prefixes of eight or
+more characters; copy scheduled run IDs in full. A run shows its trigger, schedule entry, rerun
+source, actor and assist request. Read the short reason, then expand Detail for the Pod name, full
+message and exit code. Show text whole: status reasons have at most 40 characters; refusals have an
+80-character reason and 120-character remedy. Steps appear in plan order
+([pending steps](pipelines.md#plans-and-budgets)). Missing duration is not zero. Select a step,
+attempt or container for logs; page through incomplete windows and earlier output. A `secret` tag
+means declared credential intent, not that a value was read. Runs may be Argo-queued, waiting for a
+node, running, passed, failed or cancelled. Holds are live observations of eligible containers.
+Passing and publication are separate facts: check publication if a tag has not reached the forge.
 
 ## Wait, retry and assist
 
