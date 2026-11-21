@@ -22,6 +22,34 @@ func (f *fixture) authority(ctx context.Context, repo cronsync.Repository, publi
 	return err
 }
 
+// After a restart the in-memory refusals are empty until the first full
+// pass: a resume before it must not lift a pause the authority barrier set
+// before the restart; after the pass it is allowed again.
+func TestResumeBeforeStartupPassKeepsAuthorityPause(t *testing.T) {
+	f := newFixture(t)
+	f.sync()
+	if err := f.authority(t.Context(), f.repo, func(context.Context) error { return errors.New("publish failed") }); err == nil {
+		t.Fatal("a failed publication was reported as published")
+	}
+	if !f.object(f.repo, "nightly").Spec.Suspend {
+		t.Fatal("the barrier did not pause the parent")
+	}
+	restarted, err := cronsync.New(f.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pending *publicerr.Error
+	if err := restarted.SetPause(t.Context(), f.repo, "nightly"); !errors.As(err, &pending) || pending.Reason() != "schedule update is pending" || !f.object(f.repo, "nightly").Spec.Suspend {
+		t.Fatal("a resume before the startup pass unsuspended an authority-paused parent", err)
+	}
+	if err := restarted.SyncAll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.SetPause(t.Context(), f.repo, "nightly"); err != nil || f.object(f.repo, "nightly").Spec.Suspend {
+		t.Fatal("a resume after the startup pass was refused", err)
+	}
+}
+
 func TestCronAuthoritySuspendsBeforePublication(t *testing.T) {
 	f := newFixture(t)
 	f.sync()

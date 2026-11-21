@@ -82,7 +82,10 @@ func New(config Config) (*Syncer, error) {
 	if err := config.Limits.Validate(); err != nil {
 		return nil, err
 	}
-	return &Syncer{config: config, owner: make(chan struct{}, 1), refusals: map[int64]map[string]*refusal{}}, nil
+	// Until a full pass has run, the in-memory refusals are empty, not clear:
+	// a resume then could lift a pause the authority barrier set before a
+	// restart, so resumes wait for that pass (fullSyncFailed).
+	return &Syncer{config: config, owner: make(chan struct{}, 1), refusals: map[int64]map[string]*refusal{}, fullSyncFailed: true}, nil
 }
 
 func (c Config) complete() bool {
