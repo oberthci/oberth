@@ -12,8 +12,8 @@ func TestModelWireGoldens(t *testing.T) {
 		value  any
 		golden string
 	}{
-		{"run origin", RunOrigin{}, `{"actor":"","trigger":"","schedule_entry":"","rerun_of":"","assist_requested":false,"assisted":false,"workflow_name":"","workflow_uid":""}`},
-		{"run cause", RunCause{}, `{"actor":"","trigger":"","schedule_entry":"","rerun_of":""}`},
+		{"run origin", RunOrigin{}, `{"actor":"","trigger":"","schedule_entry":"","assist_requested":false,"rerun_of":"","assisted":false,"workflow_name":"","workflow_uid":""}`},
+		{"run cause", RunCause{}, `{"actor":"","trigger":"","schedule_entry":"","assist_requested":false,"rerun_of":""}`},
 		{"publication", Publication{}, `{"id":"","repo":"","ref":"","run_id":"","promotion_id":"","object_sha":"","commit_sha":null,"previous_sha":null,"actor":"","status":"","attempts":0,"retry_at":null,"reason":"","created_at":"0001-01-01T00:00:00Z","updated_at":"0001-01-01T00:00:00Z"}`},
 		{"audit action", AuditAction{}, `{"id":0,"actor":"","action":"","resource_type":"","resource_id":"","details":"","created_at":"0001-01-01T00:00:00Z"}`},
 		{"CI request", CIRequest{}, `{"receive_id":"","repo":"","ref":"","previous_sha":"","object_sha":"","commit_sha":null,"actor":{"auth_method":"","identity":"","fingerprint":"","admin":false,"scope":null},"trigger":"","schedule_entry":"","assist":false}`},

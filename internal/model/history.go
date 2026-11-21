@@ -7,23 +7,23 @@ import (
 )
 
 // RunCause is what started a run, as recorded at acceptance: the trigger, the
-// identity that caused it, the schedule entry of a scheduled run and the run it
-// reruns. Run views show it unchanged.
+// identity that caused it, the schedule entry of a scheduled run, the run it
+// reruns and whether the push asked for assistance. Run views show it unchanged.
 type RunCause struct {
-	Actor         string     `json:"actor"`
-	Trigger       RunTrigger `json:"trigger"`
-	ScheduleEntry string     `json:"schedule_entry"`
-	RerunOf       string     `json:"rerun_of"`
+	Actor           string     `json:"actor"`
+	Trigger         RunTrigger `json:"trigger"`
+	ScheduleEntry   string     `json:"schedule_entry"`
+	AssistRequested bool       `json:"assist_requested"`
+	RerunOf         string     `json:"rerun_of"`
 }
 
 // RunOrigin holds attribution and execution identity alongside stepmodel.RunSummary.
 // C7 persists assist opt-in and the monotonic Assisted flag separately from verdict.
 type RunOrigin struct {
 	RunCause
-	AssistRequested bool   `json:"assist_requested"`
-	Assisted        bool   `json:"assisted"`
-	WorkflowName    string `json:"workflow_name"`
-	WorkflowUID     string `json:"workflow_uid"`
+	Assisted     bool   `json:"assisted"`
+	WorkflowName string `json:"workflow_name"`
+	WorkflowUID  string `json:"workflow_uid"`
 }
 
 // ReleaseReceipt identifies a delivered release, never a merely passing run.

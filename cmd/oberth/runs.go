@@ -63,9 +63,13 @@ func renderRun(out io.Writer, run map[string]any, detail bool) error {
 	return writeWrapped(out, "Logs: oberth log "+publicText(run["id"]))
 }
 
-// renderRunFacts shows where the run came from beside what it ran.
+// renderRunFacts shows where the run came from beside what it ran; assistance
+// appears only when the push asked for it.
 func renderRunFacts(out io.Writer, run map[string]any, detail bool) error {
-	for _, key := range []string{"repo", "ref", "commit_sha", "trigger", "schedule_entry", "rerun_of", "actor", "display_reason", "next_step_offset"} {
+	for _, key := range []string{"repo", "ref", "commit_sha", "trigger", "schedule_entry", "rerun_of", "actor", "assist_requested", "display_reason", "next_step_offset"} {
+		if key == "assist_requested" && run[key] != true {
+			continue
+		}
 		if err := renderFacts(out, key, run[key], detail); err != nil {
 			return err
 		}

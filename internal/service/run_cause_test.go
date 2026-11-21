@@ -14,7 +14,7 @@ import (
 
 func runCauses() []model.RunCause {
 	return []model.RunCause{
-		{Actor: "worker", Trigger: model.TriggerBranch},
+		{Actor: "worker", Trigger: model.TriggerBranch, AssistRequested: true},
 		{Actor: "oberth:scheduler", Trigger: model.TriggerSchedule, ScheduleEntry: "nightly"},
 		{Actor: "worker", Trigger: model.TriggerBranch, RerunOf: runID},
 		{Actor: "owner", Trigger: model.TriggerPromotion},
@@ -25,7 +25,7 @@ func runCauses() []model.RunCause {
 func seedCause(f *fixture, i int, cause model.RunCause) stateport.Run {
 	r := f.seed(stepmodel.RunPassed)
 	r.ID = fmt.Sprintf("abcdef02%024d", i)
-	r.Origin = model.RunOrigin{RunCause: cause, AssistRequested: true, Assisted: true, WorkflowName: "native-" + r.ID, WorkflowUID: "uid-" + r.ID}
+	r.Origin = model.RunOrigin{RunCause: cause, Assisted: cause.AssistRequested, WorkflowName: "native-" + r.ID, WorkflowUID: "uid-" + r.ID}
 	f.store.native.SeedRun(r)
 	f.store.native.SeedSteps(r.ID, nil)
 	return r

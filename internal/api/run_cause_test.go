@@ -15,7 +15,7 @@ import (
 // in the dashboard read and in the declared run_get and run_list results.
 func TestRunRecordCarriesCauseAsPlainFields(t *testing.T) {
 	run := apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "12345678", Repo: "origin/team/widget", Ref: "main", Status: stepmodel.RunPassed},
-		RunCause: model.RunCause{Actor: "oberth:scheduler", Trigger: model.TriggerSchedule, ScheduleEntry: "nightly"}}
+		RunCause: model.RunCause{Actor: "oberth:scheduler", Trigger: model.TriggerSchedule, ScheduleEntry: "nightly", AssistRequested: true}}
 	f := setup(t, func(_ *api.Config, b *apicontract.Bindings) {
 		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: run}
 	})
@@ -25,7 +25,7 @@ func TestRunRecordCarriesCauseAsPlainFields(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &shown); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"actor": "oberth:scheduler", "trigger": "schedule", "schedule_entry": "nightly", "rerun_of": ""}
+	want := map[string]any{"actor": "oberth:scheduler", "trigger": "schedule", "schedule_entry": "nightly", "assist_requested": true, "rerun_of": ""}
 	for key, value := range want {
 		if shown[key] != value {
 			t.Fatalf("%s = %v, want %v", key, shown[key], value)
