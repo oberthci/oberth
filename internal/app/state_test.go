@@ -156,7 +156,7 @@ func TestRejectedGrantCommandsSurviveDurableDeliveryReplay(t *testing.T) {
 			t.Fatal("saved rejection was not acknowledged", err)
 		}
 		text := strings.Join(result.Lines(), "\n")
-		command := "  fix: oberth secret put --repo 'origin/team/widget' --file '.oberth/build.yaml' --step 'build' 'kv/build' < <value-file>"
+		command := "  fix: Administrator: oberth secret put --repo 'origin/team/widget' --file '.oberth/build.yaml' --step 'build' 'kv/build' < <value-file>"
 		if !strings.Contains(text, command) || !strings.Contains(text, "refs/heads/topic") {
 			t.Fatal("replay lost the authoritative grant fix", text)
 		}

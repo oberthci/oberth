@@ -75,13 +75,18 @@ func (e *Refusal) Error() string {
 }
 func (e *Refusal) Unwrap() error { return e.cause }
 
-// findings renders each finding as a push prints it, in admission order.
+// findings renders each finding as a push prints it, in admission order. A
+// command is labelled with who runs it: the live-evidence check is the
+// pusher's own; every other printed command needs an administrator.
 func (e *Refusal) findings() []string {
 	var lines []string
 	for _, f := range e.Problems {
 		fix := f.Remedy
-		if f.Command != "" {
+		switch {
+		case f.Command != "" && f.Code == "live":
 			fix = f.Command
+		case f.Command != "":
+			fix = publicerr.AdministratorLine(f.Command)
 		}
 		lines = append(lines, join(e.Ref, e.File, f.Path)+": "+sentence(f.Reason)+"\n  fix: "+fix)
 	}

@@ -340,6 +340,22 @@ func TestAcceptedRunsReadFailureNeverReplaysAcceptance(t *testing.T) {
 		t.Fatal("retry did not reuse the original seal")
 	}
 }
+func TestPushFixLineSaysTheAdministratorRunsTheCommand(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	command := publicerr.UnarchiveCommand("origin/team/widget")
+	f.runs.DecideFunc = func(context.Context, service.RefUpdate) (service.Decision, error) {
+		return service.Decision{}, publicerr.New(publicerr.InvalidTransition, "The repository is archived.", "Ask an administrator to unarchive the repository.", nil).WithCommand(command)
+	}
+	s := f.new(t)
+	r := receive()
+	r.Source = f.source
+	_, err := s.Gate(context.Background(), r)
+	if err == nil || !strings.Contains(err.Error(), "\n  fix: Administrator: "+command) || strings.Contains(err.Error(), "fix: "+command) {
+		t.Fatal("the fix line does not say who runs the command", err)
+	}
+}
+
 func TestServiceRefusalLeadsWithItsReasonAndRemedy(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

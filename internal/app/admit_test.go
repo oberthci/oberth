@@ -243,7 +243,7 @@ func TestRealAdmissionFindingsAndGrantCommandReachPusher(t *testing.T) {
 	}
 	text := err.Error()
 	command := "oberth secret put --repo 'origin/team/widget' --file '.oberth/build.yaml' --step 'build' 'kv/build' < <value-file>"
-	if !strings.Contains(text, "\n  fix: "+command) || !strings.Contains(text, "secrets[kv/build]") || strings.Contains(text, "detail: "+command) {
+	if !strings.Contains(text, "\n  fix: Administrator: "+command) || !strings.Contains(text, "secrets[kv/build]") || strings.Contains(text, "detail: "+command) {
 		t.Fatal(text)
 	}
 	if strings.Contains(text, "prepare:") || strings.Contains(text, "pipeline admission failed") {
@@ -292,7 +292,7 @@ func TestEachGrantCommandIsTheFixOfItsOwnFinding(t *testing.T) {
 	}
 	lines := strings.Split(err.Error(), "\n")
 	for _, path := range []string{"kv/one", "kv/two"} {
-		command := "  fix: oberth secret put --repo 'origin/team/widget' --file '.oberth/build.yaml' --step 'build' '" + path + "' < <value-file>"
+		command := "  fix: Administrator: oberth secret put --repo 'origin/team/widget' --file '.oberth/build.yaml' --step 'build' '" + path + "' < <value-file>"
 		found := false
 		for i, line := range lines {
 			if strings.Contains(line, "secrets["+path+"]") {
