@@ -92,6 +92,26 @@ func TestLockFactsStaleOnlyForListedEndedWorkflows(t *testing.T) {
 	}
 }
 
+// Before the head waiter of an ordinary hand-over takes the unit, no live
+// holder exists and the other waiter's count still names the run that ended by
+// itself; that run released its unit, so nothing is stale. The same run, had it
+// been stopped, would be.
+func TestLockFactsRunEndedByItselfIsNeverStale(t *testing.T) {
+	t.Parallel()
+	rows := cancelledLocks(t)
+	head := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == "handover-b" })
+	rows = slices.Delete(rows, head, head+1)
+	const stale = "default/ConfigMap/oberth-sync-limits/handover stale handover-a"
+	if got := facts(t, rows); slices.Contains(got, stale) {
+		t.Fatal("run that ended by itself listed stale", got)
+	}
+	ended := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == "handover-a" })
+	rows[ended].Spec.Shutdown = wf.ShutdownStrategyStop
+	if got := facts(t, rows); !slices.Contains(got, stale) {
+		t.Fatal("stopped run named by a current count not listed stale", got)
+	}
+}
+
 // A waiting entry counts only while the Workflow is Pending or a node still
 // waits for that lock: once its node holds, the leaked unit's waiter is no
 // waiter and its count, however it reads, names nothing stale.

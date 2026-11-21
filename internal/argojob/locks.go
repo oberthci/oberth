@@ -18,7 +18,8 @@ const (
 	// LockWaiter waits for the lock.
 	LockWaiter LockRole = "waiter"
 	// LockStale has ended, yet the workflow controller still counts a unit
-	// of the lock for it: a real waiter's count names it besides every live holder.
+	// of the lock for it: it was stopped or terminated, and a real waiter's
+	// count names it besides every live holder.
 	LockStale LockRole = "stale"
 )
 
@@ -34,9 +35,11 @@ type LockFact struct {
 // status when the Workflow ends. A Workflow waits only while it is Pending on
 // a workflow-level lock or one of its nodes waits for that lock; the controller
 // keeps a waiting entry after the lock is acquired. A real waiter's entry is
-// the controller's count of holders when it last wrote it; when that count names
-// every live holder, each ended Workflow it also names is a unit neither held
-// nor free: stale. A count older than a live holder proves nothing. Rows are
+// the controller's count of holders when it last wrote it. An ended Workflow it
+// names is stale only when that count also names every live holder and the
+// Workflow was stopped or terminated: the pinned controller leaks a unit only
+// when a shutdown ends a Workflow, while a Workflow that ended by itself has
+// released its units even if a waiter's older count still names it. Rows are
 // decompressed in place so node lock status is read.
 func LockFacts(ctx context.Context, rows []wf.Workflow) ([]LockFact, error) {
 	c := lockCollector{byKey: make(map[string]*wf.Workflow, len(rows)), live: map[string][]string{}, out: []LockFact{}}
@@ -96,7 +99,7 @@ func (c *lockCollector) stale(e lockEntry) {
 		}
 	}
 	for _, holder := range e.holders {
-		if other := c.byKey[holderWorkflow(holder)]; other != nil && terminalWorkflow(other) {
+		if other := c.byKey[holderWorkflow(holder)]; other != nil && terminalWorkflow(other) && other.Spec.Shutdown != "" {
 			c.add(LockFact{Lock: e.lock, Role: LockStale, Workflow: other})
 		}
 	}
