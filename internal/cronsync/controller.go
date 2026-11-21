@@ -62,6 +62,9 @@ type Config struct {
 	PauseIntent          func(context.Context, string, string) (bool, error)
 	Limits               schedule.Limits
 	Now                  func() time.Time
+	// RepositoryAttempt bounds each repository in the pass a key the
+	// catalogue no longer knows starts; zero leaves the supplied context.
+	RepositoryAttempt time.Duration
 }
 
 // Syncer serializes control-plane operations. Callbacks must not reenter it.

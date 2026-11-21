@@ -20,7 +20,7 @@ import (
 )
 
 func (o *serverOwners) scheduleConfig() {
-	o.c.scheduleConfig = cronsync.Config{InstanceID: o.c.config.Namespace, Client: o.cluster.Argo.ArgoprojV1alpha1().CronWorkflows(o.c.config.PipelineNamespace), Git: scheduleSource{cacheSource{o}}, PauseIntent: o.c.store.SchedulePaused, Repositories: o.scheduleRepositories, Repository: o.scheduleRepository, Admit: func(ctx context.Context, p cronsync.Preparation) (*admissioncontract.PreparedAdmission, error) {
+	o.c.scheduleConfig = cronsync.Config{InstanceID: o.c.config.Namespace, Client: o.cluster.Argo.ArgoprojV1alpha1().CronWorkflows(o.c.config.PipelineNamespace), Git: scheduleSource{cacheSource{o}}, PauseIntent: o.c.store.SchedulePaused, Repositories: o.scheduleRepositories, Repository: o.scheduleRepository, RepositoryAttempt: repositoryAttempt, Admit: func(ctx context.Context, p cronsync.Preparation) (*admissioncontract.PreparedAdmission, error) {
 		return o.wiring.PrepareSchedule(ctx, app.Request{RepositoryID: p.Repository.ID, Repository: p.Repository.Qualified, Ref: p.Revision, Trigger: model.TriggerSchedule, ScheduleEntry: p.Entry.Name, Actor: actor.Actor{Identity: "schedule", AuthMethod: "system"}})
 	}}
 }
