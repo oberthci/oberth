@@ -118,9 +118,19 @@ type Grant struct {
 type GrantPage struct {
 	Grants []Grant `json:"grants"`
 }
+
+// IssuePage is one page of issue metadata, newest first. Counts covers every
+// visible issue matching the repository, kind and query; Total the issues
+// matching the whole filter, of which Offset precede this page. NextBefore
+// continues to older issues and NextAfter to newer ones, each only when
+// there are some.
 type IssuePage struct {
-	Issues     []model.Issue `json:"issues"`
-	NextBefore int64         `json:"next_before,omitempty"`
+	Issues     []model.Issue     `json:"issues"`
+	Counts     model.IssueCounts `json:"counts"`
+	Total      int               `json:"total"`
+	Offset     int               `json:"offset"`
+	NextBefore int64             `json:"next_before,omitempty"`
+	NextAfter  int64             `json:"next_after,omitempty"`
 }
 type IssueResult struct {
 	State         model.IssueState `json:"state,omitempty"`

@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/stateport"
@@ -32,35 +30,4 @@ func (s *Store) ScopedIssue(ctx context.Context, scope stateport.IssueScope, id 
 		return v, refuse(corrupt, err)
 	}
 	return v, nil
-}
-func (s *Store) ScopedIssues(ctx context.Context, scope stateport.IssueScope, f model.IssueFilter) ([]model.Issue, error) {
-	if err := validateIssueFilter(f); err != nil {
-		return nil, err
-	}
-	query, args := issueQuery(nil, f)
-	predicate, scoped := scopedIssuePredicate(scope)
-	query = strings.Replace(query, "WHERE 1", "WHERE ("+predicate+")", 1)
-	args = append(scoped, args...)
-	rows, err := s.readers.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, databaseError(err)
-	}
-	defer func() { _ = rows.Close() }()
-	return s.scopedIssueRows(rows, f)
-}
-func (s *Store) scopedIssueRows(rows *sql.Rows, f model.IssueFilter) ([]model.Issue, error) {
-	out := []model.Issue{}
-	for rows.Next() {
-		var v model.Issue
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			return nil, databaseError(err)
-		}
-		if err := json.Unmarshal([]byte(raw), &v); err != nil {
-			return nil, refuse(corrupt, err)
-		}
-		v.Stale = issueStale(v, f, s.options.Clock())
-		out = append(out, v)
-	}
-	return out, databaseError(rows.Err())
 }

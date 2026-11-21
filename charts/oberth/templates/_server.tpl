@@ -1,7 +1,7 @@
 {{/* Current CLI wire config: explicit fields resolved from chart inputs. */}}
 {{- define "oberth.server" -}}
 {{- $server := deepCopy .Values.server -}}
-{{- $runtime := pick $server.runtime "git_binary" "source_timeout_seconds" "admission_timeout_seconds" "source_client_burst" "receive_max_input_bytes" "default_branch" "image_prefixes" "source_policy" "release_routes" -}}
+{{- $runtime := pick $server.runtime "git_binary" "source_timeout_seconds" "admission_timeout_seconds" "source_client_burst" "receive_max_input_bytes" "default_branch" "image_prefixes" "source_policy" "release_routes" "issue_stale_after_seconds" "issue_active_stale_after_seconds" -}}
 {{- $_ := set $runtime "helper_image" (include "oberth.image" .) -}}
 {{- $defaults := .Values.argoNative.controller.workflowDefaults -}}
 {{- $_ := set $runtime "workflow_defaults" (dict "workflow_defaults" nil "digest" "") -}}

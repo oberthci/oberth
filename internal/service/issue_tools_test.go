@@ -55,13 +55,28 @@ func issueScopeReads(t *testing.T, p *peopleFixture) {
 	}
 	call, e := p.f.s.PrepareIssueList(t.Context(), workerCaller(), apicontract.IssueListArgs{Limit: 1})
 	page, e := execute(t.Context(), call, e)
-	if e != nil || len(page.Issues) != 1 || page.Issues[0].ID != own.ID || page.Issues[0].Body != "" || page.NextBefore != own.ID {
+	if e != nil || len(page.Issues) != 1 || page.Issues[0].ID != own.ID || page.Issues[0].Body != "" || page.NextBefore != 0 || page.NextAfter != 0 {
 		t.Fatal("scope was applied after paging or bodies returned", page, e)
 	}
+	assertScopedIssueCounts(t, p, page)
 	assertIssueManyOrder(t, p, []int64{hidden.ID, own.ID, global.ID, own.ID})
 	assertScopedIssueCreate(t, p)
 	if _, e = p.f.s.PrepareIssueUpdate(t.Context(), workerCaller(), apicontract.IssueUpdateArgs{ID: own.ID, Upstream: new("private")}); e == nil {
 		t.Fatal("uplink moved issue scope")
+	}
+}
+
+// The uplink limited to origin counts only origin's issue: neither the
+// private upstream's nor the installation-wide one; the administrator all three.
+func assertScopedIssueCounts(t *testing.T, p *peopleFixture, uplink apicontract.IssuePage) {
+	t.Helper()
+	if uplink.Counts != (model.IssueCounts{Open: 1, Todo: 1}) || uplink.Total != 1 || uplink.Offset != 0 {
+		t.Fatal("counts reached beyond the caller's scope", uplink.Counts, uplink.Total, uplink.Offset)
+	}
+	call, e := p.f.s.PrepareIssueList(t.Context(), adminCaller(), apicontract.IssueListArgs{Limit: 1})
+	page, e := execute(t.Context(), call, e)
+	if e != nil || page.Counts.Open != 3 || page.Total != 3 || page.NextBefore != page.Issues[0].ID {
+		t.Fatal("installation administrator does not count every upstream", page.Counts, page.Total, e)
 	}
 }
 func issueCASAndLock(t *testing.T, p *peopleFixture) {

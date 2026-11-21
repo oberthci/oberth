@@ -15,7 +15,7 @@ import (
 type IssueStore interface {
 	ImportIssues(context.Context, stateport.Action, stateport.IssueImport) (stateport.IssueImportResult, error)
 	ScopedIssue(context.Context, stateport.IssueScope, int64) (model.Issue, error)
-	ScopedIssues(context.Context, stateport.IssueScope, model.IssueFilter) ([]model.Issue, error)
+	ScopedIssues(context.Context, stateport.IssueScope, model.IssueFilter) (stateport.IssuePage, error)
 	CreateIssue(context.Context, stateport.Action, model.Issue) (model.Issue, error)
 	UpdateIssue(context.Context, stateport.Action, model.IssuePatch) (model.Issue, error)
 	ChangeIssueLock(context.Context, stateport.Action, stateport.IssueLockRequest) error
@@ -102,7 +102,9 @@ type SecretWriter interface {
 
 // People groups required people/authority dependencies; none can silently fall
 // back to an unaudited implementation. Backup options bind the current store port.
+// IssueWindows are the installation's stale windows for reads that name none.
 type People struct {
+	IssueWindows   model.IssueWindows
 	StateMetadata  StateMetadata
 	SecretWriter   SecretWriter
 	ReleaseRoutes  workflowpolicy.ReleaseRoutes

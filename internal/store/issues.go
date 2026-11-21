@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -164,33 +163,6 @@ func (s *Store) CloseIssue(ctx context.Context, action stateport.Action, request
 	}, action.Events...)
 }
 
-// Issues filters canonical repository scope before pagination or decoding bodies.
-func (s *Store) Issues(ctx context.Context, scope []string, filter model.IssueFilter) ([]model.Issue, error) {
-	if err := validateIssueFilter(filter); err != nil {
-		return nil, err
-	}
-	query, args := issueQuery(scope, filter)
-	rows, err := s.readers.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, databaseError(err)
-	}
-	defer func() { _ = rows.Close() }()
-	result := make([]model.Issue, 0)
-	for rows.Next() {
-		var body string
-		var issue model.Issue
-		if err := rows.Scan(&body); err != nil {
-			return nil, databaseError(err)
-		}
-		if err := json.Unmarshal([]byte(body), &issue); err != nil {
-			return nil, refuse(corrupt, err)
-		}
-		issue.Stale = issueStale(issue, filter, s.options.Clock())
-		result = append(result, issue)
-	}
-	return result, databaseError(rows.Err())
-}
-
 func requireIssueVersion(issue model.Issue, patch model.IssuePatch) error {
 	if patch.ExpectedRevision != nil && *patch.ExpectedRevision != issue.Revision {
 		return refuse(issueChanged, nil)
@@ -212,84 +184,6 @@ func applyIssuePatch(issue model.Issue, patch model.IssuePatch) model.Issue {
 		issue.Upstream = *patch.Upstream
 	}
 	return issue
-}
-
-func validateIssueFilter(filter model.IssueFilter) error {
-	if filter.Limit < 1 || filter.Limit > 200 || filter.Before < 0 {
-		return refuse(invalid, nil)
-	}
-	if filter.WorkStatus != "" && !filter.WorkStatus.Valid() {
-		return refuse(invalid, nil)
-	}
-	if filter.Kind != "" && !filter.Kind.Valid() {
-		return refuse(invalid, nil)
-	}
-	if filter.State != "" && filter.State != "all" && filter.State != "open" && filter.State != "closed" {
-		return refuse(invalid, nil)
-	}
-	return validateIssueDurations(filter)
-}
-func issueStale(issue model.Issue, filter model.IssueFilter, now time.Time) bool {
-	value := filter.StaleAfter
-	if issue.WorkStatus == model.IssueActive && filter.ActiveStaleAfter != "" {
-		value = filter.ActiveStaleAfter
-	}
-	duration, err := time.ParseDuration(value)
-	return err == nil && issue.State == model.IssueOpen && !now.Before(issue.UpdatedAt.Add(duration))
-}
-
-func issueQuery(scope []string, filter model.IssueFilter) (string, []any) {
-	predicate, args := scopePredicate("repo", scope)
-	if scope != nil {
-		upstreams := []string{}
-		for _, repo := range scope {
-			upstreams = append(upstreams, strings.SplitN(repo, "/", 2)[0])
-		}
-		p, a := scopePredicate("upstream", upstreams)
-		predicate = "(" + predicate + " OR (repo='' AND " + p + "))"
-		args = append(args, a...)
-	}
-	query := `SELECT value FROM issues WHERE ` + predicate
-	if filter.Before > 0 {
-		query += ` AND id<?`
-		args = append(args, filter.Before)
-	}
-	if filter.Repo != "" {
-		query += ` AND repo=?`
-		args = append(args, filter.Repo)
-	}
-	if filter.State != "" && filter.State != "all" {
-		query += ` AND state=?`
-		args = append(args, filter.State)
-	}
-	for _, selector := range []struct{ path, value string }{
-		{"work_status", string(filter.WorkStatus)},
-		{"kind", string(filter.Kind)},
-	} {
-		if selector.value != "" {
-			query += ` AND json_extract(value,'$.` + selector.path + `')=?`
-			args = append(args, selector.value)
-		}
-	}
-	if filter.Query != "" {
-		query += ` AND instr(lower(json_extract(value,'$.title') || ' ' || json_extract(value,'$.body')),lower(?))>0`
-		args = append(args, filter.Query)
-	}
-	query += ` ORDER BY id DESC LIMIT ?`
-	args = append(args, filter.Limit)
-	return query, args
-}
-
-func validateIssueDurations(filter model.IssueFilter) error {
-	for _, value := range []string{filter.StaleAfter, filter.ActiveStaleAfter} {
-		if value != "" {
-			duration, err := time.ParseDuration(value)
-			if err != nil || duration <= 0 {
-				return refuse(invalid, err)
-			}
-		}
-	}
-	return nil
 }
 
 // ReopenIssue is an explicit versioned manual action; CI projection owns CI state.

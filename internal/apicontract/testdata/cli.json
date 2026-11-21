@@ -669,6 +669,11 @@
         "Position": 0
       },
       {
+        "Name": "after",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
         "Name": "before",
         "Sensitive": false,
         "Position": 0
@@ -690,6 +695,11 @@
       },
       {
         "Name": "repo",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
+        "Name": "stale",
         "Sensitive": false,
         "Position": 0
       },

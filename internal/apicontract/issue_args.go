@@ -37,11 +37,13 @@ type IssueGetManyArgs struct {
 
 type IssueListArgs struct {
 	ActiveStaleAfter string `json:"active_stale_after,omitempty" desc:"Select the active-issue stale window without acquiring or extending any lock." sensitive:"false" position:"0"`
+	After            int64  `json:"after,omitempty" desc:"Continue a newer page using the newer-page cursor from the preceding reply." min:"0" sensitive:"false" position:"0"`
 	Before           int64  `json:"before,omitempty" desc:"Continue an older page using the record-ID cursor from the preceding reply." min:"0" sensitive:"false" position:"0"`
 	Kind             string `json:"kind,omitempty" desc:"Choose the resource category the operation reads or changes." sensitive:"false" position:"0"`
 	Limit            int    `json:"limit,omitempty" desc:"Bound the number of records returned; continue with the cursor in the reply." min:"1" max:"50" sensitive:"false" position:"0"`
 	Query            string `json:"query,omitempty" desc:"Search the authorized issue metadata before pagination." sensitive:"false" position:"0"`
 	Repo             string `json:"repo,omitempty" desc:"Select a visible repository by bare name or canonical upstream/organization/name." format:"repo" sensitive:"false" position:"0"`
+	Stale            bool   `json:"stale,omitempty" desc:"List only open issues left unchanged for their whole stale window." sensitive:"false" position:"0"`
 	StaleAfter       string `json:"stale_after,omitempty" desc:"Select the general issue stale-duration window used for this observation." sensitive:"false" position:"0"`
 	State            string `json:"state,omitempty" desc:"Choose the state used by this operation; omit it to use the service policy." sensitive:"false" position:"0"`
 	WorkStatus       string `json:"work_status,omitempty" desc:"Set the issue work state independently of its open or closed state." sensitive:"false" position:"0"`

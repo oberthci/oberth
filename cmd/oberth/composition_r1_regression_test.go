@@ -55,7 +55,7 @@ func compositionRegressionFixture(t *testing.T) *serverFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(map[string]any{"git_binary": binary, "source_timeout_seconds": 60, "admission_timeout_seconds": 30, "source_client_burst": 96, "default_branch": "refs/heads/main"})
+	raw, _ := json.Marshal(map[string]any{"git_binary": binary, "source_timeout_seconds": 60, "admission_timeout_seconds": 30, "source_client_burst": 96, "default_branch": "refs/heads/main", "issue_stale_after_seconds": 86400, "issue_active_stale_after_seconds": 7200})
 	f.config.Runtime = raw
 	return f
 }

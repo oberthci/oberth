@@ -14,6 +14,7 @@ import (
 	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runtimeconfig"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/sourcecontract"
@@ -37,7 +38,12 @@ type serverRuntime struct {
 	Defaults                runtimeconfig.WorkflowDefaultsSnapshot `json:"workflow_defaults"`
 	SourcePolicy            json.RawMessage                        `json:"source_policy"`
 	Routes                  workflowpolicy.ReleaseRoutes           `json:"release_routes"`
+	IssueStaleSeconds       int                                    `json:"issue_stale_after_seconds"`
+	IssueActiveStaleSeconds int                                    `json:"issue_active_stale_after_seconds"`
 }
+
+// An installation stale window lasts from a minute to a year.
+const minIssueWindowSeconds, maxIssueWindowSeconds = 60, 365 * 24 * 3600
 
 func decodeRuntime(raw []byte) (serverRuntime, error) {
 	var r serverRuntime
@@ -57,11 +63,13 @@ func validateRuntime(r serverRuntime) error {
 	}
 	var problems []string
 	for field, valid := range map[string]bool{
-		"runtime.source_timeout_seconds":    r.SourceTimeoutSeconds >= 1 && r.SourceTimeoutSeconds <= 3600,
-		"runtime.admission_timeout_seconds": r.AdmissionTimeoutSeconds >= 1 && r.AdmissionTimeoutSeconds <= 3600,
-		"runtime.receive_max_input_bytes":   r.ReceiveMaxInputBytes >= 0,
-		"runtime.source_client_burst":       r.SourceClientBurst >= 3,
-		"runtime.default_branch":            strings.HasPrefix(r.DefaultBranch, "refs/heads/") && sourcecontract.ValidatePublicRef(r.DefaultBranch) == nil,
+		"runtime.source_timeout_seconds":           r.SourceTimeoutSeconds >= 1 && r.SourceTimeoutSeconds <= 3600,
+		"runtime.admission_timeout_seconds":        r.AdmissionTimeoutSeconds >= 1 && r.AdmissionTimeoutSeconds <= 3600,
+		"runtime.receive_max_input_bytes":          r.ReceiveMaxInputBytes >= 0,
+		"runtime.source_client_burst":              r.SourceClientBurst >= 3,
+		"runtime.default_branch":                   strings.HasPrefix(r.DefaultBranch, "refs/heads/") && sourcecontract.ValidatePublicRef(r.DefaultBranch) == nil,
+		"runtime.issue_stale_after_seconds":        validIssueWindow(r.IssueStaleSeconds),
+		"runtime.issue_active_stale_after_seconds": validIssueWindow(r.IssueActiveStaleSeconds),
 	} {
 		if !valid {
 			problems = append(problems, field+": invalid or missing value")
@@ -137,4 +145,13 @@ func (o *serverOwners) notice(err error) {
 }
 func (o *serverOwners) sourceTimeout() time.Duration {
 	return time.Duration(o.settings.SourceTimeoutSeconds) * time.Second
+}
+
+func validIssueWindow(seconds int) bool {
+	return seconds >= minIssueWindowSeconds && seconds <= maxIssueWindowSeconds
+}
+
+// issueWindows are the stale windows of issue reads that name none.
+func (r serverRuntime) issueWindows() model.IssueWindows {
+	return model.IssueWindows{General: time.Duration(r.IssueStaleSeconds) * time.Second, Active: time.Duration(r.IssueActiveStaleSeconds) * time.Second}
 }

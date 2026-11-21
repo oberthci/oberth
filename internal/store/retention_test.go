@@ -33,7 +33,7 @@ func TestIssueFiltersAndStalenessAreReadOnly(t *testing.T) {
 	before, err := s.Issue(t.Context(), first.ID)
 	requireOK(t, err)
 	for range 2 {
-		rows, err := s.Issues(t.Context(), []string{"origin/team/repo"}, model.IssueFilter{StaleAfter: "1h", ActiveStaleAfter: "1m", Limit: 200})
+		rows, err := s.Issues(t.Context(), []string{"origin/team/repo"}, model.IssueFilter{Windows: model.IssueWindows{General: time.Hour, Active: time.Minute}, Limit: 200})
 		requireOK(t, err)
 		if len(rows) != 2 || !rows[0].Stale || !rows[1].Stale {
 			t.Fatal("staleness boundary was not observed")

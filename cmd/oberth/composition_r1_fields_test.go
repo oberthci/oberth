@@ -28,7 +28,7 @@ func TestCompositionR1MountedRefusalsNameFieldAndState(t *testing.T) {
 	}
 }
 func TestCompositionR1RuntimeFieldsAreRequiredAndNamed(t *testing.T) {
-	for _, field := range []string{"source_timeout_seconds", "admission_timeout_seconds", "source_client_burst", "default_branch"} {
+	for _, field := range []string{"source_timeout_seconds", "admission_timeout_seconds", "source_client_burst", "default_branch", "issue_stale_after_seconds", "issue_active_stale_after_seconds"} {
 		t.Run(field, func(t *testing.T) {
 			var fields map[string]any
 			if err := json.Unmarshal(validRuntime(), &fields); err != nil {

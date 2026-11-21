@@ -14,7 +14,8 @@ import (
 
 type AdministrationPort interface {
 	ScopedIssue(context.Context, stateport.IssueScope, int64) (model.Issue, error)
-	ScopedIssues(context.Context, stateport.IssueScope, model.IssueFilter) ([]model.Issue, error)
+	ScopedIssues(context.Context, stateport.IssueScope, model.IssueFilter) (stateport.IssuePage, error)
+	ImportIssues(context.Context, stateport.Action, stateport.IssueImport) (stateport.IssueImportResult, error)
 	CreateIssue(context.Context, stateport.Action, model.Issue) (model.Issue, error)
 	UpdateIssue(context.Context, stateport.Action, model.IssuePatch) (model.Issue, error)
 	ChangeGrant(context.Context, stateport.Action, stateport.GrantChange) (stateport.AuthoritySnapshot, error)
@@ -39,6 +40,8 @@ func AdministrationSuite(t *testing.T, factory func(*testing.T) AdministrationFi
 		"dismiss_pending_only":   checkPendingGrantDismissal,
 		"issue_read_scope":       checkIssueReadScope,
 		"issue_write_scope":      checkIssueWriteScope,
+		"issue_list_counts":      checkIssueListCounts,
+		"issue_list_paging":      checkIssueListPaging,
 		"grant_kinds_snapshot":   checkGrantKinds,
 		"audit_scope_filters":    checkAdministrativeAudit,
 		"audit_actor":            checkAdministrativeActor,

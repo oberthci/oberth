@@ -80,8 +80,8 @@ func composedIssueFile(t *testing.T) (string, stateport.IssueImport) {
 
 func checkComposedImportDryRun(t *testing.T, f *composedFixture) {
 	t.Helper()
-	rows, err := f.owners.c.store.ScopedIssues(t.Context(), stateport.IssueScope{Global: true}, model.IssueFilter{Limit: 50, State: "all"})
-	if err != nil || len(rows) != 0 {
+	page, err := f.owners.c.store.ScopedIssues(t.Context(), stateport.IssueScope{Global: true}, model.IssueFilter{Limit: 50, State: "all"})
+	if err != nil || len(page.Issues) != 0 || page.Total != 0 {
 		t.Fatal("composed dry run wrote", err)
 	}
 }

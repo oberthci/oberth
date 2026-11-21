@@ -55,6 +55,8 @@ server:
     image_prefixes: []
     source_policy: {}
     release_routes: {}
+    issue_stale_after_seconds: 86400
+    issue_active_stale_after_seconds: 7200
     controller_namespace: oberth
     controller_configmap: oberth-controller-config
     source_configmap: oberth-source

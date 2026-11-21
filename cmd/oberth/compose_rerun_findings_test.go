@@ -41,7 +41,7 @@ func TestComposedRefusedRerunListsThePushFindings(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("first server did not stop")
 	}
-	raw, _ := json.Marshal(serverRuntime{Routes: workflowpolicy.ReleaseRoutes{gittest.Repository: {{Pattern: "v*", File: ".oberth/release.yaml"}}}, GitBinary: f.git.Binary, SourceTimeoutSeconds: 15, AdmissionTimeoutSeconds: 10, SourceClientBurst: 30, DefaultBranch: "refs/heads/main", ImagePrefixes: []string{"registry.example/"}})
+	raw, _ := json.Marshal(serverRuntime{Routes: workflowpolicy.ReleaseRoutes{gittest.Repository: {{Pattern: "v*", File: ".oberth/release.yaml"}}}, GitBinary: f.git.Binary, SourceTimeoutSeconds: 15, AdmissionTimeoutSeconds: 10, SourceClientBurst: 30, DefaultBranch: "refs/heads/main", ImagePrefixes: []string{"registry.example/"}, IssueStaleSeconds: 86400, IssueActiveStaleSeconds: 7200})
 	f.config.Runtime = raw
 	f.restartChannels(t)
 	_, restarted := f.run(t)

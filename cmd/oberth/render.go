@@ -112,6 +112,9 @@ func renderView(out io.Writer, value map[string]any, detail bool) (bool, error) 
 	if runs, ok := value["runs"].([]any); ok {
 		return true, renderRuns(out, runs, value, detail)
 	}
+	if _, ok := value["counts"].(map[string]any); ok && value["issues"] != nil {
+		return true, renderIssues(out, value, detail)
+	}
 	if value["id"] != nil && value["status"] != nil && value["ref"] != nil {
 		return true, renderRun(out, value, detail)
 	}

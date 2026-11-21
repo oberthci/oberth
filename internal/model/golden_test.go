@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestModelWireGoldens(t *testing.T) {
@@ -20,7 +21,8 @@ func TestModelWireGoldens(t *testing.T) {
 		{"issue", Issue{}, `{"id":0,"revision":0,"kind":"","title":"","body":"","state":"","work_status":"","upstream":"","repo":"","branch":"","occurrences":0,"ci_origin":"","ci_work_id":"","stale":false,"lock":null,"created_at":"0001-01-01T00:00:00Z","updated_at":"0001-01-01T00:00:00Z","closed_at":null}`},
 		{"issue lock", IssueLock{}, `{"owner":"","acquired_at":"0001-01-01T00:00:00Z","expires_at":"0001-01-01T00:00:00Z"}`},
 		{"issue patch", IssuePatch{ID: 1, Title: &title, Body: &body, Upstream: &upstream, ExpectedRevision: &revision, ExpectedBodySHA256: "digest", WorkStatus: &status}, `{"id":1,"expected_revision":2,"expected_body_sha256":"digest","title":"title","body":"body","work_status":"active","upstream":"origin"}`},
-		{"issue filter", IssueFilter{Repo: "origin/org/repo", WorkStatus: IssueActive, Kind: IssueCI, State: "all", Query: "needle", Before: 3, Limit: 20, StaleAfter: "168h", ActiveStaleAfter: "1h"}, `{"repo":"origin/org/repo","work_status":"active","kind":"ci","state":"all","query":"needle","before":3,"limit":20,"stale_after":"168h","active_stale_after":"1h"}`},
+		{"issue filter", IssueFilter{Repo: "origin/org/repo", WorkStatus: IssueActive, Kind: IssueCI, State: "all", Query: "needle", Stale: true, Before: 3, After: 1, Limit: 20, Windows: IssueWindows{General: time.Hour, Active: time.Minute}}, `{"repo":"origin/org/repo","work_status":"active","kind":"ci","state":"all","query":"needle","stale":true,"before":3,"after":1,"limit":20}`},
+		{"issue counts", IssueCounts{Open: 7, Closed: 2, Todo: 3, Active: 2, Waiting: 1, Review: 1, Stale: 4}, `{"open":7,"closed":2,"todo":3,"active":2,"waiting":1,"review":1,"stale":4}`},
 		{"invitation", Invitation{}, `{"id":"","identity":"","server_url":"","ca_pin":"","scope":null,"expires_at":"0001-01-01T00:00:00Z"}`},
 		{"invitation file", InvitationFile{}, `{"id":"","identity":"","server_url":"","ca_pin":"","scope":null,"expires_at":"0001-01-01T00:00:00Z","known_hosts":"","secret":""}`},
 		{"redemption", InviteRedemption{}, `{"secret":"","server_url":"","ca_pin":"","csr":"","ssh_public_key":""}`},

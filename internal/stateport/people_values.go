@@ -53,6 +53,18 @@ type IssueScope struct {
 	Global    bool
 }
 
+// IssuePage is one page of a scope's issues, newest first, read in one
+// snapshot with its totals. Counts covers every visible issue matching the
+// filter's repository, kind and query; Total those matching the whole
+// filter; Offset those of Total newer than the page's newest issue, or than
+// its cursor when the page is empty.
+type IssuePage struct {
+	Issues []model.Issue
+	Counts model.IssueCounts
+	Total  int
+	Offset int
+}
+
 // CertificateBinding renews the uplink lifetime with its public certificate pin.
 type CertificateBinding struct {
 	Fingerprint, SPKI string

@@ -14,8 +14,9 @@ func checkIssueReadScope(t *testing.T, f AdministrationFixture) {
 	}
 	for _, allowGlobal := range []bool{false, true} {
 		scope := stateport.IssueScope{Upstreams: []string{"origin"}, Global: allowGlobal}
-		rows, err := f.Port.ScopedIssues(t.Context(), scope, model.IssueFilter{Limit: 20})
+		page, err := f.Port.ScopedIssues(t.Context(), scope, model.IssueFilter{Limit: 20})
 		mustRun(t, err)
+		rows := page.Issues
 		want := 1
 		if allowGlobal {
 			want = 3

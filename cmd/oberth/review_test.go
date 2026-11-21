@@ -289,7 +289,7 @@ func TestUnknownCommandOffersNearMatch(t *testing.T) {
 
 func TestNilPageListSaysEmpty(t *testing.T) {
 	app, out, diag := fixture(t, fake.Bindings())
-	if app.run(t.Context(), []string{"issue", "list"}) != 0 || out.String() != "no issues\n" {
+	if app.run(t.Context(), []string{"issue", "list"}) != 0 || out.String() != "0 open (0 todo, 0 active, 0 waiting, 0 review, 0 stale), 0 closed\nno issues\n" {
 		t.Fatalf("empty list disappeared: %s %s", out.String(), diag.String())
 	}
 }

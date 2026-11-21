@@ -3,7 +3,6 @@ package fake
 import (
 	"context"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -56,18 +55,13 @@ func (f *Runs) Issues(ctx context.Context, scope []string, q model.IssueFilter) 
 	if err := f.before(ctx, "Issues", false); err != nil {
 		return nil, err
 	}
-	out := []model.Issue{}
+	set := []model.Issue{}
 	for _, v := range f.data.issues {
-		if !issueMatches(v, scope, q) {
-			continue
+		if issueVisible(v, scope) && issueInSet(v, q) {
+			set = append(set, v.Clone())
 		}
-		out = append(out, v.Clone())
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
-	if len(out) > q.Limit {
-		out = out[:q.Limit]
-	}
-	return out, nil
+	return issuePage(set, q, f.clock()).Issues, nil
 }
 func issueVisible(v model.Issue, scope []string) bool {
 	if scope == nil {
@@ -230,20 +224,21 @@ func (m *runMemory) ciIssue(r stateport.Run) model.Issue {
 	return issue
 }
 
-func issueMatches(v model.Issue, scope []string, q model.IssueFilter) bool {
-	if !issueVisible(v, scope) || q.Before > 0 && v.ID >= q.Before || q.Repo != "" && q.Repo != v.Repo {
-		return false
-	}
-	return issueSelectors(v, q)
-}
-func issueSelectors(v model.Issue, q model.IssueFilter) bool {
-	if q.State != "" && q.State != "all" && q.State != string(v.State) || q.Kind != "" && q.Kind != v.Kind {
-		return false
-	}
-	if q.WorkStatus != "" && q.WorkStatus != v.WorkStatus {
+// issueInSet matches the filter's repository, kind and query, the selectors
+// that also bound the list's counts.
+func issueInSet(v model.Issue, q model.IssueFilter) bool {
+	if q.Repo != "" && q.Repo != v.Repo || q.Kind != "" && q.Kind != v.Kind {
 		return false
 	}
 	return q.Query == "" || strings.Contains(strings.ToLower(v.Title+" "+v.Body), strings.ToLower(q.Query))
+}
+
+// issueSelected matches the filter's state, work status and stale choice.
+func issueSelected(v model.Issue, q model.IssueFilter) bool {
+	if q.State != "" && q.State != "all" && q.State != string(v.State) {
+		return false
+	}
+	return (q.WorkStatus == "" || q.WorkStatus == v.WorkStatus) && (!q.Stale || v.Stale)
 }
 
 func patchIssue(v model.Issue, p model.IssuePatch) model.Issue {

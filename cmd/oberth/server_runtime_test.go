@@ -34,6 +34,29 @@ func TestRuntimeRejectsMissingSourceBudgetAndUnknownSettings(t *testing.T) {
 	}
 }
 
+func TestRuntimeIssueStaleWindowsAreBoundedInstallationDefaults(t *testing.T) {
+	r, err := decodeRuntime(validRuntime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.issueWindows(); got.General != 24*time.Hour || got.Active != 2*time.Hour {
+		t.Fatal("issue stale windows do not reach the service", got)
+	}
+	for field, values := range map[string][]int{"issue_stale_after_seconds": {0, 59, 31536001}, "issue_active_stale_after_seconds": {-1, 59, 31536001}} {
+		for _, value := range values {
+			var fields map[string]any
+			if err := json.Unmarshal(validRuntime(), &fields); err != nil {
+				t.Fatal(err)
+			}
+			fields[field] = value
+			raw, _ := json.Marshal(fields)
+			if _, err := decodeRuntime(raw); err == nil || !strings.Contains(err.Error(), "runtime."+field) {
+				t.Fatal("out-of-range stale window accepted or unnamed", field, value, err)
+			}
+		}
+	}
+}
+
 func TestRuntimeRequiresExplicitGitExecutable(t *testing.T) {
 	for _, raw := range []string{`{}`, `{"git_binary":""}`, `{"git_binary":"git"}`} {
 		if _, err := decodeRuntime([]byte(raw)); err == nil || !strings.Contains(err.Error(), "runtime.git_binary") {

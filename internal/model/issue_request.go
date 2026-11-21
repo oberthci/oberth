@@ -49,17 +49,20 @@ func (v IssuePatch) Validate() error {
 	return publicerr.Classify(err)
 }
 
-// IssueFilter is the public issue_list input; scope is supplied by Actor, never
-// by a caller-selected list of visible upstreams. State is open, closed or all.
-// Empty selectors and zero limits take the service defaults.
+// IssueFilter selects one page of an issue list; scope is supplied by Actor,
+// never by a caller-selected list of visible upstreams. State is open, closed
+// or all; Stale keeps only stale open issues under Windows. Before pages to
+// older issues and After to newer ones, by issue ID. Empty selectors and zero
+// limits take the service defaults.
 type IssueFilter struct {
-	Repo             string          `json:"repo,omitempty"`
-	WorkStatus       IssueWorkStatus `json:"work_status,omitempty"`
-	Kind             IssueKind       `json:"kind,omitempty"`
-	State            string          `json:"state,omitempty"`
-	Query            string          `json:"query,omitempty"`
-	Before           int64           `json:"before,omitempty"`
-	Limit            int             `json:"limit,omitempty"`
-	StaleAfter       string          `json:"stale_after,omitempty"`
-	ActiveStaleAfter string          `json:"active_stale_after,omitempty"`
+	Repo       string          `json:"repo,omitempty"`
+	WorkStatus IssueWorkStatus `json:"work_status,omitempty"`
+	Kind       IssueKind       `json:"kind,omitempty"`
+	State      string          `json:"state,omitempty"`
+	Query      string          `json:"query,omitempty"`
+	Stale      bool            `json:"stale,omitempty"`
+	Before     int64           `json:"before,omitempty"`
+	After      int64           `json:"after,omitempty"`
+	Limit      int             `json:"limit,omitempty"`
+	Windows    IssueWindows    `json:"-"`
 }

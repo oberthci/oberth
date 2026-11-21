@@ -209,6 +209,16 @@
               "type": "integer",
               "minimum": 3
             },
+            "issue_stale_after_seconds": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 31536000
+            },
+            "issue_active_stale_after_seconds": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 31536000
+            },
             "default_branch": {
               "type": "string",
               "pattern": "^refs/heads/.+"
@@ -263,7 +273,9 @@
             "default_branch",
             "image_prefixes",
             "source_policy",
-            "release_routes"
+            "release_routes",
+            "issue_stale_after_seconds",
+            "issue_active_stale_after_seconds"
           ]
         }
       },

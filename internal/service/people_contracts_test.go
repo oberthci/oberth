@@ -323,7 +323,8 @@ func finishCISequence(t *testing.T, p *peopleFixture, runs []stateport.Run) {
 func assertCIRollback(t *testing.T, p *peopleFixture, runStore service.RunStore, runs []stateport.Run) int64 {
 	t.Helper()
 	f := p.f
-	rows, e := p.f.c.People.Issues.ScopedIssues(t.Context(), stateport.IssueScope{Global: true}, model.IssueFilter{Limit: 50})
+	page, e := p.f.c.People.Issues.ScopedIssues(t.Context(), stateport.IssueScope{Global: true}, model.IssueFilter{Limit: 50})
+	rows := page.Issues
 	if e != nil || len(rows) != 1 || rows[0].State != model.IssueOpen || rows[0].CIWorkID != runs[2].ID || rows[0].Occurrences != 2 {
 		t.Fatal("old/other-branch pass closed red issue", rows, e)
 	}

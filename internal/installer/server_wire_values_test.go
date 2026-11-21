@@ -53,6 +53,11 @@ func validateChartRuntime(r chartServerRuntime) error {
 	if !chartDefaultBranch(r.DefaultBranch) {
 		return fmt.Errorf("runtime: invalid default branch")
 	}
+	for _, seconds := range []int{r.IssueStaleSeconds, r.IssueActiveStaleSeconds} {
+		if seconds < 60 || seconds > 365*24*3600 {
+			return fmt.Errorf("runtime: invalid issue stale window")
+		}
+	}
 	return r.Routes.Validate()
 }
 

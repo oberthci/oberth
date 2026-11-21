@@ -96,7 +96,7 @@ func composeFixture(t *testing.T, binary string) *composedFixture {
 	f.forge = forge
 	f.identity, _ = composeSSHKey(t, t.TempDir(), client.UplinkPushKeyFile)
 	f.config.Files.ForgeKey, _ = composeSSHKey(t, forgeDir, "mounted-forge-key")
-	raw, _ := json.Marshal(serverRuntime{Routes: workflowpolicy.ReleaseRoutes{gittest.Repository: {{Pattern: "v*", File: ".oberth/release.yaml"}}}, GitBinary: f.git.Binary, SourceTimeoutSeconds: 15, AdmissionTimeoutSeconds: 10, SourceClientBurst: 30, DefaultBranch: "refs/heads/main", ImagePrefixes: []string{"oberth.ci/"}})
+	raw, _ := json.Marshal(serverRuntime{Routes: workflowpolicy.ReleaseRoutes{gittest.Repository: {{Pattern: "v*", File: ".oberth/release.yaml"}}}, GitBinary: f.git.Binary, SourceTimeoutSeconds: 15, AdmissionTimeoutSeconds: 10, SourceClientBurst: 30, DefaultBranch: "refs/heads/main", ImagePrefixes: []string{"oberth.ci/"}, IssueStaleSeconds: 86400, IssueActiveStaleSeconds: 7200})
 	f.config.Runtime = raw
 	platform := serverPlatform{cluster: func(context.Context) (clusterClients, error) {
 		return clusterClients{Kube: f.kube, Argo: f.argo, REST: &rest.Config{Host: "https://cluster.oberth.ci"}}, nil

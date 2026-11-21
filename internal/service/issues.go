@@ -32,28 +32,46 @@ func issueReadScope(a actor.Actor) stateport.IssueScope {
 	return stateport.IssueScope{Upstreams: scope, Global: a.Admin && len(a.Scope) == 0}
 }
 
-func issueObservation(v model.Issue, stale, active string, now time.Time) (model.Issue, error) {
-	duration := stale
-	if v.WorkStatus == model.IssueActive && active != "" {
-		duration = active
+// issueWindows resolves a read's stale windows. An explicit stale_after sets
+// the general window, and the active one too unless active_stale_after is
+// given; a window the caller omits is the installation's.
+func (s *Service) issueWindows(stale, active string) (model.IssueWindows, error) {
+	w := s.c.People.IssueWindows
+	general, err := issueWindow(stale, w.General, "stale_after")
+	if err != nil {
+		return w, err
 	}
-	for _, raw := range []string{stale, active} {
-		if raw != "" {
-			d, e := time.ParseDuration(raw)
-			if e != nil || d <= 0 {
-				return model.Issue{}, bad("stale_after")
-			}
-		}
+	if stale != "" {
+		w.Active = general
 	}
-	d, _ := time.ParseDuration(duration)
-	v.Stale = duration != "" && v.State == model.IssueOpen && !now.Before(v.UpdatedAt.Add(d))
+	w.General = general
+	w.Active, err = issueWindow(active, w.Active, "active_stale_after")
+	return w, err
+}
+func issueWindow(raw string, fallback time.Duration, field string) (time.Duration, error) {
+	if raw == "" {
+		return fallback, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 0, bad(field)
+	}
+	return d, nil
+}
+
+// withoutExpiredLock observes an expired lock as absent; it never writes.
+func withoutExpiredLock(v model.Issue, now time.Time) model.Issue {
 	if v.Lock != nil && !now.Before(v.Lock.ExpiresAt) {
 		v.Lock = nil
 	}
-	return v, nil
+	return v
 }
 func (s *Service) PrepareIssueGet(ctx context.Context, c apicontract.Caller, q apicontract.IssueGetArgs) (apicontract.Call[model.Issue], error) {
 	a, err := s.peopleAllow(ctx, c.Actor, "issue_get")
+	if err != nil {
+		return nil, err
+	}
+	windows, err := s.issueWindows(q.StaleAfter, q.ActiveStaleAfter)
 	if err != nil {
 		return nil, err
 	}
@@ -65,10 +83,9 @@ func (s *Service) PrepareIssueGet(ctx context.Context, c apicontract.Caller, q a
 		if e != nil {
 			return v, e
 		}
-		v, e = issueObservation(v, q.StaleAfter, q.ActiveStaleAfter, s.c.Now())
-		if e != nil {
-			return v, e
-		}
+		now := s.c.Now()
+		v.Stale = windows.Stale(v, now)
+		v = withoutExpiredLock(v, now)
 		raw, e := json.Marshal(v)
 		if e == nil && len(raw) > issueBytes {
 			return model.Issue{}, refuse(issueTooLarge)
@@ -123,35 +140,42 @@ func (s *Service) PrepareIssueList(ctx context.Context, c apicontract.Caller, q 
 		}
 		q.Repo = r.Canonical
 	}
-	f := model.IssueFilter{Repo: q.Repo, Kind: model.IssueKind(q.Kind), State: q.State, WorkStatus: model.IssueWorkStatus(q.WorkStatus), Query: q.Query, Before: q.Before, Limit: q.Limit, StaleAfter: q.StaleAfter, ActiveStaleAfter: q.ActiveStaleAfter}
+	f := model.IssueFilter{Repo: q.Repo, Kind: model.IssueKind(q.Kind), State: q.State, WorkStatus: model.IssueWorkStatus(q.WorkStatus), Query: q.Query, Stale: q.Stale, Before: q.Before, After: q.After, Limit: q.Limit}
 	if f.Limit == 0 {
 		f.Limit = 20
 	}
 	if f.State == "" {
 		f.State = "open"
 	}
-	if err := s.issueSelectors(f); err != nil {
+	windows, err := s.issueWindows(q.StaleAfter, q.ActiveStaleAfter)
+	if err = errors.Join(issueSelectors(f), err); err != nil {
 		return nil, err
 	}
+	f.Windows = windows
 	return bounded(func(ctx context.Context) (apicontract.IssuePage, error) { return s.issuePage(ctx, scope, f) }), nil
 }
+
+// issuePage returns metadata rows with their totals; each cursor is offered
+// only when issues lie beyond the page in its direction.
 func (s *Service) issuePage(ctx context.Context, scope stateport.IssueScope, f model.IssueFilter) (apicontract.IssuePage, error) {
-	rows, err := s.c.People.Issues.ScopedIssues(ctx, scope, f)
-	out := apicontract.IssuePage{Issues: []model.Issue{}}
+	page, err := s.c.People.Issues.ScopedIssues(ctx, scope, f)
+	out := apicontract.IssuePage{Issues: []model.Issue{}, Counts: page.Counts, Total: page.Total, Offset: page.Offset}
 	if err != nil {
 		return out, err
 	}
-	for _, v := range rows {
+	now := s.c.Now()
+	for _, v := range page.Issues {
 		v.Body = ""
 		v.History = nil
-		v, err = issueObservation(v, f.StaleAfter, f.ActiveStaleAfter, s.c.Now())
-		if err != nil {
-			return out, err
-		}
-		out.Issues = append(out.Issues, v)
+		out.Issues = append(out.Issues, withoutExpiredLock(v, now))
 	}
-	if len(rows) == f.Limit {
-		out.NextBefore = rows[len(rows)-1].ID
+	if n := len(out.Issues); n > 0 {
+		if page.Offset > 0 {
+			out.NextAfter = out.Issues[0].ID
+		}
+		if page.Offset+n < page.Total {
+			out.NextBefore = out.Issues[n-1].ID
+		}
 	}
 	return out, nil
 }
@@ -318,7 +342,7 @@ func (s *Service) PrepareIssueLock(ctx context.Context, c apicontract.Caller, q 
 	}), nil
 }
 
-func (s *Service) issueSelectors(f model.IssueFilter) error {
+func issueSelectors(f model.IssueFilter) error {
 	var errs []error
 	if f.Kind != "" && !f.Kind.Valid() {
 		errs = append(errs, bad("kind"))
@@ -329,6 +353,8 @@ func (s *Service) issueSelectors(f model.IssueFilter) error {
 	if f.WorkStatus != "" && !f.WorkStatus.Valid() {
 		errs = append(errs, bad("work_status"))
 	}
-	_, err := issueObservation(model.Issue{}, f.StaleAfter, f.ActiveStaleAfter, s.c.Now())
-	return errors.Join(append(errs, err)...)
+	if f.Before > 0 && f.After > 0 {
+		errs = append(errs, bad("after"))
+	}
+	return errors.Join(errs...)
 }

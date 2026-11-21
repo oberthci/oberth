@@ -83,3 +83,33 @@ type IssueLock struct {
 	AcquiredAt time.Time `json:"acquired_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
 }
+
+// IssueWindows are one read's stale windows: Active for active issues,
+// General for every other work status. A zero window marks nothing stale.
+type IssueWindows struct {
+	General time.Duration
+	Active  time.Duration
+}
+
+// Stale reports whether an open issue has gone unchanged for its whole
+// window at now. It is computed on every read and never stored; the store's
+// list query applies the same rule to count and filter.
+func (w IssueWindows) Stale(v Issue, now time.Time) bool {
+	window := w.General
+	if v.WorkStatus == IssueActive {
+		window = w.Active
+	}
+	return window > 0 && v.State == IssueOpen && !now.Before(v.UpdatedAt.Add(window))
+}
+
+// IssueCounts are a list's totals: open and closed issues and, among the
+// open ones, each work status and the stale ones.
+type IssueCounts struct {
+	Open    int `json:"open"`
+	Closed  int `json:"closed"`
+	Todo    int `json:"todo"`
+	Active  int `json:"active"`
+	Waiting int `json:"waiting"`
+	Review  int `json:"review"`
+	Stale   int `json:"stale"`
+}

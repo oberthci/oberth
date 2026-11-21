@@ -109,5 +109,5 @@ func TestStoreMountConfigIsRequired(t *testing.T) {
 }
 
 func validRuntime() []byte {
-	return []byte(`{"git_binary":"/usr/bin/git","source_timeout_seconds":60,"admission_timeout_seconds":30,"source_client_burst":96,"default_branch":"refs/heads/main"}`)
+	return []byte(`{"git_binary":"/usr/bin/git","source_timeout_seconds":60,"admission_timeout_seconds":30,"source_client_burst":96,"default_branch":"refs/heads/main","issue_stale_after_seconds":86400,"issue_active_stale_after_seconds":7200}`)
 }
