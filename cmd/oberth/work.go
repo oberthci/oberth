@@ -211,7 +211,8 @@ func (s *flowSession) releaseHead(repo string) (string, error) {
 	branch := ""
 	for _, r := range repos.Repositories {
 		if r.Repo == repo {
-			branch = r.DefaultBranch
+			// The server may name the branch in full; the fetch below adds the prefix.
+			branch = strings.TrimPrefix(r.DefaultBranch, "refs/heads/")
 		}
 	}
 	if branch == "" {
