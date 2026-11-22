@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/api/fake"
 	"github.com/oberthci/oberth/internal/apicontract"
-	"github.com/oberthci/oberth/internal/client"
 )
 
 func serverTrustBindings() apicontract.Bindings {
@@ -46,20 +44,7 @@ func TestRepoAddWithoutSavedServerKeysNamesTheFlag(t *testing.T) {
 	b := serverTrustBindings()
 	command := urlCheckoutCommand(t, b, false)
 	command.app.env = func(string) string { return "" }
-	path := filepath.Join(command.app.base, "install", "installation.json")
-	raw, err := client.ReadPrivate(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var profile client.Profile
-	if err = json.Unmarshal(raw, &profile); err != nil {
-		t.Fatal(err)
-	}
-	profile.KnownHosts = ""
-	raw, _ = json.Marshal(profile)
-	if err = client.WritePrivate(path, raw); err != nil {
-		t.Fatal(err)
-	}
+	clearProfileServerKeys(t, filepath.Join(command.app.base, "install"))
 	before, err := os.ReadFile(filepath.Join(command.app.directory, ".git", "config"))
 	if err != nil {
 		t.Fatal(err)
