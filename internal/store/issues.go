@@ -139,7 +139,7 @@ func (s *Store) ChangeIssueLock(ctx context.Context, action stateport.Action, re
 
 func (s *Store) CloseIssue(ctx context.Context, action stateport.Action, request stateport.IssueClose) error {
 	action.Events = slices.Clone(action.Events)
-	return s.change(ctx, mutation{action.Actor, "issue.close", "issue", formatID(request.ID), nil}, func(tx *sql.Tx) error {
+	return s.change(ctx, mutation{action.Actor, "issue.close", "issue", formatID(request.ID), map[string]string{"reason": action.Reason}}, func(tx *sql.Tx) error {
 		issue, err := readIssue(ctx, tx, request.ID)
 		if err != nil {
 			return err

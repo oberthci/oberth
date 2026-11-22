@@ -111,7 +111,7 @@ func TestIneligibleNativeOutcomesLeaveCIIssueUntouched(t *testing.T) {
 	if e != nil || fmt.Sprint(before) != fmt.Sprint(after) {
 		t.Fatal("ineligible native verdict changed CI issue", before, after, e)
 	}
-	call, e := f.s.PrepareIssueClose(t.Context(), adminCaller(), apicontract.IssueCloseArgs{ID: before[0].ID})
+	call, e := f.s.PrepareIssueClose(t.Context(), workerCaller(), apicontract.IssueCloseArgs{ID: before[0].ID})
 	if _, e = execute(t.Context(), call, e); e == nil {
 		t.Fatal("CI issue closed without later pass")
 	}

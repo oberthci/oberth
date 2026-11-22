@@ -52,9 +52,9 @@ func TestRefusalRemediesNameInvitationAndIssue(t *testing.T) {
 	if e != nil || len(issues) != 1 {
 		t.Fatal(issues, e)
 	}
-	call, e := f.s.PrepareIssueClose(t.Context(), adminCaller(), apicontract.IssueCloseArgs{ID: issues[0].ID})
+	call, e := f.s.PrepareIssueClose(t.Context(), workerCaller(), apicontract.IssueCloseArgs{ID: issues[0].ID})
 	_, e = execute(t.Context(), call, e)
-	if !strings.Contains(publicerr.Classify(e).Error(), "later run passes") {
+	if !strings.Contains(publicerr.Classify(e).Error(), "ask an administrator to close it") {
 		t.Fatal("CI issue remedy", e)
 	}
 }

@@ -72,9 +72,9 @@ access earlier, revoke the same identity:
 ```sh
 oberth uplink revoke browser-reader --reason 'End browser access'
 ```
-Revocation cannot retract copied data. Issue bodies are plain text. An open issue is stale after 24
-hours unchanged (2 hours if `active`); reads compute it, never write. Set the windows with
-`server.runtime.issue_stale_after_seconds` and `issue_active_stale_after_seconds`.
+Revocation cannot retract copied data. Issue bodies are plain text. An administrator closes a CI
+issue with `oberth issue close <id> --reason '<why>'`. Open issues go stale after 24 hours unchanged
+(2 if `active`): `server.runtime.issue_stale_after_seconds`, `issue_active_stale_after_seconds`.
 
 ## Grants and secrets
 

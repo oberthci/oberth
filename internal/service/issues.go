@@ -286,7 +286,9 @@ func (s *Service) issueTransition(ctx context.Context, c apicontract.Caller, q i
 		if err != nil {
 			return apicontract.IssueResult{}, err
 		}
-		if v.Kind == model.IssueCI {
+		// Runs own CI issues; an administrator may still close one, which is
+		// how an issue that no later run will close is cleared.
+		if v.Kind == model.IssueCI && (q.Action != "issue_close" || !a.Admin) {
 			return apicontract.IssueResult{}, refuse(ciIssueManaged)
 		}
 		request := stateport.IssueClose{ID: q.ID, Revision: v.Revision, WorkID: v.CIWorkID}
