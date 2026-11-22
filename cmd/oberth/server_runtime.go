@@ -88,11 +88,23 @@ type clusterClients struct {
 	REST *rest.Config
 }
 
+// The server's cluster clients send at most serverClientQPS requests a second
+// after a burst of serverClientBurst, instead of the library's 5 and 10. One
+// admission reads each distinct account at most twice: a 40-step push makes two
+// reads, and one whose 40 steps each hold their own secret makes 82, which the
+// burst still serves without waiting. The API server's priority and fairness
+// remains the limiter that protects the cluster.
+const serverClientQPS, serverClientBurst = 50, 100
+
 func inClusterClients(context.Context) (clusterClients, error) {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		return clusterClients{}, err
 	}
+	return newClusterClients(cfg)
+}
+func newClusterClients(cfg *rest.Config) (clusterClients, error) {
+	cfg.QPS, cfg.Burst = serverClientQPS, serverClientBurst
 	kube, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return clusterClients{}, err
