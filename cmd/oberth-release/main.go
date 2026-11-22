@@ -51,6 +51,8 @@ const (
 	assetUnconfirmed    refusal = "Published release asset cannot be confirmed."
 	immutable           refusal = "Published release bytes differ."
 	notVerified         refusal = "Release has no matching clean verification."
+	tokenShared         refusal = "Release token file is open to group or others."
+	tokenInside         refusal = "Release token file is inside the release directory."
 )
 
 func (r refusal) Error() string { return string(r) }
@@ -82,6 +84,8 @@ func (r refusal) Remedy() string {
 		assetUnconfirmed:    "Check the named asset on GitHub; delete it only if its upload is incomplete.",
 		immutable:           "Use the existing identical release or publish a new version.",
 		notVerified:         "Run clean verification for these exact release bytes before advancing latest.",
+		tokenShared:         "Run chmod 600 on the token file, then retry.",
+		tokenInside:         "Move the token file out of the release directory, then retry.",
 	}[r]
 }
 

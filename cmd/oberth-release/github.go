@@ -55,12 +55,48 @@ func publicationFor(o options) (publication, error) {
 	if err != nil || len(bytes.TrimSpace(token)) == 0 {
 		return publication{}, releaseToken
 	}
+	if err := privateTokenFile(o.token, o.dir); err != nil {
+		return publication{}, err
+	}
 	repository, ok := githubRepository(o.origin)
 	if !ok {
 		return publication{}, inputs
 	}
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return publication{api: githubAPI, uploads: githubUploads, repository: repository, token: strings.TrimSpace(string(token)), dir: o.dir, client: client}, nil
+}
+
+// privateTokenFile accepts the token file only when group and others have no
+// access to it and it lies outside the release directory, so neither another
+// user nor a publication of that directory can expose it.
+func privateTokenFile(token, dir string) error {
+	info, err := os.Stat(token)
+	if err != nil || !info.Mode().IsRegular() {
+		return releaseToken
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return tokenShared
+	}
+	file, err := realPath(token)
+	if err != nil {
+		return releaseToken
+	}
+	root, err := realPath(dir)
+	if err != nil {
+		return nil
+	}
+	if relative, err := filepath.Rel(root, file); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return tokenInside
+	}
+	return nil
+}
+
+func realPath(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(resolved)
 }
 
 // githubRepository reads owner/name from https://github.com/<owner>/<name>/releases/download.

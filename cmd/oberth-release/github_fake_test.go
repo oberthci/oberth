@@ -202,14 +202,6 @@ func (f *githubFake) update(w http.ResponseWriter, r *http.Request, path string)
 	f.answer(w, true, release.githubRelease)
 }
 
-// locked runs step under the fake's lock, for setup and checks that a test
-// makes while another process may be talking to the fake.
-func (f *githubFake) locked(step func()) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	step()
-}
-
 // writes lists the calls that change GitHub.
 func (f *githubFake) writes() []string {
 	f.mu.Lock()

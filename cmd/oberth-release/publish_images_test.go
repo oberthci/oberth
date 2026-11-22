@@ -4,7 +4,17 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"io"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/releaseverify"
 )
@@ -59,8 +70,9 @@ func TestPublishProvesChartImagesBeforeWriting(t *testing.T) {
 			status.Store(int32(code))
 			requests.Store(0)
 			checkImagePublication(t, tool, files, imagePublicationCase{repository, code})
+			// 404 also runs clean verification; 200 also publishes through GitHub.
 			want := int32(2)
-			if code == 404 {
+			if code == 404 || code == 200 {
 				want = 4
 			}
 			if requests.Load() != want {
@@ -76,8 +88,9 @@ type imagePublicationCase struct {
 }
 
 // githubProxy stands between the tool and GitHub: it records each tunnel the
-// tool asks for and refuses it, so no test reaches the network.
-func githubProxy(t *testing.T) (*httptest.Server, func() []string) {
+// tool asks for and joins it to target, or refuses it when target is empty,
+// so no test reaches the network.
+func githubProxy(t *testing.T, target string) (*httptest.Server, func() []string) {
 	t.Helper()
 	var mu sync.Mutex
 	var tunnels []string
@@ -85,7 +98,11 @@ func githubProxy(t *testing.T) (*httptest.Server, func() []string) {
 		mu.Lock()
 		tunnels = append(tunnels, r.Method+" "+r.Host)
 		mu.Unlock()
-		w.WriteHeader(http.StatusForbidden)
+		if target == "" || r.Method != http.MethodConnect {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		tunnel(t, w, target)
 	}))
 	t.Cleanup(proxy.Close)
 	return proxy, func() []string {
@@ -95,10 +112,99 @@ func githubProxy(t *testing.T) (*httptest.Server, func() []string) {
 	}
 }
 
+func tunnel(t *testing.T, w http.ResponseWriter, target string) {
+	server, err := net.Dial("tcp", target)
+	if err != nil {
+		t.Error(err)
+		w.WriteHeader(http.StatusBadGateway)
+		return
+	}
+	client, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		t.Error(err)
+		_ = server.Close()
+		return
+	}
+	if _, err := io.WriteString(client, "HTTP/1.1 200 Connection established\r\n\r\n"); err != nil {
+		t.Error(err)
+	}
+	go func() { _, _ = io.Copy(server, client); _ = server.Close() }()
+	_, _ = io.Copy(client, server)
+	_ = client.Close()
+}
+
+// githubTLS serves the fake under GitHub's API and upload host names with a
+// test certificate and returns its address and the certificate file.
+func githubTLS(t *testing.T, fake *githubFake) (string, string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "api.github.com"},
+		DNSNames: []string{"api.github.com", "uploads.github.com"}, NotBefore: time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC), NotAfter: time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(fake.serve))
+	server.TLS = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}}
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return server.Listener.Addr().String(), ca
+}
+
+// publishedThroughGitHub runs the built tool against the fake GitHub with
+// stray files beside the signed ones: exactly the ten signed names reach the
+// release, and a token file inside the release directory is refused.
+func publishedThroughGitHub(t *testing.T, tool, dir, token string) {
+	t.Helper()
+	_, fake := githubFixture(t)
+	fake.tags["v1.2.3"] = true
+	address, ca := githubTLS(t, fake)
+	proxy, tunnels := githubProxy(t, address)
+	for _, name := range []string{"notes.txt", "github-token"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("stray"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(token string) (string, error) {
+		command := exec.CommandContext(t.Context(), tool, "publish", "--dir", dir, "--version", "v1.2.3", "--origin", releaseverify.Origin, "--token-file", token)
+		command.Env = append(os.Environ(), "HTTPS_PROXY="+proxy.URL, "https_proxy="+proxy.URL, "NO_PROXY=", "no_proxy=", "SSL_CERT_FILE="+ca)
+		output, err := command.CombinedOutput()
+		return string(output), err
+	}
+	output, err := run(token)
+	if err != nil || output != "Published v1.2.3: 10 files at "+releaseverify.Origin+"/v1.2.3.\n" {
+		t.Fatal("publication through GitHub failed", err, output)
+	}
+	release := fake.find("v1.2.3", false)
+	var names []string
+	for _, asset := range release.Assets {
+		names = append(names, asset.Name)
+	}
+	slices.Sort(names)
+	want := append(publishedNames(), "SHA256SUMS", "SHA256SUMS.sigstore.json")
+	slices.Sort(want)
+	if !slices.Equal(names, want) || len(want) != 10 {
+		t.Fatal("published assets are not exactly the signed names", names)
+	}
+	seen := len(tunnels())
+	output, err = run(filepath.Join(dir, "github-token"))
+	if err == nil || !strings.HasPrefix(output, tokenInside.Error()+"\n") || len(tunnels()) != seen {
+		t.Fatal("a token file in the release directory was accepted", err, output)
+	}
+}
+
 func checkImagePublication(t *testing.T, tool string, files map[string][]byte, tc imagePublicationCase) {
 	code := tc.code
 	t.Helper()
-	proxy, tunnels := githubProxy(t)
+	proxy, tunnels := githubProxy(t, "")
 	dir := t.TempDir()
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), body, 0600); err != nil {
@@ -118,6 +224,7 @@ func checkImagePublication(t *testing.T, tool string, files map[string][]byte, t
 		if err == nil || !slices.Equal(tunnels(), []string{"CONNECT api.github.com:443"}) {
 			t.Fatal("present images did not proceed to GitHub", err, string(output), tunnels())
 		}
+		publishedThroughGitHub(t, tool, dir, token)
 		return
 	}
 	if err == nil || len(tunnels()) != 0 {
