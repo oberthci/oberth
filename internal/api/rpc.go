@@ -143,7 +143,7 @@ wait (with after), retry_publication, or an unknown hint: show the reason and hi
 run.held: read run_hold_list for live availability; inspect with run_hold_exec, push the fix, then release with run_hold_abandon. Never replay an exec after an uncertain reply.
 An assisted run is never evidence. Promote only a passed unassisted run of that exact commit.
 While promoting, cancel and restart the one wait with promotion.finished added; stop waiting when no work remains.
-Whenever builds come up, paste the display block that oberth mcp adds verbatim in a code block, without clipping reasons.
+Whenever builds come up, paste the display block that oberth mcp adds after each run result verbatim in a code block, without clipping reasons.
 For issue changes, observe issue.updated and refresh issue_list or issue_get.
 object_sha is the accepted object; commit_sha is the tested commit. Confirm delivery with publication_list.
 Pushed notifications are an extra. After a lost mutation reply or restart, read durable state before repeating an action.`

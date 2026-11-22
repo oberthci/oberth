@@ -30,6 +30,9 @@ func (b *bridge) relay(ctx context.Context, req rpcRequest) {
 		}
 		return
 	}
+	if req.Method == "tools/list" {
+		data = withoutOutputSchemas(data)
+	}
 	if len(data) > 0 {
 		_ = b.emit(ctx, data)
 	}
@@ -225,10 +228,30 @@ func editToolReply(data, payload []byte, text string) []byte {
 		content[0], _ = json.Marshal(map[string]string{"type": "text", "text": string(payload)})
 	}
 	if text != "" {
+		// A host given structured content shows the model only that, so a reply
+		// with a display block carries the JSON as its first text block instead.
+		delete(result, "structuredContent")
 		block, _ := json.Marshal(map[string]string{"type": "text", "text": text})
 		content = append(content, block)
 	}
 	result["content"], _ = json.Marshal(content)
+	envelope["result"], _ = json.Marshal(result)
+	encoded, _ := json.Marshal(envelope)
+	return encoded
+}
+
+// withoutOutputSchemas lists tools without output schemas: a host requires
+// structured content from a tool with one, and a reply with a display block has none.
+func withoutOutputSchemas(data []byte) []byte {
+	var envelope, result map[string]json.RawMessage
+	var tools []map[string]json.RawMessage
+	if json.Unmarshal(data, &envelope) != nil || json.Unmarshal(envelope["result"], &result) != nil || json.Unmarshal(result["tools"], &tools) != nil {
+		return data
+	}
+	for _, tool := range tools {
+		delete(tool, "outputSchema")
+	}
+	result["tools"], _ = json.Marshal(tools)
 	envelope["result"], _ = json.Marshal(result)
 	encoded, _ := json.Marshal(envelope)
 	return encoded

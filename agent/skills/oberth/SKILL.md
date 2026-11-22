@@ -23,7 +23,7 @@ First run, in order (reuse an existing installation, repository or identity). As
 | 3. Bind this checkout | `oberth repo add <forge-url>` | Before running, check the URL is `git@<forge>:<organization>/<repository>.git` or its `ssh://git@` form: another SSH user is refused, and a forge's first repository needs exactly this two-part path. Then the credential-free upstream URL, registered repository, remote and push line. Exit 3: show the deploy-key remedy and wait. |
 | 4. Invite the agent identity | `oberth invite <upstream>` | Scope, expiry and invitation path, never its contents. |
 | 5. Join | `oberth join <invitation-file>` | Identity, scope, profile, repository binding, push line and printed absolute stdio connection line. |
-| 6. Push the approved commit to a new branch | `git push oberth HEAD:refs/heads/<new-branch> -o oberth.run=1` | Commit, started run, watch link and display block. Parked means no run; do not wait for one. |
+| 6. Push the approved commit to a new branch | `git push oberth HEAD:refs/heads/<new-branch> -o oberth.run=1` | Commit, started run and watch link. Parked means no run; do not wait for one. |
 | 7. Without connected tools, follow in a background shell | `oberth log <run>` | Failed step's last lines on failure; completion line when finished. |
 | 8. Without connected tools, read the final state | `oberth run wait <run>` | The complete run display block. Exit 0 also covers a failed run; read its verdict. |
 
@@ -40,6 +40,7 @@ Right after join, tell the person how Claude Code's run box finds the CLI: it us
 If join printed another path, or Claude Code starts outside this checkout, ask them to run `/plugin configure oberth@oberthci` and set executable to the path in the join line, profile to the uplink profile that line names, and leave runs blank for three.
 The plugin gives the person `/oberth-runs` and `/oberth-watch <run>`; you use the bridge's tools, the plugin adds none.
 With tools connected, follow the server's initialization instructions; they are the authority for the run loop.
+Each run result from those tools ends with its display block; paste that block verbatim.
 Without those tools, use steps 7-8 and paste `oberth run get <run>` whole.
 During held-step assistance never print the environment or credential files.
 After inspection and an authored fix, use `oberth run hold release <run> --step <step>` to release the hold.

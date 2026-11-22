@@ -34,7 +34,7 @@ func TestInitializeTeachesPushWaitLogsFixPromoteRelease(t *testing.T) {
 		"wait (with after), retry_publication, or an unknown hint", "do not take an automatic action",
 		"run_hold_list for live availability", "inspect with run_hold_exec, push the fix, then release with run_hold_abandon",
 		"passed unassisted run of that exact commit", "cancel and restart the one wait",
-		"display block that oberth mcp adds verbatim", "object_sha", "commit_sha",
+		"display block that oberth mcp adds after each run result verbatim", "object_sha", "commit_sha",
 		"publication_list", "read durable state before repeating an action", "issue.updated", "refresh issue_list or issue_get",
 	} {
 		if !strings.Contains(instructions, phrase) {

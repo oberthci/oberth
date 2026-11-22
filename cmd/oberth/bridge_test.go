@@ -12,8 +12,10 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/api/fake"
+	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/client"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
 func TestBridgeDisplayBlock(t *testing.T) {
@@ -134,19 +136,7 @@ func assertPinnedMCPEntry(t *testing.T, explicit bool) {
 		}
 		return "pinned", nil
 	}
-	in, write := io.Pipe()
-	read, out := io.Pipe()
-	a.in, a.out = in, out
-	done := make(chan int, 1)
-	go func() {
-		defer close(done)
-		defer in.Close()
-		defer out.Close()
-		done <- a.run(t.Context(), args)
-	}()
-	t.Cleanup(func() { _ = write.Close(); _ = read.Close(); <-done })
-	encoder := json.NewEncoder(write)
-	decoder := json.NewDecoder(read)
+	encoder, decoder := mcpPeer(t, a, args)
 	if err := encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": "2025-06-18"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +152,64 @@ func assertPinnedMCPEntry(t *testing.T, explicit bool) {
 	}
 	if diag.Len() != 0 {
 		t.Fatal("protocol diagnostics leaked")
+	}
+}
+
+// mcpPeer runs the application's stdio bridge and returns its protocol ends.
+func mcpPeer(t *testing.T, a application, args []string) (*json.Encoder, *json.Decoder) {
+	t.Helper()
+	in, write := io.Pipe()
+	read, out := io.Pipe()
+	a.in, a.out = in, out
+	done := make(chan int, 1)
+	go func() {
+		defer close(done)
+		defer in.Close()
+		defer out.Close()
+		done <- a.run(t.Context(), args)
+	}()
+	t.Cleanup(func() { _ = write.Close(); _ = read.Close(); <-done })
+	return json.NewEncoder(write), json.NewDecoder(read)
+}
+
+// A host shows the model a reply's structured content alone, so a run read
+// reaches it as the JSON text followed by the rendered block, as the server's
+// instructions promise.
+func TestMCPRunReadEndsWithDisplayBlock(t *testing.T) {
+	b := fake.Bindings()
+	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{
+		ID: "run1", Repo: "org/app", Ref: "refs/heads/topic", Status: stepmodel.RunFailed, DisplayReason: "step failed"}}}
+	a, diag := boundMCPApplication(t, b)
+	encoder, decoder := mcpPeer(t, a, []string{"mcp", "--profile", "pinned"})
+	var reply struct {
+		Result struct {
+			Content []struct{ Type, Text string }
+			Tools   []map[string]json.RawMessage
+			Other   json.RawMessage `json:"structuredContent"`
+		}
+		Error json.RawMessage
+	}
+	for _, request := range []map[string]any{
+		{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"protocolVersion": "2025-06-18"}},
+		{"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+		{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": map[string]any{"name": "run_get", "arguments": map[string]any{"id": "run1"}}},
+	} {
+		if encoder.Encode(request) != nil || decoder.Decode(&reply) != nil || reply.Error != nil {
+			t.Fatalf("bridge refused %v: %s", request["method"], diag.String())
+		}
+		for _, tool := range reply.Result.Tools {
+			if tool["outputSchema"] != nil {
+				t.Fatal("listed output schema demands structured content")
+			}
+		}
+	}
+	content := reply.Result.Content
+	if len(content) != 2 || reply.Result.Other != nil {
+		t.Fatalf("run read hides its display block: %+v", reply.Result)
+	}
+	block, ok := Display("run_get", json.RawMessage(content[0].Text))
+	if !ok || content[1].Text != block || !strings.Contains(block, "step failed") {
+		t.Fatalf("display block differs from the CLI's: %q", content[1].Text)
 	}
 }
 
@@ -186,7 +234,13 @@ func TestMCPHelpAndArguments(t *testing.T) {
 
 func pinnedMCPApplication(t *testing.T) (application, *bytes.Buffer) {
 	t.Helper()
-	a, _, diag := fixture(t, fake.Bindings())
+	return boundMCPApplication(t, fake.Bindings())
+}
+
+// boundMCPApplication serves bindings to a joined uplink profile named pinned.
+func boundMCPApplication(t *testing.T, bindings apicontract.Bindings) (application, *bytes.Buffer) {
+	t.Helper()
+	a, _, diag := fixture(t, bindings)
 	base := t.TempDir()
 	if err := os.Chmod(base, 0700); err != nil {
 		t.Fatal(err)

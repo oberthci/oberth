@@ -75,12 +75,7 @@ func TestBridgeAppendsDisplayAfterUnchangedJSON(t *testing.T) {
 		resp.Body = io.NopCloser(bytes.NewReader(data))
 		return resp, nil
 	}))
-	cfg.Display = func(tool string, raw json.RawMessage) (string, bool) {
-		if tool != "run_get" || !bytes.Contains(raw, []byte("run1")) {
-			return "", false
-		}
-		return "renderer block", true
-	}
+	cfg.Display = run1Block
 	p := newBridgePeer(t, cfg)
 	p.initialize()
 	p.tool("display", "run_get", map[string]any{"id": "run1"}, nil)
@@ -93,8 +88,60 @@ func TestBridgeAppendsDisplayAfterUnchangedJSON(t *testing.T) {
 	if json.Unmarshal(p.frame(), &received) != nil || json.Unmarshal(<-original, &source) != nil {
 		t.Fatal("bad protocol")
 	}
-	if len(received.Result.Content) != 2 || !bytes.Equal(received.Result.Content[0], source.Result.Content[0]) || !bytes.Equal(received.Result.Structured, source.Result.Structured) || !bytes.Contains(received.Result.Content[1], []byte("renderer block")) {
+	if len(received.Result.Content) != 2 || !bytes.Equal(received.Result.Content[0], source.Result.Content[0]) || !bytes.Contains(received.Result.Content[1], []byte("renderer block")) {
 		t.Fatal("display replaced or changed original JSON")
+	}
+	// A host shows the model structured content alone when a reply has it.
+	if len(source.Result.Structured) == 0 || len(received.Result.Structured) != 0 {
+		t.Fatal("structured content would hide the display block")
+	}
+}
+
+// run1Block renders a block for run1's run_get result only.
+func run1Block(tool string, raw json.RawMessage) (string, bool) {
+	if tool != "run_get" || !bytes.Contains(raw, []byte("run1")) {
+		return "", false
+	}
+	return "renderer block", true
+}
+
+func TestBridgeListsToolsWithoutOutputSchemas(t *testing.T) {
+	h := server(t, fake.Bindings())
+	listed := make(chan []byte, 1)
+	cfg := bridgeProfile(t, roundTrip(func(r *http.Request) (*http.Response, error) {
+		req := readBridgeRequest(r)
+		resp, err := handlerTransport(h).RoundTrip(r)
+		if err != nil || req.Method != "tools/list" {
+			return resp, err
+		}
+		data, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		listed <- data
+		resp.Body = io.NopCloser(bytes.NewReader(data))
+		return resp, err
+	}))
+	cfg.Display = func(string, json.RawMessage) (string, bool) { return "", false }
+	p := newBridgePeer(t, cfg)
+	p.initialize()
+	p.send("list", "tools/list", nil)
+	reply := p.frame()
+	if !bytes.Contains(<-listed, []byte(`"outputSchema"`)) {
+		t.Fatal("server listing has no output schemas to remove")
+	}
+	var wire struct {
+		Result struct{ Tools []map[string]json.RawMessage }
+	}
+	if json.Unmarshal(reply, &wire) != nil || len(wire.Result.Tools) == 0 || bytes.Contains(reply, []byte(`"outputSchema"`)) {
+		t.Fatalf("a listed output schema demands structured content: %.200s", reply)
+	}
+	for _, tool := range wire.Result.Tools {
+		if tool["name"] == nil || tool["inputSchema"] == nil {
+			t.Fatal("tool listing lost its names or input schemas")
+		}
+	}
+	p.tool("plain", "repo_list", map[string]any{}, nil)
+	if !bytes.Contains(p.frame(), []byte(`"structuredContent"`)) {
+		t.Fatal("a reply without a display block lost its structured content")
 	}
 }
 
