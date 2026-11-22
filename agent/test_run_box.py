@@ -1,4 +1,4 @@
-"""Bind the run box's executable, CLI calls and JSON projection to public contracts."""
+"""Bind the run box's executable, profile default, CLI calls and JSON projection to public contracts."""
 import json
 from pathlib import Path
 import re
@@ -25,14 +25,33 @@ def check_calls(client, commands):
         call = re.sub(r"\bid\b", "'cad7d9ec'", call)
         args = re.findall(r"'([^']+)'", call)
         check_command(" ".join(args + ["--json"]), commands)
-    flags = set(re.findall(r"'(--[a-z-]+)'", client))
+    flags = set(re.findall(r"'(--[a-z-]+)'", re.sub(r"const BINDING = \[[^\]]+\]", "", client)))
     if flags != {"--limit", "--json"}:
         raise ValueError("unchecked CLI flags")
     envelope = re.search(r"as \{ (\w+)\?:", client).group(1)
     if envelope not in struct_fields("internal/apicontract/results.go", "RunPage"):
         raise ValueError("unknown run-list JSON field")
-    if client.count("$.process.run(") != 1 or "[await checkedExecutable($, options), ...args, '--json']" not in client:
+    if client.count("$.process.run(") != 2 or "[await checkedExecutable($, options), ...args, '--json']" not in client:
         raise ValueError("all execution must use the configured absolute executable")
+    check_defaults(client)
+
+
+def check_defaults(client):
+    """The unset executable and profile are the fetcher's install and the bridge's checkout binding."""
+    if "$.process.run(BINDING, " not in client:
+        raise ValueError("the only other process is the checkout binding read")
+    binding = re.search(r"const BINDING = \[([^\]]+)\]", client).group(1)
+    key = re.findall(r"'([^']+)'", binding)
+    if key[:4] != ["git", "config", "--local", "--get"] or len(key) != 5:
+        raise ValueError("the binding read must be one local git config key")
+    for source in ("cmd/oberth/join_checkout.go", "cmd/oberth/mcp_profile.go"):
+        if '"' + key[4] + '"' not in (ROOT / source).read_text():
+            raise ValueError("binding key differs from the one join writes and the bridge reads")
+    installed = re.search(r"const INSTALLED = '([^']+)'", client).group(1)
+    fetcher = (AGENT / "skills/oberth/fetch-oberth").read_text()
+    directory, name = installed.rsplit("/", 1)
+    if "bin=$HOME" + directory + "\n" not in fetcher or 'at %s/' + name + ' (signature verified)' not in fetcher:
+        raise ValueError("default executable differs from the fetcher's install")
 
 
 def projection_fields(contract, name):
@@ -85,6 +104,10 @@ class RunBoxContract(unittest.TestCase):
                 check_calls(client.replace(old, new), command_table())
         with self.assertRaises(ValueError):
             check_calls(client.replace("runs", "missing"), command_table())
+        for old, new in (("'oberth.uplinkProfile'", "'oberth.profileName'"), ("'--local', ", ""),
+                         ("'/.local/bin/oberth'", "'/bin/oberth'"), ("$.process.run(BINDING, ", "$.process.run(['git'], ")):
+            with self.subTest(old=old), self.assertRaises(ValueError):
+                check_calls(client.replace(old, new), command_table())
         contract = (AGENT / "types/index.d.ts").read_text()
         with self.assertRaises(ValueError):
             check_projection(contract.replace("failure?:", "missing_field?:"))

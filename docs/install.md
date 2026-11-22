@@ -81,18 +81,18 @@ Install reuses the administrator key; if missing, it refuses. Select with `OBERT
 ## Agent plugins
 
 Once the repository is public, Claude Code installs the skill and run box with
-`/plugin marketplace add oberthci/oberth` and `/plugin install oberth@oberthci`. From join's
-`agent tools: stdio MCP server "oberth" = ...` line, copy the absolute executable path (possibly
-quoted) and uplink profile after `--profile`:
+`/plugin marketplace add oberthci/oberth` and `/plugin install oberth@oberthci`. Unset, the box
+runs the fetcher's `~/.local/bin/oberth` with `OBERTH_PROFILE` or the joined checkout's profile.
+Elsewhere, set executable and profile from join's `agent tools: stdio MCP server "oberth"` line:
 ```sh
 claude plugin configure oberth@oberthci --values-stdin <<'JSON'
 {"executable":"/absolute/verified/path/from-join","profile":"uplink-profile-from-join","runs":3}
 JSON
 ```
-Set the agent's uplink profile here or in `OBERTH_PROFILE`; the option takes precedence. No
-profile hides the box. Use the verified executable, never a checkout file. The box shows up to
-`runs` runs (0 to 10), three by default, none at 0, with progress and failed steps; refresh is
-every 15 seconds when active/watched, 60 when idle. `/oberth-runs [--limit=N]` shows the table;
+The options take precedence; a blank option means unset. No profile hides the box. Use the
+verified executable, never a checkout file. The box shows up to `runs` runs (0 to 10; blank is
+three), none at 0, with progress and failed steps; refresh is every 15 seconds when
+active/watched, 60 when idle. `/oberth-runs [--limit=N]` shows the table;
 `/oberth-watch <id-or-prefix>` watches until the completion toast. The `runs` and `watch` tools
 do the same until the `oberth` bridge is registered. Codex installs the skill through
 `agent/.codex-plugin/plugin.json` with `codex plugin marketplace add oberthci/oberth`, then

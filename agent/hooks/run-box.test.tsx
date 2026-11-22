@@ -3,7 +3,8 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Run, Snapshot } from '../types'
-import { decodeRun, progress, shortID, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
+import { decodeRun, progress, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
+import { SETUP } from './client'
 
 const options = { executable: '/verified/oberth', profile: 'joined-uplink' }
 const commandInput = { origin: { kind: 'plugin', name: 'oberth' },
@@ -25,11 +26,11 @@ function run(id = 'cad7d9ec000000000000000000000000', status: Run['status'] = 'r
 // the snapshot observer is registered here, before any state hook a test adds beneath it.
 const writes = new WeakMap<On, () => Promise<void>>()
 
-// host: the host's refusal of the plugin's tools.
-type Host = { toolRefusal?: string }
+// host: HOME, a path whose stat fails, and the host's refusal of the plugin's tools.
+type Host = { home?: string; missing?: string; toolRefusal?: string }
 
 function bottom(on: On, resolved?: string, checkout = true, profileEnv?: string, host: Host = {}) {
-  on('env.get', { name: 'OBERTH_PROFILE' }, () => ({ value: profileEnv }))
+  on('env.get', (_, e) => ({ value: e.name === 'OBERTH_PROFILE' ? profileEnv : e.name === 'HOME' ? host.home : undefined }))
   const waiting: (() => void)[] = []
   on('state.set', { plugin: 'oberth', key: 'snapshot' }, async (_, e, next) => {
     const result = await next(e)
@@ -48,7 +49,7 @@ function bottom(on: On, resolved?: string, checkout = true, profileEnv?: string,
   on('session.end', () => ({ sessionId: 'ended' }))
   on('session.root', () => ({ value: '/checkout' }))
   on('fs.stat', (_, e) => {
-    if (e.path.endsWith('/.git') && !checkout) throw new Error('not found')
+    if (e.path.endsWith('/.git') && !checkout || e.path === host.missing) throw new Error('not found')
     return { value: {
       kind: e.path === '/checkout' ? 'dir' : 'file',
       realPath: e.path === '/checkout' ? e.path : resolved ?? e.path,
@@ -134,12 +135,15 @@ test('relative executable refuses before process execution', { options: { execut
   expect((await $.command.run({ ...commandInput, command: 'oberth-watch', args: 'cad7d9ec' })).text).toContain('absolute verified path')
 })
 
-test('unset profile stays hidden, notifies once and never spawns', { options: { executable: options.executable } }, async ($, on) => {
+test('unset profile without a checkout binding stays hidden, notifies once and never runs the CLI', { options: { executable: options.executable } }, async ($, on) => {
   bottom(on)
   const clock = mock.clock(on)
   const toasts: string[] = []
   on('ui.toast', (_, e) => { toasts.push(e.text); return { value: undefined } })
-  on('process.run', () => { throw new Error('must not spawn with the current profile') })
+  on('process.run', (_, e) => {
+    if (e.argv[0] === 'git') return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    throw new Error('must not spawn with the current profile')
+  })
   await startSession($, on)
   await startSession($, on)
   await clock.advance(120000)
@@ -610,7 +614,9 @@ function v0307(on: On) {
   const calls: { argv: readonly string[]; cwd?: string; env?: unknown }[] = []
   on('process.run', (_, e) => {
     calls.push({ argv: e.argv, cwd: e.init?.cwd, env: e.init?.env })
-    return { value: { exitCode: 0, stdout: V0307_LIST, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    const git = e.argv[0] === 'git'
+    return { value: { exitCode: 0, stdout: git ? '192.168.64.1\n' : V0307_LIST, stderr: '',
+      isStdoutTruncated: false, isStderrTruncated: false } }
   })
   return calls
 }
@@ -647,3 +653,45 @@ test('a session with the oberth bridge refuses the model tools and still draws t
   expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain('d7a7d4380c1e4b5f9a2b3c4d5e6f7a81')
 })
 
+test('blank, null and numeric-text runs options', async () => {
+  for (const value of [undefined, null, '', '  ']) expect(shown(value)).toBe(3)
+  expect(shown(0)).toBe(0)
+  expect(shown('0')).toBe(0)
+  expect(shown(' 7 ')).toBe(7)
+  for (const value of [11, -1, 2.5, 'three', '11', true]) expect(shown(value)).toBeUndefined()
+})
+
+test('with no options the box uses the fetcher install and the checkout binding', async ($, on) => {
+  bottom(on, undefined, true, undefined, { home: '/Users/person/' })
+  mock.clock(on, { now: Date.parse('2026-11-22T04:00:10Z') })
+  const calls = v0307(on)
+  await startSession($, on)
+  expect(calls[0]).toEqual({ argv: ['git', 'config', '--local', '--get', 'oberth.uplinkProfile'], cwd: '/checkout', env: undefined })
+  const listed = calls.find(call => call.argv[2] === 'list')!
+  expect(listed.argv).toEqual(['/Users/person/.local/bin/oberth', 'run', 'list', '--limit', '3', '--json'])
+  expect(listed.env).toEqual({ OBERTH_PROFILE: '192.168.64.1' })
+  await text($, SMOKE)
+})
+
+test('blank options fall back the same way; OBERTH_PROFILE wins over the binding', { options: { executable: '', profile: '' } }, async ($, on) => {
+  bottom(on, undefined, true, 'env-profile', { home: '/Users/person' })
+  mock.clock(on)
+  const calls = v0307(on)
+  await startSession($, on)
+  expect(calls.some(call => call.argv[0] === 'git')).toBe(false)
+  expect(calls[0]!.argv[0]).toBe('/Users/person/.local/bin/oberth')
+  expect(calls[0]!.env).toEqual({ OBERTH_PROFILE: 'env-profile' })
+})
+
+test('a missing default executable notifies once and never runs it', async ($, on) => {
+  bottom(on, undefined, true, 'env-profile', { home: '/Users/person', missing: '/Users/person/.local/bin/oberth' })
+  mock.clock(on)
+  const notices = toasts(on)
+  const calls = v0307(on)
+  await startSession($, on)
+  await startSession($, on)
+  expect(notices).toEqual([SETUP])
+  expect(calls).toEqual([])
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toBe(SETUP)
+  await noBox($)
+})

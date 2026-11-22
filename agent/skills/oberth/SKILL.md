@@ -36,6 +36,8 @@ If `.oberth/` is absent, run `oberth init`, review the YAML and obtain consent f
 Show the stdio line from join verbatim to the person: register exactly its absolute executable path in the printed `oberth mcp --profile <uplink-profile>` line.
 The bridge uses that joined uplink or the checkout binding; it refuses administrator profiles.
 Keep using the CLI until those tools are connected. Do not edit host settings yourself.
+Right after join, tell the person how Claude Code's run box finds the CLI: it uses `~/.local/bin/oberth` and, in this checkout, the joined profile.
+If join printed another path, or Claude Code starts outside this checkout, ask them to run `/plugin configure oberth@oberthci` and set executable to the path in the join line, profile to the uplink profile that line names, and leave runs blank for three.
 With tools connected, follow the server's initialization instructions; they are the authority for the run loop.
 Without those tools, use steps 7-8 and paste `oberth run get <run>` whole.
 During held-step assistance never print the environment or credential files.

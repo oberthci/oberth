@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Register, Timer } from 'claude-code'
 import type { Snapshot } from '../types'
-import { executable, get, list, profile, SETUP, PROFILE_SETUP } from './client'
+import { checkedExecutable, get, list, profile, SETUP, PROFILE_SETUP } from './client'
 import { active, boxRows, limit, outcome, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
 
 const empty: Snapshot = { recent: [], pins: [], reachable: false, now: 0 }
@@ -115,7 +115,7 @@ async function registerTools($: EngineInterface) {
 
 // The setup notice the box needs before it can read runs, or none.
 async function missingSetup($: EngineInterface, options: PluginOptions): Promise<{ key: string; text: string } | undefined> {
-  try { executable(options) } catch { return { key: 'executable-notice', text: SETUP } }
+  try { await checkedExecutable($, options) } catch { return { key: 'executable-notice', text: SETUP } }
   try { await profile($, options) } catch { return { key: 'profile-notice', text: PROFILE_SETUP } }
   return undefined
 }

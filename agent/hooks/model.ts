@@ -43,10 +43,11 @@ export function shortID(id: string, runs: Run[]): string {
 export const SHOWN_REASON = 'Runs shown accepts 0 to 10.'
 export const SHOWN_REMEDY = 'Set runs to a whole number from 0 to 10; 3 is the default and 0 shows no run box.'
 
-// The `runs` option: unset is three; anything but a whole number from 0 to 10 is undefined.
+// The `runs` option: unset or blank is three; anything but a whole number from 0 to 10 is undefined.
 export function shown(value: unknown): number | undefined {
-  if (value === undefined || value === '') return 3
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 10 ? value : undefined
+  if (value === undefined || value === null || typeof value === 'string' && !value.trim()) return 3
+  const count = typeof value === 'string' ? Number(value) : value
+  return typeof count === 'number' && Number.isInteger(count) && count >= 0 && count <= 10 ? count : undefined
 }
 
 export function visible(state: Snapshot, count: number): Run[] {

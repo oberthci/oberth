@@ -2,27 +2,39 @@ import type { EngineInterface, PluginOptions } from 'claude-code'
 import { decodeRun } from './model'
 
 export const SETUP = 'Set executable to the absolute verified path printed by oberth join.'
-export const PROFILE_SETUP = 'Set profile to the uplink profile in the agent tools line from oberth join, or set OBERTH_PROFILE.'
+export const PROFILE_SETUP = 'Set profile to the uplink profile from oberth join, set OBERTH_PROFILE or start in the joined checkout.'
+// Where fetch-oberth installs the verified CLI, beneath the person's home directory.
+const INSTALLED = '/.local/bin/oberth'
+// The checkout binding join writes; the bridge reads the same key when started without --profile.
+const BINDING = ['git', 'config', '--local', '--get', 'oberth.uplinkProfile']
 
+const chosen = (value: unknown) => typeof value === 'string' && value.trim() ? value : ''
+
+async function bound($: EngineInterface): Promise<string> {
+  const out = await $.process.run(BINDING, { cwd: await $.session.root(), timeoutMs: 3500 }).catch(() => undefined)
+  return out?.exitCode === 0 && !out.isStdoutTruncated ? out.stdout.trim() : ''
+}
+
+// The profile option, then OBERTH_PROFILE, then the checkout's joined uplink.
 export async function profile($: EngineInterface, options: PluginOptions): Promise<string> {
-  const name = options.profile || await $.env.get('OBERTH_PROFILE')
-  if (typeof name !== 'string' || !name.trim()) throw new Error(PROFILE_SETUP)
+  const name = chosen(options.profile) || chosen(await $.env.get('OBERTH_PROFILE')) || await bound($)
+  if (!name) throw new Error(PROFILE_SETUP)
   return name
 }
 
-export function executable(options: PluginOptions): string {
-  const path = options.executable
-  if (typeof path !== 'string' || !/^(\/|[A-Za-z]:[\\/]|\\\\)/.test(path) || path.includes('\0')) {
-    throw new Error(SETUP)
-  }
+// The executable option, else the fetcher's install under HOME; always an absolute path.
+async function executable($: EngineInterface, options: PluginOptions): Promise<string> {
+  const home = chosen(await $.env.get('HOME'))
+  const path = chosen(options.executable) || (home && home.replace(/\/+$/, '') + INSTALLED)
+  if (!/^(\/|[A-Za-z]:[\\/]|\\\\)/.test(path) || path.includes('\0')) throw new Error(SETUP)
   return path
 }
 
-async function checkedExecutable($: EngineInterface, options: PluginOptions): Promise<string> {
-  const path = executable(options)
+export async function checkedExecutable($: EngineInterface, options: PluginOptions): Promise<string> {
+  const path = await executable($, options)
   const cwd = await $.session.root()
   const [file, directory, checkout] = await Promise.all([
-    $.fs.stat(path, { resolve: true }), $.fs.stat(cwd, { resolve: true }),
+    $.fs.stat(path, { resolve: true }).catch(() => { throw new Error(SETUP) }), $.fs.stat(cwd, { resolve: true }),
     $.fs.stat(cwd + '/.git').catch(() => ({ kind: 'other' as const })),
   ])
   if (file.kind !== 'file' || !file.realPath || !directory.realPath) throw new Error(SETUP)

@@ -1,8 +1,9 @@
 # Oberth agent client
 
-The agent client runs on macOS and Linux and connects to an Oberth server on Linux. Configure
-the run box with the absolute verified executable path and uplink profile printed by `oberth join`;
-keep the executable outside a checkout. The box shows up to `runs` runs, three by default, none at 0.
+The agent client runs on macOS and Linux and connects to an Oberth server on Linux. The run box
+uses the fetcher's install and the joined checkout's uplink profile unless its options name the
+absolute executable path and uplink profile printed by `oberth join`; keep the executable outside
+a checkout. The box shows up to `runs` runs, three by default or when blank, none at 0.
 
 The run box requires a host with function-hook modules and the `atom`, `read`
 and `update` state API, with plugin validation and test harness support.
