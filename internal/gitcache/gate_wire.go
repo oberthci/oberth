@@ -89,6 +89,8 @@ type gateError struct {
 	code, detail string
 	cause        error
 	reported     bool
+	// deadline marks the refusal of an admission that ran out of time.
+	deadline bool
 }
 
 func (e *gateError) Reason() string {

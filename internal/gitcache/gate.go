@@ -223,7 +223,7 @@ func (
 func (c *Cache) admissionVerdict(ctx context.Context, source *ReceiveSource, answered bool, err error) error {
 	reply := admissionReply(ctx, answered, err)
 	var refusal *gateError
-	if answered && c.config.Log != nil && errors.As(reply, &refusal) && refusal.detail == reasonGateTimeout+". "+remedyGateTimeout {
+	if answered && c.config.Log != nil && errors.As(reply, &refusal) && refusal.deadline {
 		c.config.Log(reasonAdmissionEnded, source.event.Repository+": "+source.event.ID)
 	}
 	return reply
@@ -265,7 +265,7 @@ func admissionReply(ctx context.Context, answered bool, err error) error {
 	case ctx.Err() == nil:
 		return nil
 	case errors.Is(context.Cause(ctx), context.DeadlineExceeded):
-		return &gateError{code: "unavailable", detail: reasonGateTimeout + ". " + remedyGateTimeout, cause: context.Cause(ctx)}
+		return &gateError{code: "unavailable", detail: reasonGateTimeout + ". " + remedyGateTimeout, cause: context.Cause(ctx), deadline: true}
 	default:
 		return &gateError{code: "unavailable", cause: context.Cause(ctx)}
 	}
