@@ -58,7 +58,10 @@ func publicationFor(o options) (publication, error) {
 	if err := privateTokenFile(o.token, o.dir); err != nil {
 		return publication{}, err
 	}
-	repository, ok := githubRepository(o.origin)
+	if o.origin != releaseverify.Origin {
+		return publication{}, originDiffers
+	}
+	repository, ok := githubRepository(releaseverify.Origin)
 	if !ok {
 		return publication{}, inputs
 	}

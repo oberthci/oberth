@@ -52,6 +52,7 @@ const (
 	immutable           refusal = "Published release bytes differ."
 	notVerified         refusal = "Release has no matching clean verification."
 	tokenShared         refusal = "Release token file is open to group or others."
+	originDiffers       refusal = "Release origin differs from the canonical address."
 	assetsDiffer        refusal = "Release draft holds other assets than the signed files."
 	tokenInside         refusal = "Release token file is inside the release directory."
 )
@@ -86,6 +87,7 @@ func (r refusal) Remedy() string {
 		immutable:           "Use the existing identical release or publish a new version.",
 		notVerified:         "Run clean verification for these exact release bytes before advancing latest.",
 		tokenShared:         "Run chmod 600 on the token file, then retry.",
+		originDiffers:       "Pass --origin https://github.com/oberthci/oberth/releases/download.",
 		assetsDiffer:        "Delete the assets that are not signed files from the GitHub draft, then retry.",
 		tokenInside:         "Move the token file out of the release directory, then retry.",
 	}[r]
