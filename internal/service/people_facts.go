@@ -25,7 +25,7 @@ func (s *Service) peopleAction(a actor.Actor, kind, reason, repo string) statepo
 // run, which is what the default branch becomes. A failed promotion leaves the
 // default branch where it was and its promoter sees the failure directly. A
 // fast-forward promotion starts no promotion run: its delivered publication
-// counts the tested run instead (fastForwardEvidence).
+// counts the tested run instead (delivered).
 // Other branches and tags, releases included, create, update and close no CI
 // issue.
 func (s *Service) ciIssueEvidence(ctx context.Context, r stateport.Run, o FinishedRun) (bool, error) {

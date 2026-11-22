@@ -188,6 +188,30 @@ func TestFailedFastForwardPublicationClosesNothing(t *testing.T) {
 	}
 }
 
+// Settling a delivered fast-forward reads nothing beyond its run: a default
+// branch that cannot be read after the push neither strands the publication
+// nor keeps the issue open.
+func TestDeliveredFastForwardSettlesWithoutReadingTheDefaultBranch(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	source := f.seed(stepmodel.RunPassed)
+	red := seedRedMainBase(f)
+	finishCI(t, f, red.ID, stepmodel.RunFailed)
+	push := f.moving.Push
+	f.moving.Push = func(ctx context.Context, p model.Publication) (gitport.PublicationReceipt, error) {
+		f.source.Default = func(context.Context, string) (string, error) { return "", errors.New("store unavailable") }
+		return push(ctx, p)
+	}
+	out := promote(t, f)
+	deliverPending(t, f)
+	if p, err := f.store.Publication(t.Context(), "publication:"+out.ID); err != nil || p.Status != model.PublicationDelivered {
+		t.Fatal("delivered push left unsettled", p, err)
+	}
+	if rows := ciIssues(t, f); len(rows) != 1 || rows[0].State != model.IssueClosed || rows[0].CIWorkID != source.ID {
+		t.Fatal("delivered fast-forward left the default branch issue", rows)
+	}
+}
+
 // deliverPending fires the armed publication and requires its worker to settle.
 func deliverPending(t *testing.T, f *fixture) {
 	t.Helper()

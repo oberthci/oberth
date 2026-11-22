@@ -22,13 +22,7 @@ func (s *Service) settle(ctx context.Context, p model.Publication, failure error
 	if failure != nil {
 		s.failedAttempt(&result, &action, p, failure)
 	} else {
-		result.Reason = reasonPubDelivered
-		var err error
-		result.Release, err = s.releaseReceipt(write, p)
-		if err != nil {
-			return err
-		}
-		if result.ProjectCI, err = s.fastForwardEvidence(write, p); err != nil {
+		if err := s.delivered(write, p, &result); err != nil {
 			return err
 		}
 		if result.Release != nil {
@@ -69,34 +63,26 @@ func (s *Service) failedAttempt(result *stateport.PublicationResult, action *sta
 	}
 }
 
-// fastForwardEvidence reports whether a delivered publication is a
-// fast-forward promotion of the default branch: it publishes the tested
-// branch run's own commit, so that run's pass is the default branch's newest
-// result. A merged promotion publishes its promotion run, which moved CI
+// delivered completes a delivery's result from its run, read once. A
+// promotion's publication targets the default branch; a fast-forward one
+// carries the tested branch run, whose pass is then the default branch's
+// newest result. A merged one carries its promotion run, which moved CI
 // issues when it finished.
-func (s *Service) fastForwardEvidence(ctx context.Context, p model.Publication) (bool, error) {
-	if p.PromotionID == "" || p.RunID == "" {
-		return false, nil
+func (s *Service) delivered(ctx context.Context, p model.Publication, result *stateport.PublicationResult) error {
+	result.Reason = reasonPubDelivered
+	if p.RunID == "" {
+		return nil
 	}
 	r, err := s.c.Runs.Run(ctx, p.RunID)
 	if err != nil {
-		return false, err
+		return err
 	}
-	if r.Origin.Trigger != model.TriggerBranch || r.Status != stepmodel.RunPassed || r.Origin.HasAssistance() {
-		return false, nil
-	}
-	ref, err := s.c.Source.DefaultBranch(ctx, p.Repo)
-	return err == nil && p.Ref == ref, err
+	result.ProjectCI = p.PromotionID != "" && r.Origin.Trigger == model.TriggerBranch && r.Status == stepmodel.RunPassed && !r.Origin.HasAssistance()
+	result.Release, err = s.releaseReceipt(ctx, p, r)
+	return err
 }
 
-func (s *Service) releaseReceipt(ctx context.Context, p model.Publication) (*model.ReleaseReceipt, error) {
-	if p.RunID == "" {
-		return nil, nil
-	}
-	r, err := s.c.Runs.Run(ctx, p.RunID)
-	if err != nil {
-		return nil, err
-	}
+func (s *Service) releaseReceipt(ctx context.Context, p model.Publication, r stateport.Run) (*model.ReleaseReceipt, error) {
 	if !r.Release {
 		return nil, nil
 	}
