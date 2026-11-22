@@ -43,7 +43,15 @@ func NewFormat(t *testing.T, format string) *Fixture {
 	f.Git(t, f.Work, "clone", "--bare", f.Work, f.Bare)
 	return f
 }
+// FixedDate is the author and committer date of every fixture commit made
+// without an explicit date, so fixture object IDs are the same on every run.
+const FixedDate = "2000-01-01T00:00:00Z"
+
 func (f *Fixture) Git(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	return f.git(t, FixedDate, dir, args...)
+}
+func (f *Fixture) git(t *testing.T, date, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(f.Binary, append([]string{"-c", "core.hooksPath=/dev/null", "-c", "gc.autoDetach=false", "-c", "maintenance.autoDetach=false"}, args...)...)
 	cmd.Dir = dir
@@ -52,8 +60,8 @@ func (f *Fixture) Git(t *testing.T, dir string, args ...string) string {
 		"HOME=/nonexistent",
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_AUTHOR_DATE=2000-01-01T00:00:00Z",
-		"GIT_COMMITTER_DATE=2000-01-01T00:00:00Z",
+		"GIT_AUTHOR_DATE=" + date,
+		"GIT_COMMITTER_DATE=" + date,
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -73,7 +81,13 @@ func (f *Fixture) Write(t *testing.T, name string, body []byte) {
 }
 func (f *Fixture) CommitFile(t *testing.T, message string) string {
 	t.Helper()
+	return f.CommitFileAt(t, message, FixedDate)
+}
+
+// CommitFileAt commits the work tree with date as its author and committer date.
+func (f *Fixture) CommitFileAt(t *testing.T, message, date string) string {
+	t.Helper()
 	f.Git(t, f.Work, "add", ".")
-	f.Git(t, f.Work, "commit", "-m", message)
+	f.git(t, date, f.Work, "commit", "-m", message)
 	return f.Git(t, f.Work, "rev-parse", "HEAD")
 }

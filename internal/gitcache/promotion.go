@@ -2,6 +2,8 @@ package gitcache
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/gitport"
@@ -48,7 +50,43 @@ func (c *Cache) PreparePromotion(ctx context.Context, r gitport.PromotionRequest
 	}
 	return result, nil
 }
+
+// merge writes the merge of base and source. Its identity and date come only
+// from its parents, so a repeated preparation of the same roots writes the
+// same commit.
 func (c *Cache) merge(ctx context.Context, p, base, source string) (string, []string, error) {
+	tree, conflicts, err := c.mergeTree(ctx, p, base, source)
+	if err != nil || len(conflicts) > 0 {
+		return "", conflicts, err
+	}
+	date, err := c.promotionDate(ctx, p, base, source)
+	if err != nil {
+		return "", nil, err
+	}
+	data, err := c.capture(
+		ctx,
+		command{
+			dir: p,
+			args: []string{
+				"-c",
+				"user.name=Oberth",
+				"-c",
+				"user.email=ci@oberth.ci",
+				"commit-tree",
+				tree,
+				"-p",
+				base,
+				"-p",
+				source,
+			},
+			input: strings.NewReader("Oberth promotion\n"),
+			env:   []string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date},
+		},
+		128,
+	)
+	return string(data), nil, err
+}
+func (c *Cache) mergeTree(ctx context.Context, p, base, source string) (string, []string, error) {
 	data, err := c.capture(
 		ctx,
 		command{
@@ -73,30 +111,36 @@ func (c *Cache) merge(ctx context.Context, p, base, source string) (string, []st
 		}
 		return "", nil, err
 	}
-	tree := strings.TrimSpace(fields[0])
-	// Fixed identity/date makes a repeated preparation of identical roots stable.
-	data, err = c.capture(
-		ctx,
-		command{
-			dir: p,
-			args: []string{
-				"-c",
-				"user.name=Oberth",
-				"-c",
-				"user.email=ci@oberth.ci",
-				"commit-tree",
-				tree,
-				"-p",
-				base,
-				"-p",
-				source,
-			},
-			input: strings.NewReader("Oberth promotion\n"),
-			env:   []string{"GIT_AUTHOR_DATE=2000-01-01T00:00:00Z", "GIT_COMMITTER_DATE=2000-01-01T00:00:00Z"},
-		},
-		128,
-	)
-	return string(data), nil, err
+	return strings.TrimSpace(fields[0]), nil, nil
+}
+
+// promotionDate is the tested commit's committer date, in UTC, or one second
+// after the base's when the base is not older. Tools that order commits by
+// date, such as Go pseudo-versions, then rank the promotion above the head it
+// replaces.
+func (c *Cache) promotionDate(ctx context.Context, p, base, source string) (string, error) {
+	based, err := c.committed(ctx, p, base)
+	if err != nil {
+		return "", err
+	}
+	tested, err := c.committed(ctx, p, source)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("@%d +0000", max(tested, based+1)), nil
+}
+
+// committed reads a commit's committer date in Unix seconds.
+func (c *Cache) committed(ctx context.Context, p, oid string) (int64, error) {
+	data, err := c.capture(ctx, command{dir: p, args: []string{"show", "--no-patch", "--format=%ct", oid}}, 32)
+	if err != nil {
+		return 0, err
+	}
+	seconds, err := strconv.ParseInt(string(data), 10, 64)
+	if err != nil {
+		return 0, unavailable("git", err)
+	}
+	return seconds, nil
 }
 
 func (c *Cache) mergeSource(ctx context.Context, p string, r gitport.PromotionRequest) (string, []string, error) {
