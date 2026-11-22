@@ -96,7 +96,7 @@ func failure(reason string) error {
 	case reasonPins:
 		return publicerr.New(publicerr.Forbidden, "No usable Git host key pin.", "Verify the endpoint and its pinned host key before retrying.", nil)
 	case reasonTransport:
-		return publicerr.New(publicerr.Unavailable, "Git SSH transport is unavailable.", "Check the server address, active identity and pinned host key.", nil)
+		return publicerr.New(publicerr.Unavailable, ReasonTransport, "Check the server address, active identity and pinned host key.", nil)
 	default:
 		return publicerr.New(publicerr.InvalidInput, "Git SSH configuration is invalid.", "Check the shim configuration, file permissions, identity and pinned host keys.", nil)
 	}

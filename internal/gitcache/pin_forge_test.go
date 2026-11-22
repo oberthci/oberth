@@ -19,17 +19,19 @@ import (
 
 // silentForge makes every Git command that names one of the fixture forges
 // wait, once armed, for a line the test writes only at cleanup: a forge that
-// does not answer within any caller's deadline. The log names the forge of
-// each held command.
+// does not answer within any caller's deadline. After failWith, such a
+// command prints the given diagnostic and fails at once instead, as Git does
+// when its SSH transport prints a reason. The log names the forge of each
+// held or failed command.
 type silentForge struct {
-	armed, log string
-	release    func()
+	armed, failure, log string
+	release             func()
 }
 
 func holdForges(t *testing.T, cfg *gitcache.Config, binary string, forges map[string]string) *silentForge {
 	t.Helper()
 	dir := t.TempDir()
-	s := &silentForge{armed: filepath.Join(dir, "armed"), log: filepath.Join(dir, "forge")}
+	s := &silentForge{armed: filepath.Join(dir, "armed"), failure: filepath.Join(dir, "failure"), log: filepath.Join(dir, "forge")}
 	gate, script := filepath.Join(dir, "gate"), filepath.Join(dir, "git")
 	if err := syscall.Mkfifo(gate, 0600); err != nil {
 		t.Fatal(err)
@@ -38,8 +40,8 @@ func holdForges(t *testing.T, cfg *gitcache.Config, binary string, forges map[st
 	for name, bare := range forges {
 		fmt.Fprintf(&match, "  [ \"$a\" = '%s' ] && forge=%s\n", bare, name)
 	}
-	body := fmt.Sprintf("#!/bin/sh\nforge=\nfor a do\n%sdone\nif [ -n \"$forge\" ] && [ -e '%s' ]; then\n  echo \"$forge\" >> '%s'\n  read _ < '%s'\nfi\nexec '%s' \"$@\"\n",
-		match.String(), s.armed, s.log, gate, binary)
+	body := fmt.Sprintf("#!/bin/sh\nforge=\nfor a do\n%sdone\nif [ -n \"$forge\" ] && [ -e '%s' ]; then\n  echo \"$forge\" >> '%s'\n  if [ -s '%s' ]; then cat '%s' >&2; exit 128; fi\n  read _ < '%s'\nfi\nexec '%s' \"$@\"\n",
+		match.String(), s.armed, s.log, s.failure, s.failure, gate, binary)
 	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +60,13 @@ func holdForges(t *testing.T, cfg *gitcache.Config, binary string, forges map[st
 func (s *silentForge) arm(t *testing.T) {
 	t.Helper()
 	if err := os.WriteFile(s.armed, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (s *silentForge) failWith(t *testing.T, diagnostic string) {
+	t.Helper()
+	if err := os.WriteFile(s.failure, []byte(diagnostic+"\nfatal: Could not read from remote repository.\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -13,6 +13,15 @@ func SetRefreshWait(c *Cache, d time.Duration) { c.budgets.refreshWait = d }
 // head, for one cache.
 func SetHeadWait(c *Cache, d time.Duration) { c.budgets.headWait = d }
 
+// CacheTrustWindow and the forge refusal reasons, for tests.
+const (
+	CacheTrustWindow   = cacheTrustWindow
+	ReasonForgeSilent  = reasonForgeSilent
+	RemedyForgeSilent  = remedyForgeSilent
+	ReasonForgeRefused = reasonForgeRefused
+	RemedyForgeRefused = remedyForgeRefused
+)
+
 // WaitBackground waits for running first clones and refresh fetches,
 // including what each does after it ends, without ending the cache's
 // lifetime.

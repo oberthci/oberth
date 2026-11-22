@@ -147,9 +147,9 @@ func interrupted(ctx context.Context, command string, stage int) error {
 	again := verb + " again in a moment; the server may be restarting."
 	switch stage {
 	case unanswered:
-		return publicerr.New(publicerr.Unavailable, "The Git server did not answer.", again, nil)
+		return publicerr.New(publicerr.Unavailable, ReasonUnanswered, again, nil)
 	case ended:
 		return publicerr.New(publicerr.Unavailable, "The Git server ended the connection before Git began.", verb+" again in a moment; if it repeats, ask the administrator to check this identity.", nil)
 	}
-	return publicerr.New(publicerr.Unavailable, "The Git server went away during the transfer.", again, nil)
+	return publicerr.New(publicerr.Unavailable, ReasonLost, again, nil)
 }

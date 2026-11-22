@@ -79,13 +79,6 @@ func unanswered(ctx context.Context, job *transfer) error {
 	return unavailable("forge", context.Cause(ctx))
 }
 
-// forgeLate reports whether err says only that the forge did not answer in
-// time or could not be read, so a decision the cache can make stands.
-func forgeLate(err error) bool {
-	var outage *gitport.UnavailableError
-	var updating *gitport.FetchUnfinishedError
-	return errors.As(err, &updating) || errors.As(err, &outage) && outage.Op == "forge"
-}
 
 // has reports whether the cache holds object oid; a failed check counts as
 // absent, so the forge is asked.
