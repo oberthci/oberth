@@ -162,6 +162,44 @@ func TestFirstCloneEndsAtItsBound(t *testing.T) {
 	}
 }
 
+// A clone whose upstream address changed while it ran (the upstream removed
+// and added again with another base URL) publishes and announces nothing;
+// the next Init clones from the new address.
+func TestFirstCloneOfAMovedUpstreamPublishesNothing(t *testing.T) {
+	f, moved := gittest.New(t), gittest.New(t)
+	cfg := reviewConfig(t, f)
+	release, _ := slowForge(t, f, &cfg)
+	var mu sync.Mutex
+	url := f.Bare
+	cfg.Upstream = func(context.Context, string) (gitcache.Remote, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return gitcache.Remote{URL: url, DefaultBranch: "refs/heads/main", RepositoryID: 1}, nil
+	}
+	announced := false
+	cfg.RefChanged = func(context.Context, string, []gitcache.RefUpdate) { announced = true }
+	c := reviewNew(t, cfg)
+	if err := shortInit(t, c); err == nil {
+		t.Fatal("a gated clone finished")
+	}
+	mu.Lock()
+	url = moved.Bare
+	mu.Unlock()
+	release()
+	gitcache.WaitFirstClones(c)
+	if _, err := os.Stat(filepath.Join(cfg.Root, "origin", "team", "widget.git", "HEAD")); !os.IsNotExist(err) || announced {
+		t.Fatal("the old forge's clone was published or announced", err, announced)
+	}
+	go release() // the next clone passes the same gate
+	if err := c.Init(t.Context(), gittest.Repository); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := c.ResolveRef(t.Context(), gittest.Repository, "refs/heads/main")
+	if err != nil || ref.CommitSHA != moved.Commit {
+		t.Fatal("the next clone did not come from the new address", ref, err)
+	}
+}
+
 // Once Close has begun no first clone starts: an Init afterwards fails
 // without cloning, and Inits racing Close leave no clone behind (run with
 // -race, which also checks the wait against a late start).

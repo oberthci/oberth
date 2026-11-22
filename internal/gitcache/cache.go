@@ -3,6 +3,7 @@ package gitcache
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -260,8 +261,15 @@ func (c *Cache) clone(ctx context.Context, repository, p string) error {
 	if err = c.recordRefresh(staging); err != nil {
 		return err
 	}
+	// The upstream can be removed and added again under another address while
+	// a long first clone runs: the old forge's content is not published.
+	if current, err := c.remote(ctx, repository); err != nil || current.URL != remote.URL {
+		return errors.Join(unavailable("initialize", errUpstreamMoved), err)
+	}
 	return c.publishClone(ctx, staging, p)
 }
+
+var errUpstreamMoved = errors.New("the upstream address changed during the first clone")
 
 func refuse(field string) error {
 	reason, remedy := refusalText(field)
