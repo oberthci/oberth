@@ -8,6 +8,7 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/argojob/fake"
 
+	"github.com/oberthci/oberth/internal/stateport"
 	statefake "github.com/oberthci/oberth/internal/stateport/fake"
 	"github.com/oberthci/oberth/internal/stepmodel"
 	core "k8s.io/api/core/v1"
@@ -49,11 +50,11 @@ func checkLiveRefusal(t *testing.T, stage string) {
 	c.Reporter = reporter
 
 	owner := c.Runs.(*statefake.Runs)
-	c.Progress = &progressProbe{Runs: owner, save: func(ctx context.Context, id string, steps []stepmodel.RunStep) error {
+	c.Progress = &progressProbe{Runs: owner, save: func(ctx context.Context, id string, progress stateport.Progress) error {
 		if err := refuse(); err != nil {
 			return err
 		}
-		return owner.SaveSteps(ctx, id, steps)
+		return owner.SaveProgress(ctx, id, progress)
 	}}
 	_ = argojob.New(c).Run(ctx)
 	if attempts < 11 || reports != 1 || now.Before(recovered) || !strings.Contains(logged.String(), in.id) || !strings.Contains(logged.String(), cause.Error()) {

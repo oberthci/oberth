@@ -20,6 +20,15 @@ type Node struct {
 	StartedAt, FinishedAt                                       *time.Time
 }
 
+// Progress is one native observation of an unfinished run: its logical steps
+// and Waiting, the reason of at most 40 characters that a run none of whose
+// steps has started gives for what it waits. The store derives the run's
+// queued or running status from them with stepmodel.Progress.
+type Progress struct {
+	Steps   []stepmodel.RunStep
+	Waiting string
+}
+
 // EvidenceStart declares the number of distinct native nodes in one observation.
 // The count is a receipt binding, not a workload limit.
 type EvidenceStart struct {

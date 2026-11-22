@@ -58,11 +58,12 @@ func Project(ctx context.Context, in Projection) (Observation, error) {
 		return Observation{}, err
 	}
 	rows := []projected{}
+	waits := waitingLocks(w, paths)
 	for _, entry := range plan.Entries {
 		if err := ctx.Err(); err != nil {
 			return Observation{}, err
 		}
-		rows = appendPlan(rows, projectionInput{entry: entry, w: w, pods: pods, groups: groups, out: &out, paths: paths, previous: prev, previousNodes: in.PreviousNodes})
+		rows = appendPlan(rows, projectionInput{entry: entry, w: w, pods: pods, groups: groups, out: &out, paths: paths, waits: waits, previous: prev, previousNodes: in.PreviousNodes})
 	}
 	seen := 0
 	for _, nodes := range groups {
@@ -78,6 +79,9 @@ func Project(ctx context.Context, in Projection) (Observation, error) {
 	}
 	out.Steps = stateport.PlanSteps(plan, out.Steps)
 	finishProjection(&out, rows)
+	if !terminalWorkflow(w) {
+		out.Status, out.Reason = stepmodel.Progress(stepmodel.RunQueued, out.Steps, queuedReason(rows))
+	}
 	return out, nil
 }
 
@@ -88,6 +92,7 @@ type projectionInput struct {
 	groups        map[string][]wf.NodeStatus
 	out           *Observation
 	paths         nativePaths
+	waits         map[string]string
 	previous      []stepmodel.RunStep
 	previousNodes []stateport.Node
 }
@@ -95,7 +100,11 @@ type projectionInput struct {
 func appendPlan(rows []projected, in projectionInput) []projected {
 	paths := plannedPaths(in)
 	for _, path := range paths {
-		row := projected{step: stepmodel.RunStep{Path: path, Name: in.entry.Name, Status: stepmodel.StepPending, DisplayReason: reasonWaiting}}
+		waiting := waitingFor(in.w, in.waits, path)
+		row := projected{step: stepmodel.RunStep{Path: path, Name: in.entry.Name, Status: stepmodel.StepPending, DisplayReason: waiting}}
+		if waiting != reasonWaiting {
+			row.step.Detail = waitingDetail(in.w, waiting)
+		}
 		nodes := in.groups[path]
 		sort.Slice(nodes, func(i, j int) bool { return in.paths.less(nodes[i], nodes[j]) })
 		for _, n := range nodes {
@@ -109,7 +118,7 @@ func appendPlan(rows []projected, in projectionInput) []projected {
 		rows = append(rows, row)
 	}
 	if in.entry.Dynamic && len(paths) == 0 {
-		status, reason := stepmodel.StepPending, reasonWaiting
+		status, reason := stepmodel.StepPending, waitingFor(in.w, in.waits, in.entry.Path)
 		if terminalWorkflow(in.w) {
 			status, reason = stepmodel.StepSkipped, reasonNotReached
 		}
@@ -149,7 +158,8 @@ func projectAttempt(row *projected, in projectionInput, n wf.NodeStatus) {
 	d := diagnose(n, p, in.w.Spec.Shutdown != "", nodeTemplate(in.w, n, admissioncontract.MaxNestingDepth))
 	row.step.Status, row.step.DisplayReason, row.step.Detail, row.class = nodeStatus(n.Phase), d.reason, d.detail, d.class
 	if n.SynchronizationStatus != nil && n.SynchronizationStatus.Waiting != "" {
-		row.step.DisplayReason = reasonLock
+		lock := lockReason(n.SynchronizationStatus.Waiting)
+		row.step.DisplayReason = lock
 		row.step.Detail = strings.TrimSpace(row.step.Detail + "\n" + detailLockStatus)
 	}
 	if row.step.StartedAt == nil {

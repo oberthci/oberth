@@ -94,7 +94,7 @@ func deletionDecision(_ context.Context, u service.RefUpdate) (service.Decision,
 func assertDeletionRollback(t *testing.T, f *fixture, receiveID string, publication func(context.Context, string) (model.Publication, error)) {
 	t.Helper()
 	rows, err := f.d.Runs.AcceptedRuns(t.Context(), receiveID)
-	if err != nil || len(rows) != 1 || rows[0].Status != "running" {
+	if err != nil || len(rows) != 1 || rows[0].Status != "queued" {
 		t.Fatal("partial mixed deletion", rows, err)
 	}
 	if _, err := publication(t.Context(), "deletion"); publicerr.Classify(err).Code() != publicerr.NotFound {

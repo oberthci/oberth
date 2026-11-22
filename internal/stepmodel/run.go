@@ -1,6 +1,9 @@
 package stepmodel
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 type LogSelector struct {
 	NodeID    string `json:"node_id"`
@@ -25,12 +28,40 @@ type RunStep struct {
 	Logs             []LogSelector `json:"logs,omitzero"`
 }
 
-// RunStart is a run's start: the earliest of its recorded start and its steps'
-// starts, in UTC. It returns recorded itself when no step started earlier.
+// Started reports a step that has run or ended in any attempt: a step that is
+// only pending or queued, waiting for a lock, a node or its containers, has not.
+func (s RunStep) Started() bool {
+	if s.Status.started() {
+		return true
+	}
+	for _, a := range s.Attempts {
+		if a.Status.started() {
+			return true
+		}
+	}
+	return false
+}
+
+func (s StepStatus) started() bool { return s != StepPending && s != StepQueued }
+
+// Progress is the run-status rule for an unfinished run: it is queued until
+// one of its steps has started and running from then on, never queued again,
+// even while a retry waits. A queued run's reason is waiting, what it waits
+// for; a running run's reason is empty.
+func Progress(current RunStatus, steps []RunStep, waiting string) (RunStatus, string) {
+	if current == RunRunning || slices.ContainsFunc(steps, RunStep.Started) {
+		return RunRunning, ""
+	}
+	return RunQueued, waiting
+}
+
+// RunStart is a run's start: the earliest of its recorded start and the starts
+// of its started steps, in UTC; a waiting step does not start the run. It
+// returns recorded itself when no step started earlier.
 func RunStart(recorded *time.Time, steps []RunStep) *time.Time {
 	start := recorded
 	for _, s := range steps {
-		if s.StartedAt != nil && (start == nil || s.StartedAt.Before(*start)) {
+		if s.Started() && s.StartedAt != nil && (start == nil || s.StartedAt.Before(*start)) {
 			start = new(s.StartedAt.UTC())
 		}
 	}

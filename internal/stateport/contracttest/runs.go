@@ -26,7 +26,7 @@ type RunPort interface {
 	Runs(context.Context, stateport.RunFilter) ([]stateport.Run, error)
 	RecentRuns(context.Context, []string) (map[string][]stateport.RunMark, error)
 	Steps(context.Context, string) ([]stepmodel.RunStep, error)
-	SaveSteps(context.Context, string, []stepmodel.RunStep) error
+	SaveProgress(context.Context, string, stateport.Progress) error
 	BeginPurge(context.Context, stateport.Action, string, string) error
 	FinishPurge(context.Context, stateport.Action, string, string) error
 	PurgeReceipt(context.Context, string) (stateport.PurgeReceipt, error)

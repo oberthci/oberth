@@ -57,7 +57,7 @@ func TestNativeRetryOrderSurvivesStoreRoundTripAndPartialSnapshot(t *testing.T) 
 }
 func persistOrderObservation(t *testing.T, s *store.Store, id string, o argojob.Observation) {
 	t.Helper()
-	compositionOK(t, s.SaveSteps(t.Context(), id, o.Steps))
+	compositionOK(t, s.SaveProgress(t.Context(), id, stateport.Progress{Steps: o.Steps}))
 	seq, err := s.BeginEvidence(t.Context(), stateport.Action{}, stateport.EvidenceStart{RunID: id, Nodes: len(o.Nodes)})
 	compositionOK(t, err)
 	compositionOK(t, s.PutNodes(t.Context(), stateport.Action{}, stateport.NodeBatch{RunID: id, Sequence: seq, Nodes: o.Nodes}))

@@ -181,7 +181,8 @@ source runtime, concrete Store, service, transport or installer imports.
 | Typed evidence | Reason | Failure class |
 | --- | --- | --- |
 | no node / Pending | `waiting to start` | — |
-| Unschedulable / synchronization wait | `waiting for a node` / `waiting for a lock` | — |
+| Pending for the run cap | `waiting for a run slot` | — |
+| Unschedulable / synchronization wait | `waiting for a node` / `waiting for sync limit K`, `waiting for mutex N` (`waiting for a lock` when the name does not fit) | — |
 | image pull errors | `image pull failed` | unknown |
 | ContainerCreating / PodInitializing | `starting containers` | — |
 | main exit N / OOMKilled | `exited with code N` / `out of memory` | author |
@@ -193,6 +194,12 @@ source runtime, concrete Store, service, transport or installer imports.
 | failed/error without exit or Pod | `ended without an exit code` | unknown |
 | Skipped / Omitted | `skipped by condition` / `omitted` | — |
 | terminal generic start or failed source init; authored containers never ran | `failed before starting` | infrastructure |
+
+A run is queued until one of its steps has started (a node of it ran or
+ended, in any attempt) and running from then on, never queued again; its
+start is the earliest start of a started step. A queued run's reason is its
+first waiting step's: the lock, a run slot, or waiting to start. Progress
+writes no event and no control revision.
 
 The never-started fallback requires native waiting states with no prior start or
 restart. Image, deadline, node and authored-init diagnoses retain their typed

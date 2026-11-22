@@ -10,7 +10,6 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/internal/stateport"
-	"github.com/oberthci/oberth/internal/stepmodel"
 	"io"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,7 +42,9 @@ type reviewR2Progress struct {
 	invalidated int
 }
 
-func (p *reviewR2Progress) SaveSteps(context.Context, string, []stepmodel.RunStep) error { return nil }
+func (p *reviewR2Progress) SaveProgress(context.Context, string, stateport.Progress) error {
+	return nil
+}
 func (p *reviewR2Progress) BeginEvidence(context.Context, stateport.Action, stateport.EvidenceStart) (int64, error) {
 	return 1, nil
 }

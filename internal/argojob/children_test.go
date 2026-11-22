@@ -92,7 +92,7 @@ func TestRefusedChildTerminateIsRetriedOnTheNextNotice(t *testing.T) {
 	e.ProcessForTest(t.Context(), f.child.Name)
 	run, err := f.s.Run(t.Context(), f.child.Name)
 	compositionOK(t, err)
-	if run.Status != stepmodel.RunRunning || workflows.Patches != 0 {
+	if run.Status != stepmodel.RunQueued || workflows.Patches != 0 {
 		t.Fatal("failed terminate was not left for the next notice", run.Status, workflows.Patches)
 	}
 	workflows.GetError = nil

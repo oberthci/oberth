@@ -13,7 +13,6 @@ import (
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/stateport"
 	statefake "github.com/oberthci/oberth/internal/stateport/fake"
-	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
 func memoryAdmission(t *testing.T, p *admissioncontract.PreparedAdmission) *statefake.Runs {
@@ -79,16 +78,16 @@ func (r *reportSpy) Held(ctx context.Context, h model.HeldNotice) error {
 type progressProbe struct {
 	*statefake.Runs
 	advance  func(context.Context, string) error
-	save     func(context.Context, string, []stepmodel.RunStep) error
+	save     func(context.Context, string, stateport.Progress) error
 	begin    func(context.Context, stateport.Action, stateport.EvidenceStart) (int64, error)
 	complete func(context.Context, stateport.Action, stateport.EvidenceCompletion) error
 }
 
-func (p *progressProbe) SaveSteps(ctx context.Context, id string, s []stepmodel.RunStep) error {
+func (p *progressProbe) SaveProgress(ctx context.Context, id string, s stateport.Progress) error {
 	if p.save != nil {
 		return p.save(ctx, id, s)
 	}
-	return p.Runs.SaveSteps(ctx, id, s)
+	return p.Runs.SaveProgress(ctx, id, s)
 }
 func (p *progressProbe) BeginEvidence(ctx context.Context, a stateport.Action, in stateport.EvidenceStart) (int64, error) {
 	if p.begin != nil {

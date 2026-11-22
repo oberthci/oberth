@@ -79,7 +79,7 @@ func (f *composedFixture) cancelStillRunning(t *testing.T, run stateport.Run) {
 	if f.nativeWorkflow(t, run).Spec.Shutdown != wf.ShutdownStrategyStop {
 		t.Fatal("cancel did not stop the Workflow")
 	}
-	if r, err := f.owners.c.store.Run(t.Context(), run.ID); err != nil || r.Status != stepmodel.RunRunning {
+	if r, err := f.owners.c.store.Run(t.Context(), run.ID); err != nil || r.Status != stepmodel.RunQueued {
 		t.Fatal("run reported ended before its Workflow ended", r.Status, err)
 	}
 }

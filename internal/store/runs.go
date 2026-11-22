@@ -168,7 +168,7 @@ func (s *Store) admittedRun(input stateport.Acceptance, repoID int64) stateport.
 			Ref:       r.Ref,
 			ObjectSHA: r.ObjectSHA,
 			CommitSHA: r.CommitSHA,
-			Status:    stepmodel.RunRunning,
+			Status:    stepmodel.RunQueued,
 			CreatedAt: s.options.Clock().UTC(),
 		},
 		Origin: model.RunOrigin{RunCause: model.RunCause{

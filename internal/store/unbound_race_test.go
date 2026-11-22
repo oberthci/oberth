@@ -38,7 +38,7 @@ func checkUnboundBindingRace(t *testing.T, s, other *Store) {
 	requireOK(t, err)
 	if bindErr == nil {
 		requireCode(t, failErr, publicerr.Conflict)
-		if got.Status != stepmodel.RunRunning || got.Origin.WorkflowUID != binding.Workflow.UID {
+		if got.Status != stepmodel.RunQueued || got.Origin.WorkflowUID != binding.Workflow.UID {
 			t.Fatal("bound winner was failed", got)
 		}
 	} else {

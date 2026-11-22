@@ -60,27 +60,53 @@ func checkNativeStepShape(t *testing.T, f RunFixture) {
 	savedStepShape(t, f, id, steps)
 }
 
-// checkRunStart: a run starts when its first step starts; a later save never
-// moves the start forward, an earlier observed start moves it back.
+// checkRunStart: a run is queued, without a start, while its steps only wait;
+// it runs from the first step that starts, whose start is the run's, and never
+// queues again. A later save never moves the start forward, an earlier
+// observed start moves it back.
 func checkRunStart(t *testing.T, f RunFixture) {
 	saved, err := f.Port.AcceptBatch(t.Context(), batchFor(t, f, RunCase{ID: "run-start"}))
 	mustRun(t, err)
 	id := saved.Runs[0].ID
 	steps, err := f.Port.Steps(t.Context(), id)
 	mustRun(t, err)
-	if r, err := f.Port.Run(t.Context(), id); err != nil || r.StartedAt != nil {
-		t.Fatal("an unobserved run has a start", r.StartedAt, err)
+	if r, err := f.Port.Run(t.Context(), id); err != nil || r.StartedAt != nil || r.Status != stepmodel.RunQueued {
+		t.Fatal("an unobserved run has a start or is not queued", r.StartedAt, r.Status, err)
 	}
 	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	waited := base.Add(-time.Hour)
+	steps[0].Status, steps[0].StartedAt = stepmodel.StepQueued, &waited
+	if err = f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps, Waiting: "waiting for a run slot that is far too long"}); err == nil {
+		t.Fatal("a waiting reason over 40 characters was saved")
+	}
+	mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps, Waiting: "waiting for sync limit go"}))
+	runState(t, f, id, progressWant{stepmodel.RunQueued, "waiting for sync limit go", nil})
 	for _, c := range []struct{ step, want time.Time }{{base, base}, {base.Add(time.Minute), base}, {base.Add(-time.Second), base.Add(-time.Second)}} {
 		started := c.step.In(time.FixedZone("east", 3600))
-		steps[0].StartedAt = &started
-		mustRun(t, f.Port.SaveSteps(t.Context(), id, steps))
-		r, err := f.Port.Run(t.Context(), id)
-		mustRun(t, err)
-		if r.StartedAt == nil || !r.StartedAt.Equal(c.want) || r.StartedAt.Location() != time.UTC {
-			t.Fatal("run start is not its earliest step start in UTC", r.StartedAt, c.want)
-		}
+		steps[0].Status, steps[0].StartedAt = stepmodel.StepRunning, &started
+		mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps, Waiting: "waiting for sync limit go"}))
+		runState(t, f, id, progressWant{stepmodel.RunRunning, "", &c.want})
+	}
+	steps[0].Status = stepmodel.StepQueued
+	mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps, Waiting: "waiting for a node"}))
+	runState(t, f, id, progressWant{stepmodel.RunRunning, "", new(base.Add(-time.Second))})
+}
+
+type progressWant struct {
+	status stepmodel.RunStatus
+	reason string
+	start  *time.Time
+}
+
+func runState(t *testing.T, f RunFixture, id string, want progressWant) {
+	t.Helper()
+	r, err := f.Port.Run(t.Context(), id)
+	mustRun(t, err)
+	if r.Status != want.status || r.DisplayReason != want.reason || (want.start == nil) != (r.StartedAt == nil) {
+		t.Fatal("run progress differs", r.Status, r.DisplayReason, r.StartedAt, want)
+	}
+	if want.start != nil && (!r.StartedAt.Equal(*want.start) || r.StartedAt.Location() != time.UTC) {
+		t.Fatal("run start is not its earliest started step start in UTC", r.StartedAt, *want.start)
 	}
 }
 
@@ -91,7 +117,7 @@ func savedStepShape(t *testing.T, f RunFixture, id string, want []stepmodel.RunS
 		s.CredentialIntent = !s.CredentialIntent
 		input[len(want)-1-i] = s.Clone()
 	}
-	mustRun(t, f.Port.SaveSteps(t.Context(), id, input))
+	mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: input}))
 	got, err := f.Port.Steps(t.Context(), id)
 	mustRun(t, err)
 	if !reflect.DeepEqual(got, want) {

@@ -91,7 +91,7 @@ func TestEvidenceUnknownAndNondeclassification(t *testing.T) {
 	t.Parallel()
 	s := testStore(t)
 	r, _ := accepted(t, s, "evidence-one")
-	requireOK(t, s.SaveSteps(t.Context(), r.ID, []stepmodel.RunStep{{Path: "build", Status: stepmodel.StepPending}}))
+	requireOK(t, s.SaveProgress(t.Context(), r.ID, stateport.Progress{Steps: []stepmodel.RunStep{{Path: "build", Status: stepmodel.StepPending}}}))
 	credential := true
 	n := stateport.Node{NodeID: "node-one", Path: "build", Attempt: 1, Status: stepmodel.StepRunning, Credential: &credential}
 	requireOK(t, putNodes(t, s, evidenceInput{Action: stateport.Action{Actor: "observer"}, RunID: r.ID, Nodes: []stateport.Node{n}}))

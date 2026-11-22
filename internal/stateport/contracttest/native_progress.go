@@ -13,7 +13,7 @@ type NativeProgress interface {
 	Run(context.Context, string) (stateport.Run, error)
 	Nodes(context.Context, string) ([]stateport.Node, error)
 	AdvanceNative(context.Context, string) error
-	SaveSteps(context.Context, string, []stepmodel.RunStep) error
+	SaveProgress(context.Context, string, stateport.Progress) error
 	BeginEvidence(context.Context, stateport.Action, stateport.EvidenceStart) (int64, error)
 	PutNodes(context.Context, stateport.Action, stateport.NodeBatch) error
 	CompleteEvidence(context.Context, stateport.Action, stateport.EvidenceCompletion) error
@@ -72,7 +72,7 @@ func projection(t *testing.T, f ProgressFixture) {
 	ctx := t.Context()
 	var err error
 	steps := []stepmodel.RunStep{{Path: f.Path, Name: "build", Status: stepmodel.StepFailed, DisplayReason: "out of memory"}}
-	if err = f.Store.SaveSteps(ctx, f.RunID, steps); err != nil {
+	if err = f.Store.SaveProgress(ctx, f.RunID, stateport.Progress{Steps: steps}); err != nil {
 		t.Fatal(err)
 	}
 	steps[0].DisplayReason = "changed"
@@ -108,11 +108,11 @@ func retainedNativeEvidence(t *testing.T, f ProgressFixture, batch stateport.Nod
 func nativeStepRefusals(t *testing.T, f ProgressFixture) {
 	t.Helper()
 	badSteps := []stepmodel.RunStep{{Path: "unadmitted", Status: stepmodel.StepRunning}}
-	if err := f.Store.SaveSteps(t.Context(), f.RunID, badSteps); err == nil {
+	if err := f.Store.SaveProgress(t.Context(), f.RunID, stateport.Progress{Steps: badSteps}); err == nil {
 		t.Fatal("unadmitted projection accepted")
 	}
 	badSteps[0].Path, badSteps[0].Status = f.Path, "invalid"
-	if err := f.Store.SaveSteps(t.Context(), f.RunID, badSteps); err == nil {
+	if err := f.Store.SaveProgress(t.Context(), f.RunID, stateport.Progress{Steps: badSteps}); err == nil {
 		t.Fatal("invalid projection accepted")
 	}
 	good := stepmodel.RunStep{Path: f.Path, Status: stepmodel.StepRunning}
@@ -121,13 +121,13 @@ func nativeStepRefusals(t *testing.T, f ProgressFixture) {
 		bad = append(bad, []stepmodel.RunStep{{Path: "build(0:a)", Status: stepmodel.StepRunning}})
 	}
 	for _, steps := range bad {
-		if err := f.Store.SaveSteps(t.Context(), f.RunID, steps); err == nil {
+		if err := f.Store.SaveProgress(t.Context(), f.RunID, stateport.Progress{Steps: steps}); err == nil {
 			t.Fatal("invalid native step projection accepted", steps)
 		}
 	}
 	good.AttemptCount = 1
 	good.Attempts = []stepmodel.StepAttempt{{NodeID: "n", Status: stepmodel.StepRunning}}
-	mustRun(t, f.Store.SaveSteps(t.Context(), f.RunID, []stepmodel.RunStep{good}))
+	mustRun(t, f.Store.SaveProgress(t.Context(), f.RunID, stateport.Progress{Steps: []stepmodel.RunStep{good}}))
 }
 
 func nativeOrderingIdentity(t *testing.T, f ProgressFixture, node stateport.Node) {

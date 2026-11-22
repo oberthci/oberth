@@ -160,7 +160,7 @@ func TestLockWaitingStepPointsToLockStatus(t *testing.T) {
 	}
 	out := project(t, argojob.Projection{Plan: plan, Workflow: &rows[i]})
 	for _, s := range out.Steps {
-		waiting := s.DisplayReason == "waiting for a lock"
+		waiting := s.DisplayReason == "waiting for sync limit heavy-stop"
 		if waiting != (s.Path == "f") || strings.Contains(s.Detail, hint) != waiting || waiting && s.Detail != "Waiting for lock. Lock status: 0/2\n"+hint {
 			t.Fatalf("step %s: reason %q detail %q", s.Path, s.DisplayReason, s.Detail)
 		}
@@ -190,10 +190,11 @@ func TestLockWaitingRunPointsToLockStatus(t *testing.T) {
 
 // Terminate marks a run that was waiting for a workflow-level lock Succeeded;
 // it is reported cancelled, never passed. Stop leaves it queued for the lock.
+// The holder is queued too while its only Pod has not started.
 func TestTerminatedLockWaiterIsCancelledNotPassed(t *testing.T) {
 	t.Parallel()
 	plan := admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "", Name: "main"}}}
-	for name, want := range map[string]stepmodel.RunStatus{"mutex-pending-terminate": stepmodel.RunCancelled, "mutex-pending-stop": stepmodel.RunQueued, "mutex-holder": stepmodel.RunRunning} {
+	for name, want := range map[string]stepmodel.RunStatus{"mutex-pending-terminate": stepmodel.RunCancelled, "mutex-pending-stop": stepmodel.RunQueued, "mutex-holder": stepmodel.RunQueued} {
 		rows := cancelledLocks(t)
 		i := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == name })
 		if out := project(t, argojob.Projection{Plan: plan, Workflow: &rows[i]}); out.Status != want {

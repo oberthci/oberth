@@ -48,7 +48,7 @@ func TestRestartRestoresStoredFailureBeforeShutdown(t *testing.T) {
 	run, err := s.Run(t.Context(), b.RunID)
 	compositionOK(t, err)
 	first := project(t, argojob.Projection{Workflow: f.Object, Plan: run.Admission.Plan, Pods: []*core.Pod{nativePod(f.Object, n, 7)}})
-	compositionOK(t, s.SaveSteps(t.Context(), b.RunID, first.Steps))
+	compositionOK(t, s.SaveProgress(t.Context(), b.RunID, stateport.Progress{Steps: first.Steps}))
 	sequence, err := s.BeginEvidence(t.Context(), stateport.Action{}, stateport.EvidenceStart{RunID: b.RunID, Nodes: len(first.Nodes)})
 	compositionOK(t, err)
 	compositionOK(t, s.PutNodes(t.Context(), stateport.Action{}, stateport.NodeBatch{RunID: b.RunID, Sequence: sequence, Nodes: first.Nodes}))
@@ -89,15 +89,15 @@ func TestTerminalPublicationDoesNotDiscardLatePodEvidence(t *testing.T) {
 	c.Progress = &progressProbe{Runs: s, complete: func(context.Context, stateport.Action, stateport.EvidenceCompletion) error {
 		t.Error("incomplete evidence completed")
 		return nil
-	}, save: func(ctx context.Context, id string, steps []stepmodel.RunStep) error {
+	}, save: func(ctx context.Context, id string, progress stateport.Progress) error {
 		writes++
-		err := s.SaveSteps(ctx, id, steps)
+		err := s.SaveProgress(ctx, id, progress)
 		if writes == 1 {
 			cache.PodObjects = []*core.Pod{nativePod(f.Object, n, 7)}
 			cache.Changed(f.Object.Name)
 		} else {
-			if steps[0].DisplayReason != "exited with code 7" || len(steps[0].Logs) != 1 {
-				t.Error(steps)
+			if progress.Steps[0].DisplayReason != "exited with code 7" || len(progress.Steps[0].Logs) != 1 {
+				t.Error(progress.Steps)
 			}
 			cancel()
 		}
@@ -204,7 +204,7 @@ func TestCreateTracksWhileObserverAlreadyRuns(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	writes := 0
-	c := argojob.Config{Now: compositionClock, Runs: catalogProbe{bindingRefusal{s}, ready}, Workflows: f, Cache: &fake.Cache{}, Reporter: &reportSpy{}, Progress: &progressProbe{Runs: s, save: func(context.Context, string, []stepmodel.RunStep) error { writes++; cancel(); return nil }}}
+	c := argojob.Config{Now: compositionClock, Runs: catalogProbe{bindingRefusal{s}, ready}, Workflows: f, Cache: &fake.Cache{}, Reporter: &reportSpy{}, Progress: &progressProbe{Runs: s, save: func(context.Context, string, stateport.Progress) error { writes++; cancel(); return nil }}}
 	e := argojob.New(c)
 	done := make(chan error, 1)
 	go func() { done <- e.Run(ctx) }()
@@ -237,9 +237,9 @@ func TestTerminalWaitsForLateContainerStatusesBeforeUntracking(t *testing.T) {
 	reports, writes := 0, 0
 	s := c.Runs.(*statefake.Runs)
 	c.Reporter = &reportSpy{FinishedFunc: func(context.Context, string, argojob.Observation) error { reports++; return nil }}
-	c.Progress = &progressProbe{Runs: s, save: func(ctx context.Context, id string, steps []stepmodel.RunStep) error {
+	c.Progress = &progressProbe{Runs: s, save: func(ctx context.Context, id string, progress stateport.Progress) error {
 		writes++
-		err := s.SaveSteps(ctx, id, steps)
+		err := s.SaveProgress(ctx, id, progress)
 		if writes == 1 {
 			p.Status.ContainerStatuses = []core.ContainerStatus{{Name: "main", State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 7}}}, {Name: "wait", State: core.ContainerState{Terminated: &core.ContainerStateTerminated{}}}}
 			cache.Changed(f.Object.Name)
@@ -279,8 +279,8 @@ func TestPublishedTerminalIsNotReplacedByLaterDeletion(t *testing.T) {
 	s := c.Runs.(*statefake.Runs)
 	c.Workflows = workflowReadProbe{f, cancel}
 	c.Reporter = &reportSpy{FinishedFunc: func(context.Context, string, argojob.Observation) error { reports++; return nil }}
-	c.Progress = &progressProbe{Runs: s, save: func(ctx context.Context, id string, steps []stepmodel.RunStep) error {
-		err := s.SaveSteps(ctx, id, steps)
+	c.Progress = &progressProbe{Runs: s, save: func(ctx context.Context, id string, progress stateport.Progress) error {
+		err := s.SaveProgress(ctx, id, progress)
 		f.Object = nil
 		cache.WorkflowObject = nil
 		cache.Changed(b.Workflow.Name)

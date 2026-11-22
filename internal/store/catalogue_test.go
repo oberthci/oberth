@@ -70,19 +70,25 @@ func assertReasonAssignments(t *testing.T, parsed *ast.File, catalogue map[strin
 		}
 		for index, target := range assignment.Lhs {
 			selector, ok := target.(*ast.SelectorExpr)
-			if !ok || selector.Sel.Name != "DisplayReason" {
-				continue
-			}
-			if nativeReasonProjection(file, assignment.Rhs[index]) {
-				continue
-			}
-			source, ok := assignment.Rhs[index].(*ast.SelectorExpr)
-			if !ok || !catalogue[source.Sel.Name] {
+			if ok && selector.Sel.Name == "DisplayReason" && !catalogueReason(file, assignment, index, catalogue) {
 				t.Fatal("status bypassed catalogue", file)
 			}
 		}
 		return true
 	})
+}
+
+// catalogueReason accepts a reason from the literal catalogue, a native verdict
+// or the waiting reason of native progress.
+func catalogueReason(file string, assignment *ast.AssignStmt, index int, catalogue map[string]bool) bool {
+	if len(assignment.Rhs) != len(assignment.Lhs) {
+		return nativeProgress(file, assignment.Rhs[0])
+	}
+	if nativeReasonProjection(file, assignment.Rhs[index]) {
+		return true
+	}
+	source, ok := assignment.Rhs[index].(*ast.SelectorExpr)
+	return ok && catalogue[source.Sel.Name]
 }
 
 func nativeReasonProjection(file string, e ast.Expr) bool {
@@ -95,4 +101,19 @@ func nativeReasonProjection(file string, e ast.Expr) bool {
 	}
 	input, ok := source.X.(*ast.Ident)
 	return ok && input.Name == "update"
+}
+
+// nativeProgress is the waiting reason of native progress, which the store
+// checks against the reason bounds before the run-status rule returns it.
+func nativeProgress(file string, e ast.Expr) bool {
+	call, ok := e.(*ast.CallExpr)
+	if file != "native_progress.go" || !ok {
+		return false
+	}
+	source, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || source.Sel.Name != "Progress" {
+		return false
+	}
+	pkg, ok := source.X.(*ast.Ident)
+	return ok && pkg.Name == "stepmodel"
 }

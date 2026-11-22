@@ -55,7 +55,7 @@ func realServerLogReaderFor(t *testing.T, document string) (serverLogs, statepor
 
 func saveReaderStep(t *testing.T, reader serverLogs, run stateport.Run, step stepmodel.RunStep) {
 	t.Helper()
-	if err := reader.owner.c.store.SaveSteps(t.Context(), run.ID, []stepmodel.RunStep{step}); err != nil {
+	if err := reader.owner.c.store.SaveProgress(t.Context(), run.ID, stateport.Progress{Steps: []stepmodel.RunStep{step}}); err != nil {
 		t.Fatal(err)
 	}
 }

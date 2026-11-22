@@ -105,7 +105,7 @@ func TestReviewR1ZeroNodeObservationReachesEvidenceGuard(t *testing.T) {
 	defer cancel()
 	reports, starts := 0, 0
 	c.Reporter = &reportSpy{FinishedFunc: func(context.Context, string, argojob.Observation) error { reports++; cancel(); return nil }}
-	c.Progress = &progressProbe{Runs: c.Runs.(*statefake.Runs), save: func(context.Context, string, []stepmodel.RunStep) error { return nil }, begin: func(context.Context, stateport.Action, stateport.EvidenceStart) (int64, error) {
+	c.Progress = &progressProbe{Runs: c.Runs.(*statefake.Runs), save: func(context.Context, string, stateport.Progress) error { return nil }, begin: func(context.Context, stateport.Action, stateport.EvidenceStart) (int64, error) {
 		starts++
 		return 0, nil
 	}}

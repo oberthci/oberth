@@ -111,7 +111,7 @@ func (m *runMemory) linkPromotion(a stateport.Acceptance, r stateport.Run) error
 		return nil
 	}
 	p, ok := m.promotions[a.PromotionID]
-	if !ok || p.Repo != r.Repo || p.ResultSHA != r.ObjectSHA || r.CommitSHA == nil || *r.CommitSHA != p.ResultSHA || r.Origin.Trigger != model.TriggerPromotion || r.Status != stepmodel.RunRunning {
+	if !ok || p.Repo != r.Repo || p.ResultSHA != r.ObjectSHA || r.CommitSHA == nil || *r.CommitSHA != p.ResultSHA || r.Origin.Trigger != model.TriggerPromotion || r.Status != stepmodel.RunQueued {
 		return runProblem(publicerr.InvalidInput)
 	}
 	if p.RunID != "" && p.RunID != r.ID {

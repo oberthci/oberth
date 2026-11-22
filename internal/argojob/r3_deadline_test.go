@@ -12,7 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/runlog"
 
-	"github.com/oberthci/oberth/internal/stepmodel"
+	"github.com/oberthci/oberth/internal/stateport"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -64,7 +64,7 @@ type deadlineProgress struct {
 	blocked bool
 }
 
-func (p *deadlineProgress) SaveSteps(ctx context.Context, id string, _ []stepmodel.RunStep) error {
+func (p *deadlineProgress) SaveProgress(ctx context.Context, id string, _ stateport.Progress) error {
 	if id == p.bad {
 		p.blocked = true
 		<-ctx.Done()
@@ -75,7 +75,7 @@ func (p *deadlineProgress) SaveSteps(ctx context.Context, id string, _ []stepmod
 }
 func TestObservationDeadlineLetsAnotherRunProceed(t *testing.T) {
 	t.Parallel()
-	for _, operation := range []string{"Finished", "SaveSteps"} {
+	for _, operation := range []string{"Finished", "SaveProgress"} {
 		t.Run(operation, func(t *testing.T) {
 			e, tr, native, _ := reviewR2Executor(t, &reviewR2Reporter{})
 			e.config.ObservationTimeout = 20 * time.Millisecond
@@ -97,7 +97,7 @@ func TestObservationDeadlineLetsAnotherRunProceed(t *testing.T) {
 			e.config.Reporter, e.config.Progress = reporter, progress
 			_ = e.Run(ctx)
 			err, blocked := reporter.err, reporter.blocked
-			if operation == "SaveSteps" {
+			if operation == "SaveProgress" {
 				err, blocked = progress.err, progress.blocked
 			}
 			if !blocked || !reporter.healthy || !errors.Is(err, context.DeadlineExceeded) {

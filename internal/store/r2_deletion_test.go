@@ -149,7 +149,7 @@ func TestDeletionOnlyCancelsActiveRunsOnItsRef(t *testing.T) {
 	requireOK(t, s.Finish(t.Context(), stateport.Action{}, stateport.RunUpdate{ID: passed.ID, Revision: passed.Revision, Status: stepmodel.RunPassed}))
 	input.Request.ReceiveID = "delete"
 	requireOK(t, recordDeletion(t, s, deletionForTest(input.Request)))
-	for id, want := range map[string]stepmodel.RunStatus{r.ID: stepmodel.RunCancelled, "active-other": stepmodel.RunRunning, passed.ID: stepmodel.RunPassed} {
+	for id, want := range map[string]stepmodel.RunStatus{r.ID: stepmodel.RunCancelled, "active-other": stepmodel.RunQueued, passed.ID: stepmodel.RunPassed} {
 		got, err := s.Run(t.Context(), id)
 		requireOK(t, err)
 		if got.Status != want {

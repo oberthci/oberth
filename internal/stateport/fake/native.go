@@ -52,8 +52,9 @@ func (f *Runs) BindWorkflow(ctx context.Context, a stateport.Action, b nativebin
 	})
 }
 
-// SaveSteps retains the native component's single projection without a control revision.
-func (f *Runs) SaveSteps(ctx context.Context, id string, steps []stepmodel.RunStep) error {
+// SaveProgress retains the native component's single projection without a control revision.
+func (f *Runs) SaveProgress(ctx context.Context, id string, p stateport.Progress) error {
+	steps := p.Steps
 	return f.transact(ctx, nil, func(m *runMemory) error {
 		r, ok := m.runs[id]
 		if !ok {
@@ -62,7 +63,7 @@ func (f *Runs) SaveSteps(ctx context.Context, id string, steps []stepmodel.RunSt
 		if !r.HasAdmission {
 			return runProblem(publicerr.InvalidTransition)
 		}
-		if !stateport.ValidNativeSteps(r.Admission.Plan, steps) {
+		if !stateport.ValidNativeSteps(r.Admission.Plan, steps) || p.Waiting != "" && publicerr.CheckMessage(p.Waiting, 40) != nil {
 			return runProblem(publicerr.InvalidInput)
 		}
 		steps = stateport.PlanSteps(r.Admission.Plan, steps)
@@ -72,6 +73,9 @@ func (f *Runs) SaveSteps(ctx context.Context, id string, steps []stepmodel.RunSt
 		}
 		r.LogicalStepCounts = counts
 		r.StartedAt = stepmodel.RunStart(r.StartedAt, steps)
+		if !runTerminal(r) {
+			r.Status, r.DisplayReason = stepmodel.Progress(r.Status, steps, p.Waiting)
+		}
 		r.Steps = append([]stepmodel.RunStep{}, steps...)
 		r = r.Clone()
 		m.runs[id] = r

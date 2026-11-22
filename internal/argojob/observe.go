@@ -24,7 +24,7 @@ type Runs interface {
 
 // ProgressStore retains the native projection and raw evidence without control revisions.
 type ProgressStore interface {
-	SaveSteps(context.Context, string, []stepmodel.RunStep) error
+	SaveProgress(context.Context, string, stateport.Progress) error
 	AdvanceNative(context.Context, string) error
 	Nodes(context.Context, string) ([]stateport.Node, error)
 	BeginEvidence(context.Context, stateport.Action, stateport.EvidenceStart) (int64, error)
@@ -46,6 +46,7 @@ type tracking struct {
 	plan                     admissioncontract.Plan
 	previous                 []stepmodel.RunStep
 	previousNodes            []stateport.Node
+	waiting                  string
 	completed, lost, settled bool
 	final                    *Observation
 	refusals                 int
@@ -269,7 +270,7 @@ func (e *Executor) observe(ctx context.Context, t *tracking) error {
 	var terminalError error
 	if (t.final != nil || terminalWorkflow(w)) && !t.completed {
 		// A reader told the run finished sees its final steps and counts.
-		terminalError = errors.Join(e.saveSteps(ctx, t, o.Steps), e.publish(ctx, t, o))
+		terminalError = errors.Join(e.saveProgress(ctx, t, o), e.publish(ctx, t, o))
 	}
 	w = o.workflow
 	e.capture(t, w, pods)
@@ -308,18 +309,25 @@ func (e *Executor) writeEvidence(ctx context.Context, id string, o Observation) 
 	}
 	return nil
 }
-func (e *Executor) saveSteps(ctx context.Context, t *tracking, steps []stepmodel.RunStep) error {
-	if reflect.DeepEqual(steps, t.previous) {
+
+// saveProgress writes the steps and, for a queued run, what it waits for,
+// whenever either changed since the last write.
+func (e *Executor) saveProgress(ctx context.Context, t *tracking, o Observation) error {
+	p := stateport.Progress{Steps: o.Steps}
+	if o.Status == stepmodel.RunQueued {
+		p.Waiting = o.Reason
+	}
+	if reflect.DeepEqual(p.Steps, t.previous) && p.Waiting == t.waiting {
 		return nil
 	}
-	if err := e.config.Progress.SaveSteps(ctx, t.binding.RunID, steps); err != nil {
+	if err := e.config.Progress.SaveProgress(ctx, t.binding.RunID, p); err != nil {
 		return err
 	}
-	t.previous = (stepmodel.RunSummary{Steps: steps}).Clone().Steps
+	t.previous, t.waiting = (stepmodel.RunSummary{Steps: p.Steps}).Clone().Steps, p.Waiting
 	return nil
 }
 func (e *Executor) saveObservation(ctx context.Context, t *tracking, o Observation, terminal bool) error {
-	if err := e.saveSteps(ctx, t, o.Steps); err != nil {
+	if err := e.saveProgress(ctx, t, o); err != nil {
 		return err
 	}
 	if !reflect.DeepEqual(o.Nodes, t.previousNodes) || terminal {
