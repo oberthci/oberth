@@ -100,8 +100,6 @@ type TagForge interface {
 type acceptance struct {
 	stateport.BatchAcceptance
 	Result PushResult
-	// tags are the admitted release tags the gate delivers before passing.
-	tags []gitport.Ref
 }
 
 // Service decides before admission and records sealed batches without revalidation.

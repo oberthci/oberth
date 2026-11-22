@@ -50,7 +50,7 @@ func (s *Submitter) Gate(ctx context.Context, r Receive) (PushResult, error) {
 	defer cancel()
 	a, err := s.preparePush(ctx, r, false)
 	if err == nil {
-		err = deliverReleaseTags(ctx, r.Forge, a.tags)
+		err = deliverReleaseTags(ctx, r.Forge, a.Runs)
 	}
 	if ctx.Err() != nil {
 		return PushResult{}, &PushRefusal{Problems: []*Refusal{refusal("timeout", nil)}}
@@ -114,12 +114,18 @@ func (s *Submitter) preparePush(ctx context.Context, r Receive, replay bool) (ac
 	}
 	return a, nil
 }
+
 // deliverReleaseTags puts every admitted release tag on the forge before any
 // ref moves, so no release run exists for a tag the forge lacks. A failed
 // delivery refuses the whole push; a delivered tag stays, and its version is
 // then used even if the run fails.
-func deliverReleaseTags(ctx context.Context, forge TagForge, tags []gitport.Ref) error {
-	for _, tag := range tags {
+func deliverReleaseTags(ctx context.Context, forge TagForge, runs []stateport.Acceptance) error {
+	for _, run := range runs {
+		if run.Prepared == nil || !run.Release {
+			continue
+		}
+		v := run.Prepared.View()
+		tag := gitport.Ref{Name: v.Ref, ObjectSHA: v.ObjectSHA, CommitSHA: v.CommitSHA}
 		if forge == nil {
 			return undeliveredTag(tag, nil)
 		}
@@ -310,10 +316,6 @@ func (s *Submitter) feedback(runs []stateport.Run) PushResult {
 
 func (a *acceptance) acceptRun(run stateport.Acceptance, out Outcome, publicURL string) {
 	a.Runs = append(a.Runs, run)
-	if run.Release {
-		v := run.Prepared.View()
-		a.tags = append(a.tags, gitport.Ref{Name: v.Ref, ObjectSHA: v.ObjectSHA, CommitSHA: v.CommitSHA})
-	}
 	a.Result.assistNotUsed = append(a.Result.assistNotUsed, assistRefusals(assistEnabled && run.Request.Assist, run.Prepared.View().Plan)...)
 	out.RunID, out.State = run.Prepared.View().RunID, "accepted"
 	out.WatchURL = strings.TrimRight(publicURL, "/") + "/runs/" + out.RunID
