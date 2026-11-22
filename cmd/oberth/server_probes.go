@@ -105,12 +105,20 @@ func (a serverAdministration) ProbeUpstream(ctx context.Context, name, checkRepo
 	if err != nil {
 		return out, err
 	}
+	return checkEach(out, repos, func(r stateport.Repository) error { return a.ProbeRepository(ctx, r) }, checkRepo != "")
+}
+
+// checkEach checks repositories in order and stops at the first failure: the
+// upstream is then pending with that failure's reason, whatever passed before.
+// A named repository's failure is also returned, with its cause and remedy.
+func checkEach(out apicontract.Upstream, repos []stateport.Repository, check func(stateport.Repository) error, named bool) (apicontract.Upstream, error) {
 	out.DisplayReason = "No repository was checked."
 	for _, repo := range repos {
-		if err = a.ProbeRepository(ctx, repo); err != nil {
+		if err := check(repo); err != nil {
+			out.Pending = true
 			reason := upstreamProbeStatusReason(err)
 			out.DisplayReason = reason
-			if checkRepo != "" {
+			if named {
 				return out, err
 			}
 			return out, nil
