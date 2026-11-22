@@ -8,7 +8,7 @@ const empty: Snapshot = { recent: [], pins: [], reachable: false, now: 0 }
 const snapshot = atom({ plugin: 'oberth', key: 'snapshot' } as const, empty, { shape: 'runs-1' })
 // The box's round border and one cell of padding on each side.
 const FRAME = 4
-const errorText =(error: unknown) => error instanceof Error ? error.message : 'Unable to read Oberth runs.'
+const errorText = (error: unknown) => error instanceof Error ? error.message : 'Unable to read Oberth runs.'
 // count is how many runs the box shows; with none, only active watches are read.
 type Loop = { count: number; timer?: Timer; pending?: Promise<void>; stopped?: boolean }
 

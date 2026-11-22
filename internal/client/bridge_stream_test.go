@@ -75,7 +75,9 @@ func TestBridgeAppendsDisplayAfterUnchangedJSON(t *testing.T) {
 		resp.Body = io.NopCloser(bytes.NewReader(data))
 		return resp, nil
 	}))
-	cfg.Display = run1Block
+	cfg.Display = func(tool string, raw json.RawMessage) (string, bool) {
+		return "renderer block", tool == "run_get" && bytes.Contains(raw, []byte("run1"))
+	}
 	p := newBridgePeer(t, cfg)
 	p.initialize()
 	p.tool("display", "run_get", map[string]any{"id": "run1"}, nil)
@@ -95,14 +97,6 @@ func TestBridgeAppendsDisplayAfterUnchangedJSON(t *testing.T) {
 	if len(source.Result.Structured) == 0 || len(received.Result.Structured) != 0 {
 		t.Fatal("structured content would hide the display block")
 	}
-}
-
-// run1Block renders a block for run1's run_get result only.
-func run1Block(tool string, raw json.RawMessage) (string, bool) {
-	if tool != "run_get" || !bytes.Contains(raw, []byte("run1")) {
-		return "", false
-	}
-	return "renderer block", true
 }
 
 func TestBridgeListsToolsWithoutOutputSchemas(t *testing.T) {
