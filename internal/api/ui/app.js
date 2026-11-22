@@ -7,6 +7,7 @@ const copy = {
  pastIssues: ["No issues on this page.", "Choose a filter to start from the newest issues."],
  accepted: ["Request accepted."], cancel: ["Cancel this run?"], abandon: ["Release this held step?"],
  emptySteps: ["This run has no planned steps."], emptyLog: ["This step wrote no output."],
+ clearRepo: ["Select it again to show all repositories."],
  network: ["Oberth is not reachable.", "Check that the server is running, then reload this page."],
  reconnecting: ["Reconnecting to Oberth.", "Live updates retry by themselves."],
  ready: ["Server ready."], notReady: ["Server unavailable."], unknown: ["Server status."],
@@ -213,9 +214,8 @@ async function route() {
  }
 }
 // A canonical name is upstream/organization/name. Lists show the name under an
-// upstream/organization header, and more of the prefix only where two visible
-// names would otherwise read the same.
-const upstreamOf = repo => repo.split("/")[0];
+// upstream/organization header, and more of the prefix only where two names
+// would otherwise read the same.
 const groupOf = repo => repo.split("/").slice(0, 2).join("/");
 function shortNames(repos) {
  const cut = (repo, depth) => repo.split("/").slice(depth).join("/");
@@ -225,19 +225,26 @@ function shortNames(repos) {
   return [repo, cut(repo, depth)];
  }));
 }
-// One checkbox per upstream; the address holds the selection (absent means all).
-// The last checked box cannot be cleared, so the list never selects nothing.
-function upstreamChoice(query, upstreams, chosen) {
- const choose = (name, on) => {
-  const next = upstreams.filter(item => item === name ? on : chosen.includes(item));
-  query.delete("before");
-  if (next.length === upstreams.length) query.delete("upstreams"); else query.set("upstreams", next.join(","));
-  if (query.get("repo") && !next.includes(upstreamOf(query.get("repo")))) query.delete("repo");
-  navigate("/runs?" + query);
- };
- const checked = upstreams.filter(name => chosen.includes(name));
- return h("div", {class: "upstreams", role: "group", "aria-label": "Upstreams"}, h("span", {class: "side-word", "aria-hidden": "true"}, "Upstreams"),
-  upstreams.map(name => h("label", {}, h("input", {type: "checkbox", checked: chosen.includes(name) ? "" : null, disabled: checked.length === 1 && checked[0] === name ? "" : null, onchange: event => choose(name, event.target.checked)}), name)));
+// Collapsed side-list groups are a per-viewer convenience; the list works without storage.
+function collapsedGroups() {
+ try { return new Set(JSON.parse(localStorage.getItem("oberth.collapsed") || "[]")); } catch { return new Set(); }
+}
+function saveCollapsed(groups) {
+ try { localStorage.setItem("oberth.collapsed", JSON.stringify([...groups])); } catch { /* the list still works */ }
+}
+// One disclosure per upstream/organization; collapsing hides its rows, not its runs.
+// The group holding the chosen repository opens whatever was stored.
+function repoGroup([group, members], index, labels, repo, link) {
+ const collapsed = collapsedGroups(), open = !collapsed.has(group) || members.includes(repo), id = "repo-group-" + index;
+ const rows = h("div", {class: "repo-members", id, role: "group", "aria-label": group, hidden: open ? null : ""},
+  members.map(name => h("a", {class: "repo-filter", href: link("repo", name === repo ? "" : name), title: name === repo ? name + ". " + copy.clearRepo[0] : name, "aria-label": name, "aria-current": name === repo ? "true" : null}, labels.get(name))));
+ const toggle = h("button", {type: "button", class: "repo-group", title: group, "aria-expanded": String(open), "aria-controls": id, onclick: () => {
+  const stored = collapsedGroups(), closing = toggle.getAttribute("aria-expanded") === "true";
+  toggle.setAttribute("aria-expanded", String(!closing)); rows.hidden = closing;
+  if (closing) stored.add(group); else stored.delete(group);
+  saveCollapsed(stored);
+ }}, h("span", {class: "chevron", "aria-hidden": "true"}), h("span", {class: "repo-group-name"}, group));
+ return [toggle, rows];
 }
 async function runsScreen(view) {
  const query = new URLSearchParams(location.search), signal = view.controller.signal;
@@ -246,21 +253,17 @@ async function runsScreen(view) {
  const change = key => event => { query.delete("before"); query.set(key, event.target.value); navigate("/runs?" + query); };
  const link = (key, value) => "/runs?" + params({...Object.fromEntries(query), before: null, [key]: value});
  const repo = query.get("repo") || "", status = query.get("status") || "";
- const names = repos.repositories.map(item => item.repo).sort(), upstreams = [...new Set(names.map(upstreamOf))];
- const chosen = query.has("upstreams") ? query.get("upstreams").split(",") : upstreams;
- const visible = names.filter(name => chosen.includes(upstreamOf(name))), labels = shortNames(visible), groups = [...Map.groupBy(visible, groupOf)];
+ const names = repos.repositories.map(item => item.repo).sort(), labels = shortNames(names), groups = [...Map.groupBy(names, groupOf)];
  main.append(h("h1", {}, "Runs"),
-  upstreams.length > 1 ? upstreamChoice(query, upstreams, chosen) : null,
-  h("aside", {class: "repo-side", "aria-label": "Repositories"}, h("p", {class: "side-head"}, "Repositories"),
-   h("a", {class: "repo-filter", href: link("repo", ""), "aria-current": repo ? null : "true"}, "All repos"),
-   groups.flatMap(([group, members]) => [h("p", {class: "repo-group", title: group}, group), ...members.map(name =>h("a", {class: "repo-filter", href: link("repo", name), title: name, "aria-label": name, "aria-current": name === repo ? "true" : null}, labels.get(name)))])),
+  h("aside", {class: "repo-side", "aria-label": "Repositories"},
+   h("a", {class: "repo-group", href: link("repo", ""), "aria-current": repo ? null : "true"}, h("span", {class: "chevron", "aria-hidden": "true"}), h("span", {class: "repo-group-name"}, "All repos")), groups.flatMap((group, index) => repoGroup(group, index, labels, repo, link))),
   h("div", {class: "filters"},
-   h("label", {}, "Repository", h("select", {onchange: change("repo")}, h("option", {value: ""}, "all"),
+   h("label", {}, "Repository", h("select", {onchange: change("repo")}, h("option", {value: ""}, "all repositories"),
     groups.map(([group, members]) => h("optgroup", {label: group}, members.map(name => h("option", {value: name, selected: name === repo ? "" : null}, labels.get(name))))))),
    h("div", {class: "chips", role: "group", "aria-label": "Status"}, ["", "queued", "running", "passed", "failed", "cancelled"].map(value => h("a", {class: "chip", href: link("status", value), "aria-current": value === status ? "true" : null}, value || "all")))));
  const region = h("div", {class: "runs"}); main.append(region, h("p", {class: "runs-foot"}, "Newest first · 50 runs per page"));
  view.read = async () => {
-  const page = await get("/api/runs?" + params({limit: 50, repo: query.get("repo"), ref: query.get("ref"), status: query.get("status"), upstreams: query.get("upstreams"), before: query.get("before")}), signal);
+  const page = await get("/api/runs?" + params({limit: 50, repo: query.get("repo"), ref: query.get("ref"), status: query.get("status"), before: query.get("before")}), signal);
   if (signal.aborted) return;
   replace(region, page.runs.length ? [h("div", {class: "row head", "aria-hidden": "true"}, ["STATUS", "REPOSITORY", "REF", "WHEN", "MESSAGE"].map(text => h("span", {}, text))),
    ...page.runs.map(run => h("a", {class: "row", href: "/runs/" + encodeURIComponent(run.id), "data-key": run.id}, state(run.status), h("b", {class: "repo", title: run.repo}, labels.get(run.repo) || run.repo),
@@ -394,11 +397,21 @@ function theme(value) {
 }
 theme(themes.includes(localStorage.getItem("oberth.theme")) ? localStorage.getItem("oberth.theme") : "auto");
 themeButton.addEventListener("click", () => theme(themes[(themes.indexOf(document.documentElement.dataset.theme) + 1) % themes.length]));
+// Escape leaves an issue for the issue list it came from, and on a run list
+// filtered to one repository drops only that filter.
+function escapeTarget() {
+ if (location.pathname.startsWith("/issues/")) return "/issues" + location.search;
+ if (location.pathname.startsWith("/issues")) return "/issues";
+ const query = new URLSearchParams(location.search);
+ if (location.pathname !== "/runs" || !query.has("repo")) return "/runs";
+ query.delete("repo"); query.delete("before");
+ return "/runs" + (query.size ? "?" + query : "");
+}
 document.addEventListener("keydown", event => {
  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.target.closest("input,textarea,select,[contenteditable]")) return;
  const paths = ["/runs", "/repos", "/issues", "/status"];
  if (/^[1-4]$/.test(event.key)) { event.preventDefault(); navigate(paths[Number(event.key) - 1]); }
- else if (event.key === "Escape") { event.preventDefault(); navigate(location.pathname.startsWith("/issues/") ? "/issues" + location.search : location.pathname.startsWith("/issues") ? "/issues" : "/runs"); }
+ else if (event.key === "Escape") { event.preventDefault(); navigate(escapeTarget()); }
  else if (["ArrowLeft", "ArrowRight"].includes(event.key) && main.querySelector(`.pages a[aria-keyshortcuts="${event.key}"]`)) { event.preventDefault(); main.querySelector(`.pages a[aria-keyshortcuts="${event.key}"]`).click(); }
  else if (["j", "k", "ArrowDown", "ArrowUp"].includes(event.key)) {
   const rows = Array.from(main.querySelectorAll("a.row")), index = rows.indexOf(document.activeElement);

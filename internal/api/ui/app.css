@@ -141,30 +141,27 @@ a.row:focus-visible { outline-offset: -2px; }
 .terminal::before { content: ""; grid-column: 1 / -1; height: 34px; margin: 0 0 12px; border-bottom: 1px solid var(--tline); border-radius: 8px 8px 0 0; background: radial-gradient(circle at 16px 50%, var(--failed) 4px, transparent 4.5px), radial-gradient(circle at 30px 50%, var(--running) 4px, transparent 4.5px), radial-gradient(circle at 44px 50%, var(--passed) 4px, transparent 4.5px), var(--tbar); }
 
 /* runs page: repository list on the left, status chips above the table */
-main:has(> .repo-side) { display: grid; grid-template-columns: 208px minmax(0, 1fr); grid-template-areas: "head head" "upst filters" "side runs" "side foot"; grid-template-rows: auto auto auto 1fr; column-gap: 14px; align-items: start; }
+main:has(> .repo-side) { display: grid; grid-template-columns: 208px minmax(0, 1fr); grid-template-areas: "head head" ". filters" "side runs" "side foot"; grid-template-rows: auto auto auto 1fr; column-gap: 14px; align-items: start; }
 main:has(> .repo-side) > h1 { grid-area: head; }
 main:has(> .repo-side) > .filters { grid-area: filters; }
-main:has(> .repo-side) > .upstreams { grid-area: upst; }
 main:has(> .repo-side) > .runs, main:has(> .repo-side) > .empty { grid-area: runs; }
 main:has(> .repo-side) .filters > label { display: none; }
 .repo-side { grid-area: side; position: sticky; top: 64px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-.side-head { display: flex; align-items: center; height: 37px; margin: 0; padding: 0 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 700; }
-/* Side rows share the table's rhythm: a 22px line, 7px above and below, one rule. */
-.repo-filter { display: block; padding: 7px 12px; border-bottom: 1px solid var(--line); color: var(--fg); line-height: 22px; }
-.repo-filter, .repo-group { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.repo-filter:hover { background: var(--panel2); text-decoration: none; }
-.repo-filter:last-child { border-bottom: 0; border-radius: 0 0 8px 8px; }
-.repo-filter[aria-current="true"] { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); font-weight: 700; }
-.repo-group { margin: 0; padding: 2px 12px; border-bottom: 1px solid var(--line); background: var(--panel2); color: var(--muted); font-size: 11px; line-height: 20px; }
-.repo-group ~ .repo-filter { padding-left: 20px; }
-/* Upstream checkboxes are chips in the row of the status chips, above the list. */
-.upstreams { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--muted); font-size: 12px; }
-.upstreams > .side-word { display: none; }
-.upstreams label { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
-.upstreams label:hover { border-color: var(--edge); color: var(--fg); }
-.upstreams label:has(:checked) { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.upstreams input { margin: 0; }
-.upstreams label:has(:disabled) { cursor: default; }
+/* Side rows share the table's rhythm: a 22px line, 7px above and below, one rule
+   between rows. "All repos" and the upstream/organization disclosures are the
+   top-level rows; repository names sit indented under their group's name. */
+.repo-filter, .repo-group { display: block; width: 100%; max-width: none; height: auto; margin: 0; padding: 7px 12px; border: 0; border-top: 1px solid var(--line); border-radius: 0; line-height: 22px; text-align: left; white-space: nowrap; }
+.repo-side > :first-child { border-top: 0; border-radius: 7px 7px 0 0; }
+.repo-side > :last-child > :last-child, .repo-side > .repo-group:has(+ .repo-members:last-child[hidden]) { border-radius: 0 0 7px 7px; }
+.repo-filter { padding-left: 30px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; }
+.repo-group { background: var(--panel2); color: var(--muted); font-size: 12px; font-weight: 700; cursor: pointer; }
+.repo-group-name { display: inline-block; max-width: calc(100% - 20px); vertical-align: top; overflow: hidden; text-overflow: ellipsis; }
+.repo-group:hover, .repo-filter:hover { color: var(--fg); text-decoration: none; }
+.repo-filter:hover { background: var(--panel2); }
+.repo-filter[aria-current="true"], .repo-group[aria-current="true"] { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); box-shadow: inset 3px 0 var(--accent); color: var(--fg); font-weight: 700; }
+.chevron { display: inline-block; width: 6px; height: 6px; margin: 0 10px 3px 2px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.repo-group[aria-expanded="false"] .chevron { margin-bottom: 1px; transform: rotate(-45deg); }
+a.repo-group .chevron { visibility: hidden; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { display: inline-flex; align-items: center; height: 30px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; }
 .chip:hover { border-color: var(--edge); color: var(--fg); text-decoration: none; }
@@ -184,7 +181,6 @@ main:has(> .repo-side) .filters > label { display: none; }
  main:has(> .repo-side) { display: block; }
  .repo-side { display: none; }
  main:has(> .repo-side) .filters > label { display: flex; }
- .upstreams > .side-word { display: inline; margin-right: 2px; }
  .runs .at-word { display: none; }
 }
 
@@ -349,9 +345,8 @@ main:has(> .repo-side) .filters > label { display: none; }
  /* labels */
  nav a, button, label, #signin label, summary, .back, .row.head, .card-name, .steps-head, main > h1, #signin h1 { font-size: 10.5px; font-weight: 400; letter-spacing: .2em; text-transform: uppercase; }
  input, select { font-size: 12px; }
- /* upstream names are identifiers and keep their case; the row's word reads as a label on a phone */
- .upstreams label { font-size: 12px; letter-spacing: 0; text-transform: none; }
- @media (max-width: 1099px) { .upstreams > .side-word { font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; } }
+ /* group names are identifiers and keep their case */
+ .repo-group { font-size: 12px; font-weight: 700; letter-spacing: 0; text-transform: none; }
  h1, h2, h3, .brand, .repos a.row > span:first-child, .issues .title, .issue-id b { font-weight: 400; }
  /* tabs: a word and one hairline */
  nav { align-self: stretch; gap: 4px 22px; }
