@@ -2,6 +2,8 @@ package argojob
 
 import (
 	"errors"
+	"net/http"
+
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/publicerr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -52,15 +54,29 @@ func accountMissing(ci bool, cause error) error {
 	return withDetail(publicerr.New(publicerr.Unavailable, reason, accountRemedy, cause))
 }
 
-// accountProblem names an account missing only when the cluster answered that
-// it is absent or may not be read or created; a rate limit, timeout or outage
-// is the admission running out of time, and pushing again is the remedy.
+// accountProblem calls the cluster API busy, with pushing again as the
+// remedy, only when no API answer came (a rate limit, timeout or outage on
+// the client side) or the answer was 429, 500, 503 or 504. Any other answer
+// (absent, forbidden, unauthorized, a denying webhook) and an account without
+// its UID keep the account remedy: a second push cannot change them.
 func accountProblem(ci bool, cause error) error {
 	var uid *accountUIDError
-	if apierrors.IsNotFound(cause) || apierrors.IsForbidden(cause) || errors.As(cause, &uid) {
+	if errors.As(cause, &uid) || !apiBusy(cause) {
 		return accountMissing(ci, cause)
 	}
 	return withDetail(publicerr.New(publicerr.Unavailable, busyReason, busyRemedy, cause))
+}
+
+func apiBusy(err error) bool {
+	var status apierrors.APIStatus
+	if !errors.As(err, &status) {
+		return true
+	}
+	switch status.Status().Code {
+	case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
 }
 
 type accountUIDError struct{ name string }
