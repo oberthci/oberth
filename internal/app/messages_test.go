@@ -59,11 +59,11 @@ func TestReleaseHeadRemedyNamesTheRetryAction(t *testing.T) {
 	}
 }
 
-func TestReleaseOldRemedyNamesCancelAction(t *testing.T) {
+// A cancelled release still used its version, so the floor never offers cancelling.
+func TestReleaseOldRemedyOffersOnlyAHigherVersion(t *testing.T) {
 	t.Parallel()
 	refused := refusal("release_old", nil)
-	want := "Choose a higher version, or cancel the in-flight release: oberth run cancel <run> --force."
-	if refused.Remedy() != want || !strings.Contains(refused.Error(), want) {
-		t.Fatal("release floor refusal must show the whole cancellation remedy", refused.Error())
+	if refused.Remedy() != "Choose a higher version." || strings.Contains(refused.Error(), "cancel") {
+		t.Fatal("release floor refusal offers a version-spending cancel", refused.Error())
 	}
 }
