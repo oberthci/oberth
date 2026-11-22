@@ -29,13 +29,13 @@ The chart includes the server, Argo and secret store. Keep the profile path, SSH
 deploy key and CA pin, which authenticates HTTPS. Check the endpoint with `oberth system status`.
 
 Follow [repository registration](../README.md#first-green-build) to add the deploy key and verify
-the forge fingerprint. The server owns the forge pin. `--known-hosts <known-hosts-file>` separately
-pins its SSH endpoint. Use the printed `SSH trust` path (default `~/.ssh/known_hosts`).
-Exit 3 means the forge rejected the deploy key: add it, then retry. This binds remote `oberth`.
-`--upstream <name>` selects a repository identity, preserving existing access and trust settings;
-otherwise registration reuses a matching upstream or derives its name from the host. Use the printed
-repository path for step accounts and release subjects. After joining, follow
-[checkout binding](agents.md#install-invite-and-join) to select an already registered repository.
+the forge fingerprint. Use `git@<forge>:<organization>/<repository>.git` or its `ssh://git@` form:
+Oberth logs in as `git`, and a forge's first repository needs exactly that path. The server owns the
+forge pin; `--known-hosts <known-hosts-file>` pins its SSH endpoint: use the printed `SSH trust`
+path. Exit 3: the deploy key was rejected; add it, retry. This binds remote `oberth`.
+`--upstream <name>` selects a repository identity, keeping its settings; otherwise it reuses a
+matching upstream or derives a name from the host. Use the printed repository path for step accounts
+and release subjects. After joining, see [checkout binding](agents.md#install-invite-and-join).
 
 ## A second installation in the same cluster
 

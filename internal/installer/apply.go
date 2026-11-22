@@ -25,6 +25,11 @@ type Result struct {
 	BackupReminder     string            `json:"backup_reminder"`
 }
 
+// FirstRunNext is a new installation's next action. It names the one forge URL
+// shape repo add accepts: Oberth logs in to every forge as git, and a new
+// upstream's organization is the first of exactly two path parts.
+const FirstRunNext = "Add the deploy key to your forge, then run oberth repo add git@<forge>:<organization>/<repository>.git."
+
 // UpgradeCompletion contains facts from the completed local recovery record.
 type UpgradeCompletion struct {
 	From     string `json:"from"`
@@ -87,7 +92,7 @@ func (e *Engine) apply(ctx context.Context, p *Plan, approved string, progress P
 		Profile:            profile,
 		SSHHostFingerprint: p.identities.hostFingerprint(),
 		DeployPublicKey:    string(p.identities.Forge.Data["public"]),
-		Next:               "Add the deploy key to your forge, then run oberth repo add <forge URL>.",
+		Next:               FirstRunNext,
 		BackupReminder:     reminder,
 	}, nil
 }
