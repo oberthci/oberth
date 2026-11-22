@@ -48,7 +48,7 @@ func (c *Cache) policyHead(ctx context.Context, repo string, r Remote) (gitport.
 func (c *Cache) admissionRead(ctx context.Context, p string, r Remote) (gitport.Ref, error) {
 	wait, cancel := context.WithTimeout(ctx, c.budgets.headWait)
 	defer cancel()
-	head, err := c.root().headRead(wait, p, r)
+	head, err := c.root().headRead(ctx, wait, p, r)
 	if isAbsent(err) {
 		return head, c.absence(wait, p, r, err)
 	}
@@ -85,7 +85,7 @@ func (c *Cache) headObject(ctx, wait context.Context, r Remote, head gitport.Ref
 // otherwise is told the forge did not answer. A read that ends after every
 // caller left starts the fetch of a head object the store lacks, so a retry
 // finds it. c is the root cache.
-func (c *Cache) headRead(ctx context.Context, p string, r Remote) (gitport.Ref, error) {
+func (c *Cache) headRead(ctx, wait context.Context, p string, r Remote) (gitport.Ref, error) {
 	key := forgeJobKey(p, "admission-head", r, "")
 	run := func(ctx context.Context, _ *atomic.Bool) outcome {
 		generation := c.answers.generation(p)
@@ -100,21 +100,27 @@ func (c *Cache) headRead(ctx context.Context, p string, r Remote) (gitport.Ref, 
 		}
 	}
 	job := c.joinTransfer(key, run, ended) //nolint:contextcheck // The cache lifetime owns the job, not the caller who waits for it.
-	if c.abandoned(job) {
-		// An earlier caller already waited for this read in vain: the forge
-		// is not answering in time, so later callers (the other pins of the
-		// same admission, a retry) decide at once instead of waiting again.
+	if c.unansweredRead(job) {
+		// An earlier caller already waited its whole head wait for this read
+		// in vain: the forge is not answering in time, so a later caller (a
+		// retry) decides at once instead of waiting again.
 		var expired context.CancelFunc
-		ctx, expired = context.WithTimeout(ctx, 0)
+		wait, expired = context.WithTimeout(wait, 0)
 		defer expired()
 	}
-	if result, ended := c.awaitTransfer(ctx, key, job); ended {
+	if result, done := c.awaitTransfer(wait, key, job); done {
 		return result.head, result.err
+	}
+	if ctx.Err() == nil && errors.Is(context.Cause(wait), context.DeadlineExceeded) {
+		// Only a caller whose own head wait ran out, its context still live,
+		// marks the read: one whose request ended early says nothing about
+		// the forge.
+		c.markUnanswered(job)
 	}
 	if kept, ok := c.answers.recent(key, c.config.Now(), c.lastRefresh(p)); ok {
 		return kept, nil
 	}
-	return gitport.Ref{}, unanswered(ctx, job)
+	return gitport.Ref{}, unanswered(wait, job)
 }
 
 // objectRun fetches the forge's head object oid into the store at p.

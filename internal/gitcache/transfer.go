@@ -33,6 +33,9 @@ type transfer struct {
 	// that a caller stopped waiting before the transfer ended.
 	waiting int
 	left    bool
+	// unanswered records that a caller waited its whole head wait for this
+	// read in vain, with its own context still live.
+	unanswered bool
 	// sending records that the forge began sending the transfer a pack, so a
 	// caller that stops waiting can tell a transfer under way from a forge
 	// that stalls with an error or nothing. run receives it for its forge
@@ -114,12 +117,19 @@ func (c *Cache) awaitTransfer(ctx context.Context, key string, t *transfer) (out
 	return result, true
 }
 
-// abandoned reports whether a caller already stopped waiting for t while it
-// still runs.
-func (c *Cache) abandoned(t *transfer) bool {
+// unansweredRead reports whether a caller already waited its whole head wait
+// for t in vain.
+func (c *Cache) unansweredRead(t *transfer) bool {
 	c.transfers.mu.Lock()
 	defer c.transfers.mu.Unlock()
-	return t.left
+	return t.unanswered
+}
+
+// markUnanswered records that a caller waited its whole head wait for t.
+func (c *Cache) markUnanswered(t *transfer) {
+	c.transfers.mu.Lock()
+	defer c.transfers.mu.Unlock()
+	t.unanswered = true
 }
 
 // leave marks that a caller stopped waiting while the transfer still runs. It
