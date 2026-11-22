@@ -199,11 +199,12 @@ func (c *Cache) sameUpstream(ctx context.Context, repo string, r Remote) error {
 	return nil
 }
 
-func (c *Cache) fetchSnapshot(ctx context.Context, dir string, t fetchTarget) (map[string]string, error) {
-	store, r := t.store, t.remote
+// scratchRepository makes dir a bare repository that borrows the objects of
+// the store, so a transfer into it brings only what the store lacks.
+func (c *Cache) scratchRepository(ctx context.Context, store, dir string) error {
 	format, err := c.capture(ctx, command{dir: store, args: []string{"rev-parse", "--show-object-format"}}, 64)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if err = c.run(
 		ctx,
@@ -212,13 +213,18 @@ func (c *Cache) fetchSnapshot(ctx context.Context, dir string, t fetchTarget) (m
 			args: []string{"init", "--bare", "--object-format=" + string(format), "."},
 		},
 	); err != nil {
-		return nil, err
+		return err
 	}
-	if err = os.WriteFile(
+	return os.WriteFile(
 		filepath.Join(dir, "objects", "info", "alternates"),
 		[]byte(strconv.Quote(filepath.Join(store, "objects"))+"\n"),
 		0600,
-	); err != nil {
+	)
+}
+
+func (c *Cache) fetchSnapshot(ctx context.Context, dir string, t fetchTarget) (map[string]string, error) {
+	r := t.remote
+	if err := c.scratchRepository(ctx, t.store, dir); err != nil {
 		return nil, err
 	}
 	args := []string{
@@ -232,7 +238,7 @@ func (c *Cache) fetchSnapshot(ctx context.Context, dir string, t fetchTarget) (m
 		"+refs/heads/*:refs/heads/*",
 		"+refs/tags/*:refs/tags/*",
 	}
-	if err = c.run(ctx, command{dir: dir, args: args, remote: &r, sending: t.sending}); err != nil {
+	if err := c.run(ctx, command{dir: dir, args: args, remote: &r, sending: t.sending}); err != nil {
 		return nil, err
 	}
 	return c.trackingAt(ctx, dir, "refs/", sourcecontract.MaxRefs)
@@ -244,11 +250,19 @@ func (c *Cache) changed(ctx context.Context, repo string, updates []RefUpdate) {
 	}
 }
 
-// fetchedObject is one object a fetch brings, and the flag its forge command
-// raises once the forge is sending (nil when no caller reads it).
+// fetchedObject is one object a fetch brings, the ref it is written to when
+// into is set, and the flag its forge command raises once the forge is
+// sending (nil when no caller reads it).
 type fetchedObject struct {
-	oid     string
-	sending *atomic.Bool
+	oid, into string
+	sending   *atomic.Bool
+}
+
+func (o fetchedObject) refspec() string {
+	if o.into == "" {
+		return o.oid
+	}
+	return o.oid + ":" + o.into
 }
 
 func (c *Cache) fetchObject(ctx context.Context, p string, r Remote, o fetchedObject) error {
@@ -264,7 +278,7 @@ func (c *Cache) fetchObject(ctx context.Context, p string, r Remote, o fetchedOb
 				"--no-write-fetch-head",
 				"--",
 				r.URL,
-				o.oid,
+				o.refspec(),
 			},
 			remote:  &r,
 			sending: o.sending,

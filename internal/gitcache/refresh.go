@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -96,7 +98,7 @@ func (c *Cache) startFetch(repo, p string, force bool) *transfer {
 		}
 		registered = remote.RepositoryID
 		updates, err := c.fetch(ctx, fetchTarget{store: p, repo: repo, remote: remote, sending: sending})
-		return outcome{updates: updates, err: c.recordRefreshResult(p, err)}
+		return outcome{updates: updates, err: c.recordRefreshResult(p, remote, err)}
 	}
 	ended := func(ctx context.Context, result outcome, end ending) {
 		if result.err == nil && len(result.updates) > 0 && end.unattended && sameRepository(registered, c.registeredID(ctx, repo)) {
@@ -119,9 +121,9 @@ func (c *Cache) recentRefresh(p string) (bool, error) {
 // background bound, unless the server is stopping: the next reads within
 // RefreshInterval say the forge could not be reached instead of starting the
 // whole transfer again.
-func (c *Cache) recordRefreshResult(p string, err error) error {
+func (c *Cache) recordRefreshResult(p string, r Remote, err error) error {
 	if err == nil {
-		return c.recordRefresh(p)
+		return c.recordRefresh(p, r)
 	}
 	var outage *gitport.UnavailableError
 	if c.ctx.Err() == nil && errors.As(err, &outage) && outage.Op == "forge" {
@@ -136,15 +138,37 @@ func (c *Cache) lastRefresh(p string) time.Time {
 	return readRefreshTime(filepath.Join(p, "oberth-refreshed"))
 }
 func readRefreshTime(p string) time.Time {
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return time.Time{}
-	}
-	last, _ := time.Parse(time.RFC3339Nano, string(data))
+	last, _ := readRecord(p)
 	return last
 }
-func (c *Cache) recordRefresh(p string) error {
-	if err := writeDurable(filepath.Join(p, "oberth-refreshed"), []byte(c.config.Now().Format(time.RFC3339Nano))); err != nil {
+
+// readRecord reads a time record and the forge identity on its second line,
+// if any.
+func readRecord(p string) (time.Time, string) {
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return time.Time{}, ""
+	}
+	stamp, identity, _ := strings.Cut(string(data), "\n")
+	last, _ := time.Parse(time.RFC3339Nano, stamp)
+	return last, identity
+}
+
+// refreshedFrom is the forge identity the cache at p was last refreshed from.
+func refreshedFrom(p string) string {
+	_, identity := readRecord(filepath.Join(p, "oberth-refreshed"))
+	return identity
+}
+
+// forgeIdentity names the forge a remote reads: its address and catalogue ID.
+func forgeIdentity(r Remote) string {
+	return r.URL + "\x00" + strconv.FormatInt(r.RepositoryID, 10)
+}
+
+// recordRefresh records a refresh from r's forge, which no forge failure
+// within RefreshInterval then shadows.
+func (c *Cache) recordRefresh(p string, r Remote) error {
+	if err := writeDurable(filepath.Join(p, "oberth-refreshed"), []byte(c.config.Now().Format(time.RFC3339Nano)+"\n"+forgeIdentity(r))); err != nil {
 		return err
 	}
 	err := os.Remove(filepath.Join(p, refreshFailureFile))

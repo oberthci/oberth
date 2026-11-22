@@ -80,7 +80,7 @@ func (c *Cache) ownPin(ctx context.Context, at sourcecontract.Revision, updates 
 	if _, reachable := c.heldAncestor(ctx, p, r.DefaultBranch, at.Commit); !reachable {
 		return r.RepositoryID, false, nil
 	}
-	if !c.trustedCache(p) {
+	if !c.trustedCache(p, r) {
 		return r.RepositoryID, false, forgeRefusal(reasonForgeSilent, remedyForgeSilent, at.Repository, nil)
 	}
 	return r.RepositoryID, true, nil

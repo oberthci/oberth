@@ -41,24 +41,25 @@ func forgeSlow(err error) bool {
 	return errors.Is(outage.Cause, context.DeadlineExceeded) || gitssh.TransportFailure(outage.Cause.Error())
 }
 
-// lateForge decides a forge outcome of repo's head read: nil when the forge
-// was slow and the cache at p was refreshed from it within cacheTrustWindow,
-// so the cache may decide; otherwise the refusal that names repo.
-func (c *Cache) lateForge(p, repo string, err error) error {
+// lateForge decides a forge outcome of r's head read: nil when the forge was
+// slow and the cache at p was refreshed from it within cacheTrustWindow, so
+// the cache may decide; otherwise the refusal that names r's repository.
+func (c *Cache) lateForge(p string, r Remote, err error) error {
 	if !forgeSlow(err) {
-		return forgeRefusal(reasonForgeRefused, remedyForgeRefused, repo, err)
+		return forgeRefusal(reasonForgeRefused, remedyForgeRefused, r.repository, err)
 	}
-	if !c.trustedCache(p) {
-		return forgeRefusal(reasonForgeSilent, remedyForgeSilent, repo, err)
+	if !c.trustedCache(p, r) {
+		return forgeRefusal(reasonForgeSilent, remedyForgeSilent, r.repository, err)
 	}
 	return nil
 }
 
-// trustedCache reports whether the cache at p was refreshed from its forge
-// within cacheTrustWindow, so its default head may decide without the forge.
-func (c *Cache) trustedCache(p string) bool {
+// trustedCache reports whether the cache at p was refreshed from r's forge
+// (its address and catalogue ID) within cacheTrustWindow, so its default head
+// may decide without the forge. A refresh from another address never counts.
+func (c *Cache) trustedCache(p string, r Remote) bool {
 	last := c.lastRefresh(p)
-	return !last.IsZero() && c.config.Now().Sub(last) <= cacheTrustWindow
+	return !last.IsZero() && c.config.Now().Sub(last) <= cacheTrustWindow && refreshedFrom(p) == forgeIdentity(r)
 }
 
 // forgeRefusal refuses a head read naming repo's forge. A forge that answered
@@ -105,7 +106,7 @@ func (c *Cache) admissionHead(ctx context.Context, p string, r Remote) (head git
 	case head.ObjectSHA != "":
 		return head, nil, forgeRefusal(reasonForgeSilent, remedyForgeSilent, r.repository, err)
 	}
-	if refusal := c.lateForge(p, r.repository, err); refusal != nil {
+	if refusal := c.lateForge(p, r, err); refusal != nil {
 		return gitport.Ref{}, nil, refusal
 	}
 	return gitport.Ref{}, err, nil

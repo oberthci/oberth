@@ -17,21 +17,23 @@ import (
 	"github.com/oberthci/oberth/internal/sourcecontract"
 )
 
-// silentForge makes every Git command that names one of the fixture forges
-// wait, once armed, for a line the test writes only at cleanup: a forge that
-// does not answer within any caller's deadline. After failWith, such a
-// command prints the given diagnostic and fails at once instead, as Git does
-// when its SSH transport prints a reason. The log names the forge of each
-// held or failed command.
+// silentForge makes every Git command that names an armed fixture forge
+// wait for a line the test writes only at release or cleanup: a forge that
+// does not answer within any caller's deadline. After holdFetchesOnly only its
+// fetches wait and its other commands answer. After failWith, a command of
+// an armed forge prints the given diagnostic and fails at once instead, as
+// Git does when its SSH transport prints a reason. The log names the forge of
+// each held or failed command.
 type silentForge struct {
-	armed, failure, log string
-	release             func()
+	armed, fetches, failure, log string
+	names                        []string
+	release                      func()
 }
 
 func holdForges(t *testing.T, cfg *gitcache.Config, binary string, forges map[string]string) *silentForge {
 	t.Helper()
 	dir := t.TempDir()
-	s := &silentForge{armed: filepath.Join(dir, "armed"), failure: filepath.Join(dir, "failure"), log: filepath.Join(dir, "forge")}
+	s := &silentForge{armed: filepath.Join(dir, "armed"), fetches: filepath.Join(dir, "fetches"), failure: filepath.Join(dir, "failure"), log: filepath.Join(dir, "forge")}
 	gate, script := filepath.Join(dir, "gate"), filepath.Join(dir, "git")
 	if err := syscall.Mkfifo(gate, 0600); err != nil {
 		t.Fatal(err)
@@ -39,9 +41,12 @@ func holdForges(t *testing.T, cfg *gitcache.Config, binary string, forges map[st
 	var match strings.Builder
 	for name, bare := range forges {
 		fmt.Fprintf(&match, "  [ \"$a\" = '%s' ] && forge=%s\n", bare, name)
+		s.names = append(s.names, name)
 	}
-	body := fmt.Sprintf("#!/bin/sh\nforge=\nfor a do\n%sdone\nif [ -n \"$forge\" ] && [ -e '%s' ]; then\n  echo \"$forge\" >> '%s'\n  if [ -s '%s' ]; then cat '%s' >&2; exit 128; fi\n  read _ < '%s'\nfi\nexec '%s' \"$@\"\n",
-		match.String(), s.armed, s.log, s.failure, s.failure, gate, binary)
+	body := fmt.Sprintf("#!/bin/sh\nforge= fetch=\nfor a do\n  [ \"$a\" = fetch ] && fetch=1\n%sdone\n"+
+		"if [ -n \"$forge\" ] && [ -e '%[2]s' ] && grep -qx \"$forge\" '%[2]s' && { [ ! -e '%[3]s' ] || [ -n \"$fetch\" ]; }; then\n"+
+		"  echo \"$forge\" >> '%[4]s'\n  if [ -s '%[5]s' ]; then cat '%[5]s' >&2; exit 128; fi\n  read _ < '%[6]s'\nfi\nexec '%[7]s' \"$@\"\n",
+		match.String(), s.armed, s.fetches, s.log, s.failure, gate, binary)
 	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -50,16 +55,27 @@ func holdForges(t *testing.T, cfg *gitcache.Config, binary string, forges map[st
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.release = func() {
-		_, _ = w.WriteString(strings.Repeat("\n", 64))
-		_ = w.Close()
-	}
+	// The writer stays open until cleanup, so a command that starts after a
+	// release never waits for one to open the gate.
+	t.Cleanup(func() { _ = w.Close() })
+	s.release = func() { _, _ = w.WriteString(strings.Repeat("\n", 64)) }
 	return s
 }
 
-func (s *silentForge) arm(t *testing.T) {
+// arm holds the named forges, or all of them when none is named.
+func (s *silentForge) arm(t *testing.T, names ...string) {
 	t.Helper()
-	if err := os.WriteFile(s.armed, nil, 0600); err != nil {
+	if len(names) == 0 {
+		names = s.names
+	}
+	if err := os.WriteFile(s.armed, []byte(strings.Join(names, "\n")+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (s *silentForge) holdFetchesOnly(t *testing.T) {
+	t.Helper()
+	if err := os.WriteFile(s.fetches, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -89,30 +105,38 @@ const (
 // commit and two producers, as the own pipelines do, with every forge held
 // silent once armed and the last refresh of each repository stale.
 type pinFixture struct {
-	f, pipeline, wire *gittest.Fixture
-	cfg               gitcache.Config
-	forge             *silentForge
-	mu                sync.Mutex
-	now               time.Time
-	logs              []string
-	c                 *gitcache.Cache
+	// moved is another forge a repository's registration can move to.
+	f, pipeline, wire, moved *gittest.Fixture
+	remotes                  map[string]*gittest.Fixture
+	cfg                      gitcache.Config
+	forge                    *silentForge
+	mu                       sync.Mutex
+	now                      time.Time
+	logs                     []string
+	c                        *gitcache.Cache
 }
 
 func newPinFixture(t *testing.T) *pinFixture {
 	t.Helper()
-	x := &pinFixture{f: gittest.New(t), pipeline: gittest.New(t), wire: gittest.New(t), now: time.Unix(2000000000, 0)}
+	x := &pinFixture{f: gittest.New(t), pipeline: gittest.New(t), wire: gittest.New(t), moved: gittest.New(t), now: time.Unix(2000000000, 0)}
 	x.cfg = reviewConfig(t, x.f)
 	x.cfg.Now = func() time.Time { x.mu.Lock(); defer x.mu.Unlock(); return x.now }
-	x.cfg.Log = func(reason, detail string) { x.mu.Lock(); defer x.mu.Unlock(); x.logs = append(x.logs, reason+": "+detail) }
-	remotes := map[string]*gittest.Fixture{gittest.Repository: x.f, pinnedPipeline: x.pipeline, pinnedWire: x.wire}
+	x.cfg.Log = func(reason, detail string) {
+		x.mu.Lock()
+		defer x.mu.Unlock()
+		x.logs = append(x.logs, reason+": "+detail)
+	}
+	x.remotes = map[string]*gittest.Fixture{gittest.Repository: x.f, pinnedPipeline: x.pipeline, pinnedWire: x.wire}
 	x.cfg.Upstream = func(_ context.Context, repo string) (gitcache.Remote, error) {
-		f := remotes[repo]
+		x.mu.Lock()
+		f := x.remotes[repo]
+		x.mu.Unlock()
 		if f == nil {
 			return gitcache.Remote{}, nil
 		}
 		return gitcache.Remote{URL: f.Bare, DefaultBranch: "refs/heads/main", RepositoryID: int64(len(repo))}, nil
 	}
-	x.forge = holdForges(t, &x.cfg, x.f.Binary, map[string]string{"consumer": x.f.Bare, "pipeline": x.pipeline.Bare, "wire": x.wire.Bare})
+	x.forge = holdForges(t, &x.cfg, x.f.Binary, map[string]string{"consumer": x.f.Bare, "pipeline": x.pipeline.Bare, "wire": x.wire.Bare, "moved": x.moved.Bare})
 	return x
 }
 

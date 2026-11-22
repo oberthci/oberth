@@ -10,7 +10,8 @@ import (
 
 // policyHead reads the forge's current default head of repo and makes sure
 // its object is in the cache. Each forge command runs as a job of the
-// repository under the cache lifetime, joined by concurrent callers, so a
+// repository and its forge identity under the cache lifetime, joined only by
+// callers whose registration names the same forge and branch, so a
 // caller's deadline never kills it: the head identity, the repository's
 // refresh fetch when the cache lacks the head (it tells the cache's readers
 // which refs it moved, so the producer's schedules follow), and a fetch of a
@@ -26,7 +27,7 @@ func (c *Cache) policyHead(ctx context.Context, repo string, r Remote) (gitport.
 	wait, cancel := context.WithTimeout(ctx, c.budgets.refreshWait)
 	defer cancel()
 	store := c.root()
-	head, err := c.forgeJob(wait, p+"/head", func(ctx context.Context, _ *atomic.Bool) outcome {
+	head, err := c.forgeJob(wait, forgeJobKey(p, "head", r, ""), func(ctx context.Context, _ *atomic.Bool) outcome {
 		head, err := store.remoteRef(ctx, p, r, r.DefaultBranch)
 		if isAbsent(err) {
 			err = store.policyAbsence(ctx, p, r)
@@ -43,8 +44,8 @@ func (c *Cache) policyHead(ctx context.Context, repo string, r Remote) (gitport.
 	if c.has(ctx, p, head.ObjectSHA) {
 		return head, nil
 	}
-	_, err = c.forgeJob(wait, p+"/object/"+head.ObjectSHA, func(ctx context.Context, sending *atomic.Bool) outcome {
-		return outcome{err: store.fetchObject(ctx, p, r, fetchedObject{oid: head.ObjectSHA, sending: sending})}
+	_, err = c.forgeJob(wait, forgeJobKey(p, "object", r, head.ObjectSHA), func(ctx context.Context, sending *atomic.Bool) outcome {
+		return outcome{err: store.fetchHeadObject(ctx, p, r, fetchedObject{oid: head.ObjectSHA, sending: sending})}
 	})
 	return head, err
 }

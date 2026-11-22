@@ -264,7 +264,7 @@ func (c *Cache) clone(ctx context.Context, repository, p string) error {
 	if err = c.checkDefault(ctx, staging, repository, remote); err != nil {
 		return err
 	}
-	if err = c.recordRefresh(staging); err != nil {
+	if err = c.recordRefresh(staging, remote); err != nil {
 		return err
 	}
 	// The upstream can be removed and added again under another address while
