@@ -173,7 +173,7 @@ func joinAdministrativeTransport(t *testing.T, app *application, signer joinSign
 func recordJoinGit(t *testing.T, app *application, known, sha string) *string {
 	t.Helper()
 	app.directory = t.TempDir()
-	for _, args := range [][]string{{"init"}, {"config", "oberth.repository", "project"}, {"config", "oberth.knownHosts", known}, {"config", "oberth.profile", filepath.Dir(known)}} {
+	for _, args := range [][]string{{"init"}, {"config", "oberth.repository", "project"}, {"config", "oberth.profile", filepath.Dir(known)}} {
 		if _, err := runGit(t.Context(), app.directory, args...); err != nil {
 			t.Fatal(err)
 		}

@@ -71,10 +71,8 @@ func (s *flowSession) joinedConnection(dir string) (client.Profile, string, erro
 	if json.Unmarshal(raw, &profile) != nil {
 		return profile, "", flowError("input", nil)
 	}
-	known, err := s.git("config", "--get", "oberth.knownHosts")
-	if err != nil || known == "" {
-		known = profile.KnownHosts
-	}
+	// The invitation's keys pin the server; a checkout's own settings never do.
+	known := profile.KnownHosts
 	if known == "" {
 		return profile, "", flowError("host_unsaved", nil)
 	}

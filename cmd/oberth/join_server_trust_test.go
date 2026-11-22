@@ -41,6 +41,28 @@ func TestJoinBindingNeverFallsBackToHomeKnownHosts(t *testing.T) {
 	}
 }
 
+// A checkout bound earlier may record the person's own known_hosts; join
+// still pins the server with the keys the invitation delivered.
+func TestJoinBindingIgnoresARecordedHomeKnownHosts(t *testing.T) {
+	command := urlCheckoutCommand(t, fake.Bindings(), true)
+	homeKnownHosts(t, &command)
+	home := filepath.Join(command.app.env("HOME"), ".ssh", "known_hosts")
+	for _, setting := range [][2]string{{"oberth.repository", "origin/team/widget"}, {"oberth.knownHosts", home}} {
+		if _, err := runGit(t.Context(), command.app.directory, "config", setting[0], setting[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := filepath.Join(command.app.base, "install")
+	session := flowSession{app: command.app, ctx: t.Context()}
+	if bound, err := session.bindJoinedCheckout(dir); err != nil || !bound {
+		t.Fatal("join did not bind with the invitation's keys", bound, err)
+	}
+	config, err := os.ReadFile(filepath.Join(dir, "ssh.config"))
+	if err != nil || !bytes.Contains(config, []byte(command.known)) || bytes.Contains(config, []byte(home)) {
+		t.Fatal("join pinned the server with the home known_hosts", string(config), err)
+	}
+}
+
 // homeKnownHosts puts the server's keys into the person's own known_hosts,
 // where a fallback would find them.
 func homeKnownHosts(t *testing.T, command *repoAddCommand) {

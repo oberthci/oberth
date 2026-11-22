@@ -59,10 +59,6 @@ func (s *flowSession) bindCheckout(repo, known string) error {
 	if err = s.bindGitRemote(repo, command); err != nil {
 		return err
 	}
-	absolute, _ := filepath.Abs(known)
-	if _, err = s.git("config", "oberth.knownHosts", absolute); err != nil {
-		return err
-	}
 	if _, err = s.git("config", "oberth.repository", repo); err != nil {
 		return err
 	}
