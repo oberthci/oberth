@@ -14,7 +14,7 @@ import (
 // exact object this receive creates at that tag, peeled to the exact commit,
 // through the installation's forge identity. A tag already on the forge at
 // that object counts as delivered; a tag there at any other object is never
-// moved. Once delivered, the receive's admission no longer refuses on its
+// moved, and any forge rejection is final. Once delivered, the receive's admission no longer refuses on its
 // deadline. A delivered tag stays whatever the run does next.
 func (s *ReceiveSource) DeliverTag(ctx context.Context, ref gitport.Ref) error {
 	ctx, cancel := s.scope(ctx)

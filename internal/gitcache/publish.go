@@ -155,7 +155,7 @@ func (c *Cache) confirmPublication(ctx context.Context, attempt publicationAttem
 	if actual.ObjectSHA != *r.PreviousSHA {
 		return moved(r, "upstream", actual.ObjectSHA)
 	}
-	if permanentPushRefusal(attempt.output) {
+	if permanentPushRefusal(attempt.output) || refusedTagCreation(r, attempt.output) {
 		detail := rejectedPushLine(attempt.output)
 		return &RefusalError{reason: reasonPublishRefused, remedy: remedyPublishRefused, Detail: detail}
 	}
@@ -227,6 +227,12 @@ func permanentPushRefusal(output []byte) bool {
 		}
 	}
 	return false
+}
+
+// refusedTagCreation treats any forge rejection of a create-only tag push as
+// final, whatever the forge's wording: retrying cannot change the answer.
+func refusedTagCreation(r model.Publication, output []byte) bool {
+	return strings.HasPrefix(r.Ref, "refs/tags/") && rejectedPushLine(output) != ""
 }
 
 func protectedPushRefusal(summary string) bool {
