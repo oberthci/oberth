@@ -368,7 +368,8 @@ a.repo-group .chevron { visibility: hidden; }
  /* status: a mark and the word; only failed and running light the word */
  .state { padding: 0; border: 0; background: none; font-weight: 600; }
  .state:not(.failed, .running) { color: var(--muted); }
- .mark.running { background: none; }
+ .mark.running, .bar.running { background: none; }
+ .bar.running { border: 1px solid currentColor; }
  .runs a.row:has(.failed) { box-shadow: inset 2px 0 var(--failed); }
  /* surfaces: frames, no fills, no bar on the log */
  .row.head { background: none; }

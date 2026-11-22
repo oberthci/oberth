@@ -42,7 +42,10 @@ export async function repositories(client){
  // The four colours are drawn: one bar of each kind has its own visible fill.
  const light=await barLooks(client,'light');
  check(new Set(light.map(bar=>bar.fill)).size===4&&light.every(bar=>bar.fill!=='rgba(0, 0, 0, 0)'),'bar colours not four visible fills '+JSON.stringify(light));
- results.push({light});
+ // The mono theme draws running hollow, as its status mark, so it differs from white failed.
+ const mono=await barLooks(client,'mono'),look=bar=>bar.fill+'|'+bar.edge,running=mono.find(bar=>bar.kind==='running');
+ check(new Set(mono.map(look)).size===4&&running.fill==='rgba(0, 0, 0, 0)'&&running.edge.startsWith('solid ')&&mono.every(bar=>bar.fill!=='rgba(0, 0, 0, 0)'||bar.edge.startsWith('solid ')),'mono bars not four visible looks '+JSON.stringify(mono));
+ results.push({light,mono});
  // A bar opens its own run, not the row's run list.
  await client.evaluate(`document.querySelector('.repos a.row[data-key="origin/team/web"] .bar:last-child').click()`);
  const path=await client.evaluate(`new Promise(resolve=>{const test=()=>location.pathname.startsWith('/runs/')&&resolve(location.pathname+location.search);test();setTimeout(()=>resolve(location.pathname+location.search),1000);})`);
