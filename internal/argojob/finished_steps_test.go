@@ -7,13 +7,40 @@ import (
 	"time"
 
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/argojob/fake"
 	"github.com/oberthci/oberth/internal/stateport"
 	statefake "github.com/oberthci/oberth/internal/stateport/fake"
 	"github.com/oberthci/oberth/internal/stepmodel"
 	core "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// The usual sequence: the step is first seen waiting with Argo's PodInitializing
+// message, then succeeded. Merging with the earlier observation must not bring
+// the waiting detail back onto the passed step.
+func TestPassedStepDropsTheDetailOfItsWaitingObservation(t *testing.T) {
+	t.Parallel()
+	plan := admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "", Name: "build"}}}
+	w := nativeWorkflow()
+	n := nativeNode("one", "", wf.NodePending, 1)
+	n.Message, n.FinishedAt = "PodInitializing", meta.Time{}
+	w.Status.Nodes = wf.Nodes{n.ID: n}
+	pod := nativePod(w, n, 0)
+	pod.Status.ContainerStatuses[0].State = core.ContainerState{Waiting: &core.ContainerStateWaiting{Reason: "PodInitializing"}}
+	first := project(t, argojob.Projection{Plan: plan, Workflow: w, Pods: []*core.Pod{pod}})
+	if len(first.Steps) != 1 || first.Steps[0].Detail != "PodInitializing" {
+		t.Fatal("fixture lost the waiting observation", first.Steps)
+	}
+	w.Status.Phase = wf.WorkflowSucceeded
+	n.Phase, n.FinishedAt = wf.NodeSucceeded, meta.NewTime(time.Unix(2, 0))
+	w.Status.Nodes = wf.Nodes{n.ID: n}
+	second := project(t, argojob.Projection{Plan: plan, Workflow: w, Pods: []*core.Pod{nativePod(w, n, 0)}, Previous: first.Steps, PreviousNodes: first.Nodes})
+	if len(second.Steps) != 1 || second.Steps[0].Status != stepmodel.StepPassed || second.Steps[0].Detail != "" {
+		t.Fatal("passed step kept its waiting detail", second.Steps)
+	}
+}
 
 // A reader told the run finished, by the event or a wait, reads final step
 // states and counts: the observer saves them before it reports the verdict.

@@ -63,7 +63,11 @@ func mergeDiagnosis(row projected, old stepmodel.RunStep) projected {
 	if terminalStep(old.Status) && (mergeStatus(old.Status, row.step.Status) != row.step.Status || row.step.DisplayReason == reasonFailed || row.step.DisplayReason == reasonStopped || row.step.DisplayReason == reasonUnknown) {
 		row.step.DisplayReason, row.step.Detail, row.class = old.DisplayReason, old.Detail, stepmodel.FailureUnknown
 	}
-	row.step.Detail = cmp.Or(row.step.Detail, old.Detail)
+	// A step that passed since an unfinished observation keeps none of that
+	// observation's waiting detail, such as PodInitializing.
+	if row.step.Status != stepmodel.StepPassed || terminalStep(old.Status) {
+		row.step.Detail = cmp.Or(row.step.Detail, old.Detail)
+	}
 	row.step.Name = cmp.Or(row.step.Name, old.Name)
 	row.step.FinishedAt = cmp.Or(row.step.FinishedAt, old.FinishedAt)
 	return row
