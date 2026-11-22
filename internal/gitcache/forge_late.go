@@ -66,3 +66,25 @@ func forgeRefusal(reason, remedy, repo string, cause error) error {
 	refusal.Detail = "Forge of " + repo + "."
 	return refusal
 }
+
+// DefaultHead reads the forge's default head of repo for a default-branch or
+// tag push, under the pin rule: its forge reads are repository jobs, the
+// caller waits at most the head wait, and a slow forge is accepted while the
+// cache was refreshed from it within cacheTrustWindow.
+func (c *Cache) DefaultHead(ctx context.Context, repo string) error {
+	p, err := c.path(repo)
+	if err != nil {
+		return err
+	}
+	r, err := c.remote(ctx, repo)
+	if err != nil {
+		return err
+	}
+	wait, cancel := context.WithTimeout(ctx, c.budgets.headWait)
+	_, err = c.policyHead(wait, repo, r)
+	cancel()
+	if forgeError(err) {
+		return c.lateForge(p, repo, err)
+	}
+	return err
+}

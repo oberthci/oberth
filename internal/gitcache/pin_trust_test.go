@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/gitcache/gittest"
 	"github.com/oberthci/oberth/internal/gitssh"
 	"github.com/oberthci/oberth/internal/publicerr"
 )
@@ -69,6 +70,18 @@ func TestPinFallsBackOnlyToARecentCacheForASlowForge(t *testing.T) {
 				t.Fatal("the pin was not decided")
 			}
 			checkTrust(t, tc, at.Repository, err)
+		})
+	}
+}
+
+// A default-branch or tag push reads its own default head under the same
+// rule, within the head wait.
+func TestDefaultHeadReadFollowsThePinRule(t *testing.T) {
+	for _, tc := range trustCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			x := newPinFixture(t)
+			x.prepare(t, tc)
+			checkTrust(t, tc, gittest.Repository, x.c.DefaultHead(t.Context(), gittest.Repository))
 		})
 	}
 }

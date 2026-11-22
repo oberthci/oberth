@@ -141,7 +141,7 @@ func (o *serverOwners) receive(ctx context.Context, e gitcache.ReceiveEvent, sou
 func (o *serverOwners) gate(ctx context.Context, e gitcache.ReceiveEvent, s *gitcache.ReceiveSource) error {
 	for _, update := range e.Updates {
 		if update.Ref == o.settings.DefaultBranch || strings.HasPrefix(update.Ref, "refs/tags/") {
-			if _, err := o.cache.RemoteRef(ctx, e.Repository, o.settings.DefaultBranch); err != nil {
+			if err := o.cache.DefaultHead(ctx, e.Repository); err != nil {
 				return err
 			}
 			break
