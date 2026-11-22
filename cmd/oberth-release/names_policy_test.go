@@ -100,39 +100,38 @@ exec "$@"
 	assertStaticLog(t, values)
 }
 
-// A delivered identity reaches only the guards, as Git configuration after the step's own entries;
-// without the file the guards keep the configuration they inherit.
+const (
+	fixtureIdentity  = "Fixture Author <author@example.invalid>"
+	identityMissing  = "Identity oberth/policy/identity is missing; store and grant it.\n"
+	identityMalformed = "Identity must be one \"Name <email>\" line; store it again.\n"
+)
+
+// The delivered identity is required and reaches only the guards, as Git configuration after the
+// step's own entries; a missing or malformed file refuses before any command runs.
 func TestIdentityPolicyGivesOnlyTheGuardsTheRepositoryIdentity(t *testing.T) {
 	workflow, err := argoworkflow.Decode(ownWorkflow(t, "build"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct{ name, value, count string }{
-		{"present", "Fixture Author <author@example.invalid>\n", "3"},
-		{"absent", "", "1"},
-		{"two-lines", "Fixture Author <author@example.invalid>\nOther <other@example.invalid>\n", ""},
-		{"no-address", "Fixture Author\n", ""},
+	for _, tc := range []struct{ name, refusal string }{
+		{"present", ""}, {"absent", identityMissing}, {"empty", identityMissing}, {"directory", identityMissing},
+		{"two-lines", identityMalformed}, {"no-address", identityMalformed},
 	} {
-		t.Run(tc.name, func(t *testing.T) { checkStaticIdentity(t, workflow, tc.value, tc.count) })
+		t.Run(tc.name, func(t *testing.T) { checkStaticIdentity(t, workflow, tc.name, tc.refusal) })
 	}
 }
 
-// checkStaticIdentity runs the step with an identity file holding value (none when empty); count "" expects a refusal.
-func checkStaticIdentity(t *testing.T, workflow *wfv1.Workflow, value, count string) {
+// checkStaticIdentity replaces the fixture's identity file as which says and runs the step.
+func checkStaticIdentity(t *testing.T, workflow *wfv1.Workflow, which, refusal string) {
 	t.Helper()
 	dir := workflowFixture(t)
 	values := staticFixture(t, dir)
 	values["OBERTH_SECRETS_DIR"], values["EXPECTED_NAMES"] = staticPolicyFile(t, "present")
-	values["EXPECTED_CONFIG_COUNT"], values["EXPECTED_IDENTITY"] = count, strings.TrimSpace(value)
-	if value != "" {
-		if err := os.WriteFile(filepath.Join(values["OBERTH_SECRETS_DIR"], "oberth/policy/identity"), []byte(value), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	replaceIdentity(t, filepath.Join(values["OBERTH_SECRETS_DIR"], "oberth/policy/identity"), which)
 	output, err := executeWorkflowTemplate(t, workflow, workflow.GetTemplateByName("lint-and-guards-pass"), values)
-	if count == "" {
-		if err == nil || string(output) != "Identity must be one \"Name <email>\" line; store it again.\n" {
-			t.Fatal("malformed identity did not refuse", err, string(output))
+	if refusal != "" {
+		if _, statErr := os.Stat(values["STATIC_LOG"]); err == nil || string(output) != refusal || !os.IsNotExist(statErr) {
+			t.Fatal("identity did not refuse before any command", err, string(output), statErr)
 		}
 		return
 	}
@@ -140,6 +139,32 @@ func checkStaticIdentity(t *testing.T, workflow *wfv1.Workflow, value, count str
 		t.Fatal("identity step failed or printed the identity", err, string(output))
 	}
 	assertStaticLog(t, values)
+}
+
+// replaceIdentity turns the fixture's valid identity file into the case which names.
+func replaceIdentity(t *testing.T, file, which string) {
+	t.Helper()
+	contents := map[string]string{"empty": "", "two-lines": fixtureIdentity + "\nOther <other@example.invalid>\n", "no-address": "Fixture Author\n"}
+	if value, ok := contents[which]; ok {
+		writeIdentity(t, file, value)
+	}
+	if which == "absent" || which == "directory" {
+		if err := os.Remove(file); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if which == "directory" {
+		if err := os.Mkdir(file, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func writeIdentity(t *testing.T, file, value string) {
+	t.Helper()
+	if err := os.WriteFile(file, []byte(value), 0600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func assertStaticLog(t *testing.T, values map[string]string) {
@@ -166,6 +191,7 @@ func staticPolicyFile(t *testing.T, which string) (string, string) {
 			t.Fatal(err)
 		}
 	}
+	writeIdentity(t, filepath.Join(delivery, "oberth/policy/identity"), fixtureIdentity+"\n")
 	if which == "no-delivery" {
 		delivery = ""
 	}
@@ -190,8 +216,8 @@ case "$*" in *'version --short') cat hack/lint-version | sed 's/^v//';;
 	writeFixtureCommand(t, filepath.Join(dir, "bin/python3"), `[ -z "${OBERTH_SECRETS_DIR:-}" ] || exit 97
 case "$*" in
  'hack/guards/run.py') [ "${OBERTH_GUARDS_NAMES_FILE:-}" = "$EXPECTED_NAMES" ] && [ -s "$OBERTH_GUARDS_NAMES_FILE" ] || exit 97
-  [ "$GIT_CONFIG_COUNT" = "${EXPECTED_CONFIG_COUNT:-1}" ] && `+git+`--get-all safe.directory | grep -qx /work/src || exit 95
-  if [ -n "${EXPECTED_IDENTITY:-}" ]; then [ "$(`+git+`user.name) <$(`+git+`user.email)>" = "$EXPECTED_IDENTITY" ] || exit 94; fi
+  [ "$GIT_CONFIG_COUNT" = 3 ] && `+git+`--get-all safe.directory | grep -qx /work/src || exit 95
+  [ "$(`+git+`user.name) <$(`+git+`user.email)>" = '`+fixtureIdentity+`' ] || exit 94
   echo guards >> "$STATIC_LOG";;
  'hack/plans/parity.py --check') [ -z "${OBERTH_GUARDS_NAMES_FILE:-}" ] && [ "$GIT_CONFIG_COUNT" = 1 ] || exit 97; echo parity >> "$STATIC_LOG";;
  *) exit 98;; esac
