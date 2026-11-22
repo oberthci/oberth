@@ -52,6 +52,7 @@ tool_paths=(
     hack/webui/behavior.mjs
     hack/webui/captures.mjs
     hack/webui/check.mjs
+    hack/webui/repositories.mjs
     hack/test_ui.py
     hack/dev.sh
     hack/devloop/Dockerfile
