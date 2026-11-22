@@ -1,6 +1,6 @@
 {
   "name": "oberth",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "description": "Oberth runs above the prompt (up to the runs option, three by default, none at 0), the /oberth-runs table and /oberth-watch completion notices for the person, and the connection skill; the model uses the oberth bridge's tools.",
   "types": "./types/index.d.ts",
   "userConfig": {
