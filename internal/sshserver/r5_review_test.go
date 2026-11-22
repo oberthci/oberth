@@ -63,7 +63,7 @@ func TestR5AdmissionRefusals(t *testing.T) {
 				return publicerr.New(publicerr.InvalidInput, reason, "Fix the pipeline and push again.", nil)
 			}
 			if timeout {
-				reason = "push admission is unavailable"
+				reason = "push admission did not finish in time"
 			}
 			e.f.Write(t, "a.txt", []byte("a"))
 			e.f.CommitFile(t, "a")

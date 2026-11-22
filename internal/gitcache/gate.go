@@ -202,34 +202,48 @@ func (
 	if session.passed != nil {
 		session.passed()
 	}
-	err := c.awaitAdmission(ctx, event, source)
-	if err == nil && source.delivered.Load() {
+	done := make(chan error, 1)
+	go func() { done <- c.config.PreReceive(ctx, event, source) }()
+	answered, err := c.admissionAnswer(ctx, event.ID, source, done)
+	if answered && err == nil && source.delivered.Load() {
 		// A release tag is on the forge: refusing now would spend its version with no run.
 		return nil
 	}
-	if ctx.Err() != nil {
-		return &gateError{code: "unavailable", cause: context.Cause(ctx)}
-	}
-	if err != nil {
+	return admissionReply(ctx, answered, err)
+}
+
+// admissionReply turns the callback's answer into the gate's. A refusal is
+// returned as the callback gave it, also when it came as the admission
+// context ended, if it names its reason; an approval counts only while the
+// context is live; an admission that ran out of time says so.
+func admissionReply(ctx context.Context, answered bool, err error) error {
+	var public *publicerr.Error
+	switch {
+	case answered && err != nil && (ctx.Err() == nil || errors.As(err, &public)):
 		code := "unavailable"
 		if publicerr.Permanent(err) {
 			code = "refused"
 		}
 		return &gateError{code: code, detail: err.Error(), cause: err}
+	case ctx.Err() == nil:
+		return nil
+	case errors.Is(context.Cause(ctx), context.DeadlineExceeded):
+		return &gateError{code: "unavailable", detail: reasonGateTimeout + ". " + remedyGateTimeout, cause: context.Cause(ctx)}
+	default:
+		return &gateError{code: "unavailable", cause: context.Cause(ctx)}
 	}
-	return nil
 }
 
 // Composition supplies the admission duration. Enforce its cancellation even when a
 // broken callback ignores it; a late result cannot approve or retain the source,
 // unless the callback already delivered a release tag: it is then awaited, since
-// a refusal would spend the tag's version with no run.
-func (c *Cache) awaitAdmission(ctx context.Context, event ReceiveEvent, source *ReceiveSource) error {
-	done := make(chan error, 1)
-	go func() { done <- c.config.PreReceive(ctx, event, source) }()
+// a refusal would spend the tag's version with no run, and only its approval
+// counts. Otherwise an answer already in done when the context ends is taken
+// without waiting; answered is false only when the callback had not returned.
+func (c *Cache) admissionAnswer(ctx context.Context, id string, source *ReceiveSource, done <-chan error) (bool, error) {
 	select {
 	case err := <-done:
-		return err
+		return true, err
 	case <-ctx.Done():
 		if source.delivered.Load() {
 			// Past its forge write the callback only records its approval; the
@@ -237,22 +251,23 @@ func (c *Cache) awaitAdmission(ctx context.Context, event ReceiveEvent, source *
 			select {
 			case err := <-done:
 				if err == nil {
-					return nil
+					return true, nil
 				}
 			case <-c.ctx.Done():
 			}
-			return context.Cause(ctx)
+			return false, context.Cause(ctx)
 		}
 		select {
-		case <-done:
+		case err := <-done:
+			return true, err
 		default:
 			if c.config.AdmissionMetric != nil {
 				c.config.AdmissionMetric(reasonAdmissionStuck)
 			}
 			if c.config.Log != nil {
-				c.config.Log(reasonAdmissionStuck, event.ID)
+				c.config.Log(reasonAdmissionStuck, id)
 			}
 		}
-		return context.Cause(ctx)
+		return false, context.Cause(ctx)
 	}
 }

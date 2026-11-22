@@ -28,7 +28,7 @@ const (
 	remedyPushWaiting      = "This push waits briefly for the earlier push to finish."
 	reasonPublishRefused   = "upstream refused push"
 	remedyPublishRefused   = "Correct the upstream refusal and try the push again."
-	reasonAdmissionStuck   = "admission callback still running"
+	reasonAdmissionStuck   = "admission still running at its deadline"
 	reasonForgeUpdating    = "forge copy still updating"
 	reasonOptionCount      = "push has more than two options"
 	reasonTagMoved         = "tag moved since admission"
@@ -70,4 +70,6 @@ const (
 	reasonGateUnavailable = "push admission is unavailable"
 	remedyGateRefused     = "Fix the reported problems and push again."
 	remedyGateRetry       = "Try the same push again when the server is ready."
+	reasonGateTimeout     = "push admission did not finish in time"
+	remedyGateTimeout     = "Nothing ran and no ref moved; push the same commit again."
 )

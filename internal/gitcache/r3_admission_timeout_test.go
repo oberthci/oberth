@@ -98,7 +98,7 @@ func expectAdmissionCutoff(t *testing.T, done <-chan error, diagnostics *bytes.B
 	t.Helper()
 	select {
 	case err := <-done:
-		if err == nil || !strings.Contains(strings.ToLower(diagnostics.String()), "try") {
+		if err == nil || !strings.Contains(diagnostics.String(), "push admission did not finish in time. Nothing ran and no ref moved; push the same commit again.") {
 			t.Fatal("deadline feedback", err, diagnostics.String())
 		}
 	case <-time.After(2 * time.Second):

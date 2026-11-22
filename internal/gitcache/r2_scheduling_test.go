@@ -242,7 +242,7 @@ func TestGateDeadlineReleasesReceiveAndRevokesLateSource(t *testing.T) {
 
 func checkAdmissionObserverReason(t *testing.T, reason, id string) {
 	t.Helper()
-	if reason != "admission callback still running" || id == "" {
+	if reason != "admission still running at its deadline" || id == "" {
 		t.Error(reason, id)
 	}
 }

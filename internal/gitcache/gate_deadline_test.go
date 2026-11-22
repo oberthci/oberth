@@ -1,0 +1,76 @@
+package gitcache
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/oberthci/oberth/internal/publicerr"
+)
+
+// A refusal the callback already gave when the admission context ends is the
+// answer: either branch of the select returns it, and no stuck callback is
+// observed.
+func TestAdmissionKeepsARefusalReadyAtItsDeadline(t *testing.T) {
+	observed := 0
+	c := &Cache{config: Config{AdmissionMetric: func(string) { observed++ }}}
+	refusal := publicerr.New(publicerr.InvalidInput, "pipeline admission failed", "Fix every reported finding, then push again.", nil)
+	expired, cancel := context.WithCancel(t.Context())
+	cancel()
+	for range 64 {
+		done := make(chan error, 1)
+		done <- refusal
+		answered, err := c.admissionAnswer(expired, "receive", &ReceiveSource{}, done)
+		if !answered || !errors.Is(err, refusal) {
+			t.Fatal("a ready refusal was dropped at the deadline", answered, err)
+		}
+	}
+	if observed != 0 {
+		t.Fatal("a callback that had answered was observed as still running", observed)
+	}
+}
+
+// The gate's reply: a refusal with a reason stands even after the deadline,
+// a late approval or a bare late error never approves, and an admission that
+// ran out of time says what timed out.
+func TestAdmissionReplyAfterItsDeadline(t *testing.T) {
+	live := t.Context()
+	timedOut, cancel := context.WithDeadline(t.Context(), time.Unix(1, 0))
+	defer cancel()
+	stopped, stop := context.WithCancel(t.Context())
+	stop()
+	refusal := publicerr.New(publicerr.InvalidInput, "pipeline admission failed", "Fix every reported finding, then push again.", nil)
+	for _, tc := range []struct {
+		name     string
+		ctx      context.Context
+		answered bool
+		err      error
+		want     string
+	}{
+		{"approval in time", live, true, nil, ""},
+		{"refusal in time", live, true, refusal, "pipeline admission failed"},
+		{"refusal ready at the deadline", timedOut, true, refusal, "pipeline admission failed"},
+		{"late approval", timedOut, true, nil, reasonGateTimeout},
+		{"bare error at the deadline", timedOut, true, context.DeadlineExceeded, reasonGateTimeout},
+		{"no answer at the deadline", timedOut, false, context.DeadlineExceeded, reasonGateTimeout},
+		{"receive stopped", stopped, false, context.Canceled, reasonGateUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := admissionReply(tc.ctx, tc.answered, tc.err)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatal("an approval in time was refused", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("reply %v, want %q", err, tc.want)
+			}
+		})
+	}
+	if publicerr.CheckMessage(reasonGateTimeout, 80) != nil || publicerr.CheckMessage(remedyGateTimeout, 120) != nil {
+		t.Fatal("gate timeout line is not one sentence within bounds")
+	}
+}
