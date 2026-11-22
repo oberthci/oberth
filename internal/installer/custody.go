@@ -34,6 +34,9 @@ type Profile struct {
 	BackupRecipient   string `json:"backup_recipient"`
 	BackupKey         string `json:"backup_key"`
 	BootstrapPending  bool   `json:"bootstrap_pending"`
+	// Ready records that an apply of this profile's installation reached a
+	// ready server; a later apply is an update of a completed installation.
+	Ready bool `json:"ready,omitempty"`
 }
 
 // ConfigDir confines credentials to an owner-only directory through os.Root.

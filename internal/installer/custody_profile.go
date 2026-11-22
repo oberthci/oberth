@@ -40,6 +40,7 @@ func (e *Engine) saveProfile(p *Plan, i Identities, a admin) (Profile, error) {
 		Version: 1, ServerVersion: p.release.Version(), Context: p.choices.Context,
 		ClusterUID: p.uid, ServerURL: p.choices.URL, MCPURL: p.choices.URL + "/mcp",
 		BootstrapPending:  true,
+		Ready:             p.previous.Ready,
 		Namespace:         p.choices.Namespace,
 		PipelineNamespace: p.choices.PipelineNamespace, HTTPSNodePort: p.choices.HTTPSNodePort, SSHNodePort: p.choices.SSHNodePort,
 	}

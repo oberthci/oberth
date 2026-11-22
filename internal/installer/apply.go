@@ -23,8 +23,8 @@ type Result struct {
 	StoreSnapshotHint  string            `json:"store_snapshot_hint"`
 	BackupPath         string            `json:"backup_path,omitempty"`
 	BackupReminder     string            `json:"backup_reminder"`
-	// Updated reports that an installation was already deployed: its first-run
-	// steps are done.
+	// Updated reports that an earlier apply of this profile reached a ready
+	// server; a fresh install retried after a late failure is not an update.
 	Updated bool `json:"updated,omitempty"`
 }
 
@@ -33,9 +33,9 @@ type Result struct {
 // upstream's organization is the first of exactly two path parts.
 const FirstRunNext = "Add the deploy key to your forge, then run oberth repo add git@<forge>:<organization>/<repository>.git."
 
-// UpdateNext replaces the first-run steps on an update, which keeps the
-// installation's identities and records.
-const UpdateNext = "Deploy key, repositories and identities are kept; the first-run steps are done."
+// UpdateNext replaces the first-run steps on an update of a completed
+// installation, which keeps its identities and records.
+const UpdateNext = "Deploy key, repositories and identities are kept."
 
 // UpgradeCompletion contains facts from the completed local recovery record.
 type UpgradeCompletion struct {
@@ -90,6 +90,12 @@ func (e *Engine) apply(ctx context.Context, p *Plan, approved string, progress P
 	if err = e.finish(ctx, p, profile, progress); err != nil {
 		return Result{}, err
 	}
+	if !profile.Ready {
+		profile.Ready = true
+		if err = e.Credentials.saveProfile(profile, p.admin.id); err != nil {
+			return Result{}, err
+		}
+	}
 	reminder := "Copy " + profile.BackupKey + " off this machine."
 	if profile.RecoveryKey != "" {
 		reminder += "\nCopy " + profile.RecoveryKey + " off this machine."
@@ -101,7 +107,7 @@ func (e *Engine) apply(ctx context.Context, p *Plan, approved string, progress P
 		DeployPublicKey:    string(p.identities.Forge.Data["public"]),
 		Next:               FirstRunNext,
 		BackupReminder:     reminder,
-		Updated:            p.history.Deployed.Number > 0,
+		Updated:            p.previous.Ready,
 	}
 	if result.Updated {
 		result.Next = UpdateNext

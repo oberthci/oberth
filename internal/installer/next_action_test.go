@@ -1,9 +1,12 @@
 package installer_test
 
 import (
+	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/installer"
 )
@@ -19,6 +22,30 @@ func TestFirstInstallNamesTheAcceptedForgeURL(t *testing.T) {
 	}
 	if len(r.Next) > 120 {
 		t.Fatal("next action exceeds the remedy bound", len(r.Next))
+	}
+}
+
+// A fresh install whose server never became ready leaves a deployed release;
+// its retry is still the first run and names the first-run step.
+func TestRetriedFreshInstallIsStillTheFirstRun(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	f.engine.Timeout = 50 * time.Millisecond
+	f.engine.CheckEndpoint = func(context.Context, installer.Profile) error { return errors.New("server not ready") }
+	p := prepare(t, f)
+	if _, err := f.engine.Apply(t.Context(), p, p.Digest(), nil); err == nil {
+		t.Fatal("fixture: an unready server completed the install")
+	}
+	if f.charts.History.Deployed.Number == 0 {
+		t.Fatal("fixture: the failed install left no deployed release")
+	}
+	f.engine.CheckEndpoint = func(context.Context, installer.Profile) error { return nil }
+	retry := apply(t, f, prepare(t, f))
+	if retry.Updated || retry.Next != installer.FirstRunNext {
+		t.Fatal("retried fresh install claimed an update", retry.Updated, retry.Next)
+	}
+	if again := apply(t, f, prepare(t, f)); !again.Updated || again.Next != installer.UpdateNext {
+		t.Fatal("apply after a completed install is not an update", again.Updated, again.Next)
 	}
 }
 
