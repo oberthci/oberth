@@ -98,8 +98,11 @@ func TestBranchPassLeavesDefaultBranchIssueOpen(t *testing.T) {
 	}
 }
 
+// A passing promotion closes the default branch issue; a failed one leaves it
+// as the last default branch run left it.
+//
 // Covers: REQ-C2-018
-func TestPromotionRunCountsAsDefaultBranchCI(t *testing.T) {
+func TestPromotionPassClosesAndFailureLeavesDefaultBranchIssue(t *testing.T) {
 	t.Parallel()
 	for _, status := range []stepmodel.RunStatus{stepmodel.RunFailed, stepmodel.RunPassed} {
 		t.Run(string(status), func(t *testing.T) {
@@ -112,14 +115,24 @@ func TestPromotionRunCountsAsDefaultBranchCI(t *testing.T) {
 				t.Fatal("promotion run does not target the default branch", promoted.Ref)
 			}
 			finishCI(t, f, promoted.ID, status)
-			want := model.IssueOpen
+			want, work, occurrences := model.IssueOpen, red.ID, int64(1)
 			if status == stepmodel.RunPassed {
-				want = model.IssueClosed
+				want, work = model.IssueClosed, promoted.ID
 			}
-			if rows := ciIssues(t, f); len(rows) != 1 || rows[0].State != want || rows[0].CIWorkID != promoted.ID {
-				t.Fatal("promotion run did not act as default branch CI", rows)
+			if rows := ciIssues(t, f); len(rows) != 1 || rows[0].State != want || rows[0].CIWorkID != work || rows[0].Occurrences != occurrences {
+				t.Fatal("promotion run moved the default branch issue wrongly", rows)
 			}
 		})
+	}
+}
+
+// Covers: REQ-C2-018
+func TestFailedPromotionCreatesNoCIIssue(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	finishCI(t, f, promotionRun(t, f).ID, stepmodel.RunFailed)
+	if rows := ciIssues(t, f); len(rows) != 0 {
+		t.Fatal("a failed promotion created a CI issue", rows)
 	}
 }
 
