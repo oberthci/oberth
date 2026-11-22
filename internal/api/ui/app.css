@@ -105,8 +105,14 @@ a.row:focus-visible { outline-offset: -2px; }
 .runs .when { font-size: inherit; }
 .pager { display: block; margin-top: 10px; font-size: 12px; }
 .runs > .pager { margin: 0; padding: 10px 12px; }
-.repos .row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 3fr) 96px; }
+.repos .row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 3fr) 138px 96px; }
 .repos a.row > span:first-child { font-weight: 700; }
+/* The last 20 runs: a 5px bar each with a 2px gap fill the 138px column; the
+   newest sits at the right edge so rows line up by recency. */
+.recent { display: flex; justify-content: flex-end; gap: 2px; height: 16px; }
+.bar { flex: none; width: 5px; border-radius: 1px; background: currentColor; }
+.bar.other { color: var(--edge); }
+.recent:hover .bar:not(:hover) { opacity: .45; }
 
 /* one run: header band, step list, terminal log */
 .back { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font-size: 11px; }
@@ -269,7 +275,11 @@ a.repo-group .chevron { visibility: hidden; }
  .log { margin-top: 14px; }
  .terminal { min-height: 200px; }
  .repos .head, .issues .head { display: none; }
- .repos .row { grid-template-columns: auto 1fr; gap: 6px 16px; }
+ /* A phone shows name and default branch, the latest run and the branch count,
+    then the bars on their own last line. */
+ .repos .row { grid-template-columns: minmax(0, 1fr) auto; grid-auto-flow: dense; gap: 6px 16px; }
+ .repos .recent { grid-column: 1 / -1; }
+ .repos .recent:empty { display: none; }
  /* As the run list on a phone: status and title on the first line; number,
     repository, lock and age on the second. */
  .issues { display: block; }

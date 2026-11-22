@@ -370,12 +370,22 @@ function reposScreen(view) {
  const query = new URLSearchParams(location.search), region = h("div", {class: "repos"});
  main.append(h("h1", {}, "Repositories"), h("label", {class: "toolbar"}, h("input", {type: "checkbox", checked: query.get("archived") === "include" ? "" : null, onchange: event => navigate("/repos" + (event.target.checked ? "?archived=include" : ""))}), "Show archived"), region);
  view.read = async () => {
-  const page = await get("/api/repos?" + params({archived: query.get("archived")}), view.controller.signal);
+  const page = await get("/api/repos?" + params({archived: query.get("archived"), recent_runs: true}), view.controller.signal);
   if (view.controller.signal.aborted) return;
-  replace(region, page.repositories.length ? [h("div", {class: "row head"}, ["REPOSITORY", "DEFAULT BRANCH", "LATEST RUN", "BRANCHES"].map(text => h("span", {}, text))),
+  replace(region, page.repositories.length ? [h("div", {class: "row head"}, ["REPOSITORY", "DEFAULT BRANCH", "LATEST RUN", "LAST 20", "BRANCHES"].map(text => h("span", {}, text))),
    ...page.repositories.map(repo => h("a", {class: "row", href: "/runs?" + params({repo: repo.repo}), "data-key": repo.repo}, h("span", {class: "mono"}, repo.repo), h("span", {class: "mono"}, repo.default_branch),
-    h("span", {}, repo.latest_run ? [state(repo.latest_run.status), " · " + repo.latest_run.ref + " · " + time(repo.latest_run.created_at)] : "unknown"), h("span", {}, repo.branch_count === null ? "unknown" : String(repo.branch_count))))] : [empty(copy.emptyRepos)]);
+    h("span", {}, repo.latest_run ? [state(repo.latest_run.status), " · " + repo.latest_run.ref + " · " + time(repo.latest_run.created_at)] : "no runs"), recentRuns(repo.recent_runs || []), h("span", {}, repo.branch_count === null ? "unknown" : String(repo.branch_count))))] : [empty(copy.emptyRepos)]);
  };
+}
+// A repository's last runs as bars, oldest left: green passed, red failed, yellow
+// queued or running, grey cancelled. Each bar opens its run; the row's own link
+// stays the keyboard's stop, so the bars take no tab stops of their own.
+const barColours = {passed: "passed", failed: "failed", queued: "running", running: "running"};
+function recentRuns(runs) {
+ return h("span", {class: "recent"}, runs.map(run => {
+  const words = run.status + " · " + refName(run.ref) + " · " + time(run.created_at);
+  return h("a", {class: "bar " + (barColours[run.status] || "other"), href: "/runs/" + encodeURIComponent(run.id), title: words, "aria-label": words, tabindex: "-1"});
+ }));
 }
 function statusScreen(view) {
  main.append(h("h1", {}, "Status"));

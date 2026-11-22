@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/oberthci/oberth/internal/logcontract"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
@@ -90,7 +92,7 @@ func uiExample(t *testing.T) *fixture {
 				return fallback, nil
 			}, nil
 		})
-		b.RepoList.Handler = &fake.Handler[apicontract.RepoListArgs, apicontract.RepoPage]{Value: apicontract.RepoPage{Repositories: []apicontract.Repository{{Repo: runs[0].Repo, DefaultBranch: "main", BranchCount: new(3), LatestRun: &runs[0].RunSummary}, {Repo: runs[2].Repo, DefaultBranch: "main", LatestRun: &runs[2].RunSummary}, {Repo: runs[3].Repo, DefaultBranch: "main"}}}}
+		b.RepoList.Handler = &fake.Handler[apicontract.RepoListArgs, apicontract.RepoPage]{Value: apicontract.RepoPage{Repositories: []apicontract.Repository{{Repo: runs[0].Repo, DefaultBranch: "main", BranchCount: new(3), LatestRun: &runs[0].RunSummary, RecentRuns: exampleMarks(at, "pfpppcfppppfrppppqfp")}, {Repo: runs[2].Repo, DefaultBranch: "main", LatestRun: &runs[2].RunSummary, RecentRuns: exampleMarks(at, "ppfpr")}, {Repo: runs[3].Repo, DefaultBranch: "main"}}}}
 		b.RunLogs.Handler = &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{Value: apicontract.LogResult{Content: "Running the authored test command\nFAIL pkg/check 0.40s\nexpected status 200, received 500\n<script>this is log text</script>\n", Meta: logcontract.Meta{ScanComplete: true, BytesExact: true}}}
 		b.RunRerun.Handler = &fake.Handler[apicontract.RunRerunArgs, apicontract.Receipt]{Value: apicontract.Receipt{ID: "55555555"}}
 		refused := publicerr.New(publicerr.Conflict, "This run cannot be cancelled.", "Read the current run.", nil)
@@ -121,6 +123,17 @@ func uiExample(t *testing.T) *fixture {
 		b.SystemStatus.Handler = &fake.Handler[apicontract.SystemStatusArgs, apicontract.SystemStatus]{Value: apicontract.SystemStatus{Ready: true, Version: "1"}}
 		c.Views.Containers.Handler = &fake.Handler[apicontract.IDArgs, apicontract.ContainerPage]{Value: apicontract.ContainerPage{Containers: []apicontract.Container{{NodeID: "attempt-one", Container: "main"}, {NodeID: "attempt-two", Container: "main"}}}}
 	})
+}
+
+// exampleMarks spells a repository strip oldest first, one letter per run:
+// p passed, f failed, r running, q queued, c cancelled.
+func exampleMarks(at time.Time, spelled string) []stateport.RunMark {
+	statuses := map[rune]stepmodel.RunStatus{'p': stepmodel.RunPassed, 'f': stepmodel.RunFailed, 'r': stepmodel.RunRunning, 'q': stepmodel.RunQueued, 'c': stepmodel.RunCancelled}
+	marks := []stateport.RunMark{}
+	for i, letter := range spelled {
+		marks = append(marks, stateport.RunMark{ID: fmt.Sprintf("%032x", 0x7700+i), Status: statuses[letter], Ref: "refs/heads/topic-" + fmt.Sprint(i), CreatedAt: at.Add(time.Duration(i-len(spelled)) * time.Hour)})
+	}
+	return marks
 }
 
 type exampleAuth struct {

@@ -3,13 +3,14 @@ import {launch,step} from './cdp.mjs';
 import {behavior} from './behavior.mjs';
 import {captures} from './captures.mjs';
 import {busy} from './busy.mjs';
+import {repositories} from './repositories.mjs';
 
 let client;
 try {
  client=await launch();
  step('browser behavior assertions');
  const result={behavior:await behavior(client)};
- if(!process.argv.includes('--behavior-only')){step('browser captures and assertions');result.captures=await captures(client);}
+ if(!process.argv.includes('--behavior-only')){step('browser captures and assertions');result.captures=await captures(client);step('repository strips');result.repositories=await repositories(client);}
  client.checkFatal();
  await client.close();
  if(!process.argv.includes('--behavior-only')){step('busy server');result.busy=await busy();}
