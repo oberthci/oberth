@@ -52,8 +52,10 @@ func forgeRefused(err error) bool {
 
 // lateForge decides a forge outcome of r's head read: nil when the forge was
 // slow and the cache at p was refreshed from it within cacheTrustWindow, so
-// the cache may decide; otherwise the refusal that names r's repository.
-func (c *Cache) lateForge(p string, r Remote, err error) error {
+// the cache may decide; otherwise the refusal that names r's repository. A
+// slow forge with a cache it cannot trust starts the repository's refresh
+// (follow), so a retry can decide from the cache once the refresh lands.
+func (c *Cache) lateForge(ctx context.Context, p string, r Remote, err error) error {
 	switch {
 	case forgeSlow(err):
 	case forgeRefused(err):
@@ -62,6 +64,7 @@ func (c *Cache) lateForge(p string, r Remote, err error) error {
 		return forgeRefusal(reasonForgeFailed, remedyForgeFailed, r.repository, err)
 	}
 	if !c.trustedCache(p, r) {
+		c.follow(ctx, r.repository)
 		return forgeRefusal(reasonForgeSilent, remedyForgeSilent, r.repository, err)
 	}
 	return nil
@@ -82,6 +85,16 @@ func (c *Cache) trustedCache(p string, r Remote) bool {
 
 // forgeRefusal refuses a head read naming repo's forge. A forge that answered
 // and is still sending keeps saying so.
+// follow starts or joins repo's refresh fetch without waiting for it; the
+// refs it moves reach the cache's readers when it ends.
+func (c *Cache) follow(ctx context.Context, repo string) {
+	now, cancel := context.WithTimeout(ctx, 0)
+	defer cancel()
+	if updates, err := c.root().refreshQuietly(now, repo, false); err == nil {
+		c.changed(ctx, repo, updates)
+	}
+}
+
 func forgeRefusal(reason, remedy, repo string, cause error) error {
 	var updating *gitport.FetchUnfinishedError
 	if errors.As(cause, &updating) {
@@ -122,7 +135,7 @@ func (c *Cache) admissionHead(ctx context.Context, p string, r Remote) (head git
 	case head.ObjectSHA != "":
 		return head, nil, forgeRefusal(reasonForgeSilent, remedyForgeSilent, r.repository, err)
 	}
-	if refusal := c.lateForge(p, r, err); refusal != nil {
+	if refusal := c.lateForge(ctx, p, r, err); refusal != nil {
 		return gitport.Ref{}, nil, refusal
 	}
 	return gitport.Ref{}, err, nil
