@@ -85,7 +85,12 @@ spec:
         command: [/work/shared/oberth, secretstore, exec]
         args: [--, bash, hack/static.sh]
         # Steps have no home directory: the linter's cache lives on the cache volume beside GOCACHE.
-        env: [{name: BUILD_DEFAULT_REF, value: refs/heads/main}, {name: GOLANGCI_LINT_CACHE, value: /cache/golangci-lint}]
+        # The guards' whole-program analysis peaks near 7 GiB unbounded; a soft Go limit holds the
+        # step under 6 GiB of its 8Gi at no measurable time cost.
+        env:
+          - {name: BUILD_DEFAULT_REF, value: refs/heads/main}
+          - {name: GOLANGCI_LINT_CACHE, value: /cache/golangci-lint}
+          - {name: GOMEMLIMIT, value: 6GiB}
         resources: {requests: {cpu: '2', memory: 2Gi}, limits: {cpu: '6', memory: 8Gi}}
     - name: prepare-base
       inputs:
