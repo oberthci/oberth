@@ -396,14 +396,26 @@ func TestFailedReleaseStopsBeforePublicationWait(t *testing.T) {
 	b.RunCheck.Handler = &fake.Handler[apicontract.RunCheckArgs, apicontract.RunCheckResult]{Value: apicontract.RunCheckResult{OK: true, ReleaseTag: "v0.1.0", CommitSHA: ptrReleaseSHA()}}
 	b.EventsWait.Handler = &fake.Handler[apicontract.EventsWaitArgs, apicontract.EventResult]{PrepareError: publicerr.New(publicerr.InvalidInput, "Unexpected publication wait.", "Stop before waiting for publication.", nil)}
 	app, _, diagnostic := fixture(t, b)
+	var gitCalls []string
 	app.git = func(_ context.Context, args []string) (string, error) {
+		gitCalls = append(gitCalls, strings.Join(args, " "))
 		if args[0] == "config" {
 			return "project", nil
 		}
 		return strings.Repeat("a", 40), nil
 	}
-	if code := app.run(context.Background(), []string{"release", "v0.1.0"}); code != 1 || !strings.Contains(diagnostic.String(), "Release run or publication failed.") {
+	if code := app.run(context.Background(), []string{"release", "v0.1.0"}); code != 1 {
 		t.Fatal("failed release kept waiting", code, diagnostic.String())
+	}
+	for _, want := range []string{"The release run failed; its version is now used.", "release the next version", "Used version:\nv0.1.0", "oberth log failed-release"} {
+		if !strings.Contains(diagnostic.String(), want) {
+			t.Fatalf("failed release does not say %q: %s", want, diagnostic.String())
+		}
+	}
+	for _, call := range gitCalls {
+		if strings.Contains(call, "--delete") || strings.HasPrefix(call, "tag -d") || strings.Contains(call, " :refs/tags/") {
+			t.Fatal("a failed release removed its tag", call)
+		}
 	}
 	_, _, calls := b.EventsWait.Handler.(*fake.Handler[apicontract.EventsWaitArgs, apicontract.EventResult]).Observed()
 	if calls != 0 {

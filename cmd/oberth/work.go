@@ -117,10 +117,12 @@ func release(s *flowSession, args []string) error {
 		return err
 	}
 	if run.Status != stepmodel.RunPassed {
-		return flowError("release", nil)
+		// The forge got the tag at admission and keeps it, so the version is spent.
+		problem := flowError("release_used", nil)
+		problem.Context = []string{"Used version: " + tag, "Logs: oberth log " + run.ID}
+		return problem
 	}
 	return s.releaseReceipt(run.ID)
-
 }
 func logRun(s *flowSession, args []string) error {
 	f := flowFlags("log", s.app.home())
