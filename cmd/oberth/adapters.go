@@ -48,8 +48,6 @@ type composition struct {
 	backup         *store.Backup
 	schedules      *cronsync.Syncer
 	scheduleConfig cronsync.Config
-	// startupPassDone closes when the startup schedule pass has ended.
-	startupPassDone chan struct{}
 	bindings       apicontract.Bindings
 	auth           api.Authenticator
 	enroll         apicontract.Handler[model.InviteRedemption, model.InviteCertificate]

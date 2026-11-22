@@ -144,6 +144,9 @@ func TestServerIsReadyBeforeItsStartupSchedulePass(t *testing.T) {
 	t.Cleanup(func() { repos.once.Do(func() { close(repos.release) }) })
 	repos.wire(t, f)
 	done := f.start(t.Context())
+	if !strings.Contains(f.c.health.metrics(t.Context()), "oberth_schedules_synced 0\n") {
+		t.Fatal("the metric reported a synced pass while a repository's read still hangs")
+	}
 	repos.once.Do(func() { close(repos.release) })
 	select {
 	case <-repos.pruned:

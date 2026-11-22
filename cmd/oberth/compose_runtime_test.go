@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,23 +143,28 @@ func (f *composedFixture) bindClient(t *testing.T) {
 	}
 }
 // waitStarted waits until the server reports ready and its startup schedule
-// pass, which runs after that, has ended: composed tests start from a
-// quiescent server.
+// pass, which runs after that, has ended (oberth_schedules_synced 1):
+// composed tests start from a quiescent server.
 func (f *composedFixture) waitStarted(t *testing.T, done <-chan error) {
 	t.Helper()
+	deadline := time.After(10 * time.Second)
 	select {
 	case <-f.trace.ready:
 	case err := <-done:
 		t.Fatalf("server failed: %v; %s", err, f.trace.String())
-	case <-time.After(10 * time.Second):
+	case <-deadline:
 		t.Fatalf("server not ready: %s", f.trace.String())
 	}
-	select {
-	case <-f.owners.c.startupPassDone:
-	case err := <-done:
-		t.Fatalf("server failed: %v; %s", err, f.trace.String())
-	case <-time.After(10 * time.Second):
-		t.Fatalf("startup schedule pass did not end: %s", f.trace.String())
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for !strings.Contains(f.owners.c.health.metrics(t.Context()), "oberth_schedules_synced 1\n") {
+		select {
+		case <-poll.C:
+		case err := <-done:
+			t.Fatalf("server failed: %v; %s", err, f.trace.String())
+		case <-deadline:
+			t.Fatalf("startup schedule pass did not end: %s", f.trace.String())
+		}
 	}
 }
 

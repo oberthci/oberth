@@ -33,6 +33,9 @@ type health struct {
 	cacheNoticeDrops     atomic.Uint64
 	tlsHandshakeFailures atomic.Uint64
 	nativeIncomplete     func() uint64
+	// schedulesSynced is set once the startup schedule pass, which runs after
+	// readiness, has gone over every repository (oberth_schedules_synced).
+	schedulesSynced atomic.Bool
 }
 
 func (h *health) run(ctx context.Context) error {
@@ -131,7 +134,11 @@ func (h *health) metrics(ctx context.Context) string {
 	if h.nativeIncomplete != nil {
 		native = h.nativeIncomplete()
 	}
-	observations := fmt.Sprintf("oberth_admission_timeouts_total %d\noberth_executor_incomplete_evidence_total %d\n", h.admissionTimeouts.Load(), native) + fmt.Sprintf("oberth_git_observation_drops_total %d\n", h.cacheNoticeDrops.Load())
+	schedules := 0
+	if h.schedulesSynced.Load() {
+		schedules = 1
+	}
+	observations := fmt.Sprintf("oberth_admission_timeouts_total %d\noberth_executor_incomplete_evidence_total %d\n", h.admissionTimeouts.Load(), native) + fmt.Sprintf("oberth_git_observation_drops_total %d\noberth_schedules_synced %d\n", h.cacheNoticeDrops.Load(), schedules)
 	return observations + fmt.Sprintf("oberth_tls_handshake_failures_total %d\n", h.tlsHandshakeFailures.Load()) + fmt.Sprintf("oberth_build_info 1\noberth_ready %d\noberth_database_sample_age_seconds %.0f\noberth_started %d\noberth_tls_leaf_expiry_seconds %.0f\noberth_event_retention_failures_total %d\noberth_git_maintenance_failures_total %d\n", ready, age, started, expiry, h.retentionFailures, h.cacheFailures) + watch
 }
 func (h *health) gate(next http.Handler) http.Handler {

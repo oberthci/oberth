@@ -46,7 +46,7 @@ func (c *composition) startupSchedules(ctx context.Context) error {
 	if err != nil && ctx.Err() == nil {
 		_, _ = fmt.Fprintln(c.diagnostic, err)
 	}
-	close(c.startupPassDone)
+	c.health.schedulesSynced.Store(ctx.Err() == nil)
 	<-ctx.Done()
 	return ctx.Err()
 }
