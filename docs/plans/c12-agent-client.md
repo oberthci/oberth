@@ -44,9 +44,14 @@ system trust and settings do not change.
 ### Run box
 
 **Delta:** The optional box shows up to `runs` recent runs (three when unset or blank,
-none at 0) while a listed or watched run is active, with watched runs taking priority.
-It shows whole repository/ref names, authoritative plan counts and failed step names;
-finished watches produce one completion notice. The box, `/oberth-runs` and `/oberth-watch`
+none at 0) while a listed or watched run is active or finished in the last ten minutes of
+the server's clock that the run list carries, with watched runs first in any state. Each
+run is one line under a header: id, repository and ref in short forms, status word,
+authoritative plan counts, duration, age, a watched mark and a failed run's step name,
+measured in terminal cells, cut to the box's width and never wrapped; the last column
+gives way first. `/oberth-runs` prints the same lines with a failed run's step and reason
+or a cancelled run's reason last; there the names give way before the reason.
+Finished watches produce one completion notice. The box, `/oberth-runs` and `/oberth-watch`
 read only public `run list --json` and `run get --json`, through the absolute verified
 executable (its option, by default the fetcher's install in the user bin directory),
 never a checkout executable or a PATH lookup. The plugin reads with the agent's joined
@@ -115,8 +120,11 @@ credential files or Pod environment.
    the concrete target and changes before an unapproved install, commit, push,
    promotion or release. Do not change global Git/SSH configuration or run server
    Pod commands. Report observed facts only.
-4. Run results carry the server JSON followed by C11's rendered display block.
-   Paste it verbatim with whole reasons and separate native detail. Strip terminal
+4. Run results (`run_get`, `run_wait`, `wait`, and `run_list` as its table) carry the
+   server JSON followed by C11's rendered display block on its own line, both as text
+   content: a host given structured content shows the model only that, so the bridge
+   lists no output schemas. Status and event pages carry their JSON alone. Paste the
+   block verbatim with whole reasons and separate native detail. Strip terminal
    controls and format marks; do not infer an error class from prose or clip text.
 5. The bridge forwards pushed session events with cursor resumption and maps
    keepalives to protocol progress for requests with a progress
@@ -143,7 +151,7 @@ The plugin contract check binds every CLI command, flag and JSON field to the
 public catalogue and DTOs and refuses credential/home paths. Rendering remains
 a manual host-runtime gate, with the exact command beside the rendering tests;
 the build image has no host JavaScript runtime. The UX walk checks active,
-finished, unreachable and watched states, whole names, profile selection, idle
+finished, unreachable and watched states, unwrapped lines, profile selection, idle
 and active call counts, nonblocking startup and a single completion notice.
 
 `TestAgentRegistrationContract` checks command/tool names, registration rules
