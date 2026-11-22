@@ -245,6 +245,30 @@ test('two runs list newest first and keep their places as the newer one finishes
   expect(lines[2]).toMatch(/^f366936d oberth +smoke-1 +▶ running +6\/11 +5m15s +5m$/)
 })
 
+for (const [name, skew] of [['11 minutes fast', 11 * 60000], ['30 minutes slow', -30 * 60000]] as const) {
+  test(`with this host's clock ${name}, rows age and leave on the server's clock`, { options }, async ($, on) => {
+    bottom(on)
+    const local = Date.parse('2026-11-18T00:01:00Z')
+    let server = local - skew
+    const clock = mock.clock(on, { now: local })
+    const iso = (time: number) => new Date(time).toISOString()
+    let rows = [{ ...run(), created_at: iso(server - 60000), started_at: iso(server - 60000) }]
+    on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ runs: rows, server_time: iso(server) }),
+      stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+    const advance = async (ms: number) => { server += ms; await clock.advance(ms) }
+    await startSession($, on)
+    expect((await boxLines($))[1]).toMatch(/ ▶ running +6\/11 +1m00s +1m$/)
+    rows = [{ ...rows[0]!, status: 'passed', finished_at: iso(server + REFRESH_MS) }]
+    await advance(REFRESH_MS)
+    expect((await boxLines($))[1]).toMatch(/ ✓ passed +6\/11 +1m15s +1m$/)
+    await advance(WINDOW_MS - REFRESH_MS)
+    expect((await boxLines($))[1]).toMatch(/ ✓ passed .* 11m$/)
+    expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toMatch(/ ✓ passed .* 11m$/)
+    await advance(REFRESH_MS)
+    await noBox($)
+  })
+}
+
 test('a watched run keeps the first row as it finishes behind three newer runs', { options }, async ($, on) => {
   bottom(on)
   const clock = mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })

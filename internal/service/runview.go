@@ -138,7 +138,7 @@ func (s *Service) prepareRunList(ctx context.Context, a actor.Actor, q runQuery)
 			return s.heldRunPage(ctx, f)
 		}
 		rows, err := s.c.Runs.Runs(ctx, f)
-		page := apicontract.RunPage{Runs: []apicontract.RunRecord{}}
+		page := apicontract.RunPage{Runs: []apicontract.RunRecord{}, ServerTime: s.c.Now()}
 		for _, r := range rows {
 			r.Steps = nil
 			r.NextStepOffset = nil

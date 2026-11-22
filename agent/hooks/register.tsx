@@ -27,7 +27,8 @@ function poll($: EngineInterface, options: PluginOptions, loop: Loop) {
 
 async function refresh($: EngineInterface, options: PluginOptions, loop: Loop) {
   try {
-    const recent = loop.count ? await list($, options, loop.count) : []
+    const page = loop.count ? await list($, options, loop.count) : { runs: [], serverTime: undefined }
+    const recent = page.runs
     const before = await read($, snapshot)
     const missing = before.pins.filter(pin => active(pin.run) && !recent.some(run => run.id === pin.run.id))
     const details = await Promise.all(missing.map(pin => get($, options, pin.run.id)))
@@ -38,8 +39,9 @@ async function refresh($: EngineInterface, options: PluginOptions, loop: Loop) {
       // A compare-and-set miss retries this callback; discard that attempt's notices.
       finished.length = 0
       if (loop.stopped) return state
+      // Rows age on the server's clock, which stamped them; watches expire on this one.
       return {
-        recent, reachable: true, now,
+        recent, reachable: true, now: page.serverTime ?? now,
         pins: state.pins.map(pin => {
           if (pin.doneAt !== null) return pin
           const run = [...recent, ...details].find(run => run.id === pin.run.id) ?? pin.run
@@ -72,7 +74,8 @@ function commands(on: On, options: PluginOptions) {
       const arg = e.args.trim()
       const match = /^(?:--limit[= ](\d+))?$/.exec(arg)
       if (!match) throw new Error('Use /oberth-runs [--limit=N].')
-      return { text: table(await list($, options, limit(match[1])), await $.clock.now(), e.presentation.columns) }
+      const page = await list($, options, limit(match[1]))
+      return { text: table(page.runs, page.serverTime ?? await $.clock.now(), e.presentation.columns) }
     } catch (error) { return { text: errorText(error) } }
   })
   on('command.run', { command: 'oberth-watch' }, async ($, e) => {

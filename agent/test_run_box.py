@@ -28,8 +28,8 @@ def check_calls(client, commands):
     flags = set(re.findall(r"'(--[a-z-]+)'", re.sub(r"const BINDING = \[[^\]]+\]", "", client)))
     if flags != {"--limit", "--json"}:
         raise ValueError("unchecked CLI flags")
-    envelope = re.search(r"as \{ (\w+)\?:", client).group(1)
-    if envelope not in struct_fields("internal/apicontract/results.go", "RunPage"):
+    envelope = set(re.findall(r"(\w+)\?:", re.search(r"as \{ ([^}]+) \}", client).group(1)))
+    if not envelope or envelope - struct_fields("internal/apicontract/results.go", "RunPage"):
         raise ValueError("unknown run-list JSON field")
     if client.count("$.process.run(") != 2 or "[await checkedExecutable($, options), ...args, '--json']" not in client:
         raise ValueError("all execution must use the configured absolute executable")
@@ -112,6 +112,8 @@ class RunBoxContract(unittest.TestCase):
                 check_calls(client.replace(old, new), command_table())
         with self.assertRaises(ValueError):
             check_calls(client.replace("runs", "missing"), command_table())
+        with self.assertRaises(ValueError):
+            check_calls(client.replace("server_time", "server_clock"), command_table())
         for old, new in (("'oberth.uplinkProfile'", "'oberth.profileName'"), ("'--local', ", ""),
                          ("'/.local/bin/oberth'", "'/bin/oberth'"), ("$.process.run(BINDING, ", "$.process.run(['git'], ")):
             with self.subTest(old=old), self.assertRaises(ValueError):

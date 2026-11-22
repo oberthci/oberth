@@ -21,6 +21,9 @@ type RunRecord struct {
 type RunPage struct {
 	Runs       []RunRecord `json:"runs"`
 	NextCursor string      `json:"next_cursor,omitempty"`
+	// ServerTime is the server's clock when it read the page, so a reader ages the runs
+	// against the clock that stamped them.
+	ServerTime time.Time `json:"server_time,omitzero"`
 }
 type RunCounts struct {
 	Queued    int `json:"queued"`

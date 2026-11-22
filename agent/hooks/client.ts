@@ -56,12 +56,14 @@ async function json($: EngineInterface, options: PluginOptions, args: string[]):
   return JSON.parse(out.stdout)
 }
 
+// The listed runs and the server's clock when it read them (undefined from a server
+// that does not send it).
 export async function list($: EngineInterface, options: PluginOptions, count: number) {
-  const page = await json($, options, ['run', 'list', '--limit', String(count)]) as { runs?: unknown[] | null }
+  const page = await json($, options, ['run', 'list', '--limit', String(count)]) as { runs?: unknown[] | null; server_time?: unknown }
   if (!page || !Object.hasOwn(page, 'runs')) throw new Error('Invalid run-list JSON.')
-  if (page.runs === null) return []
-  if (!Array.isArray(page.runs)) throw new Error('Invalid run-list JSON.')
-  return page.runs.map(decodeRun)
+  if (page.runs !== null && !Array.isArray(page.runs)) throw new Error('Invalid run-list JSON.')
+  const time = typeof page.server_time === 'string' ? Date.parse(page.server_time) : NaN
+  return { runs: (page.runs ?? []).map(decodeRun), serverTime: Number.isFinite(time) ? time : undefined }
 }
 
 export async function get($: EngineInterface, options: PluginOptions, id: string) {

@@ -9,7 +9,7 @@ import (
 
 // heldRunPage filters live candidates before the requested page limit.
 func (s *Service) heldRunPage(ctx context.Context, f stateport.RunFilter) (apicontract.RunPage, error) {
-	page := apicontract.RunPage{Runs: []apicontract.RunRecord{}}
+	page := apicontract.RunPage{Runs: []apicontract.RunRecord{}, ServerTime: s.c.Now()}
 	want := f.Limit
 	f.Limit = stateport.RunPageLimit
 	for {

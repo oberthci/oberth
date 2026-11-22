@@ -22,6 +22,7 @@ export type Run = {
 }
 
 export type Pin = { run: Run; doneAt: number | null }
+// now: the server's clock at the last refresh when the list carried it, else this host's.
 export type Snapshot = { recent: Run[]; pins: Pin[]; reachable: boolean; now: number }
 
 declare module 'claude-code' {
