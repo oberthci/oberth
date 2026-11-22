@@ -48,10 +48,9 @@ func (s *Store) projectCI(ctx context.Context, tx *sql.Tx, r stateport.Run) erro
 	if !terminal(r.Status) || r.Origin.HasAssistance() {
 		return refuse(conflict, nil)
 	}
-	var previous int64
-	err := tx.QueryRowContext(ctx, `SELECT sequence FROM ci_projection WHERE repo=? AND ref=?`, r.Repo, r.Ref).Scan(&previous)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return databaseError(err)
+	previous, err := projectedSequence(ctx, tx, r.Repo, r.Ref)
+	if err != nil {
+		return err
 	}
 	if previous >= r.Sequence {
 		return unchanged{}
@@ -59,9 +58,20 @@ func (s *Store) projectCI(ctx context.Context, tx *sql.Tx, r stateport.Run) erro
 	return s.recordProjection(ctx, tx, r)
 }
 
-// projectPublished makes a delivered publication's passing run the newest CI
-// result of the published ref, ordered after every run that exists now: the
-// ref is at the commit that run tested, and older runs tested older commits.
+func projectedSequence(ctx context.Context, tx *sql.Tx, repo, ref string) (int64, error) {
+	var previous int64
+	err := tx.QueryRowContext(ctx, `SELECT sequence FROM ci_projection WHERE repo=? AND ref=?`, repo, ref).Scan(&previous)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, databaseError(err)
+	}
+	return previous, nil
+}
+
+// projectPublished makes a delivered publication's passing run the CI result
+// of the published ref, ordered right after the runs that existed when its
+// first push attempt started: the ref is now at the commit that run tested,
+// and those runs tested older commits. A run created after that start, which
+// may have tested the new head, keeps the issue if it was counted already.
 func (s *Store) projectPublished(ctx context.Context, tx *sql.Tx, p model.Publication) error {
 	r, err := loadRun(ctx, tx, p.RunID)
 	if err != nil {
@@ -77,10 +87,11 @@ func (s *Store) projectPublished(ctx context.Context, tx *sql.Tx, p model.Public
 	if counted {
 		return nil
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT MAX(sequence) FROM runs`).Scan(&r.Sequence); err != nil {
-		return databaseError(err)
+	r.Ref, r.Sequence = p.Ref, p.CIAfter
+	previous, err := projectedSequence(ctx, tx, r.Repo, r.Ref)
+	if err != nil || previous > r.Sequence {
+		return err
 	}
-	r.Ref = p.Ref
 	return s.recordProjection(ctx, tx, r)
 }
 

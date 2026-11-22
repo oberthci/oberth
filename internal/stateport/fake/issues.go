@@ -22,8 +22,9 @@ func (m *runMemory) projectCI(r stateport.Run, now time.Time) error {
 	return m.recordProjection(r, now)
 }
 
-// projectPublished makes a delivered publication's passing run the newest CI
-// result of the published ref, ordered after every run that exists now.
+// projectPublished makes a delivered publication's passing run the CI result
+// of the published ref, ordered right after the runs that existed when its
+// first push attempt started.
 func (m *runMemory) projectPublished(p model.Publication, now time.Time) error {
 	r, ok := m.runs[p.RunID]
 	if !ok {
@@ -35,10 +36,10 @@ func (m *runMemory) projectPublished(p model.Publication, now time.Time) error {
 	if m.ciCounted[r.ID] {
 		return nil
 	}
-	for _, run := range m.runs {
-		r.Sequence = max(r.Sequence, run.Sequence)
+	r.Ref, r.Sequence = p.Ref, p.CIAfter
+	if m.ciSequences[r.Repo+"\x00"+r.Ref] > r.Sequence {
+		return nil
 	}
-	r.Ref = p.Ref
 	return m.recordProjection(r, now)
 }
 func (m *runMemory) recordProjection(r stateport.Run, now time.Time) error {

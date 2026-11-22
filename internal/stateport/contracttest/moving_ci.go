@@ -64,11 +64,57 @@ func forwardPublication(tested stateport.Run, id string) model.Publication {
 // settleForward prepares, attempts and settles pub, asking for CI projection.
 func settleForward(t *testing.T, p MovingPort, pub model.Publication, delivered bool) {
 	t.Helper()
+	startForward(t, p, pub)
+	settleStarted(t, p, pub, delivered)
+}
+
+// startForward prepares pub and starts its first push attempt.
+func startForward(t *testing.T, p MovingPort, pub model.Publication) {
+	t.Helper()
 	a := stateport.Action{Actor: pub.Actor}
 	mustRun(t, p.PreparePublication(t.Context(), a, stateport.PublicationIntent{Publication: pub}))
 	_, err := p.StartPublicationAttempt(t.Context(), a, stateport.PublicationAttempt{ID: pub.ID})
 	mustRun(t, err)
+}
+
+// settleStarted settles pub's first attempt, asking for CI projection.
+func settleStarted(t *testing.T, p MovingPort, pub model.Publication, delivered bool) {
+	t.Helper()
+	a := stateport.Action{Actor: pub.Actor}
 	mustRun(t, p.SettlePublication(t.Context(), a, stateport.PublicationResult{ID: pub.ID, Attempt: 1, Delivered: delivered, ProjectCI: true}))
+}
+
+// A main run created after the push attempt started may have tested the new
+// head, so it is ordered after the delivered fast-forward whether it finishes
+// after the settlement (checkPublishedCIRunAfterPush) or before it
+// (checkPublishedCIRunBeforeSettlement).
+func checkPublishedCIRunAfterPush(t *testing.T, f RunFixture) { checkRunAfterPush(t, f, false) }
+func checkPublishedCIRunBeforeSettlement(t *testing.T, f RunFixture) {
+	checkRunAfterPush(t, f, true)
+}
+func checkRunAfterPush(t *testing.T, f RunFixture, finishFirst bool) {
+	t.Helper()
+	p := moving(t, f)
+	a := stateport.Action{Actor: "operator"}
+	tested := acceptOneRun(t, f, RunCase{ID: "ci-push-tested", Ref: "refs/heads/topic"})
+	mustRun(t, f.Port.Finish(t.Context(), a, stateport.RunUpdate{ID: tested.ID, Revision: tested.Revision, Status: stepmodel.RunPassed}))
+	red := acceptOneRun(t, f, RunCase{ID: "ci-push-red", Commit: strings.Repeat("b", 40)})
+	mustRun(t, f.Port.Finish(t.Context(), a, stateport.RunUpdate{ID: red.ID, Revision: red.Revision, Status: stepmodel.RunFailed, ProjectCI: true}))
+	tested, err := f.Port.Run(t.Context(), tested.ID)
+	mustRun(t, err)
+	pub := forwardPublication(tested, "ci-push-publication")
+	startForward(t, p, pub)
+	newer := acceptOneRun(t, f, RunCase{ID: "ci-push-newer", Commit: strings.Repeat("a", 40), Trigger: model.TriggerSchedule})
+	finish := stateport.RunUpdate{ID: newer.ID, Revision: newer.Revision, Status: stepmodel.RunFailed, ProjectCI: true}
+	if finishFirst {
+		mustRun(t, f.Port.Finish(t.Context(), a, finish))
+	}
+	settleStarted(t, p, pub, true)
+	if !finishFirst {
+		requireCIIssue(t, f, model.IssueClosed, tested.ID)
+		mustRun(t, f.Port.Finish(t.Context(), a, finish))
+	}
+	requireCIIssue(t, f, model.IssueOpen, newer.ID)
 }
 
 func requireCIIssue(t *testing.T, f RunFixture, state model.IssueState, runID string) {

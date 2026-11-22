@@ -15,10 +15,11 @@ type PublicationResult struct {
 	Delivered, Retryable bool
 	Reason, Detail       string
 	Release              *model.ReleaseReceipt
-	// ProjectCI, on a delivery, makes the publication's passing run the
-	// newest CI result of the published branch: a fast-forward promotion
-	// leaves that branch exactly at the commit the run tested. Runs created
-	// before the delivery no longer move that branch's CI issue.
+	// ProjectCI, on a delivery, makes the publication's passing run the CI
+	// result of the published branch: a fast-forward promotion leaves that
+	// branch exactly at the commit the run tested. It is ordered right after
+	// the runs that existed when the first push attempt started; those no
+	// longer move that branch's CI issue, and any later run does.
 	ProjectCI bool
 }
 

@@ -77,12 +77,15 @@ func (f *Runs) BindPublication(ctx context.Context, a stateport.Action, id, prev
 	}})
 }
 func (f *Runs) StartPublicationAttempt(ctx context.Context, a stateport.Action, q stateport.PublicationAttempt) (model.Publication, error) {
-	return f.changePublication(ctx, publicationChange{q.ID, "publication.attempt", a, func(_ *runMemory, p *model.Publication) error {
+	return f.changePublication(ctx, publicationChange{q.ID, "publication.attempt", a, func(m *runMemory, p *model.Publication) error {
 		if p.Status != model.PublicationPending || p.Attempts != q.ExpectedAttempts || p.Attempts >= pushretry.MaxAttempts {
 			return runProblem(publicerr.Conflict)
 		}
 		if p.Attempts > 0 && p.RetryAt == nil || p.RetryAt != nil && f.clock().Before(*p.RetryAt) {
 			return runProblem(publicerr.Conflict)
+		}
+		if p.CIAfter == 0 {
+			p.CIAfter = m.sequence
 		}
 		p.Attempts++
 		p.RetryAt = nil

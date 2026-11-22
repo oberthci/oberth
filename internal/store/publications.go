@@ -78,6 +78,11 @@ func (s *Store) StartPublicationAttempt(ctx context.Context, action stateport.Ac
 		if err := canStartPublication(p, attempt, s.options.Clock()); err != nil {
 			return err
 		}
+		if p.CIAfter == 0 {
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence),0) FROM runs`).Scan(&p.CIAfter); err != nil {
+				return databaseError(err)
+			}
+		}
 		p.Attempts++
 		p.RetryAt = nil
 		p.UpdatedAt = s.options.Clock().UTC()
@@ -136,20 +141,29 @@ func (s *Store) AbandonPublication(ctx context.Context, action stateport.Action,
 	}, action.Events...)
 }
 
+// storedPublication is a publication row's value: the record and its CI
+// ordering bound, which the record's own encoding leaves out.
+type storedPublication struct {
+	model.Publication
+	CIAfter int64 `json:"ci_after,omitempty"`
+}
+
 func readPublication(ctx context.Context, tx *sql.Tx, id string) (model.Publication, error) {
-	var p model.Publication
+	var stored storedPublication
 	var body string
 	if err := tx.QueryRowContext(ctx, `SELECT value FROM publications WHERE id=?`, id).Scan(&body); err != nil {
-		return p, databaseError(err)
+		return stored.Publication, databaseError(err)
 	}
-	if err := json.Unmarshal([]byte(body), &p); err != nil {
-		return p, refuse(corrupt, err)
+	if err := json.Unmarshal([]byte(body), &stored); err != nil {
+		return stored.Publication, refuse(corrupt, err)
 	}
-	return p, nil
+	stored.Publication.CIAfter = stored.CIAfter
+	return stored.Publication, nil
 }
 
 func savePublication(ctx context.Context, tx *sql.Tx, p model.Publication) error {
-	_, err := tx.ExecContext(ctx, `UPDATE publications SET status=?,value=? WHERE id=?`, p.Status, encode(p), p.ID)
+	value := encode(storedPublication{Publication: p, CIAfter: p.CIAfter})
+	_, err := tx.ExecContext(ctx, `UPDATE publications SET status=?,value=? WHERE id=?`, p.Status, value, p.ID)
 	return databaseError(err)
 }
 

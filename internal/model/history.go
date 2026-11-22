@@ -54,6 +54,10 @@ type Publication struct {
 	Reason      string            `json:"reason"`
 	CreatedAt   time.Time         `json:"created_at"`
 	UpdatedAt   time.Time         `json:"updated_at"`
+	// CIAfter is the newest run sequence when the first push attempt started,
+	// before the ref can move: a delivered fast-forward's CI result is ordered
+	// right after it. The stores keep it; no view shows it.
+	CIAfter int64 `json:"-"`
 }
 
 func (v Publication) Clone() Publication {
