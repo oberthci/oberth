@@ -92,7 +92,7 @@ func TestFailedExplicitProbeLeavesCompletePendingRegistration(t *testing.T) {
 		}
 		out := apicontract.Upstream{Name: "new", Pending: true, DisplayReason: "Git SSH host key does not match the pin."}
 		if repo != "" {
-			return out, publicerr.New(publicerr.InvalidInput, cause, "Push a first commit to the forge, then retry.", nil)
+			return out, publicerr.New(publicerr.InvalidInput, cause, "Push the first commit with your own forge access, then retry.", nil)
 		}
 		return out, nil
 	}

@@ -50,7 +50,9 @@ func (e *FetchUnfinishedError) Unwrap() error {
 }
 
 const EmptyForgeReason = "The forge repository has no commit."
-const EmptyForgeRemedy = "Push a first commit to the forge, then retry."
+// EmptyForgeRemedy sends the person to their own forge access: Oberth's deploy
+// key lives only in the cluster, so a push with it from their machine fails.
+const EmptyForgeRemedy = "Push the first commit with your own forge access, then retry; Oberth's deploy key is not on this machine."
 
 type EmptyRepositoryError struct{}
 
