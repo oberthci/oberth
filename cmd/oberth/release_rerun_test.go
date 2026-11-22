@@ -43,6 +43,26 @@ func failedRelease(t *testing.T, status stepmodel.RunStatus) string {
 	return diagnostic.String()
 }
 
+func TestFailedReleaseOffersTheRerunThatKeepsItsVersion(t *testing.T) {
+	for _, status := range []stepmodel.RunStatus{stepmodel.RunFailed, stepmodel.RunCancelled} {
+		text := failedRelease(t, status)
+		rerun := strings.Index(text, "Rerun it to keep the version")
+		next := strings.Index(text, "release the next version")
+		if rerun < 0 || next < rerun || !strings.Contains(text, "oberth run rerun release-run") {
+			t.Fatalf("%s release does not offer its rerun first: %s", status, text)
+		}
+	}
+	b := fake.Bindings()
+	cli, out, diagnostic := fixture(t, b)
+	if exit := cli.run(t.Context(), []string{"run", "rerun", "release-run"}); exit != 0 {
+		t.Fatal("the printed rerun command does not run", exit, out, diagnostic)
+	}
+	inputs, _, calls := b.RunRerun.Handler.(*fake.Handler[apicontract.RunRerunArgs, apicontract.Receipt]).Observed()
+	if calls != 1 || inputs[0].ID != "release-run" {
+		t.Fatal("the printed rerun command did not rerun the release run", inputs)
+	}
+}
+
 func TestReleaseOfATagWithoutARunSaysTheVersionIsUsed(t *testing.T) {
 	text := failedRelease(t, "")
 	for _, want := range []string{"The release tag already exists, but it has no release run.", "Its version is used; release the next version.", "Used version:\nv0.1.0"} {
