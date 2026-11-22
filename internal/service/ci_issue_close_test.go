@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/actor"
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
@@ -12,8 +13,8 @@ import (
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
-// An administrator clears a CI issue that no later run will close; an uplink
-// still cannot, and a later failing default-branch run reopens it as usual.
+// The installation administrator clears a CI issue that no later run will
+// close; an uplink, a scoped administrator included, still cannot, and a later failing default-branch run reopens it as usual.
 //
 // Covers: REQ-C2-018
 func TestAdministratorClosesCIIssue(t *testing.T) {
@@ -27,20 +28,25 @@ func TestAdministratorClosesCIIssue(t *testing.T) {
 		t.Fatal(e)
 	}
 	open := ciIssue(t, p)
-	e := closeIssue(t, p, workerCaller(), apicontract.IssueCloseArgs{ID: open.ID, Reason: "not mine"})
-	requireCode(t, e, publicerr.InvalidTransition)
-	if ciIssue(t, p).State != model.IssueOpen {
-		t.Fatal("an uplink closed a CI issue")
+	scopedAdmin := actor.Actor{Identity: "scoped-admin", AuthMethod: "key", Fingerprint: "scoped-admin", Admin: true, Scope: []string{"origin"}}
+	f.store.Actors[scopedAdmin.Fingerprint] = scopedAdmin
+	f.store.Policies[scopedAdmin.Fingerprint] = service.KeyPolicy{Agent: true}
+	for _, c := range []apicontract.Caller{workerCaller(), {Actor: scopedAdmin}} {
+		e := closeIssue(t, p, c, apicontract.IssueCloseArgs{ID: open.ID, Reason: "not mine"})
+		requireCode(t, e, publicerr.InvalidTransition)
+		if ciIssue(t, p).State != model.IssueOpen {
+			t.Fatal("an uplink closed a CI issue", c.Actor.Identity)
+		}
 	}
 	const reason = "created by branch CI in error"
-	if e = closeIssue(t, p, adminCaller(), apicontract.IssueCloseArgs{ID: open.ID, Reason: reason}); e != nil {
+	if e := closeIssue(t, p, adminCaller(), apicontract.IssueCloseArgs{ID: open.ID, Reason: reason}); e != nil {
 		t.Fatal(e)
 	}
 	if v := ciIssue(t, p); v.State != model.IssueClosed {
 		t.Fatal("administrator close did not close the CI issue", v)
 	}
 	assertCloseAudited(t, p, reason)
-	if e = f.s.Finished(t.Context(), service.FinishedRun{RunID: runs[1].ID, Status: stepmodel.RunFailed}); e != nil {
+	if e := f.s.Finished(t.Context(), service.FinishedRun{RunID: runs[1].ID, Status: stepmodel.RunFailed}); e != nil {
 		t.Fatal(e)
 	}
 	if v := ciIssue(t, p); v.ID != open.ID || v.State != model.IssueOpen || v.CIWorkID != runs[1].ID {

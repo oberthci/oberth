@@ -273,6 +273,17 @@ type issueAction struct {
 	Action, Reason string
 }
 
+// ciIssueClose admits the one change a person makes to a CI issue: an
+// unscoped administrator closes it, which clears an issue no later run will
+// close. Runs own every other change; a scoped administrator is refused like
+// any uplink.
+func ciIssueClose(a actor.Actor, q issueAction) error {
+	if q.Action != "issue_close" || !a.Admin || len(a.Scope) > 0 {
+		return refuse(ciIssueManaged)
+	}
+	return nil
+}
+
 func (s *Service) issueTransition(ctx context.Context, c apicontract.Caller, q issueAction) (apicontract.Call[apicontract.IssueResult], error) {
 	a, e := s.peopleAllow(ctx, c.Actor, q.Action)
 	if e != nil {
@@ -286,10 +297,10 @@ func (s *Service) issueTransition(ctx context.Context, c apicontract.Caller, q i
 		if err != nil {
 			return apicontract.IssueResult{}, err
 		}
-		// Runs own CI issues; an administrator may still close one, which is
-		// how an issue that no later run will close is cleared.
-		if v.Kind == model.IssueCI && (q.Action != "issue_close" || !a.Admin) {
-			return apicontract.IssueResult{}, refuse(ciIssueManaged)
+		if v.Kind == model.IssueCI {
+			if err := ciIssueClose(a, q); err != nil {
+				return apicontract.IssueResult{}, err
+			}
 		}
 		request := stateport.IssueClose{ID: q.ID, Revision: v.Revision, WorkID: v.CIWorkID}
 		fact := s.peopleAction(a, "issue.updated", q.Reason, v.Repo)
