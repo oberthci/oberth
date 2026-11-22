@@ -148,7 +148,7 @@ Browser-only identities need no SSH key; generate only the keys required by
 the chosen connection.
 
 Public release consumers and publication use one canonical public release origin.
-Downloads refuse every redirect and show the target as separate detail. Offline
+Downloads follow at most three HTTPS redirects, under it or to GitHub's asset hosts; a refused target shows as separate detail. Offline
 inputs follow C9's [Release verification](c9-install-and-upgrade.md#invariants).
 
 ### Health, readiness and metrics

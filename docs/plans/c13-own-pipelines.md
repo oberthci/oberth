@@ -59,8 +59,8 @@ those definitions; they do not define rival DTOs.
   injected run-fact environment is assumed. Granted leaves declare their client,
   exact-audience read-only login projection, public CA and memory scratch. Authority
   remains the exact canonical repository/workflow-file/step grant, never an annotation
-  or command. The signing leaf alone receives the long-lived signing key; publish and
-  finalize each receive their own short-lived token. Installation-specific
+  or command. The signing leaf alone receives the signing key; publish and
+  finalize alone receive the GitHub release token, each through its own grant. Installation-specific
   audiences come from installation-owned configuration through the existing
   declaration and capability contracts. Accounts follow C5's
   [release authority](c5-native-execution.md#release-authority).
@@ -93,7 +93,7 @@ promotion-file binding.
 C13 owns the canonical release public key. `hack/release-pin.sh <public-key-file>`
 provisions it and C12's generated fetch key material in one operation. C12 owns
 [fetch verification and the agreement check](c12-agent-client.md#owned-data-and-public-contract).
-Public release consumers and publication use C11's canonical release origin.
+Public release consumers and publication use C11's canonical release origin: each tag's GitHub release.
 
 Release signatures are checked only against the pinned public key in the release
 script, product verifier and fetch script, with no transparency log. Signing
@@ -167,8 +167,8 @@ Installation policy follows [C9 invariant 7](c9-install-and-upgrade.md#invariant
    coordination belongs to the harness, not server scheduling.
 
 Automated release publication, enabled after cutover, uses only an admitted
-release run with short-lived delegated publishing credentials. The signing key
-is the one long-lived secret, available only to its granted signing step.
+release run. The GitHub release token reaches only the publish and finalize steps and
+the signing key only its granted signing step.
 One build target produces
 the matching server image, source-plugin image and chart, each with a declared command,
 for local use and release. `ux-gate` records complete command, flag and time baselines
@@ -206,11 +206,11 @@ explicit image commands. `ux-gate` records fresh and warm command/flag/prompt/ti
 baselines, enforces command and flag ceilings in CI and checks the 25% time bound
 locally. `TestExactShortLivedPublicationAuthorityContract` changes repository,
 file and step grants and refuses release grants in build CI.
-`TestReleaseCredentialVolumes` checks projected tokens on publish/finalize and
-that the verify step has no publication token.
+`TestReleaseCredentialVolumes` checks that publish/finalize declare only the GitHub token
+path and that the verify step has no publication token.
 The clean-Pod verify step checks signed bytes, component inventories and digests
 before moving `latest`. Finalization tests cover create-only version objects,
-conditional monotonic aliases and refusal of different bytes on rerun.
+monotonic latest marking and refusal of different bytes on rerun.
 
 ## Retired terms
 

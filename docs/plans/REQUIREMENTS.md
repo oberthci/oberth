@@ -1,6 +1,6 @@
 # Requirements
 
-Generated from `requirements.json`; SHA256 54358e38309454124cc7a05d13b93ea72ed5419a7d6f0b7f2363d44420c7a28a.
+Generated from `requirements.json`; SHA256 15b3bb635d2d376f4bb07d02e569421b959fa47c00eb1dcc2b0ce77beab5cdd2.
 
 These are normative requirements. Inspections are planned; this register does not claim they have passed.
 
@@ -344,7 +344,7 @@ These are normative requirements. Inspections are planned; this register does no
 
 ### REQ-C13-001
 
-**Correctness.** The first release is made by hand with hack/release.sh and the documented release steps; automated publication follows cutover and uses only an admitted release run with short-lived delegated credentials, with the signing key as the one long-lived secret reaching only its granted signing step. Without this, a release can publish substituted bytes or expose broader credentials. Inspection to write: `TestExactShortLivedPublicationAuthorityContract` (contract_test).
+**Correctness.** The first release is made by hand with hack/release.sh and the documented release steps; automated publication follows cutover and uses only an admitted release run, with the signing key reaching only its granted signing step and the GitHub release token only the publish and finalize steps. Without this, a release can publish substituted bytes or expose broader credentials. Inspection to write: `TestExactShortLivedPublicationAuthorityContract` (contract_test).
 
 ### REQ-C13-003
 

@@ -863,7 +863,7 @@
       "id": "REQ-C13-001",
       "component": "C13",
       "class": "correctness",
-      "requirement": "The first release is made by hand with hack/release.sh and the documented release steps; automated publication follows cutover and uses only an admitted release run with short-lived delegated credentials, with the signing key as the one long-lived secret reaching only its granted signing step.",
+      "requirement": "The first release is made by hand with hack/release.sh and the documented release steps; automated publication follows cutover and uses only an admitted release run, with the signing key reaching only its granted signing step and the GitHub release token only the publish and finalize steps.",
       "loss_if_absent": "Without this, a release can publish substituted bytes or expose broader credentials.",
       "inspection": {
         "kind": "contract_test",

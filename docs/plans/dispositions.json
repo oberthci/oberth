@@ -9392,9 +9392,9 @@
   "spec_sha256": {
     "docs/plans/c1-transport-and-tool-registry.md": "d9a5966979bf2cd06412028dfa72d6d906e996631ca78f9156e5d204cfea26bb",
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
-    "docs/plans/c11-cli-and-server-composition.md": "857bab18143705bd661bbbec67d47e58114e22ae3166fd915a928f7d19cb3cf2",
+    "docs/plans/c11-cli-and-server-composition.md": "fe07bd88ff30107b53d34ab7cd47722ccaeb508dcaef0156f718216e579476f0",
     "docs/plans/c12-agent-client.md": "bb69fd9b2aec5887e02baf6e887df4b439102b4131062a518b112a1aa3d24260",
-    "docs/plans/c13-own-pipelines.md": "2a2ec98164d0eee77c796cda88ac40c540639e78443d2fdb691d3bd34929a42d",
+    "docs/plans/c13-own-pipelines.md": "fa121f325bae19b0b1e48fe0a36b98b4354559a6f40d320715186c9c566bb586",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
     "docs/plans/c2-service-actions-and-history.md": "b77026102fe047cefc36dcfb9eccbedf0a3ab0f53dbcd497f01f82ee5d5d962d",
     "docs/plans/c3-wiring-and-submission.md": "c6e9feb88ec2e679a8435d686121a5ce7690e02abb3327549fcd0741974ac7d2",
