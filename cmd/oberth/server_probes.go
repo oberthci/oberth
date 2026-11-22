@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -46,6 +47,9 @@ func (a serverAdministration) ProbeRepository(ctx context.Context, r stateport.R
 	}
 	key := app.ProbeKey{Address: u.BaseURL, User: "git", Fingerprint: fmt.Sprintf("%x", sha256.Sum256([]byte(identity.PublicKey))), PinsDigest: fmt.Sprintf("%x", sha256.Sum256(pins)), Repository: r.Canonical}
 	result := a.owner.checks.CheckRepository(ctx, key)
+	if result.Detail != "" {
+		a.logCheck(ctx, r.Canonical, result)
+	}
 	if result.Reason == gitport.EmptyForgeReason {
 		return publicerr.New(publicerr.InvalidInput, gitport.EmptyForgeReason, gitport.EmptyForgeRemedy, nil)
 	}
@@ -73,6 +77,20 @@ func (a serverAdministration) ProbeRepository(ctx context.Context, r stateport.R
 	}
 	return nil
 }
+
+// logCheck puts a failed check's full cause in the server log; the caller's
+// refusal names only its public reason.
+func (a serverAdministration) logCheck(ctx context.Context, repository string, result app.ProbeResult) {
+	if a.owner.c.diagnostic == nil {
+		return
+	}
+	slog.New(slog.NewTextHandler(a.owner.c.diagnostic, nil)).WarnContext(ctx, "repository check failed", "repository", repository, "reason", result.Reason, "cause", result.Detail)
+}
+
+// ProbeUpstream checks the upstream's repositories, or only checkRepo when one
+// is named. A failed check of a named repository returns its refusal, which
+// carries the cause and remedy; that repository is not bound yet, so no later
+// list check could show it.
 func (a serverAdministration) ProbeUpstream(ctx context.Context, name, checkRepo string) (apicontract.Upstream, error) {
 	u, err := a.owner.c.store.Upstream(ctx, name)
 	if err != nil {
@@ -90,9 +108,11 @@ func (a serverAdministration) ProbeUpstream(ctx context.Context, name, checkRepo
 	out.DisplayReason = "No repository was checked."
 	for _, repo := range repos {
 		if err = a.ProbeRepository(ctx, repo); err != nil {
-			out.Pending = true
 			reason := upstreamProbeStatusReason(err)
 			out.DisplayReason = reason
+			if checkRepo != "" {
+				return out, err
+			}
 			return out, nil
 		}
 		out.Pending = false
@@ -100,16 +120,19 @@ func (a serverAdministration) ProbeUpstream(ctx context.Context, name, checkRepo
 	}
 	return out, nil
 }
+
 // upstreamProbeStatusReason is the upstream's line for a failed repository
 // probe, one of the catalogue reasons the message guard checks: a host key
-// mismatch, an archived repository and a first clone still running are named;
-// anything else is a failed check.
+// mismatch, an archived repository, an empty forge repository and a first
+// clone still running are named; anything else is a failed check.
 func upstreamProbeStatusReason(err error) string {
 	switch publicerr.Classify(err).Reason() {
 	case gitssh.HostKeyMismatchReason:
 		return gitssh.HostKeyMismatchReason
 	case repositoryArchivedReason:
 		return repositoryArchivedReason
+	case gitport.EmptyForgeReason:
+		return gitport.EmptyForgeReason
 	case gitport.CloneUnfinishedReason:
 		return gitport.CloneUnfinishedReason
 	}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api/fake"
 	"github.com/oberthci/oberth/internal/client"
+	"github.com/oberthci/oberth/internal/gitport"
 	"github.com/oberthci/oberth/internal/gitssh"
 	"github.com/oberthci/oberth/internal/publicerr"
 )
@@ -49,7 +50,7 @@ func assertFindingOutputWidth(t *testing.T, text string) {
 }
 
 func TestProbeStatusReasonsFitDisplay(t *testing.T) {
-	for _, reason := range []string{repositoryProbeFailureReason, repositoryArchivedReason, gitssh.HostKeyMismatchReason} {
+	for _, reason := range []string{repositoryProbeFailureReason, repositoryArchivedReason, gitssh.HostKeyMismatchReason, gitport.EmptyForgeReason} {
 		if len([]rune(reason)) > 40 {
 			t.Fatal("probe status reason exceeds display bound", reason)
 		}

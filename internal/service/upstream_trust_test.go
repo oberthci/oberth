@@ -3,10 +3,12 @@ package service_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/stateport"
 )
@@ -83,17 +85,23 @@ func TestInvalidUpstreamAddressRefusesBeforeHandshake(t *testing.T) {
 func TestFailedExplicitProbeLeavesCompletePendingRegistration(t *testing.T) {
 	t.Parallel()
 	p, calls := confirmationFixture(t)
-	p.f.c.People.Administration.(*testAdministration).Probe = func(context.Context, string, string) (apicontract.Upstream, error) {
+	cause := "The forge repository has no commit."
+	p.f.c.People.Administration.(*testAdministration).Probe = func(_ context.Context, _, repo string) (apicontract.Upstream, error) {
 		if !calls.persisted {
 			t.Fatal("probe preceded durable configuration")
 		}
-		return apicontract.Upstream{Name: "new", Pending: true, DisplayReason: "Git SSH host key does not match the pin."}, nil
+		out := apicontract.Upstream{Name: "new", Pending: true, DisplayReason: "Git SSH host key does not match the pin."}
+		if repo != "" {
+			return out, publicerr.New(publicerr.InvalidInput, cause, "Push a first commit to the forge, then retry.", nil)
+		}
+		return out, nil
 	}
 	p.f.restart(t)
 	call, err := p.f.s.PrepareUpstreamAdd(t.Context(), adminCaller(), apicontract.UpstreamAddArgs{Name: "new", BaseURL: "ssh://forge.oberth.ci", CheckRepo: "other/widget", Repin: true})
 	_, err = execute(t.Context(), call, err)
-	if err == nil || !strings.Contains(err.Error(), "registered") {
-		t.Fatal("failed explicit check silently succeeded", err)
+	problem := publicerr.Classify(err)
+	if problem == nil || problem.Reason() != cause || !slices.Contains(problem.Context, "Upstream is registered: new") {
+		t.Fatal("failed explicit check hid its cause or the registration", err)
 	}
 	checkPendingUpstreamList(t, p, false)
 	checkPendingUpstreamList(t, p, true)

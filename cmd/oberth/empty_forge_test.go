@@ -34,6 +34,7 @@ func TestEmptyForgeRegistrationAndPushExplainFirstCommit(t *testing.T) {
 	if problem == nil || problem.Reason() != gitport.EmptyForgeReason || problem.Remedy() != gitport.EmptyForgeRemedy {
 		t.Fatal("registration probe hid empty forge", err)
 	}
+	f.checkEmptyUpstream(t)
 	store := filepath.Join(filepath.Dir(f.config.DatabaseFile), "git", "origin", "team", "widget.git")
 	for range 2 {
 		gittest.ExpireRefresh(t, store)
@@ -46,5 +47,19 @@ func TestEmptyForgeRegistrationAndPushExplainFirstCommit(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+	}
+}
+
+// repo add checks the repository through upstream add before binding it; the
+// caller gets the cause and remedy, the server log the full cause.
+func (f *composedFixture) checkEmptyUpstream(t *testing.T) {
+	t.Helper()
+	out, err := (serverAdministration{f.owners}).ProbeUpstream(t.Context(), "origin", "team/widget")
+	problem := publicerr.Classify(err)
+	if !out.Pending || out.DisplayReason != gitport.EmptyForgeReason || problem == nil || problem.Remedy() != gitport.EmptyForgeRemedy {
+		t.Fatal("upstream check hid empty forge", out, err)
+	}
+	if log := f.trace.String(); !strings.Contains(log, `msg="repository check failed" repository=origin/team/widget reason="The forge repository has no commit."`) {
+		t.Fatal("server log lacks the check's cause", log)
 	}
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"slices"
 	"strconv"
@@ -208,10 +209,9 @@ func (s *Service) PrepareUpstreamAdd(ctx context.Context, c apicontract.Caller, 
 		}
 		out.Org = v.Org
 		out.Offered, out.Replaced = prepared.Offered, prepared.Replaced
-		if e == nil && out.Pending && q.CheckRepo != "" {
-			problem := publicerr.New(publicerr.Unavailable, "Upstream is registered; its repository check is pending.", "Correct the reported check and retry upstream list --check.", nil)
-			problem.Context = []string{out.DisplayReason, "Upstream: " + v.Name}
-			return out, problem
+		var problem *publicerr.Error
+		if q.CheckRepo != "" && errors.As(e, &problem) {
+			problem.Context = append(problem.Context, "Upstream is registered: "+v.Name)
 		}
 		return out, e
 	}})

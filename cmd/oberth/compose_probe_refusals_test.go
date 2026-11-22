@@ -27,7 +27,7 @@ func TestComposedProbeReportsChangedHostKeyWithoutStagingPaths(t *testing.T) {
 	a := serverAdministration{f.owners}
 	restoreHost := f.replaceForgeHost(t)
 	out, err := a.ProbeUpstream(t.Context(), "origin", "team/widget")
-	if err != nil || !out.Pending || out.DisplayReason != gitssh.HostKeyMismatchReason {
+	if !refusedWith(err, gitssh.HostKeyMismatchReason) || !out.Pending || out.DisplayReason != gitssh.HostKeyMismatchReason {
 		t.Fatal("host-key change was not identified", out, err)
 	}
 	repo, err := f.owners.c.store.Repository(t.Context(), gittest.Repository, nil)
@@ -42,9 +42,14 @@ func TestComposedProbeReportsChangedHostKeyWithoutStagingPaths(t *testing.T) {
 	restoreHost()
 	f.git.Git(t, f.git.Bare, "symbolic-ref", "HEAD", "refs/heads/absent")
 	out, err = a.ProbeUpstream(t.Context(), "origin", "team/widget")
-	if err != nil || !out.Pending || out.DisplayReason != "Repository check failed." {
+	if !refusedWith(err, repositoryProbeFailureReason) || !out.Pending || out.DisplayReason != "Repository check failed." {
 		t.Fatal("unavailable repository was reported as changed trust", out, err)
 	}
+}
+
+func refusedWith(err error, reason string) bool {
+	problem := publicerr.Classify(err)
+	return problem != nil && problem.Reason() == reason
 }
 
 func (f *composedFixture) replaceForgeHost(t *testing.T) func() {

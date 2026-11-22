@@ -19,6 +19,7 @@ func TestUpstreamProbeNamesAnUnfinishedFirstClone(t *testing.T) {
 		{publicerr.New(publicerr.Unavailable, gitport.CloneUnfinishedReason, gitport.CloneUnfinishedRemedy, nil), gitport.CloneUnfinishedReason},
 		{publicerr.New(publicerr.Unavailable, gitssh.HostKeyMismatchReason, "Check the host key.", nil), gitssh.HostKeyMismatchReason},
 		{publicerr.New(publicerr.Forbidden, repositoryArchivedReason, "Unarchive the repository before probing it.", nil), repositoryArchivedReason},
+		{&gitport.EmptyRepositoryError{}, gitport.EmptyForgeReason},
 		{errors.New("forge refused"), repositoryProbeFailureReason},
 	} {
 		if got := upstreamProbeStatusReason(tc.err); got != tc.want {
