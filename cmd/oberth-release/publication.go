@@ -111,6 +111,21 @@ func (p publication) publishFiles(ctx context.Context, tag, commit string) error
 	if err != nil {
 		return err
 	}
+	if err := p.addMissing(ctx, release, names); err != nil {
+		return err
+	}
+	if !release.Draft {
+		return nil
+	}
+	if err := p.confirmDraft(ctx, release.ID, names); err != nil {
+		return err
+	}
+	return p.publishDraft(ctx, release.ID)
+}
+
+// addMissing compares every asset the release holds before uploading the
+// missing names in order; published bytes are never replaced.
+func (p publication) addMissing(ctx context.Context, release githubRelease, names []string) error {
 	existing := make(map[string]githubAsset, len(release.Assets))
 	for _, asset := range release.Assets {
 		existing[asset.Name] = asset
@@ -129,13 +144,7 @@ func (p publication) publishFiles(ctx context.Context, tag, commit string) error
 			}
 		}
 	}
-	if !release.Draft {
-		return nil
-	}
-	if err := p.confirmDraft(ctx, release.ID, names); err != nil {
-		return err
-	}
-	return p.publishDraft(ctx, release.ID)
+	return nil
 }
 
 // confirmDraft re-reads the draft and requires exactly the signed names, each

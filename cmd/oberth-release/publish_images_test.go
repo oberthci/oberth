@@ -70,12 +70,9 @@ func TestPublishProvesChartImagesBeforeWriting(t *testing.T) {
 			status.Store(int32(code))
 			requests.Store(0)
 			checkImagePublication(t, tool, files, imagePublicationCase{repository, code})
-			// 404 also runs clean verification; 200 also publishes through GitHub.
-			want := int32(2)
-			if code == 404 || code == 200 {
-				want = 4
-			}
-			if requests.Load() != want {
+			// 401 and 403 stop after one check; 404 also runs clean
+			// verification and 200 also publishes through GitHub.
+			if want := map[int]int32{200: 4, 404: 4}[code] + map[int]int32{401: 2, 403: 2}[code]; requests.Load() != want {
 				t.Fatal("did not check both chart image digests", requests.Load())
 			}
 		})

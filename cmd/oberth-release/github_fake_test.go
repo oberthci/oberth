@@ -37,7 +37,7 @@ type fakeRelease struct {
 const fakeRepository = "/repos/oberthci/oberth"
 
 // fakeCommit is the commit every fixture tag and signed record names.
-var fakeCommit = strings.Repeat("a", 40)
+const fakeCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 func githubFixture(t *testing.T) (publication, *githubFake) {
 	t.Helper()

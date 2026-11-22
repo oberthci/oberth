@@ -31,6 +31,31 @@ func TestPublicationRefusesEveryOtherOrigin(t *testing.T) {
 	}
 }
 
+// tokenFileFixture writes a token file with mode outside or inside a new
+// release directory, or links to one inside from outside.
+func tokenFileFixture(t *testing.T, mode os.FileMode, where string) (string, string) {
+	t.Helper()
+	dir, outside := t.TempDir(), t.TempDir()
+	token := filepath.Join(outside, "github")
+	if where != "outside" {
+		token = filepath.Join(dir, "github")
+	}
+	if err := os.WriteFile(token, []byte("fixture"), mode); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(token, mode); err != nil {
+		t.Fatal(err)
+	}
+	if where != "link" {
+		return dir, token
+	}
+	link := filepath.Join(outside, "github")
+	if err := os.Symlink(token, link); err != nil {
+		t.Fatal(err)
+	}
+	return dir, link
+}
+
 // A by-hand publication receives the GitHub token only as a private file
 // outside the release directory.
 func TestPublicationTokenFileMustBePrivateAndOutsideTheRelease(t *testing.T) {
@@ -47,24 +72,7 @@ func TestPublicationTokenFileMustBePrivateAndOutsideTheRelease(t *testing.T) {
 		{"linked from outside into the release", 0600, "link", tokenInside},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir, outside := t.TempDir(), t.TempDir()
-			token := filepath.Join(outside, "github")
-			if tc.in != "outside" {
-				token = filepath.Join(dir, "github")
-			}
-			if err := os.WriteFile(token, []byte("fixture"), tc.mode); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Chmod(token, tc.mode); err != nil {
-				t.Fatal(err)
-			}
-			if tc.in == "link" {
-				link := filepath.Join(outside, "github")
-				if err := os.Symlink(token, link); err != nil {
-					t.Fatal(err)
-				}
-				token = link
-			}
+			dir, token := tokenFileFixture(t, tc.mode, tc.in)
 			_, err := publicationFor(options{token: token, dir: dir, origin: releaseverify.Origin})
 			if !errors.Is(err, tc.want) && (tc.want != nil || err != nil) {
 				t.Fatal("token file decision differs", err)
