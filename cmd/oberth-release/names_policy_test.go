@@ -209,7 +209,8 @@ echo diff >> "$STATIC_LOG"
 `)
 	writeFixtureCommand(t, filepath.Join(dir, "bin/go"), `[ -z "${OBERTH_GUARDS_NAMES_FILE:-}${OBERTH_SECRETS_DIR:-}" ] && [ "$GIT_CONFIG_COUNT" = 1 ] || exit 97
 case "$*" in *'version --short') cat hack/lint-version | sed 's/^v//';;
- *'run ./...') [ "$TMPDIR" = "$FIXTURE_ROOT/shared/tmp" ] || exit 93; echo lint >> "$STATIC_LOG";;
+ *'run ./...') [ "$TMPDIR" = "$FIXTURE_ROOT/shared/tmp" ] && [ "$GOLANGCI_LINT_CACHE" = "$FIXTURE_ROOT/cache/golangci-lint" ] || exit 93
+  echo lint >> "$STATIC_LOG";;
  *) exit 98;; esac
 `)
 	git := "'" + fixtureExecutable(t, "git") + "' config "
@@ -224,5 +225,7 @@ case "$*" in
 `)
 	values := workflowValues(dir)
 	values["STATIC_LOG"], values["OBERTH_GUARDS_NAMES_FILE"] = filepath.Join(dir, "static.log"), "inherited-must-not-leak"
+	// A step has no home directory: every tool default under HOME must be replaced by the workflow.
+	values["HOME"] = "/nonexistent"
 	return values
 }
