@@ -14,8 +14,10 @@ import (
 )
 
 // ReceiveSource reads native quarantine objects only for the gate's lifetime.
-// Other repositories use their ordinary exact source; no object is imported or
-// ref moved by this reader. C3 owns which revisions and policies to inspect.
+// Other repositories use their ordinary exact source, whose refresh (a pin's
+// producer head) may move their refs as any read does; nothing is imported
+// into the pushed repository and none of its refs moves. C3 owns which
+// revisions and policies to inspect.
 type ReceiveSource struct {
 	base, pushed *Cache
 	ctx          context.Context

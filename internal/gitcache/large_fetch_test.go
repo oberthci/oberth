@@ -288,6 +288,26 @@ func TestPinOfAHeadTheCacheLacksWaitsForTheRefresh(t *testing.T) {
 	}
 }
 
+// A pin whose producer head arrives with a refresh that the pin waited for
+// tells the cache's readers what moved, so the producer's schedules follow.
+func TestPinRefreshAnnouncesTheProducersMoves(t *testing.T) {
+	x := newFetchFixture(t, transferring)
+	c := x.start(t)
+	next := x.advance(t)
+	x.slow.release(t)
+	at := sourcecontract.Revision{Repository: gittest.Repository, Commit: x.f.Commit}
+	if _, reachable, err := c.Pin(t.Context(), at); err != nil || !reachable {
+		t.Fatal("the pin was not admitted", reachable, err)
+	}
+	gitcache.WaitBackground(c)
+	x.mu.Lock()
+	moves := slices.Clone(x.moves)
+	x.mu.Unlock()
+	if len(moves) != 1 || !slices.ContainsFunc(moves[0], func(u gitcache.RefUpdate) bool { return u.Ref == "refs/heads/main" && u.NewSHA == next }) {
+		t.Fatal("the pin's refresh did not announce the producer's moves once", moves)
+	}
+}
+
 const otherRepository = "origin/team/other"
 
 // pushFixture is a cache whose admission reads the forge's default head of

@@ -23,7 +23,9 @@ func (c *Cache) policyHead(ctx context.Context, repo, p string, r Remote) (gitpo
 // headObject brings the default head's object into the cache. An object the
 // cache has needs no transfer. A missing one arrives with the repository's
 // refresh fetch, which finishes in the background when the forge has much to
-// send, and the caller is told so when it stops waiting; a head the refresh
+// send, and the caller is told so when it stops waiting. The refresh tells
+// the cache's readers which refs it moved, whoever reads the head (a pin, a
+// release's ancestry), so the producer's schedules follow. A head the refresh
 // did not bring (it moved since, or the refresh failed) is fetched on its own.
 func (c *Cache) headObject(ctx context.Context, repo string, r Remote, oid string) error {
 	p, err := c.path(repo)
@@ -33,7 +35,7 @@ func (c *Cache) headObject(ctx context.Context, repo string, r Remote, oid strin
 	if c.has(ctx, p, oid) {
 		return nil
 	}
-	_, err = c.refreshQuietly(ctx, repo, false)
+	err = c.refresh(ctx, repo, false)
 	var updating *gitport.FetchUnfinishedError
 	if errors.As(err, &updating) {
 		return err
