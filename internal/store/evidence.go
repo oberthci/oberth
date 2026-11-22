@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/stateport"
@@ -139,11 +140,17 @@ func requireNodeUpdate(old, n stateport.Node, credential bool) error {
 }
 
 func retainsNodeEvidence(old, n stateport.Node) bool {
-	return (!old.PodRestarted || n.PodRestarted) && retains(old.Exit, n.Exit) && retains(old.StartedAt, n.StartedAt) && retains(old.FinishedAt, n.FinishedAt)
+	return (!old.PodRestarted || n.PodRestarted) && retains(old.Exit, n.Exit) && retainsInstant(old.StartedAt, n.StartedAt) && retainsInstant(old.FinishedAt, n.FinishedAt)
 }
 
 func retains[T comparable](previous, next *T) bool {
 	return previous == nil || next != nil && *previous == *next
+}
+
+// retainsInstant compares instants, not their location: the native API reads
+// times in local time and the store reads its own back in UTC.
+func retainsInstant(previous, next *time.Time) bool {
+	return previous == nil || next != nil && previous.Equal(*next)
 }
 
 func sameNodeIdentity(old, n stateport.Node) bool {
