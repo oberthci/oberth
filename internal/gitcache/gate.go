@@ -213,7 +213,20 @@ func (
 		// whether the tag is there is unknown, so the reply claims neither.
 		return &gateError{code: "unavailable", cause: context.Cause(ctx)}
 	}
-	return admissionReply(ctx, answered, err)
+	return c.admissionVerdict(ctx, source, answered, err)
+}
+
+// admissionVerdict is admissionReply, and logs an admission refused at its
+// deadline although its callback had returned, so every deadline refusal is
+// logged once with its repository (one whose callback was still running is
+// logged by admissionAnswer).
+func (c *Cache) admissionVerdict(ctx context.Context, source *ReceiveSource, answered bool, err error) error {
+	reply := admissionReply(ctx, answered, err)
+	var refusal *gateError
+	if answered && c.config.Log != nil && errors.As(reply, &refusal) && refusal.detail == reasonGateTimeout+". "+remedyGateTimeout {
+		c.config.Log(reasonAdmissionEnded, source.event.Repository+": "+source.event.ID)
+	}
+	return reply
 }
 
 // deliveredReply answers for a receive whose release tag is already on the
