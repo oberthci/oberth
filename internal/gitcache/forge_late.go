@@ -115,9 +115,7 @@ func (c *Cache) DefaultHead(ctx context.Context, repo string) error {
 // the transfer done. Only a head read that gave no head (late is the forge's
 // outcome) leaves the decision to the cache, under lateForge's rule.
 func (c *Cache) admissionHead(ctx context.Context, p string, r Remote) (head gitport.Ref, late, err error) {
-	wait, cancel := context.WithTimeout(ctx, c.budgets.headWait)
-	head, err = c.policyHead(wait, r.repository, r)
-	cancel()
+	head, err = c.policyHead(ctx, r.repository, r, c.budgets.headWait)
 	switch {
 	case !forgeError(err):
 		return head, nil, err

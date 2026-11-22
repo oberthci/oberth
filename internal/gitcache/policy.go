@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync/atomic"
+	"time"
 
 	"github.com/oberthci/oberth/internal/gitport"
 )
@@ -16,21 +17,20 @@ import (
 // refresh fetch when the cache lacks the head (it tells the cache's readers
 // which refs it moved, so the producer's schedules follow), and a fetch of a
 // head the refresh did not bring. An object the cache has needs no transfer.
-// A caller waits at most the refresh wait within ctx; one that stops waiting
-// is told the forge did not answer, or that its copy is still updating once
-// the forge is sending.
-func (c *Cache) policyHead(ctx context.Context, repo string, r Remote) (gitport.Ref, error) {
+// A caller waits for the forge at most budget within ctx, and reads the cache
+// under ctx itself; one that stops waiting
+// decides from the head the forge last answered (headRead), or is told the
+// forge did not answer, or that its copy is still updating once the forge is
+// sending.
+func (c *Cache) policyHead(ctx context.Context, repo string, r Remote, budget time.Duration) (gitport.Ref, error) {
 	p, err := c.path(repo)
 	if err != nil {
 		return gitport.Ref{}, err
 	}
-	wait, cancel := context.WithTimeout(ctx, c.budgets.refreshWait)
+	wait, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	store := c.root()
-	head, err := c.forgeJob(wait, forgeJobKey(p, "head", r, ""), func(ctx context.Context, _ *atomic.Bool) outcome {
-		head, err := store.remoteRef(ctx, p, r, r.DefaultBranch)
-		return outcome{head: head, err: err}
-	})
+	head, err := store.headRead(wait, p, r)
 	if isAbsent(err) {
 		return head, c.absence(wait, p, r, err)
 	}
@@ -44,11 +44,47 @@ func (c *Cache) policyHead(ctx context.Context, repo string, r Remote) (gitport.
 	if c.has(ctx, p, head.ObjectSHA) {
 		return head, nil
 	}
-	_, err = c.forgeJob(wait, forgeJobKey(p, "object", r, head.ObjectSHA), func(ctx context.Context, sending *atomic.Bool) outcome {
-		return outcome{err: store.fetchHeadObject(ctx, p, r, fetchedObject{oid: head.ObjectSHA, sending: sending})}
-	})
+	_, err = c.forgeJob(wait, forgeJobKey(p, "object", r, head.ObjectSHA), store.objectRun(p, r, head.ObjectSHA))
 	return head, err
 }
+
+// headRead reads r's default head as a job of its forge identity and keeps
+// the answer (headAnswers). A caller whose wait ends first decides from the
+// answer kept within cacheTrustWindow, as from one the forge just gave, and
+// otherwise is told the forge did not answer. A read that ends after every
+// caller left starts the fetch of a head object the store lacks, so a retry
+// finds it. c is the root cache.
+func (c *Cache) headRead(ctx context.Context, p string, r Remote) (gitport.Ref, error) {
+	key := forgeJobKey(p, "head", r, "")
+	run := func(ctx context.Context, _ *atomic.Bool) outcome {
+		head, err := c.remoteRef(ctx, p, r, r.DefaultBranch)
+		c.answers.record(key, head, err, c.config.Now())
+		return outcome{head: head, err: err}
+	}
+	ended := func(ctx context.Context, result outcome, end ending) {
+		if result.err == nil && end.unattended && !c.has(ctx, p, result.head.ObjectSHA) {
+			object := forgeJobKey(p, "object", r, result.head.ObjectSHA)
+			c.leave(object, c.joinTransfer(object, c.objectRun(p, r, result.head.ObjectSHA), noEnd)) //nolint:contextcheck // The cache lifetime owns the fetch; no caller waits for it.
+		}
+	}
+	job := c.joinTransfer(key, run, ended) //nolint:contextcheck // The cache lifetime owns the job, not the caller who waits for it.
+	if result, ended := c.awaitTransfer(ctx, key, job); ended {
+		return result.head, result.err
+	}
+	if kept, ok := c.answers.recent(key, c.config.Now()); ok {
+		return kept, nil
+	}
+	return gitport.Ref{}, unanswered(ctx, job)
+}
+
+// objectRun fetches the forge's head object oid into the store at p.
+func (c *Cache) objectRun(p string, r Remote, oid string) func(context.Context, *atomic.Bool) outcome {
+	return func(ctx context.Context, sending *atomic.Bool) outcome {
+		return outcome{err: c.fetchHeadObject(ctx, p, r, fetchedObject{oid: oid, sending: sending})}
+	}
+}
+
+func noEnd(context.Context, outcome, ending) {}
 
 // absence follows a forge that answered that the default branch is absent
 // with the listing that tells an empty forge from a deleted default branch.
@@ -77,7 +113,7 @@ func (c *Cache) root() *Cache {
 // forgeJob joins or starts the forge job of key and waits for it within ctx.
 // A caller that stops waiting leaves the job running.
 func (c *Cache) forgeJob(ctx context.Context, key string, run func(context.Context, *atomic.Bool) outcome) (gitport.Ref, error) {
-	job := c.root().joinTransfer(key, run, func(context.Context, outcome, ending) {}) //nolint:contextcheck // The cache lifetime owns the job, not the caller who waits for it.
+	job := c.root().joinTransfer(key, run, noEnd) //nolint:contextcheck // The cache lifetime owns the job, not the caller who waits for it.
 	result, ended := c.root().awaitTransfer(ctx, key, job)
 	if !ended {
 		return gitport.Ref{}, unanswered(ctx, job)

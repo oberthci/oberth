@@ -26,7 +26,7 @@ func (c *Cache) DefaultFile(ctx context.Context, repo, path string) (gitport.Ref
 	if err != nil {
 		return gitport.Ref{}, gitport.File{}, err
 	}
-	head, err := c.policyHead(ctx, repo, remote)
+	head, err := c.policyHead(ctx, repo, remote, c.budgets.refreshWait)
 	if err != nil {
 		return head, gitport.File{}, err
 	}

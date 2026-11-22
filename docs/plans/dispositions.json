@@ -9397,10 +9397,10 @@
     "docs/plans/c13-own-pipelines.md": "7bf8d26daa7f51f8897f126f230345f41b683bd6a06adc771f0bb491a2149fb7",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
     "docs/plans/c2-service-actions-and-history.md": "047eea2191a7521e47fd0dd9b46ca49d5e762f8dae85a65555e607d4eca89df0",
-    "docs/plans/c3-wiring-and-submission.md": "26a401c9cc19dab0baaa4eb8a27f8d1ef773c7efffd9476d39992a0d0cd56263",
+    "docs/plans/c3-wiring-and-submission.md": "52c53abb8b4adcc31e12ce0da905de5e38ec42a38e9bbf8656451f1d99fe2879",
     "docs/plans/c4-admission-rules-and-plan.md": "c207fb79c8cc077a0f608adc6e684cb0aa89b12ed2d3359bb9c015b3932e2f7b",
     "docs/plans/c5-native-execution.md": "f82bcf8ee9b7264bfbb2c2be78740cd85eddcf9c11275aec5b89a2198a67c325",
-    "docs/plans/c6-source-delivery.md": "1f4c456dc34662b74e481fc7f77fbb32f8e2526ba0a428bc255bdebd91296c56",
+    "docs/plans/c6-source-delivery.md": "2415575fe71fbec39a647f338f6cba72801f6d832e427bfe1c8289ba7a3a47ba",
     "docs/plans/c7-durable-state.md": "eb00a8dff6d93731716c3d0af66a517f8a9d3b3475d64b720d79eb82fbca4bec",
     "docs/plans/c8-logs.md": "d406f3a01f449719be4aa255d628b908e9a8a1e33230f3c21b9b50ce0e74a61d",
     "docs/plans/c9-install-and-upgrade.md": "ffe5000d2d415e4729d71d7574c04b2f52c02801708ac717f32555548c05e228"

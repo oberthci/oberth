@@ -76,6 +76,8 @@ type Cache struct {
 	objectEnv      []string
 	budgets        gitBudgets
 	transfers      *transfers
+	// answers keeps each forge identity's last default head answer.
+	answers *headAnswers
 	// unscoped is the cache a receive-scoped copy was made from; transfers
 	// that outlive the receive run there, never in its quarantine.
 	unscoped   *Cache
@@ -120,6 +122,7 @@ func New(ctx context.Context, config Config) (*Cache, error) {
 	cache := &Cache{
 		budgets:   defaultGitBudgets(),
 		transfers: &transfers{running: map[string]*transfer{}},
+		answers:   newHeadAnswers(),
 		config:    config,
 		rootLock:  owner,
 		gates:     &repositoryGates{repos: make(map[string]chan struct{})},

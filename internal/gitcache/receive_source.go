@@ -54,6 +54,7 @@ func (
 		ctx:       c.ctx,
 		budgets:   c.budgets,
 		transfers: c.transfers,
+		answers:   c.answers,
 		unscoped:  c,
 		config:    c.config,
 		gates:     c.gates,
