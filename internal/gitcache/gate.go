@@ -232,9 +232,14 @@ func (c *Cache) awaitAdmission(ctx context.Context, event ReceiveEvent, source *
 		return err
 	case <-ctx.Done():
 		if source.delivered.Load() {
-			// Past its forge write the callback only records its approval.
-			if err := <-done; err == nil {
-				return nil
+			// Past its forge write the callback only records its approval; the
+			// cache's own end still ends the wait, so a server stop is never held.
+			select {
+			case err := <-done:
+				if err == nil {
+					return nil
+				}
+			case <-c.ctx.Done():
 			}
 			return context.Cause(ctx)
 		}
