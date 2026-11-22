@@ -89,12 +89,12 @@ claude plugin configure oberth@oberthci --values-stdin <<'JSON'
 {"executable":"/absolute/verified/path/from-join","profile":"uplink-profile-from-join","runs":3}
 JSON
 ```
-The options take precedence; a blank option means unset. No profile hides the box. Use the
-verified executable, never a checkout file. The box shows up to `runs` runs (0 to 10; blank is
-three), none at 0, with progress and failed steps; it refreshes every 15 seconds, active or
-idle. `/oberth-runs [--limit=N]` shows the table;
-`/oberth-watch <id-or-prefix>` watches until the completion toast; the model uses the bridge's
-tools, and the plugin adds none. Codex installs the skill through
+Options take precedence; blank means unset. No profile hides the box. Use the verified
+executable, never a checkout file. The box shows up to `runs` runs (0 to 10; blank is three),
+none at 0, with progress and failed steps, refreshed every 15 seconds. `/oberth-runs [--limit=N]`
+shows the table; `/oberth-watch <id-or-prefix>` watches until the completion toast; the model
+uses the bridge's tools. Update with `claude plugin marketplace update oberthci`, then
+`claude plugin update oberth@oberthci` and a restart. Codex installs the skill through
 `agent/.codex-plugin/plugin.json` with `codex plugin marketplace add oberthci/oberth`, then
 `codex plugin add oberth@oberthci`. Register join's exact bridge line as in
 [agent connection](agents.md#connect-the-tools); this package has no above-prompt view for Codex.

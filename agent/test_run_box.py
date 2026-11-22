@@ -145,9 +145,13 @@ class RunBoxContract(unittest.TestCase):
         marketplace = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
         self.assertEqual(marketplace["name"], "oberthci")
         self.assertEqual(marketplace["plugins"][0]["source"], "./agent")
+        versions = set()
         for host in (".claude-plugin", ".codex-plugin"):
             manifest = json.loads((AGENT / host / "plugin.json").read_text())
             self.assertEqual(manifest["name"], "oberth")
+            versions.add(manifest["version"])
+        # One package version for both hosts: an update delivers the shared skill to each.
+        self.assertEqual(len(versions), 1)
         manifest = json.loads((AGENT / ".codex-plugin/plugin.json").read_text())
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertEqual(manifest["hooks"], [])
