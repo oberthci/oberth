@@ -55,6 +55,42 @@ func TestAdmissionNeverWaitsForACallbackThatHasNotAnswered(t *testing.T) {
 	}
 }
 
+// A callback whose release tag delivery has begun when the admission context
+// ends is waited for, also when the delivery is recorded only after the
+// deadline, and its approval is the answer.
+func TestAdmissionWaitsForADeliveryUnderWay(t *testing.T) {
+	c := &Cache{ctx: t.Context()}
+	source := &ReceiveSource{}
+	source.delivering.Store(true)
+	expired, cancel := context.WithCancel(t.Context())
+	cancel()
+	done := make(chan error, 1)
+	type answer struct {
+		answered bool
+		err      error
+	}
+	returned := make(chan answer, 1)
+	go func() {
+		answered, err := c.admissionAnswer(expired, "receive", source, done)
+		returned <- answer{answered, err}
+	}()
+	select {
+	case a := <-returned:
+		t.Fatal("the deadline did not wait for a delivery under way", a)
+	case <-time.After(200 * time.Millisecond):
+	}
+	source.delivered.Store(true)
+	done <- nil
+	select {
+	case a := <-returned:
+		if !a.answered || a.err != nil {
+			t.Fatal("the delivery's approval was not the answer", a)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the wait for the delivery did not end with its answer")
+	}
+}
+
 // The gate's reply: a refusal with a reason stands even after the deadline,
 // a late approval or a bare late error never approves, and an admission that
 // ran out of time says what timed out.

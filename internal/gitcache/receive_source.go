@@ -22,8 +22,9 @@ type ReceiveSource struct {
 	base, pushed *Cache
 	ctx          context.Context
 	event        ReceiveEvent
-	// delivered records a release tag this receive put on the forge.
-	delivered atomic.Bool
+	// delivering records that this receive began putting its release tag on
+	// the forge; delivered, that the tag is there.
+	delivering, delivered atomic.Bool
 }
 
 func (

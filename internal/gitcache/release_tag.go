@@ -18,12 +18,20 @@ const maxReleaseTagBytes = 64 << 10
 // object directly on that commit, through the installation's forge identity.
 // A tag already on the forge at that object counts as delivered; a tag there
 // at any other object is never moved, and any forge rejection is final. Once
-// delivered, the receive's admission no longer refuses on its deadline.
+// its delivery has begun, the receive's admission waits for its outcome at the
+// deadline instead of refusing.
 func (s *ReceiveSource) DeliverTag(ctx context.Context, ref gitport.Ref) error {
 	ctx, cancel := s.scope(ctx)
 	defer cancel()
 	if !strings.HasPrefix(ref.Name, "refs/tags/") || !slices.Contains(s.event.Updates, RefUpdate{Ref: ref.Name, NewSHA: ref.ObjectSHA}) {
 		return refuse("immutable tag")
+	}
+	// Marked before the forge is touched: the gate, at its deadline, either sees
+	// the mark and waits for this delivery's outcome, or ended first, and then
+	// nothing is written.
+	s.delivering.Store(true)
+	if err := s.ctx.Err(); err != nil {
+		return err
 	}
 	r := model.Publication{ID: "receive:" + s.event.ID, Actor: s.event.Actor, Repo: s.event.Repository, Ref: ref.Name, ObjectSHA: ref.ObjectSHA, CommitSHA: &ref.CommitSHA, PreviousSHA: new("")}
 	if err := s.pushed.deliverTag(ctx, r); err != nil {

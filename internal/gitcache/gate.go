@@ -205,8 +205,13 @@ func (
 	done := make(chan error, 1)
 	go func() { done <- c.config.PreReceive(ctx, event, source) }()
 	answered, err := c.admissionAnswer(ctx, event.ID, source, done)
-	if source.delivered.Load() {
+	switch {
+	case source.delivered.Load():
 		return deliveredReply(answered, err)
+	case source.delivering.Load() && !answered:
+		// A server stop ended the wait while the forge write was under way:
+		// whether the tag is there is unknown, so the reply claims neither.
+		return &gateError{code: "unavailable", cause: context.Cause(ctx)}
 	}
 	return admissionReply(ctx, answered, err)
 }
@@ -255,18 +260,20 @@ func admissionReply(ctx context.Context, answered bool, err error) error {
 
 // Composition supplies the admission duration. Enforce its cancellation even when a
 // broken callback ignores it; a late result cannot approve or retain the source,
-// unless the callback already delivered a release tag: it is then awaited, since
-// a refusal would spend the tag's version with no run (deliveredReply answers
-// it). Otherwise an answer already in done when the context ends is taken
-// without waiting; answered is false only when the callback had not returned.
+// unless the callback began delivering a release tag: it is then awaited, since
+// a refusal could spend the tag's version with no run (deliveredReply answers
+// a delivered one). Otherwise an answer already in done when the context
+// ends is taken without waiting; answered is false only when the callback had
+// not returned.
 func (c *Cache) admissionAnswer(ctx context.Context, id string, source *ReceiveSource, done <-chan error) (bool, error) {
 	select {
 	case err := <-done:
 		return true, err
 	case <-ctx.Done():
-		if source.delivered.Load() {
-			// Past its forge write the callback only records its approval; the
-			// cache's own end still ends the wait, so a server stop is never held.
+		if source.delivering.Load() {
+			// A forge write under way, or done, is waited for: its outcome decides
+			// the answer. The cache's own end still ends the wait, so a server
+			// stop is never held.
 			select {
 			case err := <-done:
 				return true, err
