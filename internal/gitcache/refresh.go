@@ -8,11 +8,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 )
 
 // RefreshInterval bounds how long demand reads reuse a forge snapshot or failure.
 const RefreshInterval = 45 * time.Second
+
 // refreshDeadline is how long a caller waits for the repository's forge fetch
 // before it reads the cache or is told the fetch continues; the fetch itself
 // runs to the background bound.
@@ -85,7 +87,7 @@ func (c *Cache) refreshQuietly(ctx context.Context, repo string, force bool) ([]
 // catalogue ID it started with.
 func (c *Cache) startFetch(repo, p string, force bool) *transfer {
 	var registered int64
-	run := func(ctx context.Context) outcome {
+	run := func(ctx context.Context, sending *atomic.Bool) outcome {
 		if !force {
 			if recent, err := c.recentRefresh(p); recent {
 				return outcome{err: err}
@@ -96,7 +98,7 @@ func (c *Cache) startFetch(repo, p string, force bool) *transfer {
 			return outcome{err: err}
 		}
 		registered = remote.RepositoryID
-		updates, err := c.fetch(ctx, p, repo, remote)
+		updates, err := c.fetch(ctx, fetchTarget{store: p, repo: repo, remote: remote, sending: sending})
 		return outcome{updates: updates, err: c.recordRefreshResult(p, err)}
 	}
 	ended := func(ctx context.Context, result outcome, end ending) {

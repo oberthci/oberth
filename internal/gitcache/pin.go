@@ -37,7 +37,7 @@ func (c *Cache) defaultAncestor(ctx context.Context, at sourcecontract.Revision)
 		return 0, sourcecontract.Ref{}, false, err
 	}
 
-	head, err := c.policyHead(ctx, at.Repository, p, r)
+	head, err := c.policyHead(ctx, at.Repository, r)
 	if isAbsent(err) {
 		return r.RepositoryID, sourcecontract.Ref{}, false, nil
 	}

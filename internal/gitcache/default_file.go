@@ -16,8 +16,7 @@ func (c *Cache) DefaultFile(ctx context.Context, repo, path string) (gitport.Ref
 	if err := sourcecontract.ValidateFilePath(path); err != nil {
 		return gitport.Ref{}, gitport.File{}, refuse("file path")
 	}
-	p, err := c.path(repo)
-	if err != nil {
+	if _, err := c.path(repo); err != nil {
 		return gitport.Ref{}, gitport.File{}, err
 	}
 	if err := c.refresh(ctx, repo, false); err != nil {
@@ -27,7 +26,7 @@ func (c *Cache) DefaultFile(ctx context.Context, repo, path string) (gitport.Ref
 	if err != nil {
 		return gitport.Ref{}, gitport.File{}, err
 	}
-	head, err := c.policyHead(ctx, repo, p, remote)
+	head, err := c.policyHead(ctx, repo, remote)
 	if err != nil {
 		return head, gitport.File{}, err
 	}

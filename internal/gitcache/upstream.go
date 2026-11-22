@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/oberthci/oberth/internal/gitport"
 	"github.com/oberthci/oberth/internal/sourcecontract"
@@ -79,7 +80,7 @@ func (c *Cache) RemoteRef(ctx context.Context, repo, ref string) (gitport.Ref, e
 	}
 
 	if ref == r.DefaultBranch {
-		return c.policyHead(ctx, repo, p, r)
+		return c.policyHead(ctx, repo, r)
 	}
 	head, err := c.remoteRef(ctx, p, r, ref)
 	if ref == "HEAD" && isAbsent(err) {
@@ -134,13 +135,23 @@ func (c *Cache) remoteRef(ctx context.Context, p string, r Remote, ref string) (
 func (c *Cache) Fetch(ctx context.Context, repo string) error {
 	return c.refresh(ctx, repo, false)
 }
-func (c *Cache) fetch(ctx context.Context, p, repo string, r Remote) (updates []RefUpdate, result error) {
+
+// fetchTarget is one refresh fetch: the repository, its store and remote, and
+// the flag its forge command sets once the forge is sending a pack.
+type fetchTarget struct {
+	store, repo string
+	remote      Remote
+	sending     *atomic.Bool
+}
+
+func (c *Cache) fetch(ctx context.Context, t fetchTarget) (updates []RefUpdate, result error) {
+	p, repo, r := t.store, t.repo, t.remote
 	dir, err := os.MkdirTemp(c.config.Scratch, "oberth-export-fetch-")
 	if err != nil {
 		return nil, err
 	}
 	defer func() { result = errors.Join(result, os.RemoveAll(dir)) }()
-	after, err := c.fetchSnapshot(ctx, dir, p, r)
+	after, err := c.fetchSnapshot(ctx, dir, t)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +185,8 @@ func (c *Cache) fetch(ctx context.Context, p, repo string, r Remote) (updates []
 	}
 	return c.mirror(ctx, p, mirrorChange{before: before, after: after, repository: repo})
 }
-func (c *Cache) fetchSnapshot(ctx context.Context, dir, store string, r Remote) (map[string]string, error) {
+func (c *Cache) fetchSnapshot(ctx context.Context, dir string, t fetchTarget) (map[string]string, error) {
+	store, r := t.store, t.remote
 	format, err := c.capture(ctx, command{dir: store, args: []string{"rev-parse", "--show-object-format"}}, 64)
 	if err != nil {
 		return nil, err
@@ -206,7 +218,7 @@ func (c *Cache) fetchSnapshot(ctx context.Context, dir, store string, r Remote) 
 		"+refs/heads/*:refs/heads/*",
 		"+refs/tags/*:refs/tags/*",
 	}
-	if err = c.run(ctx, command{dir: dir, args: args, remote: &r}); err != nil {
+	if err = c.run(ctx, command{dir: dir, args: args, remote: &r, sending: t.sending}); err != nil {
 		return nil, err
 	}
 	return c.trackingAt(ctx, dir, "refs/", sourcecontract.MaxRefs)

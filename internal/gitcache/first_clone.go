@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/oberthci/oberth/internal/gitport"
 )
@@ -31,7 +32,7 @@ func (c *Cache) waitClone(ctx context.Context, clone *transfer, p string) error 
 // reads the repository once it is there instead of at the next unrelated move.
 func (c *Cache) startClone(repository, p string) *transfer {
 	var registered int64
-	run := func(ctx context.Context) outcome {
+	run := func(ctx context.Context, _ *atomic.Bool) outcome {
 		registered = c.registeredID(ctx, repository)
 		return outcome{err: c.cloneOnce(ctx, repository, p)}
 	}

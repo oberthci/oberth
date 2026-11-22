@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/oberthci/oberth/internal/boundedio"
@@ -29,6 +30,8 @@ type command struct {
 	diagnostics io.Writer
 	exchange    func(io.Writer, io.Reader) error
 	progress    *commandProgress
+	// sending, when set, is raised once the forge begins sending a pack.
+	sending *atomic.Bool
 }
 
 func (c *Cache) capture(ctx context.Context, s command, limit int64) ([]byte, error) {
@@ -53,9 +56,7 @@ func (c *Cache) run(ctx context.Context, s command) error {
 			idle = c.budgets.idle
 		}
 		progress = watchProgress(cancel, idle)
-		if s.remote != nil {
-			progress.moved = forgeSending(ctx)
-		}
+		progress.moved = s.sending
 	}
 	defer progress.close()
 	cmd, detail := c.nativeCommand(s, progress, cancel)

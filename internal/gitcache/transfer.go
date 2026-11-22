@@ -31,17 +31,9 @@ type transfer struct {
 	left    bool
 	// sending records that the forge began sending the transfer a pack, so a
 	// caller that stops waiting can tell a transfer under way from a forge
-	// that stalls with an error or nothing.
+	// that stalls with an error or nothing. run receives it for its forge
+	// command.
 	sending atomic.Bool
-}
-
-// sendingKey carries a transfer's sending flag to the forge commands it runs.
-type sendingKey struct{}
-
-// forgeSending is the sending flag of the transfer ctx belongs to, or nil.
-func forgeSending(ctx context.Context) *atomic.Bool {
-	flag, _ := ctx.Value(sendingKey{}).(*atomic.Bool)
-	return flag
 }
 
 // ending is what a transfer knows about its callers when its result is final:
@@ -70,7 +62,7 @@ func (f *transfers) close() {
 // joinTransfer counts the caller in on the transfer running under key, or
 // starts run under the cache lifetime and the background bound. ended runs
 // once the result is final, with what the transfer then knew of its callers.
-func (c *Cache) joinTransfer(key string, run func(context.Context) outcome, ended func(context.Context, outcome, ending)) *transfer {
+func (c *Cache) joinTransfer(key string, run func(context.Context, *atomic.Bool) outcome, ended func(context.Context, outcome, ending)) *transfer {
 	c.transfers.mu.Lock()
 	defer c.transfers.mu.Unlock()
 	if t := c.transfers.running[key]; t != nil {
@@ -85,9 +77,9 @@ func (c *Cache) joinTransfer(key string, run func(context.Context) outcome, ende
 	}
 	c.transfers.running[key] = t
 	c.transfers.wait.Go(func() {
-		ctx, cancel := context.WithTimeout(context.WithValue(c.ctx, sendingKey{}, &t.sending), c.budgets.background)
+		ctx, cancel := context.WithTimeout(c.ctx, c.budgets.background)
 		defer cancel()
-		result := run(ctx)
+		result := run(ctx, &t.sending)
 		c.transfers.mu.Lock()
 		delete(c.transfers.running, key)
 		end := ending{left: t.left, unattended: t.waiting == 0}
