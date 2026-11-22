@@ -40,3 +40,36 @@ func renderLatestRun(out io.Writer, path string, run map[string]any) error {
 	}
 	return writeWrapped(out, factLabel(path)+": "+text)
 }
+
+// renderRepositoryRuns prints a repository's latest run and its recent runs on
+// one line each instead of as nested run views.
+func renderRepositoryRuns(out io.Writer, path, key string, value any) (bool, error) {
+	if run, ok := value.(map[string]any); key == "latest_run" && ok {
+		return true, renderLatestRun(out, path, run)
+	}
+	if runs, ok := value.([]any); key == "recent_runs" && ok {
+		text := "no runs"
+		if len(runs) > 0 {
+			text = recentLetters(runs) + " (oldest first)"
+		}
+		return true, writeWrapped(out, factLabel(path)+": "+text)
+	}
+	return false, nil
+}
+
+// recentLetters spells runs as the web page colours them: P passed, F failed,
+// R queued or running, - cancelled or any other status.
+func recentLetters(runs []any) string {
+	letters := map[string]string{"passed": "P", "failed": "F", "queued": "R", "running": "R"}
+	var text strings.Builder
+	for _, run := range runs {
+		object, _ := run.(map[string]any)
+		status, _ := object["status"].(string)
+		letter, ok := letters[status]
+		if !ok {
+			letter = "-"
+		}
+		text.WriteString(letter)
+	}
+	return text.String()
+}

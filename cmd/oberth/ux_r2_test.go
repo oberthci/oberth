@@ -69,6 +69,26 @@ func TestRunLabelsAndRepositoryLatestRunStayReadable(t *testing.T) {
 	}
 }
 
+// TestRepositoryRecentRunsReadAsOneLine: oberth repo list --recent-runs prints a
+// repository's strip as one line of letters, oldest first, not as run views.
+func TestRepositoryRecentRunsReadAsOneLine(t *testing.T) {
+	app, out, _ := fixture(t, fake.Bindings())
+	data := []byte(`{"repositories":[{"repo":"acme/app","recent_runs":[` +
+		`{"id":"11111111","status":"passed","ref":"refs/heads/main","created_at":"2026-11-16T14:00:00Z"},` +
+		`{"id":"22222222","status":"failed","ref":"refs/heads/fix","created_at":"2026-11-16T14:01:00Z"},` +
+		`{"id":"33333333","status":"cancelled","ref":"refs/heads/main","created_at":"2026-11-16T14:02:00Z"},` +
+		`{"id":"44444444","status":"queued","ref":"refs/heads/main","created_at":"2026-11-16T14:03:00Z"},` +
+		`{"id":"55555555","status":"running","ref":"refs/heads/main","created_at":"2026-11-16T14:04:00Z"}]},` +
+		`{"repo":"acme/quiet","recent_runs":[]}]}`)
+	if err := app.render(data, false, commonOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "repositories[0] / recent runs: PF-RR (oldest first)\n") || !strings.Contains(text, "repositories[1] / recent runs: no runs\n") || strings.Contains(text, "11111111") || strings.Contains(text, "refs/heads") {
+		t.Fatalf("recent runs not one line per repository: %q", text)
+	}
+}
+
 func TestWrappedHelpContinuationsAreIndented(t *testing.T) {
 	var out bytes.Buffer
 	text := "--long-option: " + strings.Repeat("complete words ", 30)

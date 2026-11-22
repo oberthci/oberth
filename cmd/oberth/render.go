@@ -83,8 +83,8 @@ func renderObject(out io.Writer, path string, value map[string]any, detail bool)
 		if path != "" {
 			label = path + "." + key
 		}
-		if run, ok := value[key].(map[string]any); key == "latest_run" && ok {
-			if err := renderLatestRun(out, label, run); err != nil {
+		if handled, err := renderRepositoryRuns(out, label, key, value[key]); handled || err != nil {
+			if err != nil {
 				return err
 			}
 			continue
