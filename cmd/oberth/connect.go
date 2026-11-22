@@ -19,7 +19,7 @@ import (
 )
 
 func invite(s *flowSession, args []string) error {
-	f := flowFlags("invite", s.app.home())
+	f := flowFlags("invite")
 	rest, err := parseFlow(f, args)
 	identity := flagValue[string](f, "identity")
 	out := flagValue[string](f, "out")
@@ -161,7 +161,7 @@ func renew(s *flowSession, args []string) error {
 	return s.fact("certificate renewed\nnext: oberth system status")
 }
 func addRepository(s *flowSession, args []string) error {
-	f := flowFlags("repo add", s.app.home())
+	f := flowFlags("repo add")
 	rest, err := parseFlow(f, args)
 	known := flagValue[string](f, "known-hosts")
 	if err != nil {
@@ -231,9 +231,10 @@ func (s *flowSession) repositoryBound(upstream, repo string) error {
 	return s.fact("Upstream: %s\nStep accounts and release subjects derive from this name.\nbound: %s\nnext: git push oberth HEAD:refs/heads/<new-branch> -o oberth.run=1", upstream, repo)
 }
 
-// prepareCheckout selects the trusted host keys: an explicit file, else the
-// host keys a joined profile saved from its invitation, else the user's own
-// known_hosts.
+// prepareCheckout selects the Oberth server's SSH host keys: an explicit file,
+// else the keys the selected profile saved, at install for an administrator
+// or from the invitation for a joined uplink. The forge's key is never here:
+// the server pins it.
 func (s *flowSession) prepareCheckout(known string) (client.Profile, string, error) {
 	if err := s.refuseBareCheckout(); err != nil {
 		return client.Profile{}, known, err
@@ -245,12 +246,11 @@ func (s *flowSession) prepareCheckout(known string) (client.Profile, string, err
 		return client.Profile{}, known, err
 	}
 	if known == "" {
-		if profile, _ := s.readProfile(); profile.Uplink {
-			known = profile.KnownHosts
-		}
+		profile, _ := s.readProfile()
+		known = profile.KnownHosts
 	}
 	if known == "" {
-		known = filepath.Join(s.app.home(), ".ssh", "known_hosts")
+		return client.Profile{}, known, flowError("host_unsaved", nil)
 	}
 	connection, _, err := s.checkoutProfile(known)
 	return connection, known, err

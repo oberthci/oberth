@@ -14,7 +14,7 @@ import (
 )
 
 func initialize(s *flowSession, args []string) error {
-	f := flowFlags("init", s.app.home())
+	f := flowFlags("init")
 	rest, err := parseFlow(f, args)
 	force := flagValue[bool](f, "force")
 	release := flagValue[bool](f, "release")
@@ -100,7 +100,7 @@ func validate(s *flowSession, args []string) error {
 }
 
 func check(s *flowSession, args []string) error {
-	f := flowFlags("check", s.app.home())
+	f := flowFlags("check")
 	rest, err := parseFlow(f, args)
 	repo := flagValue[string](f, "repo")
 	local := flagValue[string](f, "local")

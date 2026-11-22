@@ -24,7 +24,7 @@ func checkCheckoutTrust(known string, endpoint *url.URL) error {
 		return err
 	}
 	if err = gitssh.CheckPins(absolute, net.JoinHostPort(endpoint.Hostname(), sshPort(endpoint))); err != nil {
-		problem := publicerr.New(publicerr.InvalidInput, "SSH trust file has no usable endpoint key.", "Pass the SSH trust file printed by install.", err)
+		problem := publicerr.New(publicerr.InvalidInput, "The file has no SSH host key of this Oberth server.", serverTrustRemedy, err)
 		problem.ID = "ssh-trust-endpoint"
 		problem.Context = []string{"File: " + absolute}
 		return problem

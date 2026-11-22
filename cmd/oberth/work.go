@@ -12,7 +12,7 @@ import (
 )
 
 func promote(s *flowSession, args []string) error {
-	f := flowFlags("promote", s.app.home())
+	f := flowFlags("promote")
 	rest, err := parseFlow(f, args)
 	repo := flagValue[string](f, "repo")
 	if err != nil {
@@ -132,7 +132,7 @@ func release(s *flowSession, args []string) error {
 	return s.releaseReceipt(run.ID)
 }
 func logRun(s *flowSession, args []string) error {
-	f := flowFlags("log", s.app.home())
+	f := flowFlags("log")
 	rest, err := parseFlow(f, args)
 	pattern := flagValue[string](f, "pattern")
 	tail := flagValue[bool](f, "tail")

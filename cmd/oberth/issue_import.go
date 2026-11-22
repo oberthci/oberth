@@ -16,7 +16,7 @@ import (
 )
 
 func importIssues(s *flowSession, args []string) (err error) {
-	flags := flowFlags("issue import", s.app.home())
+	flags := flowFlags("issue import")
 	rest, err := parseFlow(flags, args)
 	if err != nil {
 		return err

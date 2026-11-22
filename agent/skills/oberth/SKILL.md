@@ -31,7 +31,7 @@ An invitation scopes access to every repository in one upstream: the first compo
 the full `<upstream>/<organization>/<repository>` name, not the full repository name.
 
 Use `--url` and `--ssh-port` on install only for mapped ports; keep them identical between review and apply.
-A joined profile pins the installation's SSH keys itself; pass `--known-hosts` to repo add only to replace them.
+The selected profile, from install or join, pins the Oberth server's SSH keys; pass `--known-hosts` to repo add only to replace them, never with the forge's keys.
 If `.oberth/` is absent, run `oberth init`, review the YAML and obtain consent for its commit before pushing.
 Show the stdio line from join verbatim to the person: register exactly its absolute executable path in the printed `oberth mcp --profile <uplink-profile>` line.
 The bridge uses that joined uplink or the checkout binding; it refuses administrator profiles.

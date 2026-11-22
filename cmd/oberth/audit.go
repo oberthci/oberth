@@ -8,7 +8,7 @@ import (
 )
 
 func audit(s *flowSession, args []string) error {
-	f := flowFlags("audit", s.app.home())
+	f := flowFlags("audit")
 	rest, err := parseFlow(f, args)
 	if err != nil {
 		return err

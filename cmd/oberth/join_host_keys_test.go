@@ -40,7 +40,7 @@ func TestJoinedFreshHomeAddsItsRepositoryWithTheInvitedHostKeys(t *testing.T) {
 	endpoint := strings.Fields(string(trusted))[0]
 
 	other := w.joinFresh(t, "agent-other-host", func(text string) string { return strings.Replace(text, endpoint, "[127.0.0.2]:22", 1) })
-	if code := other.app.run(t.Context(), []string{"repo", "add", forge}); code != 1 || !strings.Contains(other.diagnostic.String(), "SSH trust file has no usable endpoint key.") {
+	if code := other.app.run(t.Context(), []string{"repo", "add", forge}); code != 1 || !strings.Contains(other.diagnostic.String(), "The file has no SSH host key of this Oberth server.") {
 		t.Fatal("repo add trusted keys for another host", code, other.diagnostic.String())
 	}
 

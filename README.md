@@ -31,13 +31,13 @@ default command below is for a first installation.
    it does not ask for an address. Supply `--ssh-port <port>` too if the default is unreachable.
    Add the printed public deploy key to your forge with write access.
    Copy the saved `backup.agekey` off this machine; keep its contents private.
-   Install saves your administrator profile: local connection details and credentials.
-   Use its printed `SSH trust` file path for `<known-hosts-file>` below.
+   Install saves your administrator profile: local connection details and credentials,
+   including the Oberth server's SSH host keys, which `repo add` uses by itself.
 
-2. Register the repository and bind this checkout:
+2. Register the repository and bind this checkout, with the forge's own SSH URL:
 
    ```sh
-   oberth repo add <forge-url> --known-hosts <known-hosts-file>
+   oberth repo add <forge-url>
    ```
 
    This first attempt stops and prints the forge's offered SSH host fingerprints.
@@ -45,13 +45,12 @@ default command below is for a first installation.
    supplied by its administrator. After verifying it, register and bind the checkout:
 
    ```sh
-   oberth repo add <forge-url> --known-hosts <known-hosts-file> \
-     --expected-host-fingerprint <fingerprint>
+   oberth repo add <forge-url> --expected-host-fingerprint <fingerprint>
    ```
 
    Use `--repin` only after a changed forge key has been independently verified.
    Use the full repository name it prints; its first path component is the upstream name.
-   Your local SSH host-key file is separate; see [installation](docs/install.md) to select it.
+   The forge's key is pinned by the server; it is never read from your own SSH files.
 
 3. Create an [uplink](docs/agents.md) for the approved upstream. Join with its file:
 

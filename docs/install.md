@@ -31,8 +31,8 @@ deploy key and CA pin, which authenticates HTTPS. Check the endpoint with `obert
 Follow [repository registration](../README.md#first-green-build) to add the deploy key and verify
 the forge fingerprint. Use the forge's SSH URL with its own user and full path, for example
 `ssh://<user>@<forge>/<path>/<organization>/<repository>.git`. The server owns the
-forge pin; `--known-hosts <known-hosts-file>` pins its SSH endpoint: use the printed `SSH trust`
-path. Exit 3: the deploy key was rejected; add it, retry. This binds remote `oberth`.
+forge pin; the profile's `SSH trust` file pins the Oberth server's SSH host keys (`--known-hosts`
+replaces it). Exit 3: the deploy key was rejected; add it, retry. This binds remote `oberth`.
 `--upstream <name>` selects a repository identity, keeping its settings; otherwise it reuses a
 matching upstream or derives a name from the host. Use the printed repository path for step accounts
 and release subjects. After joining, see [checkout binding](agents.md#install-invite-and-join).
@@ -250,11 +250,11 @@ and verified retry; a required environment variable adds one flag.
 
 | First green path | Commands | Flags |
 | --- | --- | --- |
-| Terminal, default ports: install with `--context` | 8 | 5 |
-| Unattended, mapped ports: apply only, with `--yes --url --ssh-port` | 8 | 8 |
-| Agent, mapped ports: address and SSH port on both commands | 9 | 12 |
+| Terminal, default ports: install with `--context` | 8 | 3 |
+| Unattended, mapped ports: apply only, with `--yes --url --ssh-port` | 8 | 6 |
+| Agent, mapped ports: address and SSH port on both commands | 9 | 10 |
 
-Omit `--known-hosts` if the default file has the verified SSH key; subtract two flags.
-The forge pin is server-owned. A dry run adds one command and its flags, included in the agent row.
+`repo add` reads the Oberth server's SSH keys from the profile; the forge pin is server-owned.
+A dry run adds one command and its flags, included in the agent row.
 The three release commands assume no refusals; missing grants add approval commands and another
 release attempt. `secret put` takes three flags.

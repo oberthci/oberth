@@ -25,7 +25,7 @@ func commandCatalogue() map[string]commandSyntax {
 		}
 	}
 	for _, flow := range flowCommands() {
-		rows[flow.name] = commandSyntax{Args: [2]int{flow.minArgs, flow.maxArgs}, Flags: transportSyntax(flagSyntax(flowFlags(flow.name, ""))), Summary: flow.summary}
+		rows[flow.name] = commandSyntax{Args: [2]int{flow.minArgs, flow.maxArgs}, Flags: transportSyntax(flagSyntax(flowFlags(flow.name))), Summary: flow.summary}
 	}
 	for _, row := range installationCommands() {
 		rows[row.name] = commandSyntax{Args: [2]int{row.minArgs, row.maxArgs}, Flags: helpSyntax(flagSyntax(installationFlags(row.name))), Summary: row.summary}

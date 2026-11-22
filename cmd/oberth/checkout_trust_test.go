@@ -65,7 +65,7 @@ func assertTrustRefusalUnchanged(t *testing.T, command repoAddCommand, b apicont
 	t.Helper()
 
 	text := command.diagnostic.String()
-	if !strings.Contains(text, "Pass the SSH trust file printed by install.") || !strings.Contains(text, filepath.Join(command.app.base, "install", "known_hosts")) {
+	if !strings.Contains(text, serverTrustRemedy) || !strings.Contains(text, filepath.Join(command.app.base, "install", "known_hosts")) {
 		t.Fatal(text)
 	}
 	after, err := os.ReadFile(filepath.Join(command.app.directory, ".git", "config"))

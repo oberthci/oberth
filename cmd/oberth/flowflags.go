@@ -1,12 +1,9 @@
 package main
 
-import (
-	"flag"
-	"path/filepath"
-)
+import "flag"
 
 // flowFlags supplies the same native flag definitions to parsing and help.
-func flowFlags(name, home string) *flag.FlagSet {
+func flowFlags(name string) *flag.FlagSet {
 	if name == "access allow" {
 		return grantFlags()
 	}
@@ -21,9 +18,9 @@ func flowFlags(name, home string) *flag.FlagSet {
 		f.String("expires", "24h", "Invitation lifetime.")
 	case "repo add":
 		f.String("upstream", "", "Name of an existing or new upstream.")
-		f.String("expected-host-fingerprint", "", "Forge host fingerprint verified by the administrator.")
+		f.String("expected-host-fingerprint", "", "The forge's SSH host-key fingerprint, verified by the administrator.")
 		f.Bool("repin", false, "Replace a changed forge host key after verification.")
-		f.String("known-hosts", "", "Trusted host keys; default: a joined profile's saved keys, else "+filepath.Join(home, ".ssh", "known_hosts")+".")
+		f.String("known-hosts", "", "Oberth server's SSH host keys, not the forge's; default: the selected profile's saved keys.")
 	case "init":
 		f.Bool("force", false, "Replace only the selected pipeline.")
 		f.Bool("release", false, "Write the release pipeline.")

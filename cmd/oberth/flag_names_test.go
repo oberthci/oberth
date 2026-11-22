@@ -59,7 +59,7 @@ func readFlowCommand(rest []string) (map[string]string, bool, error) {
 	}
 	for _, flow := range flowCommands() {
 		if named(flow.name) {
-			f := flowFlags(flow.name, "")
+			f := flowFlags(flow.name)
 			args, err := parseFlow(f, rest[len(strings.Fields(flow.name)):])
 			return flowFields(f, args), true, err
 		}

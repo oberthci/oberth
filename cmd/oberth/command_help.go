@@ -19,7 +19,7 @@ func (a application) bespokeHelp(words []string) (int, bool) {
 			if row, _, ok := findCommand(commands(), words); ok && len(strings.Fields(row.path)) > len(strings.Fields(flow.name)) {
 				continue
 			}
-			return a.nativeHelp(nativeHelpRequest{flow.usage, flow.summary, flowFlags(flow.name, a.home()), true}), true
+			return a.nativeHelp(nativeHelpRequest{flow.usage, flow.summary, flowFlags(flow.name), true}), true
 		}
 	}
 	for _, row := range installationCommands() {

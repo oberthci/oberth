@@ -184,6 +184,11 @@ func flowError(key string, cause error) *publicerr.Error {
 	m := flowMessages()[key]
 	return publicerr.New(publicerr.Unavailable, m[0], m[1], cause)
 }
+
+// serverTrustRemedy names the flag and the file that holds the Oberth server's
+// SSH host keys, which is not the forge's.
+const serverTrustRemedy = "Pass --known-hosts with the SSH trust file that install or join printed."
+
 func flowMessages() map[string][2]string {
 	return map[string][2]string{
 		"invitation_file":    {"Invitation file is not valid JSON.", "Ask the administrator for a new invitation file."},
@@ -193,11 +198,12 @@ func flowMessages() map[string][2]string {
 		"promotion_ci":       {"The promoted commit's CI run did not pass.", "Read the printed run's logs before promoting or releasing again."},
 		"tag_name":           {"The release tag name is invalid.", "Choose a valid Git tag name, then rerun oberth release."},
 		"repository_missing": {"The bound repository is not registered.", "Run oberth repo add from this checkout."},
-		"host_missing":       {"The SSH host-key file was not found.", "Create or select the named trusted host-key file."},
-		"host_link":          {"The SSH host-key file is a symbolic link.", "Select the named regular trusted host-key file directly."},
-		"host_kind":          {"The SSH host-key path is not a regular file.", "Select a regular trusted host-key file."},
-		"host_mode":          {"The SSH host-key file allows other users to write.", "Remove group and other write permission from the named trusted file."},
-		"host_read":          {"Cannot read the SSH host-key file.", "Check the named file's owner and read permission."},
+		"host_unsaved":       {"This profile saved no Oberth server SSH host keys.", serverTrustRemedy},
+		"host_missing":       {"The Oberth server's SSH host-key file was not found.", serverTrustRemedy},
+		"host_link":          {"The Oberth server's SSH host-key file is a symbolic link.", "Select the named regular trusted host-key file directly."},
+		"host_kind":          {"The Oberth server's SSH host-key path is not a regular file.", "Select a regular trusted host-key file."},
+		"host_mode":          {"The Oberth server's SSH host-key file allows other users to write.", "Remove group and other write permission from the named trusted file."},
+		"host_read":          {"Cannot read the Oberth server's SSH host-key file.", "Check the named file's owner and read permission."},
 		"agent":              {"Cannot resolve the running Oberth executable.", "Reinstall Oberth at an absolute executable path, then run oberth mcp."},
 		"repo_executable":    {"Cannot bind this checkout with the running Oberth executable.", "Use the installed oberth command, or reinstall Oberth, then run oberth repo add."},
 		"client_shim":        {"Cannot update the profile's Git helper.", "Remove the named helper, then run oberth repo add from this checkout."},
