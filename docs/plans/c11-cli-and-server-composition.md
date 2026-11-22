@@ -179,7 +179,7 @@ overwrite existing evidence. Daemon startup performs no old-layout migration. Cu
 Composition order is: resolve configuration and identity; inspect/open state checked for
 schema and local audit integrity; construct adapters and required mutation gates;
 construct one shared Workflow/Pod watch; synchronize it; recover owners and accepted
-receives with their audit records; activate actions and schedule reconciliation. Wire
+receives with their audit records; activate actions; after readiness, run the startup schedule reconciliation in the background (`oberth_schedules_synced` reports its end). Wire
 on-demand declarations, grant publication, source recovery and transactional
 events to their component owners. No missing security dependency silently disables a gate.
 

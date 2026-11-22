@@ -52,7 +52,7 @@ Catalogue, pause and authority publication implementations remain injected.
 
 1. After the server reports ready, startup syncs all in the background, each repository within its own 30-second attempt; Argo fires during
    server downtime. Errors are shown and retried on the next relevant event,
-   admin repair or startup, and never delay or fail the start. One lock serializes control-plane work, not runs.
+   admin repair or startup, and never delay or fail the start. One lock serializes control-plane work, not runs. The startup pass takes it for one repository at a time, so notices and grants are served between repositories; resumes are refused from construction until it has gone over every repository, and a pass that reaches no repository stops the server so its restart retries.
 2. **Delta:** Author refusals suspend an existing owned parent without replacing its spec;
    suspension must succeed before refusal converges. Git/admission/store/native
    outages and cancellation leave its last admitted spec and pause flag unchanged.
