@@ -43,21 +43,21 @@ system trust and settings do not change.
 
 ### Run box
 
-**Delta:** The optional box shows up to three recent runs while a listed or watched
-run is active, with watched runs taking priority. It shows whole repository/ref
-names, authoritative plan counts and failed step names; finished watches produce
-one completion notice. `/oberth-runs` and `/oberth-watch` and their host tools read
-only public `run list --json` and `run get --json`, through the configured absolute
-verified executable, never a checkout executable or a PATH lookup. The plugin
-reads with the agent's joined uplink profile, selected by its option or
-`OBERTH_PROFILE`; without one it explains setup once and stays hidden. It reads
-no credential paths, server state or cluster API.
+**Delta:** The optional box shows up to `runs` recent runs (three when unset or blank,
+none at 0) while a listed or watched run is active, with watched runs taking priority.
+It shows whole repository/ref names, authoritative plan counts and failed step names;
+finished watches produce one completion notice. The box, `/oberth-runs` and `/oberth-watch`
+read only public `run list --json` and `run get --json`, through the absolute verified
+executable (its option, by default the fetcher's install in the user bin directory),
+never a checkout executable or a PATH lookup. The plugin reads with the agent's joined
+uplink profile, selected by its option, `OBERTH_PROFILE` or the checkout's joined uplink
+binding; without one it explains setup once and stays hidden. It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.
 
-One timer polls every 15 seconds for active/watched work and every 60 seconds
-while idle, so terminal pushes are still discovered. Refreshes coalesce and each
-CLI call is bounded. Session start does not await the first refresh. Missing
-configuration is explained once per installation; unreachable or malformed
-responses hide stale rows quietly. Session exit cancels the timer.
+One timer refreshes every 15 seconds, active or idle, so short runs and terminal pushes
+are still seen. Refreshes coalesce and each CLI call is bounded. Session start does not
+await the first refresh. Missing configuration is explained once per installation;
+unreachable or malformed responses hide stale rows quietly. Session exit cancels the
+timer.
 
 Plugin packaging follows C13's [guard naming policy](c13-own-pipelines.md#check-tooling).
 The connection skill stays shared and host-neutral.
@@ -95,8 +95,9 @@ A lost mutation reply requires reading durable state before another action.
 
 C12 has no server imports. [dependencies.json](dependencies.json) grants only
 its test permissions. The instruction file and POSIX script call the public CLI,
-Git and signature/digest tools. Optional host hooks use the same public CLI JSON
-and the host's state, clock and rendering APIs. They read no server database,
+Git and signature/digest tools. Optional host hooks use the same public CLI JSON,
+the checkout's joined uplink key in its Git configuration, and the host's state,
+clock and rendering APIs. They read no server database,
 credential files or Pod environment.
 
 ## Invariants and budgets
