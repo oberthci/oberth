@@ -127,7 +127,7 @@ func diagnostics() []diagnostic {
 		{publicerr.InvalidInput, "The complete issue exceeds the response budget.", "Read issue_list metadata and request fewer complete issues."},
 		{publicerr.Conflict, "backup already running", "Wait for the current backup stream to close."},
 		{publicerr.Forbidden, "The invitation could not be redeemed.", "Ask the administrator for a new invitation."},
-		{publicerr.InvalidTransition, "CI issues close when a later run passes.", "Pass a later default-branch run, or ask an administrator to close it."},
+		{publicerr.InvalidTransition, "CI issues close when a later run passes.", "Pass a later scheduled or default-branch run, or ask an administrator to close it."},
 		{publicerr.NotFound, "The requested issue was not found.", "Select a visible issue."},
 		{publicerr.NotFound, "Run not found.", "List runs with oberth run list and select a visible run."},
 		{publicerr.Forbidden, "The invitation address has changed.", "Ask the administrator to run oberth invite for a new invitation."},

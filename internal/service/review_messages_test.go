@@ -54,7 +54,7 @@ func TestRefusalRemediesNameInvitationAndIssue(t *testing.T) {
 	}
 	call, e := f.s.PrepareIssueClose(t.Context(), workerCaller(), apicontract.IssueCloseArgs{ID: issues[0].ID})
 	_, e = execute(t.Context(), call, e)
-	if !strings.Contains(publicerr.Classify(e).Error(), "ask an administrator to close it") {
+	if !strings.Contains(publicerr.Classify(e).Error(), "Pass a later scheduled or default-branch run, or ask an administrator to close it.") {
 		t.Fatal("CI issue remedy", e)
 	}
 }
