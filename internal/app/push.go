@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/admissioncontract"
+	"github.com/oberthci/oberth/internal/gitport"
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/stateport"
@@ -48,6 +49,9 @@ func (s *Submitter) Gate(ctx context.Context, r Receive) (PushResult, error) {
 	ctx, cancel := s.d.Deadline(ctx, 30*time.Second)
 	defer cancel()
 	a, err := s.preparePush(ctx, r, false)
+	if err == nil {
+		err = deliverReleaseTags(ctx, r.Forge, a.tags)
+	}
 	if ctx.Err() != nil {
 		return PushResult{}, &PushRefusal{Problems: []*Refusal{refusal("timeout", nil)}}
 	}
@@ -109,6 +113,26 @@ func (s *Submitter) preparePush(ctx context.Context, r Receive, replay bool) (ac
 		return a, problems
 	}
 	return a, nil
+}
+// deliverReleaseTags puts every admitted release tag on the forge before any
+// ref moves, so no release run exists for a tag the forge lacks. A failed
+// delivery refuses the whole push; a delivered tag stays, and its version is
+// then used even if the run fails.
+func deliverReleaseTags(ctx context.Context, forge TagForge, tags []gitport.Ref) error {
+	for _, tag := range tags {
+		if forge == nil {
+			return undeliveredTag(tag, nil)
+		}
+		if err := forge.DeliverTag(ctx, tag); err != nil {
+			return undeliveredTag(tag, err)
+		}
+	}
+	return nil
+}
+func undeliveredTag(tag gitport.Ref, cause error) error {
+	e := refusal("tag_delivery", cause)
+	e.Ref = tag.Name
+	return &PushRefusal{Problems: []*Refusal{e}}
 }
 func (a *acceptance) skip(d service.Decision) {
 	if d.Deletion != nil {
@@ -286,6 +310,10 @@ func (s *Submitter) feedback(runs []stateport.Run) PushResult {
 
 func (a *acceptance) acceptRun(run stateport.Acceptance, out Outcome, publicURL string) {
 	a.Runs = append(a.Runs, run)
+	if run.Release {
+		v := run.Prepared.View()
+		a.tags = append(a.tags, gitport.Ref{Name: v.Ref, ObjectSHA: v.ObjectSHA, CommitSHA: v.CommitSHA})
+	}
 	a.Result.assistNotUsed = append(a.Result.assistNotUsed, assistRefusals(assistEnabled && run.Request.Assist, run.Prepared.View().Plan)...)
 	out.RunID, out.State = run.Prepared.View().RunID, "accepted"
 	out.WatchURL = strings.TrimRight(publicURL, "/") + "/runs/" + out.RunID

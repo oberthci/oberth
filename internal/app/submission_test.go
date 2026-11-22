@@ -128,6 +128,7 @@ func checkReleaseServiceSelection(t *testing.T, file string, release bool) {
 	r.Updates[0].Request.Ref.Name = "refs/tags/v1.2.3"
 	r.Updates[0].Request.Trigger = model.TriggerTag
 	r.Updates[0].Request.Release = !release
+	r.Forge = &tagForge{f: f, receive: r.ID}
 	s := f.new(t)
 	if _, err := s.Gate(t.Context(), r); err != nil {
 		t.Fatal(err)

@@ -151,6 +151,7 @@ func (o *serverOwners) gate(ctx context.Context, e gitcache.ReceiveEvent, s *git
 	if err != nil {
 		return err
 	}
+	r.Forge = s
 	_, err = o.wiring.Gate(ctx, r)
 	return err
 }

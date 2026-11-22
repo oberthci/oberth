@@ -87,10 +87,21 @@ type Receive struct {
 	ID      string
 	Updates []RefUpdate
 	Source  Source
+	// Forge delivers this push's admitted release tags; the gate refuses a
+	// release without it.
+	Forge TagForge
+}
+
+// TagForge puts one admitted release tag, exactly as pushed, on the forge.
+// An identical tag there counts as delivered; any other refuses.
+type TagForge interface {
+	DeliverTag(context.Context, gitport.Ref) error
 }
 type acceptance struct {
 	stateport.BatchAcceptance
 	Result PushResult
+	// tags are the admitted release tags the gate delivers before passing.
+	tags []gitport.Ref
 }
 
 // Service decides before admission and records sealed batches without revalidation.

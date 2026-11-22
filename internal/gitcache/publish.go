@@ -88,15 +88,9 @@ func validatePublishedCommit(r model.Publication) error {
 	return nil
 }
 func (c *Cache) publishIntent(ctx context.Context, p string, remote Remote, r model.Publication) error {
-	head, err := c.remoteRef(ctx, p, remote, r.Ref)
-	if err != nil && !isAbsent(err) {
+	held, err := c.forgeHolds(ctx, p, remote, r)
+	if err != nil || held {
 		return err
-	}
-	if head.ObjectSHA == r.ObjectSHA {
-		return nil
-	}
-	if strings.HasPrefix(r.Ref, "refs/tags/") && head.ObjectSHA != "" {
-		return &gitport.AlreadyExistsError{Repository: r.Repo, Ref: r.Ref, ObjectSHA: head.ObjectSHA}
 	}
 	if err = c.lock(ctx, p); err != nil {
 		return err
@@ -106,6 +100,28 @@ func (c *Cache) publishIntent(ctx context.Context, p string, remote Remote, r mo
 	if err != nil {
 		return err
 	}
+	return c.pushIntent(ctx, p, remote, r)
+}
+
+// forgeHolds reports whether the forge already has the intended object at the
+// ref. A tag there at any other object is never moved.
+func (c *Cache) forgeHolds(ctx context.Context, p string, remote Remote, r model.Publication) (bool, error) {
+	head, err := c.remoteRef(ctx, p, remote, r.Ref)
+	if err != nil && !isAbsent(err) {
+		return false, err
+	}
+	if head.ObjectSHA == r.ObjectSHA {
+		return true, nil
+	}
+	if strings.HasPrefix(r.Ref, "refs/tags/") && head.ObjectSHA != "" {
+		return false, &gitport.AlreadyExistsError{Repository: r.Repo, Ref: r.Ref, ObjectSHA: head.ObjectSHA}
+	}
+	return false, nil
+}
+
+// pushIntent pushes the exact object fenced on its predecessor, then reads the
+// forge back; an empty predecessor means the ref must not exist yet.
+func (c *Cache) pushIntent(ctx context.Context, p string, remote Remote, r model.Publication) error {
 	args := []string{"push", "--progress", "--porcelain", "--force-with-lease=" + r.Ref + ":" + *r.PreviousSHA,
 		"--", remote.URL, r.ObjectSHA + ":" + r.Ref}
 	output, pushErr := c.capture(ctx, command{dir: p, args: args, remote: &remote}, 2<<20)
