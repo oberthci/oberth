@@ -48,11 +48,17 @@ func (c *Cache) lateForge(p, repo string, err error) error {
 	if !forgeSlow(err) {
 		return forgeRefusal(reasonForgeRefused, remedyForgeRefused, repo, err)
 	}
-	last := c.lastRefresh(p)
-	if last.IsZero() || c.config.Now().Sub(last) > cacheTrustWindow {
+	if !c.trustedCache(p) {
 		return forgeRefusal(reasonForgeSilent, remedyForgeSilent, repo, err)
 	}
 	return nil
+}
+
+// trustedCache reports whether the cache at p was refreshed from its forge
+// within cacheTrustWindow, so its default head may decide without the forge.
+func (c *Cache) trustedCache(p string) bool {
+	last := c.lastRefresh(p)
+	return !last.IsZero() && c.config.Now().Sub(last) <= cacheTrustWindow
 }
 
 // forgeRefusal refuses a head read naming repo's forge. A forge that answered

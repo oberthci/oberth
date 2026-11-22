@@ -58,31 +58,32 @@ func (c *Cache) defaultAncestor(ctx context.Context, at sourcecontract.Revision)
 
 // ownPin decides a pin of the pushed repository's own commit during its own
 // admission from the receive and the cache, never the forge: the commit is
-// reachable from the default head the cache holds or from the commit this
-// receive moves the default branch to.
+// reachable from the commit this receive moves the default branch to, or from
+// the default head the cache holds while the cache was refreshed from the
+// forge within cacheTrustWindow (each push refreshes its repository first);
+// with an older cache, during an outage of its forge, it is refused naming
+// that forge. A commit that reached the forge outside Oberth since the last
+// refresh is not reachable yet: that pin is refused until the cache sees it.
 func (c *Cache) ownPin(ctx context.Context, at sourcecontract.Revision, updates []RefUpdate) (int64, bool, error) {
 	r, p, err := c.pinProducer(ctx, at)
 	if err != nil || r.RepositoryID == 0 {
 		return 0, false, err
 	}
-	var heads []string
-	held, err := c.trackedHead(ctx, p, r.DefaultBranch)
-	if err == nil {
-		heads = append(heads, held.CommitSHA)
-	} else if !isAbsent(err) {
-		return r.RepositoryID, false, err
-	}
 	for _, u := range updates {
-		if u.Ref == r.DefaultBranch && u.NewSHA != "" {
-			heads = append(heads, u.NewSHA)
+		if u.Ref != r.DefaultBranch || u.NewSHA == "" {
+			continue
 		}
-	}
-	for _, head := range heads {
-		if reachable, err := c.reaches(ctx, p, at.Commit, head); err != nil || reachable {
+		if reachable, err := c.reaches(ctx, p, at.Commit, u.NewSHA); err != nil || reachable {
 			return r.RepositoryID, reachable, err
 		}
 	}
-	return r.RepositoryID, false, nil
+	if _, reachable := c.heldAncestor(ctx, p, r.DefaultBranch, at.Commit); !reachable {
+		return r.RepositoryID, false, nil
+	}
+	if !c.trustedCache(p) {
+		return r.RepositoryID, false, forgeRefusal(reasonForgeSilent, remedyForgeSilent, at.Repository, nil)
+	}
+	return r.RepositoryID, true, nil
 }
 
 func (c *Cache) pinProducer(ctx context.Context, at sourcecontract.Revision) (Remote, string, error) {
