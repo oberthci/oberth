@@ -51,8 +51,11 @@ func (c *Cache) run(ctx context.Context, s command) error {
 	defer cancel(nil)
 	progress := s.progress
 	if progress == nil {
+		// A transfer, and any command that waits on a forge, ends once
+		// nothing has moved for the idle budget: a forge session that stalls
+		// never holds its caller or its job for the whole total budget.
 		idle := time.Duration(0)
-		if transferCommand(s.args) {
+		if transferCommand(s.args) || s.remote != nil {
 			idle = c.budgets.idle
 		}
 		progress = watchProgress(cancel, idle)
