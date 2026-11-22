@@ -9,6 +9,10 @@ func SetBackgroundBound(c *Cache, d time.Duration) { c.budgets.background = d }
 // for one cache.
 func SetRefreshWait(c *Cache, d time.Duration) { c.budgets.refreshWait = d }
 
+// SetHeadWait replaces headDeadline, a pin's wait for the forge's default
+// head, for one cache.
+func SetHeadWait(c *Cache, d time.Duration) { c.budgets.headWait = d }
+
 // WaitBackground waits for running first clones and refresh fetches,
 // including what each does after it ends, without ending the cache's
 // lifetime.

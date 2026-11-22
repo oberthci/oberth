@@ -63,11 +63,8 @@ func (c *Cache) refreshQuietly(ctx context.Context, repo string, force bool) ([]
 	key := p + "/fetch"
 	fetch := c.startFetch(repo, p, force) //nolint:contextcheck // The cache lifetime owns the fetch, not the caller who waits for it.
 	result, ended := c.awaitTransfer(wait, key, fetch)
-	switch {
-	case !ended && fetch.sending.Load():
-		return nil, &gitport.FetchUnfinishedError{Cause: context.Cause(wait)}
-	case !ended:
-		return nil, unavailable("forge", context.Cause(wait))
+	if !ended {
+		return nil, unanswered(wait, fetch)
 	}
 	var refusal *RefusalError
 	if !force && errors.As(result.err, &refusal) && refusal.Field == "pending receive" {

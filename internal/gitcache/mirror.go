@@ -98,7 +98,7 @@ func (c *Cache) mirrorGeneration(ctx context.Context, p string, change mirrorCha
 		if old == next {
 			continue
 		}
-		tracking := "refs/oberth/upstream/" + strings.TrimPrefix(name, "refs/")
+		tracking := trackingName(name)
 		native = append(native, RefUpdate{Ref: tracking, OldSHA: old, NewSHA: next})
 		if public[name] != old {
 			continue

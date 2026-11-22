@@ -364,13 +364,13 @@ func TestFetchOfAMovedUpstreamImportsNothing(t *testing.T) {
 	}
 }
 
-// A fetch started inside a push (a pin of the pushed repository's own older
-// commit) runs on the store, never in the push's quarantine: it outlives the
+// A fetch started inside a push (a read of the pushed repository's default
+// head) runs on the store, never in the push's quarantine: it outlives the
 // push, whose quarantine is gone by then, and still lands.
 func TestFetchStartedInAPushOutlivesItsQuarantine(t *testing.T) {
 	x := newFetchFixture(t, transferring)
 	x.cfg.PreReceive = func(ctx context.Context, e gitcache.ReceiveEvent, s *gitcache.ReceiveSource) error {
-		_, _, err := s.Pin(ctx, sourcecontract.Revision{Repository: e.Repository, Commit: x.f.Commit})
+		_, err := s.Checkout(ctx, e.Repository, sourcecontract.Ref{})
 		return err
 	}
 	c := x.start(t)

@@ -89,7 +89,7 @@ func (c *Cache) RemoteRef(ctx context.Context, repo, ref string) (gitport.Ref, e
 	if err != nil {
 		return head, err
 	}
-	if err = c.fetchObject(ctx, p, r, head.ObjectSHA); err != nil {
+	if err = c.fetchObject(ctx, p, r, fetchedObject{oid: head.ObjectSHA}); err != nil {
 		return head, err
 	}
 	return c.peelRemote(ctx, p, head)
@@ -243,7 +243,14 @@ func (c *Cache) changed(ctx context.Context, repo string, updates []RefUpdate) {
 	}
 }
 
-func (c *Cache) fetchObject(ctx context.Context, p string, r Remote, oid string) error {
+// fetchedObject is one object a fetch brings, and the flag its forge command
+// raises once the forge is sending (nil when no caller reads it).
+type fetchedObject struct {
+	oid     string
+	sending *atomic.Bool
+}
+
+func (c *Cache) fetchObject(ctx context.Context, p string, r Remote, o fetchedObject) error {
 	return c.run(
 		ctx,
 		command{
@@ -256,9 +263,10 @@ func (c *Cache) fetchObject(ctx context.Context, p string, r Remote, oid string)
 				"--no-write-fetch-head",
 				"--",
 				r.URL,
-				oid,
+				o.oid,
 			},
-			remote: &r,
+			remote:  &r,
+			sending: o.sending,
 		},
 	)
 }

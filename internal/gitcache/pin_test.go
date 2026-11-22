@@ -92,9 +92,11 @@ func TestReceivePinReadsQuarantineWithoutImportAndExpiresForOtherProducers(t *te
 	f.Write(t, "file.txt", []byte("pushed producer"))
 	next = f.CommitFile(t, "producer")
 	f.Git(t, f.Work, "push", f.Bare, "main")
-	updates := []gitcache.RefUpdate{{Ref: "refs/heads/feature", NewSHA: next}}
+	// The push moves the default branch: a pin of the pushed repository's own
+	// commit reads that head from the receive and its object from quarantine.
+	updates := []gitcache.RefUpdate{{Ref: "refs/heads/main", OldSHA: f.Commit, NewSHA: next}}
 	r := gateReceive(f)
-	r.AlwaysRun = true
+	r.AlwaysRun, r.AllowDefault = true, true
 	r.Input = receiveBatchInput(t, f, updates, nil)
 	r.Deliver = func(context.Context, gitcache.ReceiveEvent) ([]string, error) { return nil, nil }
 	if err := c.Receive(t.Context(), r); err != nil {

@@ -5,6 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/oberthci/oberth/internal/gitport"
 )
 
 // backgroundBound is how long a forge transfer that outlives its callers (a
@@ -14,9 +16,11 @@ import (
 // a transfer whose data stops moving.
 const backgroundBound = 30 * time.Minute
 
-// outcome is a transfer's result: the public refs it moved and its error.
+// outcome is a transfer's result: the public refs it moved, the forge head it
+// read, and its error.
 type outcome struct {
 	updates []RefUpdate
+	head    gitport.Ref
 	err     error
 }
 

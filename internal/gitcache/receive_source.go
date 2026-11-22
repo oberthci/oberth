@@ -76,11 +76,10 @@ func (s *ReceiveSource) scope(ctx context.Context) (context.Context, context.Can
 func (s *ReceiveSource) Pin(ctx context.Context, at sourcecontract.Revision) (int64, bool, error) {
 	ctx, cancel := s.scope(ctx)
 	defer cancel()
-	cache := s.base
 	if at.Repository == s.event.Repository {
-		cache = s.pushed
+		return s.pushed.ownPin(ctx, at, s.event.Updates)
 	}
-	return cache.Pin(ctx, at)
+	return s.base.Pin(ctx, at)
 }
 func (s *ReceiveSource) ReadFile(ctx context.Context, at gitport.Revision, path string) (gitport.File, error) {
 	ctx, cancel := s.scope(ctx)
