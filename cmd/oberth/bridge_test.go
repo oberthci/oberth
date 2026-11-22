@@ -21,12 +21,17 @@ import (
 func TestBridgeDisplayBlock(t *testing.T) {
 	reason := strings.Repeat("r", 40)
 	run := map[string]any{"id": "run1", "repo": "org/app", "ref": "refs/heads/topic", "status": "failed", "display_reason": reason, "detail": "native diagnostic", "steps": []any{map[string]any{"name": "test", "status": "failed", "display_reason": "test failed", "detail": "native step detail"}}, "failure": map[string]any{"failed_step": "test", "retry_hint": map[string]any{"action": "none", "reason_code": "author"}}}
-	for _, tool := range []string{"run_get", "run_wait", "status", "wait", "events_wait"} {
+	for _, tool := range []string{"run_get", "run_wait", "wait"} {
 		t.Run(tool, func(t *testing.T) { assertToolDisplay(t, tool, run) })
 	}
 	t.Run("run_list", func(t *testing.T) { assertListDisplay(t, run) })
-	if _, ok := Display("repo_list", []byte(`{}`)); ok {
-		t.Fatal("unrelated display appended")
+	// Status and event pages keep their JSON alone: a block would flatten the same facts.
+	status, _ := json.Marshal(run)
+	events, _ := json.Marshal(map[string]any{"events": []any{run}, "next_after_id": 1, "timed_out": false})
+	for tool, data := range map[string][]byte{"repo_list": []byte(`{}`), "status": status, "events_wait": events} {
+		if _, ok := Display(tool, data); ok {
+			t.Fatal("display appended to", tool)
+		}
 	}
 	if text, ok := Display("run_wait", []byte(`{"run":null,"timed_out":false}`)); !ok || !strings.Contains(text, "No run matched.") {
 		t.Fatal("empty wait lost its display block")
@@ -39,8 +44,6 @@ func assertToolDisplay(t *testing.T, tool string, run map[string]any) {
 	switch tool {
 	case "run_wait", "wait":
 		value = map[string]any{"run": run, "timed_out": false}
-	case "events_wait":
-		value = map[string]any{"events": []any{run}, "next_after_id": 1, "timed_out": false}
 	}
 	data, _ := json.Marshal(value)
 	text, ok := Display(tool, data)
