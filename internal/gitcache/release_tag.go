@@ -80,9 +80,9 @@ func (c *Cache) releaseTagObject(ctx context.Context, p string, r model.Publicat
 	if err != nil {
 		return &RefusalError{reason: reasonTagTarget, remedy: remedyTagTarget, Detail: err.Error()}
 	}
-	header, _, _ := strings.Cut(string(data), "\n\n")
-	lines := strings.Split(header, "\n")
-	if !slices.Contains(lines, "object "+*r.CommitSHA) || !slices.Contains(lines, "type commit") {
+	// Git reads a tag's target from its first two header lines and ignores later ones.
+	lines := strings.SplitN(string(data), "\n", 3)
+	if len(lines) < 3 || lines[0] != "object "+*r.CommitSHA || lines[1] != "type commit" {
 		return &RefusalError{reason: reasonTagTarget, remedy: remedyTagTarget}
 	}
 	return nil
