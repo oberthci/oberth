@@ -39,10 +39,12 @@ func trustCases() []trustCase {
 		{name: "stale cache, no server answered", diagnostic: gitssh.ReasonUnanswered, age: staleAge, refusal: gitcache.ReasonForgeSilent},
 		{name: "fresh cache, server went away", diagnostic: gitssh.ReasonLost},
 		{name: "fresh cache, transport unavailable", diagnostic: gitssh.ReasonTransport},
-		{name: "fresh cache, ended before Git began", diagnostic: gitssh.ReasonEnded, refusal: gitcache.ReasonForgeRefused},
+		{name: "fresh cache, ended before Git began", diagnostic: gitssh.ReasonEnded, refusal: gitcache.ReasonForgeFailed},
 		{name: "fresh cache, command refused", diagnostic: gitssh.ReasonRefused, refusal: gitcache.ReasonForgeRefused},
-		{name: "fresh cache, unknown line", diagnostic: "fatal: unexpected answer from the remote", refusal: gitcache.ReasonForgeRefused},
-		{name: "fresh cache, identity refused", diagnostic: "Git SSH identity was refused.", refusal: gitcache.ReasonForgeRefused},
+		{name: "fresh cache, unknown line", diagnostic: "fatal: unexpected answer from the remote", refusal: gitcache.ReasonForgeFailed},
+		{name: "fresh cache, local fault", diagnostic: "fatal: index-pack failed", refusal: gitcache.ReasonForgeFailed},
+		{name: "fresh cache, no usable pin", diagnostic: gitssh.ReasonNoPin, refusal: gitcache.ReasonForgeRefused},
+		{name: "fresh cache, identity refused", diagnostic: gitssh.ReasonIdentityRefused, refusal: gitcache.ReasonForgeRefused},
 		{name: "fresh cache, host key mismatch", diagnostic: gitssh.HostKeyMismatchReason, refusal: gitcache.ReasonForgeRefused},
 		{name: "fresh cache, silent forge, commit the cached head does not reach", side: true, refusal: gitcache.ReasonForgeSilent},
 	}
@@ -121,6 +123,7 @@ func TestForgeRefusalMessagesFitTheirBounds(t *testing.T) {
 	for _, m := range [][2]string{
 		{gitcache.ReasonForgeSilent, gitcache.RemedyForgeSilent},
 		{gitcache.ReasonForgeRefused, gitport.ForgeOperatorRemedy},
+		{gitcache.ReasonForgeFailed, gitcache.RemedyForgeFailed},
 	} {
 		if publicerr.CheckMessage(m[0], 40) != nil || publicerr.CheckMessage(m[1], 120) != nil {
 			t.Fatal("message over its bound", m)

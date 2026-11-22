@@ -15,10 +15,28 @@ const (
 	ReasonRefused    = "The Git server refused the Git command."
 )
 
+// The refusal reasons say that the server or the pins refused this
+// connection: a refused host key or identity, no usable pin, or a refused
+// Git command.
+const (
+	ReasonIdentityRefused = "Git SSH identity was refused."
+	ReasonNoPin           = "No usable Git host key pin."
+)
+
 // TransportFailure reports whether native Git diagnostics carry a transport
 // reason this command printed.
 func TransportFailure(diagnostics string) bool {
-	for _, reason := range []string{ReasonUnanswered, ReasonLost, ReasonTransport} {
+	return carries(diagnostics, ReasonUnanswered, ReasonLost, ReasonTransport)
+}
+
+// RefusalFailure reports whether native Git diagnostics carry a refusal
+// reason this command printed.
+func RefusalFailure(diagnostics string) bool {
+	return carries(diagnostics, HostKeyMismatchReason, ReasonIdentityRefused, ReasonNoPin, ReasonRefused)
+}
+
+func carries(diagnostics string, reasons ...string) bool {
+	for _, reason := range reasons {
 		if strings.Contains(diagnostics, reason) {
 			return true
 		}

@@ -33,6 +33,8 @@ const (
 	reasonForgeSilent      = "forge did not answer in time"
 	remedyForgeSilent      = "Retry in a minute; the cached head cannot decide this without the forge."
 	reasonForgeRefused     = "forge refused the head read"
+	reasonForgeFailed      = "forge head read failed"
+	remedyForgeFailed      = "Retry; if it repeats, the server log names the Git command that failed."
 	reasonOptionCount      = "push has more than two options"
 	reasonTagMoved         = "tag moved since admission"
 	reasonTagTarget        = "release tag must point at its commit"

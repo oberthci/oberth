@@ -95,7 +95,7 @@ func TestForgeFailureLogNamesTheRepository(t *testing.T) {
 		t.Fatal("the cache was not served during the outage", err)
 	}
 	prefix := gitport.ForgeStatusReason + ": " + gittest.Repository + ": " + gitport.ForgeOperatorRemedy
-	if !logs.has(prefix + " ") || !logs.has(prefix+" "+gitport.ForgeCacheNotice) {
+	if !logs.has(prefix+" ") || !logs.has(prefix+" "+gitport.ForgeCacheNotice) {
 		t.Fatal("the forge failure log does not name the repository", logs.lines)
 	}
 }

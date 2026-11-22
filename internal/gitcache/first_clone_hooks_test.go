@@ -19,6 +19,8 @@ const (
 	ReasonForgeSilent  = reasonForgeSilent
 	RemedyForgeSilent  = remedyForgeSilent
 	ReasonForgeRefused = reasonForgeRefused
+	ReasonForgeFailed  = reasonForgeFailed
+	RemedyForgeFailed  = remedyForgeFailed
 )
 
 // WaitBackground waits for running first clones and refresh fetches,

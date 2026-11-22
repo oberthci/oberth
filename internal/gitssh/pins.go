@@ -94,7 +94,7 @@ func pinAlgorithms(data []byte, address string, verify ssh.HostKeyCallback) []st
 func failure(reason string) error {
 	switch reason {
 	case reasonPins:
-		return publicerr.New(publicerr.Forbidden, "No usable Git host key pin.", "Verify the endpoint and its pinned host key before retrying.", nil)
+		return publicerr.New(publicerr.Forbidden, ReasonNoPin, "Verify the endpoint and its pinned host key before retrying.", nil)
 	case reasonTransport:
 		return publicerr.New(publicerr.Unavailable, ReasonTransport, "Check the server address, active identity and pinned host key.", nil)
 	default:

@@ -41,12 +41,25 @@ func forgeSlow(err error) bool {
 	return errors.Is(outage.Cause, context.DeadlineExceeded) || gitssh.TransportFailure(outage.Cause.Error())
 }
 
+// forgeRefused reports whether a forge outcome is a refusal: a refused host
+// key, identity, pin or Git command. Any other failure that is not slow (a
+// connection ended before Git began, an unknown answer, a local fault) is
+// neither a refusal nor a transport failure.
+func forgeRefused(err error) bool {
+	var outage *gitport.UnavailableError
+	return errors.As(err, &outage) && outage.Op == "forge" && outage.Cause != nil && gitssh.RefusalFailure(outage.Cause.Error())
+}
+
 // lateForge decides a forge outcome of r's head read: nil when the forge was
 // slow and the cache at p was refreshed from it within cacheTrustWindow, so
 // the cache may decide; otherwise the refusal that names r's repository.
 func (c *Cache) lateForge(p string, r Remote, err error) error {
-	if !forgeSlow(err) {
+	switch {
+	case forgeSlow(err):
+	case forgeRefused(err):
 		return forgeRefusal(reasonForgeRefused, gitport.ForgeOperatorRemedy, r.repository, err)
+	default:
+		return forgeRefusal(reasonForgeFailed, remedyForgeFailed, r.repository, err)
 	}
 	if !c.trustedCache(p, r) {
 		return forgeRefusal(reasonForgeSilent, remedyForgeSilent, r.repository, err)

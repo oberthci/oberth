@@ -80,7 +80,6 @@ func unanswered(ctx context.Context, job *transfer) error {
 	return unavailable("forge", context.Cause(ctx))
 }
 
-
 // has reports whether the cache holds object oid; a failed check counts as
 // absent, so the forge is asked.
 func (c *Cache) has(ctx context.Context, p, oid string) bool {

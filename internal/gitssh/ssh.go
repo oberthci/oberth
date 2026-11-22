@@ -127,7 +127,7 @@ func handshakeError(ctx context.Context, command string, err error) error {
 		return publicerr.New(publicerr.Forbidden, HostKeyMismatchReason, "Verify the server fingerprint and correct the pinned host key.", err)
 	}
 	if strings.Contains(err.Error(), "unable to authenticate") || strings.Contains(err.Error(), "too many authentication failures") {
-		return publicerr.New(publicerr.Forbidden, "Git SSH identity was refused.", "Use an active identity; ask the administrator to check revocation and access.", err)
+		return publicerr.New(publicerr.Forbidden, ReasonIdentityRefused, "Use an active identity; ask the administrator to check revocation and access.", err)
 	}
 	return interrupted(ctx, command, ended)
 }
