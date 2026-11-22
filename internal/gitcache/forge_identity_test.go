@@ -63,7 +63,7 @@ func TestHeadObjectOfAMovedUpstreamImportsNothing(t *testing.T) {
 	x := newPinFixture(t)
 	x.start(t)
 	x.forge.arm(t, "pipeline")
-	x.forge.holdFetchesOnly(t)
+	x.forge.holdOnly(t, "fetch")
 	gitcache.SetHeadWait(x.c, 300*time.Millisecond)
 	f := x.pipeline
 	f.Write(t, "next", []byte("a head the cache lacks"))

@@ -29,11 +29,11 @@ func (c *Cache) policyHead(ctx context.Context, repo string, r Remote) (gitport.
 	store := c.root()
 	head, err := c.forgeJob(wait, forgeJobKey(p, "head", r, ""), func(ctx context.Context, _ *atomic.Bool) outcome {
 		head, err := store.remoteRef(ctx, p, r, r.DefaultBranch)
-		if isAbsent(err) {
-			err = store.policyAbsence(ctx, p, r)
-		}
 		return outcome{head: head, err: err}
 	})
+	if isAbsent(err) {
+		return head, c.absence(wait, p, r, err)
+	}
 	if err != nil || c.has(ctx, p, head.ObjectSHA) {
 		return head, err
 	}
@@ -48,6 +48,21 @@ func (c *Cache) policyHead(ctx context.Context, repo string, r Remote) (gitport.
 		return outcome{err: store.fetchHeadObject(ctx, p, r, fetchedObject{oid: head.ObjectSHA, sending: sending})}
 	})
 	return head, err
+}
+
+// absence follows a forge that answered that the default branch is absent
+// with the listing that tells an empty forge from a deleted default branch.
+// The forge has answered: a listing that does not finish or fails keeps that
+// answer, so no caller decides from the cache.
+func (c *Cache) absence(ctx context.Context, p string, r Remote, absent error) error {
+	store := c.root()
+	_, err := c.forgeJob(ctx, forgeJobKey(p, "absence", r, ""), func(ctx context.Context, _ *atomic.Bool) outcome {
+		return outcome{err: store.policyAbsence(ctx, p, r)}
+	})
+	if forgeError(err) {
+		return absent
+	}
+	return err
 }
 
 // root is the cache whose store a forge job writes: a receive-scoped copy's

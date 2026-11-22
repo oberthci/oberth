@@ -36,3 +36,22 @@ func TestAnsweredHeadDecidesWhileItsTransferRuns(t *testing.T) {
 	x.slow.release(t)
 	gitcache.WaitBackground(c)
 }
+
+// A forge that answers that its default branch is gone decides as well: when
+// the second listing, which tells an empty forge from a deleted default
+// branch, does not finish within the head wait, the pin is not reachable and
+// is never decided from the head the cache holds.
+func TestAnsweredAbsenceDecidesWhileTheListingRuns(t *testing.T) {
+	x := newPinFixture(t)
+	x.start(t)
+	f := x.pipeline
+	f.Git(t, f.Work, "push", "-q", f.Bare, "main:refs/heads/other")
+	f.Git(t, f.Bare, "update-ref", "-d", "refs/heads/main")
+	x.forge.arm(t, "pipeline")
+	x.forge.holdOnly(t, "refs/heads/*")
+	gitcache.SetHeadWait(x.c, 300*time.Millisecond)
+	_, reachable, err := x.c.Pin(t.Context(), sourcecontract.Revision{Repository: pinnedPipeline, Commit: f.Commit})
+	if reachable || err != nil {
+		t.Fatal("a pin of a deleted default branch was decided from the cache", reachable, err)
+	}
+}

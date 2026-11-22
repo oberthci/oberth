@@ -19,21 +19,23 @@ import (
 
 // silentForge makes every Git command that names an armed fixture forge
 // wait for a line the test writes only at release or cleanup: a forge that
-// does not answer within any caller's deadline. After holdFetchesOnly only its
-// fetches wait and its other commands answer. After failWith, a command of
+// does not answer within any caller's deadline. After holdOnly only its
+// commands that carry the given argument wait ("fetch": its fetches) and
+// its other commands answer; releaseOne lets one held command go. After
+// failWith, a command of
 // an armed forge prints the given diagnostic and fails at once instead, as
 // Git does when its SSH transport prints a reason. The log names the forge of
 // each held or failed command.
 type silentForge struct {
-	armed, fetches, failure, log string
-	names                        []string
-	release                      func()
+	armed, only, failure, log string
+	names                     []string
+	release, releaseOne       func()
 }
 
 func holdForges(t *testing.T, cfg *gitcache.Config, binary string, forges map[string]string) *silentForge {
 	t.Helper()
 	dir := t.TempDir()
-	s := &silentForge{armed: filepath.Join(dir, "armed"), fetches: filepath.Join(dir, "fetches"), failure: filepath.Join(dir, "failure"), log: filepath.Join(dir, "forge")}
+	s := &silentForge{armed: filepath.Join(dir, "armed"), only: filepath.Join(dir, "only"), failure: filepath.Join(dir, "failure"), log: filepath.Join(dir, "forge")}
 	gate, script := filepath.Join(dir, "gate"), filepath.Join(dir, "git")
 	if err := syscall.Mkfifo(gate, 0600); err != nil {
 		t.Fatal(err)
@@ -43,10 +45,10 @@ func holdForges(t *testing.T, cfg *gitcache.Config, binary string, forges map[st
 		fmt.Fprintf(&match, "  [ \"$a\" = '%s' ] && forge=%s\n", bare, name)
 		s.names = append(s.names, name)
 	}
-	body := fmt.Sprintf("#!/bin/sh\nforge= fetch=\nfor a do\n  [ \"$a\" = fetch ] && fetch=1\n%sdone\n"+
-		"if [ -n \"$forge\" ] && [ -e '%[2]s' ] && grep -qx \"$forge\" '%[2]s' && { [ ! -e '%[3]s' ] || [ -n \"$fetch\" ]; }; then\n"+
+	body := fmt.Sprintf("#!/bin/sh\nonly=$(cat '%[3]s' 2>/dev/null)\nforge= hit=\nfor a do\n  [ -n \"$only\" ] && [ \"$a\" = \"$only\" ] && hit=1\n%[1]sdone\n"+
+		"if [ -n \"$forge\" ] && [ -e '%[2]s' ] && grep -qx \"$forge\" '%[2]s' && { [ -z \"$only\" ] || [ -n \"$hit\" ]; }; then\n"+
 		"  echo \"$forge\" >> '%[4]s'\n  if [ -s '%[5]s' ]; then cat '%[5]s' >&2; exit 128; fi\n  read _ < '%[6]s'\nfi\nexec '%[7]s' \"$@\"\n",
-		match.String(), s.armed, s.fetches, s.log, s.failure, gate, binary)
+		match.String(), s.armed, s.only, s.log, s.failure, gate, binary)
 	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +61,7 @@ func holdForges(t *testing.T, cfg *gitcache.Config, binary string, forges map[st
 	// release never waits for one to open the gate.
 	t.Cleanup(func() { _ = w.Close() })
 	s.release = func() { _, _ = w.WriteString(strings.Repeat("\n", 64)) }
+	s.releaseOne = func() { _, _ = w.WriteString("\n") }
 	return s
 }
 
@@ -73,9 +76,9 @@ func (s *silentForge) arm(t *testing.T, names ...string) {
 	}
 }
 
-func (s *silentForge) holdFetchesOnly(t *testing.T) {
+func (s *silentForge) holdOnly(t *testing.T, arg string) {
 	t.Helper()
-	if err := os.WriteFile(s.fetches, nil, 0600); err != nil {
+	if err := os.WriteFile(s.only, []byte(arg), 0600); err != nil {
 		t.Fatal(err)
 	}
 }
