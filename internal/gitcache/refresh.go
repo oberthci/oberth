@@ -67,14 +67,20 @@ func (c *Cache) refreshQuietly(ctx context.Context, repo string, force bool) ([]
 	case !ended:
 		return nil, unavailable("forge", context.Cause(wait))
 	}
+	var refusal *RefusalError
+	if !force && errors.As(result.err, &refusal) && refusal.Field == "pending receive" {
+		// The pending receive owns the public inventory until it is settled;
+		// an ordinary read is served the cache, a forced look learns why.
+		return nil, nil
+	}
 	return result.updates, result.err
 }
 
 // startFetch joins or starts the refresh fetch of repository at p. A refresh
 // that became recent while the fetch waited to start fetches nothing unless
 // forced; a pending receive owns the public inventory until it is settled, so
-// the fetch then moves nothing; a forge failure is recorded only from the
-// fetch's own outcome. The refs a fetch moved go to the cache's readers when
+// the fetch then moves nothing and each caller reads that as its own mode
+// says; a forge failure is recorded only from the fetch's own outcome. The refs a fetch moved go to the cache's readers when
 // no caller waited to take them, for the repository registered under the
 // catalogue ID it started with.
 func (c *Cache) startFetch(repo, p string, force bool) *transfer {
@@ -91,10 +97,6 @@ func (c *Cache) startFetch(repo, p string, force bool) *transfer {
 		}
 		registered = remote.RepositoryID
 		updates, err := c.fetch(ctx, p, repo, remote)
-		var refusal *RefusalError
-		if !force && errors.As(err, &refusal) && refusal.Field == "pending receive" {
-			return outcome{}
-		}
 		return outcome{updates: updates, err: c.recordRefreshResult(ctx, p, err)}
 	}
 	ended := func(ctx context.Context, result outcome, end ending) {
