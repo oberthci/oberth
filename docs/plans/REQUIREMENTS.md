@@ -1,6 +1,6 @@
 # Requirements
 
-Generated from `requirements.json`; SHA256 5e58d74cc45580bb5b02315e5c5fb121d5187481953b2494c959a91d3a1cf5bd.
+Generated from `requirements.json`; SHA256 b2e31121e9f6002e235b5f707f90a357e1386468d78b36a1fce89267290ed652.
 
 These are normative requirements. Inspections are planned; this register does not claim they have passed.
 
@@ -58,7 +58,7 @@ These are normative requirements. Inspections are planned; this register does no
 
 ### REQ-C2-018
 
-**Correctness.** CI issue projection takes only schedules, default-branch pushes and passing promotion runs, preserves C7's person-owned fields and closes an issue only after a later passing run of the same branch or when the installation administrator closes it with a reason; a newer failure keeps it open or reopens it. Without this, a newer failure can disappear from the issue list. Inspection to write: `TestCiIssueClosesAfterLaterPassContract` (contract_test).
+**Correctness.** CI issue projection takes only schedules, default-branch pushes, passing promotion runs and the tested run of a delivered fast-forward promotion, counted as the default branch's newest result; it preserves C7's person-owned fields and closes an issue only after a later passing result of the same branch or when the installation administrator closes it with a reason; a newer failure keeps it open or reopens it. Without this, a newer failure can disappear from the issue list. Inspection to write: `TestCiIssueClosesAfterLaterPassContract` (contract_test).
 
 ### REQ-C2-019
 

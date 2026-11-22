@@ -177,7 +177,7 @@ allow 256 refs and a 1 GiB pack by default (`server.runtime.receive_max_input_by
 
 ## CI issues
 
-Failing default-branch pushes and schedules open or update scoped CI issues; a newer pass of that
-branch closes them. Other branches and tags open none. A passing promotion run counts as the default
-branch; a failed one or a fast-forward (no run) changes nothing. Assisted, cancelled, restart-cut or
+Failing default-branch pushes and schedules open or update CI issues; a newer pass closes them.
+Other branches and tags open none. A passing promotion run, or a delivered fast-forward's tested
+run, counts as the default branch; a failed one changes nothing. Assisted, cancelled, restart-cut or
 evicted runs are no evidence. Never change stored run state. Owners close manual issues.

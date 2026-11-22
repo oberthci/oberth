@@ -137,7 +137,7 @@
       "id": "REQ-C2-018",
       "component": "C2",
       "class": "correctness",
-      "requirement": "CI issue projection takes only schedules, default-branch pushes and passing promotion runs, preserves C7's person-owned fields and closes an issue only after a later passing run of the same branch or when the installation administrator closes it with a reason; a newer failure keeps it open or reopens it.",
+      "requirement": "CI issue projection takes only schedules, default-branch pushes, passing promotion runs and the tested run of a delivered fast-forward promotion, counted as the default branch's newest result; it preserves C7's person-owned fields and closes an issue only after a later passing result of the same branch or when the installation administrator closes it with a reason; a newer failure keeps it open or reopens it.",
       "loss_if_absent": "Without this, a newer failure can disappear from the issue list.",
       "inspection": {
         "kind": "contract_test",
