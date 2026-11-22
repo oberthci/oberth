@@ -373,15 +373,24 @@ function reposScreen(view) {
   const page = await get("/api/repos?" + params({archived: query.get("archived"), recent_runs: true}), view.controller.signal);
   if (view.controller.signal.aborted) return;
   replace(region, page.repositories.length ? [h("div", {class: "row head"}, ["REPOSITORY", "DEFAULT BRANCH", "LATEST RUN", "LAST 20", "BRANCHES"].map(text => h("span", {}, text))),
-   ...page.repositories.map(repo => h("a", {class: "row", href: "/runs?" + params({repo: repo.repo}), "data-key": repo.repo}, h("span", {class: "mono"}, repo.repo), h("span", {class: "mono"}, repo.default_branch && refName(repo.default_branch)),
-    h("span", {}, repo.latest_run ? [state(repo.latest_run.status), " · " + refName(repo.latest_run.ref) + " · " + time(repo.latest_run.created_at)] : "no runs"), recentRuns(repo.recent_runs || []), h("span", {}, repo.branch_count === null ? "unknown" : String(repo.branch_count))))] : [empty(copy.emptyRepos)]);
+   ...page.repositories.map(repoRow)] : [empty(copy.emptyRepos)]);
  };
+}
+// A repository row links to its run list. Its name is its text cells: the bars
+// inside it are links of their own, and a link's name would otherwise take in
+// every bar's title.
+function repoRow(repo) {
+ const cells = [h("span", {class: "mono"}, repo.repo), h("span", {class: "mono"}, repo.default_branch && refName(repo.default_branch)),
+  h("span", {}, repo.latest_run ? [state(repo.latest_run.status), " · " + refName(repo.latest_run.ref) + " · " + time(repo.latest_run.created_at)] : "no runs"),
+  h("span", {}, repo.branch_count === null ? "unknown" : String(repo.branch_count))];
+ return h("a", {class: "row", href: "/runs?" + params({repo: repo.repo}), "data-key": repo.repo, "aria-label": cells.map(cell => cell.textContent.replace(/\s+/g, " ").trim()).join(" ")},
+  cells.slice(0, 3), recentRuns(repo.recent_runs || []), cells[3]);
 }
 // A repository's last runs as bars, oldest left: green passed, red failed, yellow
 // queued or running, grey cancelled. Each bar opens its run and names it in its
 // title. The bars sit inside the row's link, which stays the one stop for the
-// keyboard and for assistive technology: the strip is hidden from it and the
-// bars take no tab stops.
+// keyboard and for assistive technology: the strip is hidden from the tree, the
+// row's name leaves it out, and the bars take no tab stops.
 const barColours = {passed: "passed", failed: "failed", queued: "running", running: "running"};
 function recentRuns(runs) {
  return h("span", {class: "recent", "aria-hidden": "true"}, runs.map(run => {

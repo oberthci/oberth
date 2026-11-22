@@ -25,7 +25,8 @@ export async function repositories(client){
    const letters=spelled[row.key];
    check(JSON.stringify(row.bars.map(bar=>bar.colour))===JSON.stringify([...letters].map(letter=>colour[letter])),'bars out of order or miscoloured '+JSON.stringify(row));
    check(row.bars.every((bar,index)=>bar.href==='/runs/'+(0x7700+index).toString(16).padStart(32,'0')&&bar.label===null&&bar.title.split(' · ')[1]==='topic-'+index&&bar.tab===-1&&bar.width===5&&bar.height===16&&(!index||bar.left>row.bars[index-1].left)),'bar link, title or shape wrong '+JSON.stringify(row.bars));
-   // The bars live inside the row's link: hidden from assistive technology, so the row reads as before.
+   // The bars live inside the row's link: the strip is hidden from the accessibility tree, so the
+   // bars are no separate nodes in it (the row's name is checked below).
    check(row.hidden==='true','bar strip exposed inside the row link '+JSON.stringify(row));
    if(!letters)check(row.latest==='no runs'&&!row.bars.length,'repository without runs not marked '+JSON.stringify(row));
    // From 1024px each row is one line: no cell taller than the status pill's line. Narrower, a
@@ -48,6 +49,15 @@ export async function repositories(client){
  const mono=await barLooks(client,'mono'),look=bar=>bar.fill+'|'+bar.edge,running=mono.find(bar=>bar.kind==='running');
  check(new Set(mono.map(look)).size===4&&running.fill==='rgba(0, 0, 0, 0)'&&running.edge.startsWith('solid ')&&mono.every(bar=>bar.fill!=='rgba(0, 0, 0, 0)'||bar.edge.startsWith('solid ')),'mono bars not four visible looks '+JSON.stringify(mono));
  results.push({light,mono});
+ // A row link's accessible name is its text cells, as on a page without bars: aria-hidden does not
+ // take descendants out of a name, so the row names itself and no bar title may appear in it.
+ await client.loaded('/repos','.repos .bar');
+ await client.cdp('Accessibility.enable');
+ const {nodes}=await client.cdp('Accessibility.getFullAXTree');
+ const names=nodes.filter(node=>node.role?.value==='link'&&!node.ignored).map(node=>node.name?.value||'');
+ const rowText=await client.evaluate(`Array.from(document.querySelectorAll('.repos a.row')).map(row=>Array.from(row.children).filter(cell=>!cell.matches('.recent')).map(cell=>cell.textContent.replace(/\\s+/g,' ').trim()).join(' '))`);
+ check(rowText.length===3&&rowText.every(text=>names.includes(text))&&!names.some(name=>name.includes(' · topic-')),'row link names are not their text cells '+JSON.stringify({rowText,names:names.filter(name=>name.includes('/'))}));
+ results.push({rowNames:rowText});
  // A bar opens its own run, not the row's run list.
  await client.evaluate(`document.querySelector('.repos a.row[data-key="origin/team/web"] .bar:last-child').click()`);
  const path=await client.evaluate(`new Promise(resolve=>{const test=()=>location.pathname.startsWith('/runs/')&&resolve(location.pathname+location.search);test();setTimeout(()=>resolve(location.pathname+location.search),1000);})`);
