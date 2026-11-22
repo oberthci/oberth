@@ -288,6 +288,7 @@ func acceptCISequence(t *testing.T, p *peopleFixture) []stateport.Run {
 		b.Runs[0].Request.ReceiveID = b.ReceiveID
 		b.Runs[0].Request.ObjectSHA = fmt.Sprintf("%040x", n)
 		b.Runs[0].Request.CommitSHA = new(b.Runs[0].Request.ObjectSHA)
+		b.Runs[0].Request.Ref = "refs/heads/main"
 		if n == 4 {
 			b.Runs[0].Request.Ref = "refs/heads/other"
 		}

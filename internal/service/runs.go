@@ -86,7 +86,11 @@ func (s *Service) recordFinished(ctx context.Context, f finishedRecord) error {
 	if reason == "" {
 		reason = runReason(o.Status)
 	}
-	update := stateport.RunUpdate{ProjectCI: projectCI(r, o), ID: r.ID, Revision: r.Revision, Status: o.Status, Failure: o.Failure, Publication: intent, Promotion: promotion, Reason: reason, Detail: o.Detail, NativePhase: o.NativePhase}
+	projectCI, err := s.ciIssueEvidence(ctx, r, o)
+	if err != nil {
+		return err
+	}
+	update := stateport.RunUpdate{ProjectCI: projectCI, ID: r.ID, Revision: r.Revision, Status: o.Status, Failure: o.Failure, Publication: intent, Promotion: promotion, Reason: reason, Detail: o.Detail, NativePhase: o.NativePhase}
 	action := stateport.Action{Actor: r.Origin.Actor, Events: []stateport.EventWrite{s.event(r, model.EventRunFinished, reason, fmt.Sprint(r.Revision))}}
 
 	if promotion != nil {

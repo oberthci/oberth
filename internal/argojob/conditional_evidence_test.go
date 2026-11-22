@@ -273,13 +273,20 @@ func conditionalAdmission(t *testing.T, tc conditionalEvidenceCase) *admissionco
 
 type conditionalTimer struct{}
 
+// conditionalSource names the default branch, the one source fact a finish reads.
+type conditionalSource struct{ service.Source }
+
+func (conditionalSource) DefaultBranch(ctx context.Context, _ string) (string, error) {
+	return "refs/heads/main", ctx.Err()
+}
+
 func (conditionalTimer) Stop() bool { return true }
 
 func conditionalService(t *testing.T, s *store.Store, runs service.RunStore) *service.Service {
 	t.Helper()
 	c := service.Config{Runs: runs, Catalog: s, Events: s, Publications: s, Promotions: s, HoldStore: s,
 		Authority: struct{ service.AuthorityStore }{}, MovingGit: struct{ service.MovingGit }{}, Holds: struct{ service.HoldExec }{},
-		Git: struct{ service.Git }{}, Source: struct{ service.Source }{}, Exec: struct{ service.Exec }{}, Starter: struct{ service.Starter }{}, Logs: struct{ service.Logs }{},
+		Git: struct{ service.Git }{}, Source: conditionalSource{}, Exec: struct{ service.Exec }{}, Starter: struct{ service.Starter }{}, Logs: struct{ service.Logs }{},
 		Now: compositionClock, NewID: func() string { return "unused" }, OnError: func(err error) { t.Error(err) },
 		AfterFunc: func(time.Duration, func()) service.Timer { return conditionalTimer{} }}
 	svc, err := service.New(t.Context(), c)
