@@ -1,7 +1,9 @@
 package service_test
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,9 +32,28 @@ func TestRepoListReadsEveryStripInOneStoreCall(t *testing.T) {
 	if one := strips[names[1]]; len(one) != 1 || one[0].Ref != "refs/heads/fix" || one[0].Status != stepmodel.RunFailed {
 		t.Fatal("single run strip wrong", one)
 	}
-	if _, listed := strips[hiddenRepository]; listed || strips[names[2]] != nil {
-		t.Fatal("hidden repository listed or a repository without runs has a strip", strips)
+	if _, listed := strips[hiddenRepository]; listed || strips[names[2]] == nil || len(strips[names[2]]) != 0 {
+		t.Fatal("hidden repository listed or a repository without runs lacks its empty strip", strips)
 	}
+	if wire := repoJSON(t, page, names[2]); !strings.Contains(wire, `"recent_runs":[]`) {
+		t.Fatal("empty strip not sent", wire)
+	}
+}
+
+// repoJSON is one repository of a page as the server sends it.
+func repoJSON(t *testing.T, page apicontract.RepoPage, name string) string {
+	t.Helper()
+	for _, r := range page.Repositories {
+		if r.Repo == name {
+			data, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(data)
+		}
+	}
+	t.Fatal("repository absent", name)
+	return ""
 }
 
 // TestRepoListStripOnlyWhenAsked: a plain repository list reads no strip, and
@@ -40,8 +61,8 @@ func TestRepoListReadsEveryStripInOneStoreCall(t *testing.T) {
 func TestRepoListStripOnlyWhenAsked(t *testing.T) {
 	f := setup(t)
 	seedStrips(f)
-	if page := listRepos(t, f, workerCaller(), false); f.store.Calls()["RecentRuns"] != 0 || page.Repositories[0].RecentRuns != nil {
-		t.Fatal("strip read although not asked for", f.store.Calls(), page.Repositories[0])
+	if page := listRepos(t, f, workerCaller(), false); f.store.Calls()["RecentRuns"] != 0 || strings.Contains(repoJSON(t, page, repository), "recent_runs") {
+		t.Fatal("strip read or sent although not asked for", f.store.Calls(), page.Repositories[0])
 	}
 	seen := 0
 	for _, r := range listRepos(t, f, apicontract.Caller{Actor: admin()}, true).Repositories {

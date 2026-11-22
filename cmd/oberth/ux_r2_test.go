@@ -13,10 +13,13 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/api/fake"
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/stateport"
+	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
 func TestRunAndStepTablesAlignColumns(t *testing.T) {
@@ -70,21 +73,28 @@ func TestRunLabelsAndRepositoryLatestRunStayReadable(t *testing.T) {
 }
 
 // TestRepositoryRecentRunsReadAsOneLine: oberth repo list --recent-runs prints a
-// repository's strip as one line of letters, oldest first, not as run views.
+// repository's strip as one line of letters, oldest first, not as run views, and
+// "no runs" for the empty list the server sends for a repository without runs.
+// Without the flag the server sends no list and no line is printed.
 func TestRepositoryRecentRunsReadAsOneLine(t *testing.T) {
 	app, out, _ := fixture(t, fake.Bindings())
-	data := []byte(`{"repositories":[{"repo":"acme/app","recent_runs":[` +
-		`{"id":"11111111","status":"passed","ref":"refs/heads/main","created_at":"2026-11-16T14:00:00Z"},` +
-		`{"id":"22222222","status":"failed","ref":"refs/heads/fix","created_at":"2026-11-16T14:01:00Z"},` +
-		`{"id":"33333333","status":"cancelled","ref":"refs/heads/main","created_at":"2026-11-16T14:02:00Z"},` +
-		`{"id":"44444444","status":"queued","ref":"refs/heads/main","created_at":"2026-11-16T14:03:00Z"},` +
-		`{"id":"55555555","status":"running","ref":"refs/heads/main","created_at":"2026-11-16T14:04:00Z"}]},` +
-		`{"repo":"acme/quiet","recent_runs":[]}]}`)
+	at := time.Date(2026, 11, 16, 14, 0, 0, 0, time.UTC)
+	var marks []stateport.RunMark
+	for i, status := range []stepmodel.RunStatus{stepmodel.RunPassed, stepmodel.RunFailed, stepmodel.RunCancelled, stepmodel.RunQueued, stepmodel.RunRunning} {
+		marks = append(marks, stateport.RunMark{ID: strconv.Itoa(11111111 * (i + 1)), Status: status, Ref: "refs/heads/main", CreatedAt: at})
+	}
+	data, err := json.Marshal(apicontract.RepoPage{Repositories: []apicontract.Repository{
+		{Repo: "acme/app", RecentRuns: marks}, {Repo: "acme/quiet", RecentRuns: []stateport.RunMark{}}, {Repo: "acme/plain"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := app.render(data, false, commonOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
-	if !strings.Contains(text, "repositories[0] / recent runs: PF-RR (oldest first)\n") || !strings.Contains(text, "repositories[1] / recent runs: no runs\n") || strings.Contains(text, "11111111") || strings.Contains(text, "refs/heads") {
+	if !strings.Contains(text, "repositories[0] / recent runs: PF-RR (oldest first)\n") || !strings.Contains(text, "repositories[1] / recent runs: no runs\n") ||
+		strings.Contains(text, "repositories[2] / recent runs") || strings.Contains(text, "11111111") || strings.Contains(text, "refs/heads") {
 		t.Fatalf("recent runs not one line per repository: %q", text)
 	}
 }

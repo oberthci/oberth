@@ -156,7 +156,7 @@ type Repository struct {
 	Archived      bool                  `json:"archived"`
 	BranchCount   *int                  `json:"branch_count"`
 	LatestRun     *stepmodel.RunSummary `json:"latest_run"`
-	RecentRuns    []stateport.RunMark   `json:"recent_runs,omitempty"`
+	RecentRuns    []stateport.RunMark   `json:"recent_runs,omitzero"`
 }
 type RepoPage struct {
 	Upstreams    []Upstream   `json:"upstreams,omitempty"`

@@ -220,7 +220,8 @@ func (s *Service) repoViews(ctx context.Context, repos []stateport.Repository, o
 
 // runFacts gives each repository on the page its latest run and, when asked,
 // its recent runs: one store read for the whole page, under the names already
-// narrowed to the caller's scope, as for the run list.
+// narrowed to the caller's scope, as for the run list. Asked for, a repository
+// without runs carries an empty list, so every reader can say "no runs".
 func (s *Service) runFacts(ctx context.Context, repos []stateport.Repository, scope []string, wanted bool) ([]apicontract.Repository, error) {
 	latest, err := s.c.Runs.Runs(ctx, stateport.RunFilter{Repositories: scope, LatestRepository: true, Limit: stateport.RunPageLimit})
 	if err != nil {
@@ -235,6 +236,9 @@ func (s *Service) runFacts(ctx context.Context, repos []stateport.Repository, sc
 	out := []apicontract.Repository{}
 	for _, r := range repos {
 		v := apicontract.Repository{Repo: r.Canonical, Archived: r.Archived, RecentRuns: recent[r.Canonical]}
+		if wanted && v.RecentRuns == nil {
+			v.RecentRuns = []stateport.RunMark{}
+		}
 		for _, run := range latest {
 			if run.Repo == r.Canonical {
 				latest := summary(run.RunSummary)
