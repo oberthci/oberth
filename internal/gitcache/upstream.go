@@ -81,7 +81,7 @@ func (c *Cache) RemoteRef(ctx context.Context, repo, ref string) (gitport.Ref, e
 	}
 
 	if ref == r.DefaultBranch {
-		return c.policyHead(ctx, repo, r, c.budgets.refreshWait)
+		return c.policyHead(ctx, repo, r)
 	}
 	head, err := c.remoteRef(ctx, p, r, ref)
 	if ref == "HEAD" && isAbsent(err) {
