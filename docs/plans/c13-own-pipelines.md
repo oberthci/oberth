@@ -70,8 +70,8 @@ those definitions; they do not define rival DTOs.
   plugin images, the packaged chart, signed `SHA256SUMS` and `release.json` carry
   every shipped digest. Install verifies them before any write. No registry
   signatures or chart index. The clean-Pod verify leaf checks signed bytes and
-  digests before finalizing `latest`. C2/C6 publish the admitted upstream tag's
-  exact object after native success; the release never pushes that tag itself.
+  digests before finalizing `latest`. C3's gate delivers the admitted tag's exact
+  object upstream before the run exists; the release never pushes that tag itself.
 - **Harness evidence.** Repository-local executable checks under `hack/` fail on
   nonzero exit. Candidate walk mode installs this run's bytes through C9's
   local-chart path; release mode verifies a published signed release. Retain

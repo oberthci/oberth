@@ -9394,10 +9394,10 @@
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
     "docs/plans/c11-cli-and-server-composition.md": "fe07bd88ff30107b53d34ab7cd47722ccaeb508dcaef0156f718216e579476f0",
     "docs/plans/c12-agent-client.md": "568115dafda0444a9c220bfa49de456cb0f034f86669c9835e5cbaea995b6821",
-    "docs/plans/c13-own-pipelines.md": "b496225fb3c12cf78b5681d846acf874479637bfc10dee81f24deea17c5e49b8",
+    "docs/plans/c13-own-pipelines.md": "7bf8d26daa7f51f8897f126f230345f41b683bd6a06adc771f0bb491a2149fb7",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
     "docs/plans/c2-service-actions-and-history.md": "e8111fa7eb8a1fb6d2e8b9810e14f4fab1f0290d8c2c1545ad74b81c7a79ecea",
-    "docs/plans/c3-wiring-and-submission.md": "c6e9feb88ec2e679a8435d686121a5ce7690e02abb3327549fcd0741974ac7d2",
+    "docs/plans/c3-wiring-and-submission.md": "3387d47b3c41f25b86f416de84fd4b6c20692633a20a23de36f067b192a4820a",
     "docs/plans/c4-admission-rules-and-plan.md": "c207fb79c8cc077a0f608adc6e684cb0aa89b12ed2d3359bb9c015b3932e2f7b",
     "docs/plans/c5-native-execution.md": "f82bcf8ee9b7264bfbb2c2be78740cd85eddcf9c11275aec5b89a2198a67c325",
     "docs/plans/c6-source-delivery.md": "d0ea36b49f4a856385c79f3204d97b8b7e3c2be7fa8978fccae4b5eb8d88b562",
@@ -10740,7 +10740,7 @@
         "**Delta:**"
       ],
       "scope": "implementation",
-      "basis": "- **Delta:** **Release outputs.** Four platform executables, digest-bound server and source- plugin images, the packaged chart, signed `SHA256SUMS` and `release.json` carry every shipped digest. Install verifies them before any write. No registry signatures or chart index. The clean-Pod verify leaf checks signed bytes and digests before finalizing `latest`. C2/C6 publish the admitted upstream tag's exact object after native success; the release never pushes that tag itself.",
+      "basis": "- **Delta:** **Release outputs.** Four platform executables, digest-bound server and source- plugin images, the packaged chart, signed `SHA256SUMS` and `release.json` carry every shipped digest. Install verifies them before any write. No registry signatures or chart index. The clean-Pod verify leaf checks signed bytes and digests before finalizing `latest`. C3's gate delivers the admitted tag's exact object upstream before the run exists; the release never pushes that tag itself.",
       "rows": [],
       "predicates": []
     },
@@ -12671,14 +12671,14 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "| **Delta:** `Gate` | C6 invokes it with all updates and a quarantine-bound source before any ref moves. Collect every independently knowable finding with its ref/file and C4's exact grant command. One bad ref rejects the whole push. Tags always require admission, including uplink pushes without a run option. Parked/deleted updates skip preparation; absent optional build YAML starts nothing; missing release YAML refuses. The gate has 30 seconds and refuses with a try-again remedy on expiry, including completion racing expiry. |",
+      "basis": "| **Delta:** `Gate` | C6 invokes it with all updates and a quarantine-bound source before any ref moves. Collect every independently knowable finding with its ref/file and C4's exact grant command. One bad ref rejects the whole push. Tags always require admission, including uplink pushes without a run option. Parked/deleted updates skip preparation; absent optional build YAML starts nothing; missing release YAML refuses. An admitted release tag reaches the upstream before the gate passes; a failed delivery refuses the push. The gate has 30 seconds and refuses with a try-again remedy on expiry, including completion racing expiry. |",
       "rows": [
         {
           "category": "Git push options",
           "name": "oberth.run",
           "disposition": "NEW",
           "reason": "Run-requested pushes are admitted in quarantine before any ref moves; one bad ref rejects the whole push with every finding.",
-          "basis": "| **Delta:** `Gate` | C6 invokes it with all updates and a quarantine-bound source before any ref moves. Collect every independently knowable finding with its ref/file and C4's exact grant command. One bad ref rejects the whole push. Tags always require admission, including uplink pushes without a run option. Parked/deleted updates skip preparation; absent optional build YAML starts nothing; missing release YAML refuses. The gate has 30 seconds and refuses with a try-again remedy on expiry, including completion racing expiry. |",
+          "basis": "| **Delta:** `Gate` | C6 invokes it with all updates and a quarantine-bound source before any ref moves. Collect every independently knowable finding with its ref/file and C4's exact grant command. One bad ref rejects the whole push. Tags always require admission, including uplink pushes without a run option. Parked/deleted updates skip preparation; absent optional build YAML starts nothing; missing release YAML refuses. An admitted release tag reaches the upstream before the gate passes; a failed delivery refuses the push. The gate has 30 seconds and refuses with a try-again remedy on expiry, including completion racing expiry. |",
           "approval": "owner-approved D9",
           "owner": "C6",
           "behavior": "Run-requested pushes are admitted in quarantine before any ref moves; one bad ref rejects the whole push with every finding."
