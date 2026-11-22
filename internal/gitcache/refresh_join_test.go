@@ -13,7 +13,7 @@ import (
 func TestPendingReceiveRefusalIsReadPerCaller(t *testing.T) {
 	for _, force := range []bool{false, true} {
 		c := &Cache{ctx: t.Context(), budgets: defaultGitBudgets(), transfers: &transfers{running: map[string]*transfer{}},
-			config: Config{Root: t.TempDir(), Now: time.Now, Upstream: func(context.Context, string) (Remote, error) { return Remote{}, nil }}}
+			config: Config{Root: t.TempDir(), Now: func() time.Time { return time.Unix(2000000000, 0) }, Upstream: func(context.Context, string) (Remote, error) { return Remote{}, nil }}}
 		p, err := c.path("origin/team/widget")
 		if err != nil {
 			t.Fatal(err)

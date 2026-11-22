@@ -158,10 +158,8 @@ func (c *Cache) fetch(ctx context.Context, t fetchTarget) (updates []RefUpdate, 
 	if len(after) == 0 {
 		return nil, &gitport.EmptyRepositoryError{}
 	}
-	// A long fetch can outlive an upstream removed and added again under
-	// another address: the old forge's content is not imported.
-	if current, err := c.remote(ctx, repo); err != nil || current.URL != r.URL || r.RepositoryID != 0 && current.RepositoryID != r.RepositoryID {
-		return nil, errors.Join(unavailable("refresh", errUpstreamMoved), err)
+	if err := c.sameUpstream(ctx, repo, r); err != nil {
+		return nil, err
 	}
 	if err := c.lock(ctx, p); err != nil {
 		return nil, err
@@ -185,6 +183,18 @@ func (c *Cache) fetch(ctx context.Context, t fetchTarget) (updates []RefUpdate, 
 	}
 	return c.mirror(ctx, p, mirrorChange{before: before, after: after, repository: repo})
 }
+
+// sameUpstream refuses to import a fetch that outlived its upstream removed
+// and added again under another address or catalogue ID: the old forge's
+// content stays out, as it does for a first clone.
+func (c *Cache) sameUpstream(ctx context.Context, repo string, r Remote) error {
+	current, err := c.remote(ctx, repo)
+	if err != nil || current.URL != r.URL || r.RepositoryID != 0 && current.RepositoryID != r.RepositoryID {
+		return errors.Join(unavailable("refresh", errUpstreamMoved), err)
+	}
+	return nil
+}
+
 func (c *Cache) fetchSnapshot(ctx context.Context, dir string, t fetchTarget) (map[string]string, error) {
 	store, r := t.store, t.remote
 	format, err := c.capture(ctx, command{dir: store, args: []string{"rev-parse", "--show-object-format"}}, 64)
