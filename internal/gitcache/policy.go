@@ -102,7 +102,7 @@ func (c *Cache) headRead(ctx context.Context, p string, r Remote) (gitport.Ref, 
 	if result, ended := c.awaitTransfer(ctx, key, job); ended {
 		return result.head, result.err
 	}
-	if kept, ok := c.answers.recent(key, c.config.Now()); ok {
+	if kept, ok := c.answers.recent(key, c.config.Now(), c.lastRefresh(p)); ok {
 		return kept, nil
 	}
 	return gitport.Ref{}, unanswered(ctx, job)

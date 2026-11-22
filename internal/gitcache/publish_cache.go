@@ -50,5 +50,6 @@ func (c *Cache) recordPublication(ctx context.Context, p string, r model.Publica
 	if err = c.refTransaction(ctx, p, native); err != nil {
 		return err
 	}
+	c.answers.forget(p)
 	return clearReconciliation(p)
 }

@@ -122,6 +122,7 @@ func (c *Cache) mirrorGeneration(ctx context.Context, p string, change mirrorCha
 	if err = c.refTransaction(ctx, p, native); err != nil {
 		return nil, err
 	}
+	c.answers.forget(p)
 	return updates, clearReconciliation(p)
 }
 
