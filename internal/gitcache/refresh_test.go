@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -124,20 +125,22 @@ func TestDemandRefreshPreservesPendingReceiveInventory(t *testing.T) {
 	}
 }
 
+// A refresh fetch is bounded by the background bound (thirty minutes), not by
+// its caller's fifteen-second wait, so a fetch with much to transfer can end.
 func TestDemandRefreshBoundsForgeWork(t *testing.T) {
 	f := gittest.New(t)
 	cfg := reviewConfig(t, f)
 	now := time.Unix(2000000000, 0)
 	cfg.Now = func() time.Time { return now }
 	upstream := cfg.Upstream
-	inspect := false
+	var inspect atomic.Bool
 	wall := time.Now //nolint:forbidigo // Context deadlines use real time; the cache's freshness clock stays injected.
 	cfg.Upstream = func(ctx context.Context, repo string) (gitcache.Remote, error) {
-		if inspect {
+		if inspect.Load() {
 			deadline, ok := ctx.Deadline()
 			remaining := deadline.Sub(wall())
-			if !ok || remaining <= 0 || remaining > 15*time.Second {
-				t.Error("unbounded forge refresh", deadline)
+			if !ok || remaining <= 15*time.Second || remaining > 30*time.Minute {
+				t.Error("forge refresh not bounded by the background bound", deadline)
 			}
 		}
 		return upstream(ctx, repo)
@@ -146,7 +149,7 @@ func TestDemandRefreshBoundsForgeWork(t *testing.T) {
 	if err := c.Init(t.Context(), gittest.Repository); err != nil {
 		t.Fatal(err)
 	}
-	inspect = true
+	inspect.Store(true)
 	now = now.Add(gitcache.RefreshInterval)
 	if err := c.Fetch(t.Context(), gittest.Repository); err != nil {
 		t.Fatal(err)

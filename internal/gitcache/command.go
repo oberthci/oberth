@@ -53,6 +53,9 @@ func (c *Cache) run(ctx context.Context, s command) error {
 			idle = c.budgets.idle
 		}
 		progress = watchProgress(cancel, idle)
+		if s.remote != nil {
+			progress.moved = forgeSending(ctx)
+		}
 	}
 	defer progress.close()
 	cmd, detail := c.nativeCommand(s, progress, cancel)

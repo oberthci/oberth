@@ -2,9 +2,14 @@ package gitcache
 
 import "time"
 
-// SetFirstCloneBound replaces firstCloneBound for one cache.
-func SetFirstCloneBound(c *Cache, d time.Duration) { c.budgets.firstClone = d }
+// SetBackgroundBound replaces backgroundBound for one cache.
+func SetBackgroundBound(c *Cache, d time.Duration) { c.budgets.background = d }
 
-// WaitFirstClones waits for running first clones, including what each does
-// after it ends, without ending the cache's lifetime.
-func WaitFirstClones(c *Cache) { c.clones.wait.Wait() }
+// SetRefreshWait replaces refreshDeadline, the wait of a refresh's caller,
+// for one cache.
+func SetRefreshWait(c *Cache, d time.Duration) { c.budgets.refreshWait = d }
+
+// WaitBackground waits for running first clones and refresh fetches,
+// including what each does after it ends, without ending the cache's
+// lifetime.
+func WaitBackground(c *Cache) { c.transfers.wait.Wait() }

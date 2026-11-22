@@ -1,18 +1,20 @@
 package gitcache
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"k8s.io/utils/clock"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-type gitBudgets struct{ idle, local, transfer, cleanup, firstClone time.Duration }
+type gitBudgets struct{ idle, local, transfer, cleanup, background, refreshWait time.Duration }
 
 func defaultGitBudgets() gitBudgets {
-	return gitBudgets{idle: time.Minute, local: 10 * time.Minute, transfer: time.Hour, cleanup: time.Minute, firstClone: firstCloneBound}
+	return gitBudgets{idle: time.Minute, local: 10 * time.Minute, transfer: time.Hour, cleanup: time.Minute, background: backgroundBound, refreshWait: refreshDeadline}
 }
 func transferCommand(args []string) bool {
 	switch nativeOperation(args) {
@@ -44,6 +46,9 @@ type commandProgress struct {
 	closed   bool
 	paused   int
 	cancel   context.CancelCauseFunc
+	// moved, when set, records that the forge began sending a pack, not
+	// only an error or nothing.
+	moved *atomic.Bool
 }
 
 func watchProgress(cancel context.CancelCauseFunc, idle time.Duration) *commandProgress {
@@ -132,5 +137,15 @@ func (w commandWriter) Write(b []byte) (int, error) {
 		w.cancel(err)
 	}
 	w.progress.touch(n)
+	if w.progress.moved != nil && packArriving(b[:n]) {
+		w.progress.moved.Store(true)
+	}
 	return n, err
+}
+
+// packArriving reports whether native fetch output shows the forge sending a
+// pack: its relayed progress or the local receiving count. An error the forge
+// prints before it stalls is neither.
+func packArriving(b []byte) bool {
+	return bytes.Contains(b, []byte("remote: ")) || bytes.Contains(b, []byte("Receiving objects"))
 }

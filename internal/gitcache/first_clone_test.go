@@ -131,7 +131,7 @@ func TestLateCloneAnnouncesOnlyTheSameRegisteredRepository(t *testing.T) {
 			id = tc.end
 			mu.Unlock()
 			release()
-			gitcache.WaitFirstClones(c)
+			gitcache.WaitBackground(c)
 			if announced != tc.announced {
 				t.Fatal("announcement differs from the registration", announced)
 			}
@@ -146,7 +146,7 @@ func TestFirstCloneEndsAtItsBound(t *testing.T) {
 	cfg := reviewConfig(t, f)
 	_, log := slowForge(t, f, &cfg)
 	c := reviewNew(t, cfg)
-	gitcache.SetFirstCloneBound(c, 300*time.Millisecond)
+	gitcache.SetBackgroundBound(c, 300*time.Millisecond)
 	for attempt := 1; attempt <= 2; attempt++ {
 		err := c.Init(t.Context(), gittest.Repository)
 		if err == nil || publicerr.Permanent(err) {
@@ -186,7 +186,7 @@ func TestFirstCloneOfAMovedUpstreamPublishesNothing(t *testing.T) {
 	url = moved.Bare
 	mu.Unlock()
 	release()
-	gitcache.WaitFirstClones(c)
+	gitcache.WaitBackground(c)
 	if _, err := os.Stat(filepath.Join(cfg.Root, "origin", "team", "widget.git", "HEAD")); !os.IsNotExist(err) || announced {
 		t.Fatal("the old forge's clone was published or announced", err, announced)
 	}

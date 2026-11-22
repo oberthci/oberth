@@ -4,117 +4,50 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"sync"
-	"time"
 
 	"github.com/oberthci/oberth/internal/gitport"
 )
 
-// firstCloneBound is how long the first clone of a repository may run. It is
-// separate from the caller's deadline (a request or a schedule sync allows
-// seconds): thirty minutes carries a few gigabytes over a modest link, and the
-// idle budget still ends a clone whose transfer stops moving.
-const firstCloneBound = 30 * time.Minute
-
-// firstClone is one running first clone; done closes when err is final.
-type firstClone struct {
-	done chan struct{}
-	err  error
-	// left records that a caller stopped waiting before the clone ended.
-	left bool
-}
-
-// firstClones holds the first clones still running, at most one per path,
-// and lets Close wait for them.
-type firstClones struct {
-	mu      sync.Mutex
-	running map[string]*firstClone
-	closed  bool
-	wait    sync.WaitGroup
-}
-
-// close refuses every later clone, then waits for the ones that started: a
-// clone starts under mu only while closed is false, so none starts once Wait
-// has begun.
-func (f *firstClones) close() {
-	f.mu.Lock()
-	f.closed = true
-	f.mu.Unlock()
-	f.wait.Wait()
-}
-
 // awaitClone waits within ctx for the first clone of repository, starting it
-// when none runs. The clone runs under the cache lifetime and firstCloneBound,
-// so a caller whose deadline passes leaves it running and is told so; once it
-// ends, the next caller sees the clone or starts a new one after a failure.
+// when none runs. The clone runs under the cache lifetime and the background
+// bound, so a caller whose deadline passes leaves it running and is told so;
+// once it ends, the next caller sees the clone or starts a new one after a
+// failure.
 func (c *Cache) awaitClone(ctx context.Context, repository, p string) error {
 	clone := c.startClone(repository, p) //nolint:contextcheck // The cache lifetime owns the clone, not the caller who waits for it.
 	return c.waitClone(ctx, clone, p)
 }
 
-func (c *Cache) waitClone(ctx context.Context, clone *firstClone, p string) error {
-	select {
-	case <-clone.done:
-		return clone.err
-	case <-ctx.Done():
-		if !c.leave(clone, p) {
-			<-clone.done
-			return clone.err
-		}
+func (c *Cache) waitClone(ctx context.Context, clone *transfer, p string) error {
+	result, ended := c.awaitTransfer(ctx, p, clone)
+	if !ended {
 		return &gitport.CloneUnfinishedError{Cause: context.Cause(ctx)}
 	}
+	return result.err
 }
 
-// leave marks that a caller stopped waiting while the clone still runs, so
-// the clone announces its refs when it ends. It reports false when the clone
-// had already ended: the caller then takes its result like any waiter, and
-// no outcome falls between "continues" and an announcement.
-func (c *Cache) leave(clone *firstClone, p string) bool {
-	c.clones.mu.Lock()
-	defer c.clones.mu.Unlock()
-	if c.clones.running[p] != clone {
-		return false
+// startClone joins or starts the first clone of repository at p. A clone a
+// caller left announces its refs when it ends, so schedule reconciliation
+// reads the repository once it is there instead of at the next unrelated move.
+func (c *Cache) startClone(repository, p string) *transfer {
+	var registered int64
+	run := func(ctx context.Context) outcome {
+		registered = c.registeredID(ctx, repository)
+		return outcome{err: c.cloneOnce(ctx, repository, p)}
 	}
-	clone.left = true
-	return true
-}
-
-func (c *Cache) startClone(repository, p string) *firstClone {
-	c.clones.mu.Lock()
-	defer c.clones.mu.Unlock()
-	if clone := c.clones.running[p]; clone != nil {
-		return clone
-	}
-	clone := &firstClone{done: make(chan struct{})}
-	if c.clones.closed || c.ctx.Err() != nil {
-		clone.err = unavailable("initialize", context.Canceled)
-		close(clone.done)
-		return clone
-	}
-	c.clones.running[p] = clone
-	c.clones.wait.Go(func() {
-		ctx, cancel := context.WithTimeout(c.ctx, c.budgets.firstClone)
-		defer cancel()
-		registered := c.registeredID(ctx, repository)
-		err := c.cloneOnce(ctx, repository, p)
-		c.clones.mu.Lock()
-		delete(c.clones.running, p)
-		clone.err = err
-		left := clone.left
-		c.clones.mu.Unlock()
-		close(clone.done)
-		if err == nil && left && sameRepository(registered, c.registeredID(ctx, repository)) {
+	ended := func(ctx context.Context, result outcome, end ending) {
+		if result.err == nil && end.left && sameRepository(registered, c.registeredID(ctx, repository)) {
 			c.announceClone(ctx, repository)
 		}
-	})
-	return clone
+	}
+	return c.joinTransfer(p, run, ended)
 }
 
-// sameRepository reports whether a clone that started with catalogue ID start
-// ends for the repository registered as end: registered at the end, and
+// sameRepository reports whether a transfer that started with catalogue ID
+// start ends for the repository registered as end: registered at the end, and
 // either under the ID it started with or registered only meanwhile (an
 // upstream check clones before repo add). A repository removed meanwhile, or
-// removed and added again under another ID, has no readers for this clone.
+// removed and added again under another ID, has no readers for this transfer.
 func sameRepository(start, end int64) bool {
 	return end != 0 && (start == 0 || start == end)
 }
@@ -142,8 +75,7 @@ func (c *Cache) cloneOnce(ctx context.Context, repository, p string) error {
 }
 
 // announceClone tells the cache's readers about the refs a clone brought when
-// the caller that wanted them had stopped waiting, so schedule reconciliation
-// reads the repository once it is there instead of at the next unrelated move.
+// the caller that wanted them had stopped waiting.
 func (c *Cache) announceClone(ctx context.Context, repository string) {
 	refs, err := c.ListRefs(ctx, repository)
 	if err != nil {

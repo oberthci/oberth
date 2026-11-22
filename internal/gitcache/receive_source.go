@@ -50,7 +50,8 @@ func (
 	scoped := &Cache{
 		ctx:       c.ctx,
 		budgets:   c.budgets,
-		clones:    c.clones,
+		transfers: c.transfers,
+		unscoped:  c,
 		config:    c.config,
 		gates:     c.gates,
 		rootLock:  c.rootLock,

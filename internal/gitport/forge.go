@@ -30,6 +30,25 @@ func (e *CloneUnfinishedError) Unwrap() error {
 	return publicerr.New(publicerr.Unavailable, e.Reason(), e.Remedy(), e.Cause)
 }
 
+const (
+	FetchUnfinishedReason = "The forge copy is still updating."
+	FetchUnfinishedRemedy = "It continues on the server, so try again in a minute."
+	// ForgeUpdatingNotice heads the line a read served from the cache prints
+	// while the repository's forge fetch still runs.
+	ForgeUpdatingNotice = "Forge copy is still updating; serving cache aged "
+)
+
+// FetchUnfinishedError means the forge answered but the repository's fetch
+// was still running when the caller's wait ended; the fetch continues.
+type FetchUnfinishedError struct{ Cause error }
+
+func (*FetchUnfinishedError) Reason() string  { return FetchUnfinishedReason }
+func (*FetchUnfinishedError) Remedy() string  { return FetchUnfinishedRemedy }
+func (e *FetchUnfinishedError) Error() string { return e.Reason() + " " + e.Remedy() }
+func (e *FetchUnfinishedError) Unwrap() error {
+	return publicerr.New(publicerr.Unavailable, e.Reason(), e.Remedy(), e.Cause)
+}
+
 const EmptyForgeReason = "The forge repository has no commit."
 const EmptyForgeRemedy = "Push a first commit to the forge, then retry."
 

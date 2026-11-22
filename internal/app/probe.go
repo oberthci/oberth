@@ -35,6 +35,10 @@ func (c *Checks) CheckRepository(ctx context.Context, key ProbeKey) ProbeResult 
 		if errors.As(err, &unfinished) {
 			result.Reason = unfinished.Reason()
 		}
+		var updating *gitport.FetchUnfinishedError
+		if errors.As(err, &updating) {
+			result.Reason = updating.Reason()
+		}
 		var outage *gitport.UnavailableError
 		if errors.As(err, &outage) && outage.Op == "forge" {
 			result.Reason = outage.Reason()

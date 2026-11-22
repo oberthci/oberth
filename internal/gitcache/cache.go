@@ -72,8 +72,11 @@ type Cache struct {
 	replayProblems map[string]string
 	objectEnv      []string
 	budgets        gitBudgets
-	clones         *firstClones
-	hookDigest     [sha256.Size]byte
+	transfers      *transfers
+	// unscoped is the cache a receive-scoped copy was made from; transfers
+	// that outlive the receive run there, never in its quarantine.
+	unscoped   *Cache
+	hookDigest [sha256.Size]byte
 	// Receive boundaries permit deterministic fault injection.
 	receivePrepared, receiveReturned func()
 }
@@ -112,14 +115,14 @@ func New(ctx context.Context, config Config) (*Cache, error) {
 		config.AdmissionTimeout = 30 * time.Second
 	}
 	cache := &Cache{
-		budgets:  defaultGitBudgets(),
-		clones:   &firstClones{running: map[string]*firstClone{}},
-		config:   config,
-		rootLock: owner,
-		gates:    &repositoryGates{repos: make(map[string]chan struct{})},
-		export:   make(chan struct{}, 1),
-		activeMu: &sync.Mutex{},
-		active:   make(map[string]bool),
+		budgets:   defaultGitBudgets(),
+		transfers: &transfers{running: map[string]*transfer{}},
+		config:    config,
+		rootLock:  owner,
+		gates:     &repositoryGates{repos: make(map[string]chan struct{})},
+		export:    make(chan struct{}, 1),
+		activeMu:  &sync.Mutex{},
+		active:    make(map[string]bool),
 	}
 	if err := cache.recoverMirrors(ctx); err != nil {
 		return nil, err
@@ -147,10 +150,10 @@ func prepareCachePaths(config Config) error {
 }
 
 // Close releases root ownership after the caller has stopped all requests;
-// it ends running first clones and waits for them before releasing it.
+// it ends running forge transfers and waits for them before releasing it.
 func (c *Cache) Close() error {
 	c.stopDelivery()
-	c.clones.close()
+	c.transfers.close()
 	return c.rootLock.Close()
 }
 

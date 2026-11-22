@@ -26,6 +26,9 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	if len(args) > 0 && args[0] == "fetch" && strings.Contains(diagnostic.String(), gitport.ForgeCacheNotice) {
 		return "", publicerr.New(publicerr.Unavailable, gitport.ForgeReason, gitport.ForgeRemedy, nil)
 	}
+	if len(args) > 0 && args[0] == "fetch" && strings.Contains(diagnostic.String(), gitport.ForgeUpdatingNotice) {
+		return "", publicerr.New(publicerr.Unavailable, gitport.FetchUnfinishedReason, gitport.FetchUnfinishedRemedy, nil)
+	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		exit.Stderr = diagnostic.Bytes()

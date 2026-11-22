@@ -53,8 +53,9 @@ func (a serverAdministration) ProbeRepository(ctx context.Context, r stateport.R
 	if result.Reason == gitport.EmptyForgeReason {
 		return publicerr.New(publicerr.InvalidInput, gitport.EmptyForgeReason, gitport.EmptyForgeRemedy, nil)
 	}
-	if result.Reason == gitport.CloneUnfinishedReason {
-		problem := publicerr.New(publicerr.Unavailable, gitport.CloneUnfinishedReason, gitport.CloneUnfinishedRemedy, nil)
+	unfinished := map[string]string{gitport.CloneUnfinishedReason: gitport.CloneUnfinishedRemedy, gitport.FetchUnfinishedReason: gitport.FetchUnfinishedRemedy}
+	if remedy, ok := unfinished[result.Reason]; ok {
+		problem := publicerr.New(publicerr.Unavailable, result.Reason, remedy, nil)
 		problem.Context = []string{"Repository: " + r.Canonical}
 		return problem
 	}
@@ -143,6 +144,8 @@ func upstreamProbeStatusReason(err error) string {
 		return gitport.EmptyForgeReason
 	case gitport.CloneUnfinishedReason:
 		return gitport.CloneUnfinishedReason
+	case gitport.FetchUnfinishedReason:
+		return gitport.FetchUnfinishedReason
 	}
 	return repositoryProbeFailureReason
 }

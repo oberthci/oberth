@@ -38,6 +38,7 @@ func TestUpstreamProbeNamesAnUnfinishedFirstClone(t *testing.T) {
 		want string
 	}{
 		{publicerr.New(publicerr.Unavailable, gitport.CloneUnfinishedReason, gitport.CloneUnfinishedRemedy, nil), gitport.CloneUnfinishedReason},
+		{&gitport.FetchUnfinishedError{}, gitport.FetchUnfinishedReason},
 		{publicerr.New(publicerr.Unavailable, gitssh.HostKeyMismatchReason, "Check the host key.", nil), gitssh.HostKeyMismatchReason},
 		{publicerr.New(publicerr.Forbidden, repositoryArchivedReason, "Unarchive the repository before probing it.", nil), repositoryArchivedReason},
 		{&gitport.EmptyRepositoryError{}, gitport.EmptyForgeReason},

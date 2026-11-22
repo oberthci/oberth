@@ -29,6 +29,7 @@ const (
 	reasonPublishRefused   = "upstream refused push"
 	remedyPublishRefused   = "Correct the upstream refusal and try the push again."
 	reasonAdmissionStuck   = "admission callback still running"
+	reasonForgeUpdating    = "forge copy still updating"
 	reasonOptionCount      = "push has more than two options"
 	reasonTagMoved         = "tag moved since admission"
 	reasonTagTarget        = "release tag must point at its commit"
