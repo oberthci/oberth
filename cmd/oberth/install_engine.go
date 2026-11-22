@@ -204,12 +204,17 @@ func (s installationSession) applyInstallation(ctx context.Context, in io.Reader
 	if err = selection.Commit(); err != nil {
 		return err
 	}
-	if err = showInstallation(out, result); err != nil {
+	return s.app.showApplied(out, result)
+}
+
+// showApplied prints an applied installation; only a new one names the join
+// step, an update keeps its identities.
+func (a application) showApplied(out io.Writer, result installer.Result) error {
+	if err := showInstallation(out, result); err != nil || result.Updated {
 		return err
 	}
-	app := s.app
-	app.out = out
-	return app.agentTools("")
+	a.out = out
+	return a.agentTools("")
 }
 
 type installationReview struct {

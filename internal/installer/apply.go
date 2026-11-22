@@ -23,12 +23,19 @@ type Result struct {
 	StoreSnapshotHint  string            `json:"store_snapshot_hint"`
 	BackupPath         string            `json:"backup_path,omitempty"`
 	BackupReminder     string            `json:"backup_reminder"`
+	// Updated reports that an installation was already deployed: its first-run
+	// steps are done.
+	Updated bool `json:"updated,omitempty"`
 }
 
 // FirstRunNext is a new installation's next action. It names the one forge URL
 // shape repo add accepts: Oberth logs in to every forge as git, and a new
 // upstream's organization is the first of exactly two path parts.
 const FirstRunNext = "Add the deploy key to your forge, then run oberth repo add git@<forge>:<organization>/<repository>.git."
+
+// UpdateNext replaces the first-run steps on an update, which keeps the
+// installation's identities and records.
+const UpdateNext = "Deploy key, repositories and identities are kept; the first-run steps are done."
 
 // UpgradeCompletion contains facts from the completed local recovery record.
 type UpgradeCompletion struct {
@@ -87,14 +94,19 @@ func (e *Engine) apply(ctx context.Context, p *Plan, approved string, progress P
 	if profile.RecoveryKey != "" {
 		reminder += "\nCopy " + profile.RecoveryKey + " off this machine."
 	}
-	return Result{
+	result := Result{
 		StoreSnapshotHint:  StoreSnapshotHint,
 		Profile:            profile,
 		SSHHostFingerprint: p.identities.hostFingerprint(),
 		DeployPublicKey:    string(p.identities.Forge.Data["public"]),
 		Next:               FirstRunNext,
 		BackupReminder:     reminder,
-	}, nil
+		Updated:            p.history.Deployed.Number > 0,
+	}
+	if result.Updated {
+		result.Next = UpdateNext
+	}
+	return result, nil
 }
 func (e *Engine) revalidate(ctx context.Context, p *Plan) (bool, error) {
 	uid, err := e.Cluster.UID(ctx)

@@ -119,7 +119,7 @@ func (s installationSession) applyUpgrade(ctx context.Context, plan *installer.U
 	if err != nil {
 		return err
 	}
-	// An upgrade renames the administrator files, so the audit uses the ones it left.
+	// An upgrade issues a new administrator certificate file, so the audit uses the one it left.
 	remote, err := s.profileClient(result.Profile)
 	if err == nil {
 		defer remote.Close()

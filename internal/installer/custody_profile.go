@@ -58,8 +58,11 @@ func (e *Engine) saveProfile(p *Plan, i Identities, a admin) (Profile, error) {
 	host := []byte("[" + u.Hostname() + "]:" + strconv.Itoa(p.choices.SSHPort) + " " + string(i.Host.Data["public"]))
 	hostName := "known_hosts-" + publicDigest(host)
 	caName := "ca-" + publicDigest(i.CA.Data["tls.crt"]) + ".crt"
+	// The key file is named by its public key, so a reused key keeps its file;
+	// each apply issues a new certificate under a new name.
+	keyName, certName := "admin-"+publicDigest(a.public)+".key", "admin-"+a.id+".crt"
 	for name, data := range map[string][]byte{
-		"admin-" + a.id + ".key": a.key, "admin-" + a.id + ".crt": a.cert,
+		keyName: a.key, certName: a.cert,
 		caName: i.CA.Data["tls.crt"], hostName: host,
 	} {
 		if err = c.save(name, data); err != nil {
@@ -70,8 +73,7 @@ func (e *Engine) saveProfile(p *Plan, i Identities, a admin) (Profile, error) {
 	if err != nil {
 		return Profile{}, err
 	}
-	profile.AdminKey = c.pathFor("admin-" + a.id + ".key")
-	profile.AdminCert = c.pathFor("admin-" + a.id + ".crt")
+	profile.AdminKey, profile.AdminCert = c.pathFor(keyName), c.pathFor(certName)
 	profile.CAFile, profile.KnownHosts = c.pathFor(caName), c.pathFor(hostName)
 	profile.BackupKey = c.pathFor("backup.agekey")
 	return profile, c.saveProfile(profile, a.id)

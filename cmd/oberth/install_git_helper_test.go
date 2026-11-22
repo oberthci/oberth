@@ -23,8 +23,8 @@ func TestUpgradeRollbackAndInstallRerunKeepTheProfileGitHelperWorking(t *testing
 	f.wireGitHelper(&app, clients["upgrade"])
 	before := profileKey(t, app)
 	upgradeSignedFixture(t, &f)
-	if after := profileKey(t, app); after == before || fileExists(before) {
-		t.Fatal("upgrade did not rename the administrator key", before, after)
+	if after := profileKey(t, app); after != before || !fileExists(before) {
+		t.Fatal("upgrade renamed the reused administrator key", before, after)
 	}
 	assertHelperOnProfileKey(t, app, clients["upgrade"])
 	f.wireGitHelper(&app, clients["rollback"])
@@ -35,8 +35,8 @@ func TestUpgradeRollbackAndInstallRerunKeepTheProfileGitHelperWorking(t *testing
 	f.wireGitHelper(&app, clients["install"])
 	before = profileKey(t, app)
 	rerunSignedInstall(t, f, "v0.1.0", f.previous)
-	if after := profileKey(t, app); after == before || fileExists(before) {
-		t.Fatal("install rerun did not rename the administrator key", before, after)
+	if after := profileKey(t, app); after != before || !fileExists(before) {
+		t.Fatal("install rerun renamed the reused administrator key", before, after)
 	}
 	assertHelperOnProfileKey(t, app, clients["install"])
 	if strings.Contains(diagnostic.String(), "not repaired") {
@@ -54,9 +54,10 @@ func TestUnrepairableGitHelperKeepsItsKeyAndNamesTheRepair(t *testing.T) {
 	session.app = app
 	f.session.engine.GitHelper = session.repointGit
 	before := profileKey(t, app)
+	certificate := installedProfile(t, app).AdminCert
 	upgradeSignedFixture(t, &f)
-	if profileKey(t, app) == before {
-		t.Fatal("upgrade did not rename the administrator key")
+	if profileKey(t, app) != before || installedProfile(t, app).AdminCert == certificate {
+		t.Fatal("upgrade renamed the reused key or kept the earlier certificate name")
 	}
 	helper := profileHelper(t, app)
 	if helper.Identity != before || !fileExists(before) {
@@ -67,8 +68,8 @@ func TestUnrepairableGitHelperKeepsItsKeyAndNamesTheRepair(t *testing.T) {
 		t.Fatal("failure does not name the repair and the kept files", diagnostic)
 	}
 	kept, err := installer.EarlierCredentials(installedProfile(t, app))
-	if err != nil || !slices.Contains(kept, before) {
-		t.Fatal("earlier key not kept", kept, err)
+	if err != nil || !slices.Contains(kept, certificate) {
+		t.Fatal("earlier certificate not kept", kept, err)
 	}
 	f.wireGitHelper(&app, clients["bound"])
 	rerunSignedInstall(t, f, "v0.2.0", f.target)

@@ -26,3 +26,16 @@ func TestInstallResultSaysHowToOpenTheWebView(t *testing.T) {
 		}
 	}
 }
+
+// Only a new installation names the join step; an update's identities exist.
+func TestAppliedUpdatePrintsNoFirstRunStep(t *testing.T) {
+	for _, updated := range []bool{false, true} {
+		var out bytes.Buffer
+		if err := (application{}).showApplied(&out, installer.Result{Next: "next", Updated: updated}); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "oberth join") == updated {
+			t.Fatal("join step shown for the wrong apply", updated, out.String())
+		}
+	}
+}

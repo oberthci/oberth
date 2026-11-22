@@ -20,8 +20,8 @@ func TestSuccessfulRepairRemovesEveryKeptGeneration(t *testing.T) {
 	for range 3 {
 		apply(t, f, prepare(t, f))
 	}
-	if keys := administratorKeys(t, f.dir); keys != 4 {
-		t.Fatal("failed repairs did not keep the earlier keys", keys)
+	if certificates := administratorCertificates(t, f.dir); certificates != 4 {
+		t.Fatal("failed repairs did not keep the earlier certificates", certificates)
 	}
 	helperHosts := filepath.Join(f.dir, "known_hosts-"+strings.Repeat("a", 64))
 	if err := os.WriteFile(helperHosts, []byte("[127.0.0.1]:22 key\n"), 0600); err != nil {
@@ -31,8 +31,8 @@ func TestSuccessfulRepairRemovesEveryKeptGeneration(t *testing.T) {
 		return []string{p.AdminKey, helperHosts}, true
 	}
 	apply(t, f, prepare(t, f))
-	if keys := administratorKeys(t, f.dir); keys != 1 {
-		t.Fatal("successful repair kept earlier keys", keys)
+	if certificates := administratorCertificates(t, f.dir); certificates != 1 || administratorKeys(t, f.dir) != 1 {
+		t.Fatal("successful repair kept earlier credentials", certificates)
 	}
 	earlier, err := os.ReadDir(f.dir)
 	if err != nil {
@@ -51,15 +51,27 @@ func TestSuccessfulRepairRemovesEveryKeptGeneration(t *testing.T) {
 
 func administratorKeys(t *testing.T, dir string) int {
 	t.Helper()
+	return administratorFiles(t, dir, ".key")
+}
+
+// administratorCertificates counts certificate generations: each apply issues
+// one, while a reused key keeps its single file.
+func administratorCertificates(t *testing.T, dir string) int {
+	t.Helper()
+	return administratorFiles(t, dir, ".crt")
+}
+
+func administratorFiles(t *testing.T, dir, suffix string) int {
+	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	keys := 0
+	files := 0
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "admin-") && strings.HasSuffix(entry.Name(), ".key") {
-			keys++
+		if strings.HasPrefix(entry.Name(), "admin-") && strings.HasSuffix(entry.Name(), suffix) {
+			files++
 		}
 	}
-	return keys
+	return files
 }
