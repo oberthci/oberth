@@ -85,8 +85,8 @@ spec:
         command: [/work/shared/oberth, secretstore, exec]
         args: [--, bash, hack/static.sh]
         # Steps have no home directory: the linter's cache lives on the cache volume beside GOCACHE.
-        # The guards' whole-program analysis peaks near 7 GiB unbounded; a soft Go limit holds the
-        # step under 6 GiB of its 8Gi at no measurable time cost.
+        # Unbounded, the whole step peaked at 7749 MiB of its 8Gi; GOMEMLIMIT is a soft limit per Go
+        # process that keeps the guards' analysis heap near 6 GiB (guards 46 s against 41-43 s).
         # The linter's run lock lives in the temporary directory: a per-run one lets runs overlap.
         env:
           - {name: BUILD_DEFAULT_REF, value: refs/heads/main}
