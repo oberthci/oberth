@@ -39,7 +39,7 @@ unassisted evidence is still required, and direct default-branch pushes remain r
 
 Stable `vMAJOR.MINOR.PATCH` tags release after setup. The server supplies:
 
-- `version`: the admitted tag, above successful or in-flight releases recorded here.
+- `version`: the admitted tag, above successful or in-flight releases recorded here, never reused.
 - `release-tested-commit`: the tag's peeled commit, for lightweight and annotated tags.
 - `release-default-commit`: the exact default head used by the server's Git ancestry check.
 - `release-build-status`: `passed` from the latest admitted `.oberth/build.yaml` run on that commit.
@@ -68,8 +68,8 @@ The release pipeline prepares the base and signer, builds, signs, pushes both im
 registry, publishes the files as the tag's GitHub release, verifies them in a clean Pod and advances
 `latest`. The build checks its commit without rerunning tests. Only signing gets the long-lived key,
 only the image push the registry login, only publish/finalize the GitHub token. Branch CI reaches
-neither those credentials nor the release cache. Publish refuses until the tag is on GitHub at the
-signed commit.
+neither those credentials nor the release cache. Oberth puts the tag on GitHub when it admits the
+release, before the run; if the run then fails, that version is used: release the next one.
 
 Once, as administrator: edit [pipeline-resources.yaml](../.oberth/pipeline-resources.yaml) (storage
 class/sizes, positive `go` semaphore limit, HTTPS origin) and apply it in the pipeline namespace. It
