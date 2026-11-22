@@ -32,6 +32,29 @@ func TestAdmissionKeepsARefusalReadyAtItsDeadline(t *testing.T) {
 	}
 }
 
+// A callback that has not answered when the admission context ends is never
+// waited for: the check of its result at the deadline does not block, and it
+// is observed as still running once.
+func TestAdmissionNeverWaitsForACallbackThatHasNotAnswered(t *testing.T) {
+	observed := 0
+	c := &Cache{config: Config{AdmissionMetric: func(string) { observed++ }}}
+	expired, cancel := context.WithCancel(t.Context())
+	cancel()
+	returned := make(chan bool, 1)
+	go func() {
+		answered, _ := c.admissionAnswer(expired, "receive", &ReceiveSource{}, make(chan error))
+		returned <- answered
+	}()
+	select {
+	case answered := <-returned:
+		if answered || observed != 1 {
+			t.Fatal("a callback without an answer was taken as answered or not observed", answered, observed)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the deadline waited for a callback that has not answered")
+	}
+}
+
 // The gate's reply: a refusal with a reason stands even after the deadline,
 // a late approval or a bare late error never approves, and an admission that
 // ran out of time says what timed out.
