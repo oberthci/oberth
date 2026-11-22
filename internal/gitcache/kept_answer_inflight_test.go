@@ -81,3 +81,27 @@ func TestReadInFlightAcrossADeliveryKeepsNoAnswer(t *testing.T) {
 		t.Fatal("a delivered commit was refused from an answer handed over after the delivery", reachable, err)
 	}
 }
+
+// The generation is per repository: a refresh of another repository while a
+// head read is in flight leaves that read's answer in place, and it decides
+// the retry whose own read is slow.
+func TestReadInFlightAcrossAnotherRepositorysRefreshKeepsItsAnswer(t *testing.T) {
+	x := newPinFixture(t)
+	x.start(t)
+	gitcache.SetHeadWait(x.c, 300*time.Millisecond)
+	x.mu.Lock()
+	x.now = x.now.Add(gitcache.CacheTrustWindow)
+	x.mu.Unlock()
+	x.forge.arm(t, "pipeline")
+	x.forge.holdOnly(t, "refs/heads/main^{}")
+	x.forge.deliverLate(t)
+	at := sourcecontract.Revision{Repository: pinnedPipeline, Commit: x.pipeline.Commit}
+	checkSilentRefusal(t, x, at)
+	if err := x.c.Fetch(t.Context(), pinnedWire); err != nil {
+		t.Fatal(err)
+	}
+	x.lateAnswer(t)
+	if _, reachable, err := x.c.Pin(t.Context(), at); err != nil || !reachable {
+		t.Fatal("another repository's refresh dropped the in-flight read's answer", reachable, err)
+	}
+}
