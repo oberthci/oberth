@@ -9392,7 +9392,7 @@
   "spec_sha256": {
     "docs/plans/c1-transport-and-tool-registry.md": "d9a5966979bf2cd06412028dfa72d6d906e996631ca78f9156e5d204cfea26bb",
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
-    "docs/plans/c11-cli-and-server-composition.md": "fe07bd88ff30107b53d34ab7cd47722ccaeb508dcaef0156f718216e579476f0",
+    "docs/plans/c11-cli-and-server-composition.md": "27c9437eba8649eb0ec14c51a216653a9ddcd693108070ee3766ef788fdd392d",
     "docs/plans/c12-agent-client.md": "42e5d73621e6fdc5b4f149e21079fb7ca57bfe0b3fb75abbee23b84b07a3b6bb",
     "docs/plans/c13-own-pipelines.md": "7bf8d26daa7f51f8897f126f230345f41b683bd6a06adc771f0bb491a2149fb7",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
@@ -10432,14 +10432,14 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** `repo add` accepts normal SSH, SCP-style SSH and HTTPS forge addresses, with a repository path shaped as organization/repository and an optional `.git` suffix. A new upstream refuses deeper path prefixes and URLs with passwords or tokens; an SSH login name is not a password. Existing upstream addresses retain their stored scheme, host, port and namespace. Discovery is a live scoped read: a joined caller binds exactly one visible registered match without an admin call, names ambiguous candidates and prints a usable administrator command when the repository is unavailable. `--upstream` selects among visible matching addresses; it never turns the supplied address into only a path selector.",
+      "basis": "**Delta:** `repo add` accepts normal SSH, SCP-style SSH and HTTPS forge addresses with the forge's own SSH user, a path of any depth and an optional `.git` suffix. A new upstream stores the address without its last part; that namespace's last directory is the organization. The user and every path part are letters, digits and `._-`, start alphanumeric and hold no `..`; passwords and tokens are refused, and an address without a user logs in as `git`. Existing upstream addresses retain their stored scheme, user, host, port and namespace and match only an address with the same user. Discovery is a live scoped read: a joined caller binds exactly one visible registered match without an admin call, names ambiguous candidates and prints a usable administrator command when the repository is unavailable. `--upstream` selects among visible matching addresses; it never turns the supplied address into only a path selector.",
       "rows": [
         {
           "category": "CLI commands",
           "name": "oberth repo add",
           "disposition": "CHANGE",
-          "reason": "Match the complete scoped forge address, refuse credentials and unsupported prefixes for new upstreams, and preserve all other checkout remotes.",
-          "basis": "**Delta:** `repo add` accepts normal SSH, SCP-style SSH and HTTPS forge addresses, with a repository path shaped as organization/repository and an optional `.git` suffix. A new upstream refuses deeper path prefixes and URLs with passwords or tokens; an SSH login name is not a password. Existing upstream addresses retain their stored scheme, host, port and namespace. Discovery is a live scoped read: a joined caller binds exactly one visible registered match without an admin call, names ambiguous candidates and prints a usable administrator command when the repository is unavailable. `--upstream` selects among visible matching addresses; it never turns the supplied address into only a path selector.",
+          "reason": "Match the complete scoped forge address with its SSH user, refuse credentials and unsafe users or paths, and preserve all other checkout remotes.",
+          "basis": "**Delta:** `repo add` accepts normal SSH, SCP-style SSH and HTTPS forge addresses with the forge's own SSH user, a path of any depth and an optional `.git` suffix. A new upstream stores the address without its last part; that namespace's last directory is the organization. The user and every path part are letters, digits and `._-`, start alphanumeric and hold no `..`; passwords and tokens are refused, and an address without a user logs in as `git`. Existing upstream addresses retain their stored scheme, user, host, port and namespace and match only an address with the same user. Discovery is a live scoped read: a joined caller binds exactly one visible registered match without an admin call, names ambiguous candidates and prints a usable administrator command when the repository is unavailable. `--upstream` selects among visible matching addresses; it never turns the supplied address into only a path selector.",
           "item": 120
         }
       ]
@@ -10450,14 +10450,14 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** Binding uses a per-remote `file:///` address and pack commands on the dedicated `oberth` remote. Its pack commands use the server SSH endpoint saved by join. `repo add` checks Git's effective fetch and push addresses and transport policy; a rewrite or policy that prevents the intended binding refuses with a remedy. It replaces or clears only configuration that `repo add` itself wrote, including its obsolete push URLs, and leaves a person's settings and every other remote unchanged. An administrator binding clears only the product's stale uplink binding.",
+      "basis": "**Delta:** Binding uses a per-remote `file:///` address and pack commands on the dedicated `oberth` remote. Its pack commands use the server SSH endpoint saved by join, pinned by the Oberth server's SSH host keys that the selected profile saved at install or join (`--known-hosts` replaces them); without them `repo add` and join refuse and name `--known-hosts`, and `~/.ssh/known_hosts` is never read. The forge's key is `--expected-host-fingerprint`, pinned by the server. `repo add` checks Git's effective fetch and push addresses and transport policy; a rewrite or policy that prevents the intended binding refuses with a remedy. It replaces or clears only configuration that `repo add` itself wrote, including its obsolete push URLs, and leaves a person's settings and every other remote unchanged. An administrator binding clears only the product's stale uplink binding.",
       "rows": [
         {
           "category": "CLI commands",
           "name": "oberth repo add",
           "disposition": "CHANGE",
           "reason": "Use a per-remote file address and pack commands, verify effective fetch/push addresses and transport policy, and change only configuration repo add itself wrote.",
-          "basis": "**Delta:** Binding uses a per-remote `file:///` address and pack commands on the dedicated `oberth` remote. Its pack commands use the server SSH endpoint saved by join. `repo add` checks Git's effective fetch and push addresses and transport policy; a rewrite or policy that prevents the intended binding refuses with a remedy. It replaces or clears only configuration that `repo add` itself wrote, including its obsolete push URLs, and leaves a person's settings and every other remote unchanged. An administrator binding clears only the product's stale uplink binding.",
+          "basis": "**Delta:** Binding uses a per-remote `file:///` address and pack commands on the dedicated `oberth` remote. Its pack commands use the server SSH endpoint saved by join, pinned by the Oberth server's SSH host keys that the selected profile saved at install or join (`--known-hosts` replaces them); without them `repo add` and join refuse and name `--known-hosts`, and `~/.ssh/known_hosts` is never read. The forge's key is `--expected-host-fingerprint`, pinned by the server. `repo add` checks Git's effective fetch and push addresses and transport policy; a rewrite or policy that prevents the intended binding refuses with a remedy. It replaces or clears only configuration that `repo add` itself wrote, including its obsolete push URLs, and leaves a person's settings and every other remote unchanged. An administrator binding clears only the product's stale uplink binding.",
           "item": 122
         }
       ]

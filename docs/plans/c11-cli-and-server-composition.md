@@ -125,19 +125,19 @@ last event ID; durable `events_wait` and per-request progress remain available.
 
 ### Repository and identity choices
 
-**Delta:** `repo add` accepts normal SSH, SCP-style SSH and HTTPS forge addresses,
-with a repository path shaped as organization/repository and an optional `.git`
-suffix. A new upstream refuses deeper path prefixes and URLs with passwords or
-tokens; an SSH login name is not a password. Existing upstream addresses retain
-their stored scheme, host, port and namespace. Discovery is a live scoped read:
-a joined caller binds exactly one visible registered match without an admin call,
-names ambiguous candidates and prints a usable administrator command when the
-repository is unavailable. `--upstream` selects among visible matching addresses;
-it never turns the supplied address into only a path selector.
+**Delta:** `repo add` accepts normal SSH, SCP-style SSH and HTTPS forge addresses with the
+forge's own SSH user, a path of any depth and an optional `.git` suffix. A new upstream
+stores the address without its last part; that namespace's last directory is the organization.
+The user and every path part are letters, digits and `._-`, start alphanumeric and hold no
+`..`; passwords and tokens are refused, and an address without a user logs in as `git`.
+Existing upstream addresses retain their stored scheme, user, host, port and namespace and
+match only an address with the same user. Discovery is a live scoped read: a joined caller
+binds exactly one visible registered match without an admin call, names ambiguous candidates
+and prints a usable administrator command when the repository is unavailable. `--upstream` selects among visible matching addresses; it never turns the supplied address into only a path selector.
 
 **Delta:** Binding uses a per-remote `file:///` address and pack commands on the
 dedicated `oberth` remote. Its pack commands use the server SSH endpoint saved
-by join. `repo add` checks Git's effective fetch and push addresses and transport
+by join, pinned by the Oberth server's SSH host keys that the selected profile saved at install or join (`--known-hosts` replaces them); without them `repo add` and join refuse and name `--known-hosts`, and `~/.ssh/known_hosts` is never read. The forge's key is `--expected-host-fingerprint`, pinned by the server. `repo add` checks Git's effective fetch and push addresses and transport
 policy; a rewrite or policy that prevents the intended binding refuses with a
 remedy. It replaces or clears only configuration that `repo add` itself wrote,
 including its obsolete push URLs, and leaves a person's settings and every
