@@ -205,11 +205,30 @@ func (
 	done := make(chan error, 1)
 	go func() { done <- c.config.PreReceive(ctx, event, source) }()
 	answered, err := c.admissionAnswer(ctx, event.ID, source, done)
-	if answered && err == nil && source.delivered.Load() {
-		// A release tag is on the forge: refusing now would spend its version with no run.
-		return nil
+	if source.delivered.Load() {
+		return deliveredReply(answered, err)
 	}
 	return admissionReply(ctx, answered, err)
+}
+
+// deliveredReply answers for a receive whose release tag is already on the
+// forge. Its approval stands, also a late one: refusing would spend the
+// version with no run. Anything else (an error, a server stop) says that the
+// tag was delivered and its version is used, after the callback's own reason
+// when it gave one; never that no ref moved.
+func deliveredReply(answered bool, err error) error {
+	if answered && err == nil {
+		return nil
+	}
+	detail := reasonTagDelivered + ". " + remedyTagDelivered
+	if answered {
+		detail = err.Error() + "\n" + detail
+	}
+	code := "unavailable"
+	if publicerr.Permanent(err) {
+		code = "refused"
+	}
+	return &gateError{code: code, detail: detail, cause: err}
 }
 
 // admissionReply turns the callback's answer into the gate's. A refusal is
@@ -237,8 +256,8 @@ func admissionReply(ctx context.Context, answered bool, err error) error {
 // Composition supplies the admission duration. Enforce its cancellation even when a
 // broken callback ignores it; a late result cannot approve or retain the source,
 // unless the callback already delivered a release tag: it is then awaited, since
-// a refusal would spend the tag's version with no run, and only its approval
-// counts. Otherwise an answer already in done when the context ends is taken
+// a refusal would spend the tag's version with no run (deliveredReply answers
+// it). Otherwise an answer already in done when the context ends is taken
 // without waiting; answered is false only when the callback had not returned.
 func (c *Cache) admissionAnswer(ctx context.Context, id string, source *ReceiveSource, done <-chan error) (bool, error) {
 	select {
@@ -250,12 +269,10 @@ func (c *Cache) admissionAnswer(ctx context.Context, id string, source *ReceiveS
 			// cache's own end still ends the wait, so a server stop is never held.
 			select {
 			case err := <-done:
-				if err == nil {
-					return true, nil
-				}
+				return true, err
 			case <-c.ctx.Done():
+				return false, context.Cause(ctx)
 			}
-			return false, context.Cause(ctx)
 		}
 		select {
 		case err := <-done:
