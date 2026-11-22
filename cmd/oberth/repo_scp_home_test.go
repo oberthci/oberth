@@ -14,6 +14,8 @@ import (
 func TestSCPAddressesKeepGitsMeaning(t *testing.T) {
 	for _, tc := range []struct{ address, stored, requested string }{
 		{"oberth@192.168.86.247:repos/oberth-smoke.git", "ssh://oberth@192.168.86.247/~/repos/oberth-smoke.git", "git-upload-pack '~/repos/oberth-smoke.git'"},
+		{"oberth@192.168.86.247:~/repos/oberth-smoke.git", "ssh://oberth@192.168.86.247/~/repos/oberth-smoke.git", "git-upload-pack '~/repos/oberth-smoke.git'"},
+		{"git@192.168.86.247:~/repos/oberth-smoke.git", "ssh://192.168.86.247/~/repos/oberth-smoke.git", "git-upload-pack '~/repos/oberth-smoke.git'"},
 		{"oberth@192.168.86.247:/home/oberth/repos/oberth-smoke.git", "ssh://oberth@192.168.86.247/home/oberth/repos/oberth-smoke.git", "git-upload-pack '/home/oberth/repos/oberth-smoke.git'"},
 		{"git@github.com:org/repo.git", "ssh://github.com/org/repo.git", "git-upload-pack '/org/repo.git'"},
 		{"forge.oberth.ci:team/widget.git", "ssh://forge.oberth.ci/team/widget.git", "git-upload-pack '/team/widget.git'"},

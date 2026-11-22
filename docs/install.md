@@ -30,7 +30,7 @@ deploy key and CA pin, which authenticates HTTPS. Check the endpoint with `obert
 
 Follow [repository registration](../README.md#first-green-build) to add the deploy key and verify
 the forge fingerprint. Use the forge's SSH URL with its own user and path, such as
-`ssh://<user>@<forge>/<path>/<repo>.git`; as in Git, `<user>@<forge>:<rel-path>` is in its home.
+`ssh://<user>@<forge>/<path>/<repo>.git`; `<user>@<forge>:<path>` is in its home, `git@` from root.
 The server owns the forge pin; the profile's `SSH trust` file pins the Oberth server's SSH keys
 (`--known-hosts` replaces it). Exit 3: the deploy key was rejected; add it, retry. Binds `oberth`.
 `--upstream <name>` selects a repository identity, keeping its settings; otherwise it reuses a
