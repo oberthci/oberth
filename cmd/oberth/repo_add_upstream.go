@@ -19,7 +19,7 @@ func repositoryUpstream(s *flowSession, u *url.URL, name string, flags *flag.Fla
 	if err != nil {
 		return source.Name, err
 	}
-	if !existing && !strings.Contains(strings.Trim(u.Path, "/"), "/") {
+	if !existing && !strings.Contains(strings.TrimPrefix(strings.Trim(u.Path, "/"), reponame.HomePrefix), "/") {
 		return source.Name, publicerr.New(publicerr.InvalidInput, "A new upstream needs an organization in the URL path.", "Use a forge URL shaped like ssh://host/organization/repository.git.", nil)
 	}
 	repo, err := repositoryFromURL(source.Name, u)

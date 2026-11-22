@@ -11,6 +11,7 @@ func TestForgeURLAcceptsTheForgesOwnUserAndPath(t *testing.T) {
 		"ssh://oberth@192.168.86.247/home/oberth/repos/oberth-smoke.git": "oberth",
 		"ssh://git@forge.oberth.ci/team/widget.git":                      "git",
 		"ssh://forge.oberth.ci:2222/srv/git/team/widget.git":             DefaultForgeUser,
+		"ssh://oberth@192.168.86.247/~/repos/oberth-smoke.git":           "oberth",
 		"https://forge.oberth.ci":                                        DefaultForgeUser,
 	} {
 		u, err := url.Parse(address)
@@ -39,7 +40,9 @@ func TestForgeURLRefusesInjectedUsersAndPaths(t *testing.T) {
 		"ssh://forge.oberth.ci/home//widget.git":                   "forge path",
 		"ssh://forge.oberth.ci/home/%2e%2e/widget.git":             "forge path",
 		"ssh://forge.oberth.ci/home/a%0Ab/widget.git":              "forge path",
-		"ssh://forge.oberth.ci/~/repos/widget.git":                 "forge path",
+		"ssh://forge.oberth.ci/repos/~/widget.git":                 "forge path",
+		"ssh://forge.oberth.ci/~user/repos/widget.git":             "forge path",
+		"ssh://forge.oberth.ci/~/../widget.git":                    "forge path",
 	} {
 		u, err := url.Parse(address)
 		if component == "" {

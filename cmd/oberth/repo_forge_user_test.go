@@ -12,7 +12,11 @@ import (
 const plainForgeURL = "ssh://oberth@192.168.86.247/home/oberth/repos/oberth-smoke.git"
 
 func TestRepoAddRegistersThePlainSSHForgesUserAndPath(t *testing.T) {
-	for _, address := range []string{plainForgeURL, "oberth@192.168.86.247:/home/oberth/repos/oberth-smoke.git", "oberth@192.168.86.247:home/oberth/repos/oberth-smoke.git"} {
+	for address, base := range map[string]string{
+		plainForgeURL: "ssh://oberth@192.168.86.247/home/oberth/repos",
+		"oberth@192.168.86.247:/home/oberth/repos/oberth-smoke.git": "ssh://oberth@192.168.86.247/home/oberth/repos",
+		"oberth@192.168.86.247:repos/oberth-smoke.git":              "ssh://oberth@192.168.86.247/~/repos",
+	} {
 		t.Run(address, func(t *testing.T) {
 			b := fake.Bindings()
 			b.RepoAdd.Handler = &fake.Handler[apicontract.RepoAddArgs, apicontract.Repository]{Value: apicontract.Repository{Repo: "192-168-86-247/repos/oberth-smoke"}}
@@ -22,7 +26,7 @@ func TestRepoAddRegistersThePlainSSHForgesUserAndPath(t *testing.T) {
 				t.Fatal(code, command.diagnostic.String())
 			}
 			upstreams, _, calls := b.UpstreamAdd.Handler.(*fake.Handler[apicontract.UpstreamAddArgs, apicontract.Upstream]).Observed()
-			want := apicontract.UpstreamAddArgs{Name: "192-168-86-247", BaseURL: "ssh://oberth@192.168.86.247/home/oberth/repos", CheckRepo: "repos/oberth-smoke", ExpectedHostFingerprint: "SHA256:verified"}
+			want := apicontract.UpstreamAddArgs{Name: "192-168-86-247", BaseURL: base, CheckRepo: "repos/oberth-smoke", ExpectedHostFingerprint: "SHA256:verified"}
 			if calls != 1 || upstreams[0] != want {
 				t.Fatal("upstream lost the forge's user or namespace", upstreams)
 			}

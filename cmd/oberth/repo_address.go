@@ -48,6 +48,10 @@ func upstreamAddress(u *url.URL) string {
 	return base.String()
 }
 
+// repositoryAddressURL spells an SCP-style address as the ssh:// URL Git
+// resolves the same way. A relative path of an account other than git is
+// relative to that account's home, which Git's ssh:// form writes as /~/; a
+// git@ address keeps the root-relative form hosted forges serve both ways.
 func repositoryAddressURL(address string) string {
 	if strings.Contains(address, "://") {
 		return address
@@ -65,7 +69,12 @@ func repositoryAddressURL(address string) string {
 	if strings.Contains(address[:separator], "/") {
 		return address
 	}
-	return "ssh://" + address[:separator] + "/" + address[separator+1:]
+	path := address[separator+1:]
+	user, _, named := strings.Cut(address[:separator], "@")
+	if named && user != reponame.DefaultForgeUser && !strings.HasPrefix(path, "/") {
+		path = reponame.HomePrefix + path
+	}
+	return "ssh://" + address[:separator] + "/" + path
 }
 
 func invalidRepositoryAddress() error {

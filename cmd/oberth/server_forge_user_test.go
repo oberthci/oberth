@@ -15,15 +15,23 @@ import (
 )
 
 // The server clones a plain SSH forge's repository as the forge's own user,
-// from the namespace the upstream was registered with.
+// from the namespace the upstream was registered with, absolute or in the
+// user's home.
 func TestServerReachesAPlainSSHForgeAsItsOwnUser(t *testing.T) {
+	for _, namespace := range []string{"/home/oberth/repos", "/~/repos"} {
+		t.Run(namespace, func(t *testing.T) { checkPlainForgeClone(t, namespace) })
+	}
+}
+
+func checkPlainForgeClone(t *testing.T, namespace string) {
+	t.Helper()
 	forge := composeForge(t, gittest.New(t))
 	dir := t.TempDir()
 	key, _ := composeSSHKey(t, t.TempDir(), "forge")
 	c := &composition{config: serverConfig{DatabaseFile: filepath.Join(dir, "state.db"), Files: serverFiles{ForgeKey: key}}}
 	owners := &serverOwners{c: c, settings: serverRuntime{DefaultBranch: "refs/heads/main"}}
 	a := serverAdministration{owners}
-	base := "ssh://oberth@" + forge.address + "/home/oberth/repos"
+	base := "ssh://oberth@" + forge.address + namespace
 	prepared, err := a.PrepareUpstream(t.Context(), apicontract.UpstreamAddArgs{Name: "plain", BaseURL: base, CheckRepo: "repos/oberth-smoke", ExpectedHostFingerprint: ssh.FingerprintSHA256(forge.key)})
 	if err != nil || prepared.Persist(t.Context()) != nil {
 		t.Fatal(err)
@@ -41,7 +49,7 @@ func TestServerReachesAPlainSSHForgeAsItsOwnUser(t *testing.T) {
 	}
 	c.store = db
 	remote, err := owners.upstream(t.Context(), "plain/repos/oberth-smoke")
-	if err != nil || remote.URL != "ssh://oberth@127.0.0.1/home/oberth/repos/oberth-smoke.git" {
+	if err != nil || remote.URL != "ssh://oberth@127.0.0.1"+namespace+"/oberth-smoke.git" {
 		t.Fatal("clone address differs", remote.URL, err)
 	}
 	_, port, _ := net.SplitHostPort(forge.address)

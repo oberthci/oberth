@@ -126,10 +126,10 @@ last event ID; durable `events_wait` and per-request progress remain available.
 ### Repository and identity choices
 
 **Delta:** `repo add` accepts normal SSH, SCP-style SSH and HTTPS forge addresses with the
-forge's own SSH user, a path of any depth and an optional `.git` suffix. A new upstream
+forge's own SSH user, a path of any depth and an optional `.git` suffix. As in Git, a relative SCP-style path of a user other than `git` is in that user's home and is stored as `ssh://user@host/~/path`; an absolute SCP path and a `git@` SCP path keep the root form. A new upstream
 stores the address without its last part; that namespace's last directory is the organization.
 The user and every path part are letters, digits and `._-`, start alphanumeric and hold no
-`..`; passwords and tokens are refused, and an address without a user logs in as `git`.
+`..`, and only a leading `~` names the home; passwords and tokens are refused, and an address without a user logs in as `git`.
 Existing upstream addresses retain their stored scheme, user, host, port and namespace and
 match only an address with the same user. Discovery is a live scoped read: a joined caller
 binds exactly one visible registered match without an admin call, names ambiguous candidates
