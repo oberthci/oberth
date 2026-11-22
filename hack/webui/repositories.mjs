@@ -17,7 +17,7 @@ export async function repositories(client){
   await client.cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
   const mark=client.requests.length;
   await client.loaded('/repos','.repos a.row');
-  const page=await client.evaluate(`({scroll:document.documentElement.scrollWidth,head:Array.from(document.querySelectorAll('.repos .head span')).map(node=>node.textContent),rows:Array.from(document.querySelectorAll('.repos a.row')).map(row=>({key:row.dataset.key,height:row.getBoundingClientRect().height,latest:row.children[2].textContent,cells:Array.from(row.children).map(cell=>cell.getBoundingClientRect().height),bars:Array.from(row.querySelectorAll('.bar')).map(bar=>({colour:bar.classList[1],href:bar.getAttribute('href'),title:bar.title,label:bar.getAttribute('aria-label'),tab:bar.tabIndex,left:bar.getBoundingClientRect().left,width:bar.getBoundingClientRect().width,height:bar.getBoundingClientRect().height}))}))})`);
+  const page=await client.evaluate(`({scroll:document.documentElement.scrollWidth,head:Array.from(document.querySelectorAll('.repos .head span')).map(node=>node.textContent),rows:Array.from(document.querySelectorAll('.repos a.row')).map(row=>({key:row.dataset.key,height:row.getBoundingClientRect().height,latest:row.children[2].textContent,branch:row.children[1].textContent,cells:Array.from(row.children).map(cell=>cell.getBoundingClientRect().height),bars:Array.from(row.querySelectorAll('.bar')).map(bar=>({colour:bar.classList[1],href:bar.getAttribute('href'),title:bar.title,label:bar.getAttribute('aria-label'),tab:bar.tabIndex,left:bar.getBoundingClientRect().left,width:bar.getBoundingClientRect().width,height:bar.getBoundingClientRect().height}))}))})`);
   const reads=client.requests.slice(mark).filter(request=>request.path.startsWith('/api/repos')||request.path.startsWith('/api/runs'));
   check(reads.length===1&&new URL(reads[0].url).searchParams.get('recent_runs')==='true','the page did not read every strip with the repository list in one request '+JSON.stringify(reads));
   check(page.scroll<=width&&JSON.stringify(page.head)==='["REPOSITORY","DEFAULT BRANCH","LATEST RUN","LAST 20","BRANCHES"]','repositories page overflowed or lost its head '+JSON.stringify(page));
@@ -31,6 +31,9 @@ export async function repositories(client){
    if(width>=1024)check(row.cells.every(height=>height<=24)&&row.height<=44,'repository row is not one line '+JSON.stringify({width,row}));
   }
   const api=page.rows.find(row=>row.key==='origin/team/api');
+  // The example carries stored refs (refs/heads/...) and a latest run from an earlier day; the row
+  // prints branch names as the run list does.
+  check(api.latest==='failed  · w5/own-m3 · Nov 15 15:00'&&api.branch==='main','latest run or default branch not shown as a branch name '+JSON.stringify(api));
   check(api.bars[0].title==='passed · topic-0 · Nov 15 19:00'&&api.bars[19].title==='passed · topic-19 · 14:00'&&api.bars[5].title.startsWith('cancelled · ')&&api.bars[17].title.startsWith('queued · '),'bar titles wrong '+JSON.stringify(api.bars.map(bar=>bar.title)));
   const capture=await client.cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{x:0,y:0,width,height:Math.max(900,await client.evaluate('document.documentElement.scrollHeight')),scale:1}});
   await writeFile(`${client.artifacts}/repositories-strip-${width}-light.png`,Buffer.from(capture.data,'base64'));

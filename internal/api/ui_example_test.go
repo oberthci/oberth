@@ -92,7 +92,7 @@ func uiExample(t *testing.T) *fixture {
 				return fallback, nil
 			}, nil
 		})
-		b.RepoList.Handler = &fake.Handler[apicontract.RepoListArgs, apicontract.RepoPage]{Value: apicontract.RepoPage{Repositories: []apicontract.Repository{{Repo: runs[0].Repo, DefaultBranch: "main", BranchCount: new(3), LatestRun: &runs[0].RunSummary, RecentRuns: exampleMarks(at, "pfpppcfppppfrppppqfp")}, {Repo: runs[2].Repo, DefaultBranch: "main", LatestRun: &runs[2].RunSummary, RecentRuns: exampleMarks(at, "ppfpr")}, {Repo: runs[3].Repo, DefaultBranch: "main"}}}}
+		b.RepoList.Handler = &fake.Handler[apicontract.RepoListArgs, apicontract.RepoPage]{Value: apicontract.RepoPage{Repositories: exampleRepositories(runs, at)}}
 		b.RunLogs.Handler = &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{Value: apicontract.LogResult{Content: "Running the authored test command\nFAIL pkg/check 0.40s\nexpected status 200, received 500\n<script>this is log text</script>\n", Meta: logcontract.Meta{ScanComplete: true, BytesExact: true}}}
 		b.RunRerun.Handler = &fake.Handler[apicontract.RunRerunArgs, apicontract.Receipt]{Value: apicontract.Receipt{ID: "55555555"}}
 		refused := publicerr.New(publicerr.Conflict, "This run cannot be cancelled.", "Read the current run.", nil)
@@ -123,6 +123,19 @@ func uiExample(t *testing.T) *fixture {
 		b.SystemStatus.Handler = &fake.Handler[apicontract.SystemStatusArgs, apicontract.SystemStatus]{Value: apicontract.SystemStatus{Ready: true, Version: "1"}}
 		c.Views.Containers.Handler = &fake.Handler[apicontract.IDArgs, apicontract.ContainerPage]{Value: apicontract.ContainerPage{Containers: []apicontract.Container{{NodeID: "attempt-one", Container: "main"}, {NodeID: "attempt-two", Container: "main"}}}}
 	})
+}
+
+// exampleRepositories shapes the repository list as the server stores it: full
+// refs, and a latest run from an earlier day on a branch of ordinary length.
+func exampleRepositories(runs []apicontract.RunRecord, at time.Time) []apicontract.Repository {
+	api, web := runs[1].RunSummary, runs[2].RunSummary
+	api.Ref, api.CreatedAt = "refs/heads/w5/own-m3", at.Add(-24*time.Hour)
+	web.Ref = "refs/heads/feature/search"
+	return []apicontract.Repository{
+		{Repo: runs[0].Repo, DefaultBranch: "refs/heads/main", BranchCount: new(3), LatestRun: &api, RecentRuns: exampleMarks(at, "pfpppcfppppfrppppqfp")},
+		{Repo: runs[2].Repo, DefaultBranch: "refs/heads/main", LatestRun: &web, RecentRuns: exampleMarks(at, "ppfpr")},
+		{Repo: runs[3].Repo, DefaultBranch: "refs/heads/main"},
+	}
 }
 
 // exampleMarks spells a repository strip oldest first, one letter per run:

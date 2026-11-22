@@ -373,8 +373,8 @@ function reposScreen(view) {
   const page = await get("/api/repos?" + params({archived: query.get("archived"), recent_runs: true}), view.controller.signal);
   if (view.controller.signal.aborted) return;
   replace(region, page.repositories.length ? [h("div", {class: "row head"}, ["REPOSITORY", "DEFAULT BRANCH", "LATEST RUN", "LAST 20", "BRANCHES"].map(text => h("span", {}, text))),
-   ...page.repositories.map(repo => h("a", {class: "row", href: "/runs?" + params({repo: repo.repo}), "data-key": repo.repo}, h("span", {class: "mono"}, repo.repo), h("span", {class: "mono"}, repo.default_branch),
-    h("span", {}, repo.latest_run ? [state(repo.latest_run.status), " · " + repo.latest_run.ref + " · " + time(repo.latest_run.created_at)] : "no runs"), recentRuns(repo.recent_runs || []), h("span", {}, repo.branch_count === null ? "unknown" : String(repo.branch_count))))] : [empty(copy.emptyRepos)]);
+   ...page.repositories.map(repo => h("a", {class: "row", href: "/runs?" + params({repo: repo.repo}), "data-key": repo.repo}, h("span", {class: "mono"}, repo.repo), h("span", {class: "mono"}, repo.default_branch && refName(repo.default_branch)),
+    h("span", {}, repo.latest_run ? [state(repo.latest_run.status), " · " + refName(repo.latest_run.ref) + " · " + time(repo.latest_run.created_at)] : "no runs"), recentRuns(repo.recent_runs || []), h("span", {}, repo.branch_count === null ? "unknown" : String(repo.branch_count))))] : [empty(copy.emptyRepos)]);
  };
 }
 // A repository's last runs as bars, oldest left: green passed, red failed, yellow
