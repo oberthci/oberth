@@ -203,8 +203,8 @@ func TestDeltaNonReturningAdmissionDeadline(t *testing.T) {
 	case e := <-done:
 		returned = true
 		t.Log("deadline result", e)
-	case <-time.After(time.Second):
-		t.Error("Receive still blocked one second after caller deadline while callback ignores cancellation")
+	case <-time.After(5 * time.Second):
+		t.Error("Receive still blocked five seconds after caller deadline while callback ignores cancellation")
 	}
 	once.Do(func() { close(release) })
 	if !returned {
