@@ -27,13 +27,14 @@ func (a application) mcpEntry(ctx context.Context, args []string) (int, bool) {
 	return a.runMCP(ctx, profile), true
 }
 
-// Display uses the CLI's renderer, retaining detail as separate named fields.
+// Display uses the CLI's renderer, retaining detail as separate named fields. A run list
+// shows the table alone: a view per row would repeat the JSON row by row.
 func Display(tool string, structured json.RawMessage) (string, bool) {
 	switch tool {
 	case "run_list", "run_get", "run_wait", "status", "wait", "events_wait":
 		var out bytes.Buffer
 		a := application{out: &out}
-		options := commonOptions{detail: true}
+		options := commonOptions{detail: tool != "run_list"}
 		for _, d := range apicontract.Definitions(apicontract.Bindings{}) {
 			if d.Name == tool {
 				options.resultType = d.ResultType

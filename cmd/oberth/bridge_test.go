@@ -21,9 +21,10 @@ import (
 func TestBridgeDisplayBlock(t *testing.T) {
 	reason := strings.Repeat("r", 40)
 	run := map[string]any{"id": "run1", "repo": "org/app", "ref": "refs/heads/topic", "status": "failed", "display_reason": reason, "detail": "native diagnostic", "steps": []any{map[string]any{"name": "test", "status": "failed", "display_reason": "test failed", "detail": "native step detail"}}, "failure": map[string]any{"failed_step": "test", "retry_hint": map[string]any{"action": "none", "reason_code": "author"}}}
-	for _, tool := range []string{"run_list", "run_get", "run_wait", "status", "wait", "events_wait"} {
+	for _, tool := range []string{"run_get", "run_wait", "status", "wait", "events_wait"} {
 		t.Run(tool, func(t *testing.T) { assertToolDisplay(t, tool, run) })
 	}
+	t.Run("run_list", func(t *testing.T) { assertListDisplay(t, run) })
 	if _, ok := Display("repo_list", []byte(`{}`)); ok {
 		t.Fatal("unrelated display appended")
 	}
@@ -36,8 +37,6 @@ func assertToolDisplay(t *testing.T, tool string, run map[string]any) {
 	t.Helper()
 	value := any(run)
 	switch tool {
-	case "run_list":
-		value = map[string]any{"runs": []any{run}}
 	case "run_wait", "wait":
 		value = map[string]any{"run": run, "timed_out": false}
 	case "events_wait":
@@ -54,6 +53,23 @@ func assertToolDisplay(t *testing.T, tool string, run map[string]any) {
 	var cli bytes.Buffer
 	if err := (application{out: &cli}).render(data, false, commonOptions{detail: true}); err != nil || text != safeDisplay(cli.String()) {
 		t.Fatal("bridge uses a second renderer")
+	}
+}
+
+// A run list's block is the CLI's table with whole reasons, never a view per row.
+func assertListDisplay(t *testing.T, run map[string]any) {
+	t.Helper()
+	data, _ := json.Marshal(map[string]any{"runs": []any{run, run}, "next_cursor": "run1"})
+	text, ok := Display("run_list", data)
+	var cli bytes.Buffer
+	if err := (application{out: &cli}).render(data, false, commonOptions{}); err != nil || !ok || text != safeDisplay(cli.String()) {
+		t.Fatalf("list block differs from oberth run list: %s", text)
+	}
+	if !strings.Contains(text, strings.Repeat("r", 40)) || !strings.Contains(text, "oberth run list --before run1") {
+		t.Fatalf("list block lost a reason or the next page: %s", text)
+	}
+	if strings.Contains(text, "native diagnostic") || strings.Contains(text, "Run run1") || len(strings.Split(strings.TrimSpace(text), "\n")) != 5 {
+		t.Fatalf("list block repeats a run view per row: %s", text)
 	}
 }
 
