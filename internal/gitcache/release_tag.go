@@ -57,7 +57,7 @@ func (c *Cache) deliverTag(ctx context.Context, r model.Publication) error {
 		// The forge accepted the create-only push; a read-back adds no certainty.
 		return nil
 	}
-	return c.confirmPublication(ctx, publicationAttempt{store: p, remote: remote, intent: r, output: output, err: err})
+	return c.confirmPublication(ctx, publicationAttempt{store: p, remote: remote, intent: r, output: output, err: err, gate: true})
 }
 
 // releaseTagObject checks the pushed object locally: it peels to the admitted

@@ -138,6 +138,8 @@ type publicationAttempt struct {
 	intent model.Publication
 	output []byte
 	err    error
+	// gate marks the receive gate's delivery, where any rejection is final.
+	gate bool
 }
 
 func (c *Cache) confirmPublication(ctx context.Context, attempt publicationAttempt) error {
@@ -155,7 +157,7 @@ func (c *Cache) confirmPublication(ctx context.Context, attempt publicationAttem
 	if actual.ObjectSHA != *r.PreviousSHA {
 		return moved(r, "upstream", actual.ObjectSHA)
 	}
-	if permanentPushRefusal(attempt.output) || refusedTagCreation(r, attempt.output) {
+	if finalRejection(attempt) {
 		detail := rejectedPushLine(attempt.output)
 		return &RefusalError{reason: reasonPublishRefused, remedy: remedyPublishRefused, Detail: detail}
 	}
@@ -229,10 +231,12 @@ func permanentPushRefusal(output []byte) bool {
 	return false
 }
 
-// refusedTagCreation treats any forge rejection of a create-only tag push as
-// final, whatever the forge's wording: retrying cannot change the answer.
-func refusedTagCreation(r model.Publication, output []byte) bool {
-	return strings.HasPrefix(r.Ref, "refs/tags/") && rejectedPushLine(output) != ""
+// finalRejection reports a refused push that retrying cannot change. At the
+// gate any rejection is final, whatever the forge's wording: the pusher reads
+// the forge's line and no retry exists. A publication keeps its retry budget
+// for every rejection but a known policy refusal.
+func finalRejection(a publicationAttempt) bool {
+	return permanentPushRefusal(a.output) || a.gate && rejectedPushLine(a.output) != ""
 }
 
 func protectedPushRefusal(summary string) bool {

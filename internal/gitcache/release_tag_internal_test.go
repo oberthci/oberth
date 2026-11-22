@@ -2,24 +2,30 @@ package gitcache
 
 import (
 	"testing"
-
-	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestAnyForgeRejectionOfATagCreationIsFinal(t *testing.T) {
+// A rejected tag push is final at the gate, whatever the forge's wording; a
+// publication after the run keeps its retry for anything but a policy refusal.
+func TestTagRejectionIsFinalOnlyAtTheGate(t *testing.T) {
 	t.Parallel()
-	ruleset := []byte("To forge\n!\trefs/tags/v1.2.3:refs/tags/v1.2.3\t[remote rejected] (push declined due to repository rule violations)\nDone")
-	for _, tc := range []struct {
-		ref    string
+	rejected := func(summary string) []byte {
+		return []byte("To forge\n!\trefs/tags/v1.2.3:refs/tags/v1.2.3\t" + summary + "\nDone")
+	}
+	ruleset := rejected("[remote rejected] (push declined due to repository rule violations)")
+	for name, tc := range map[string]struct {
 		output []byte
-		want   bool
+		gate   bool
+		final  bool
 	}{
-		{"refs/tags/v1.2.3", ruleset, true},
-		{"refs/tags/v1.2.3", []byte("To forge\nDone"), false},
-		{"refs/heads/main", ruleset, false},
+		"gate, ruleset":               {ruleset, true, true},
+		"gate, unpacker error":        {rejected("[remote rejected] (unpacker error)"), true, true},
+		"gate, no rejection":          {[]byte("To forge\nDone"), true, false},
+		"publication, ruleset":        {ruleset, false, false},
+		"publication, unpacker error": {rejected("[remote rejected] (unpacker error)"), false, false},
+		"publication, hook declined":  {rejected("[remote rejected] (pre-receive hook declined)"), false, true},
 	} {
-		if got := refusedTagCreation(model.Publication{Ref: tc.ref}, tc.output); got != tc.want {
-			t.Fatalf("%s: final=%v, want %v", tc.ref, got, tc.want)
+		if got := finalRejection(publicationAttempt{output: tc.output, gate: tc.gate}); got != tc.final {
+			t.Fatalf("%s: final=%v, want %v", name, got, tc.final)
 		}
 	}
 }
