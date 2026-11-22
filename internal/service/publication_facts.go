@@ -11,6 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/pushretry"
 	"github.com/oberthci/oberth/internal/stateport"
+	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
 func (s *Service) settle(ctx context.Context, p model.Publication, failure error) error {
@@ -25,6 +26,9 @@ func (s *Service) settle(ctx context.Context, p model.Publication, failure error
 		var err error
 		result.Release, err = s.releaseReceipt(write, p)
 		if err != nil {
+			return err
+		}
+		if result.ProjectCI, err = s.fastForwardEvidence(write, p); err != nil {
 			return err
 		}
 		if result.Release != nil {
@@ -63,6 +67,26 @@ func (s *Service) failedAttempt(result *stateport.PublicationResult, action *sta
 		p.RetryAt = nil
 		action.Events = []stateport.EventWrite{s.publicationEvent(p, model.EventPublicationFailed, reasonPubFailed)}
 	}
+}
+
+// fastForwardEvidence reports whether a delivered publication is a
+// fast-forward promotion of the default branch: it publishes the tested
+// branch run's own commit, so that run's pass is the default branch's newest
+// result. A merged promotion publishes its promotion run, which moved CI
+// issues when it finished.
+func (s *Service) fastForwardEvidence(ctx context.Context, p model.Publication) (bool, error) {
+	if p.PromotionID == "" || p.RunID == "" {
+		return false, nil
+	}
+	r, err := s.c.Runs.Run(ctx, p.RunID)
+	if err != nil {
+		return false, err
+	}
+	if r.Origin.Trigger != model.TriggerBranch || r.Status != stepmodel.RunPassed || r.Origin.HasAssistance() {
+		return false, nil
+	}
+	ref, err := s.c.Source.DefaultBranch(ctx, p.Repo)
+	return err == nil && p.Ref == ref, err
 }
 
 func (s *Service) releaseReceipt(ctx context.Context, p model.Publication) (*model.ReleaseReceipt, error) {

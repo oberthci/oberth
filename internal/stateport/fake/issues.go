@@ -16,10 +16,30 @@ func (m *runMemory) projectCI(r stateport.Run, now time.Time) error {
 	if r.Origin.HasAssistance() || !runTerminal(r) {
 		return runProblem(publicerr.Conflict)
 	}
-	key := r.Repo + "\x00" + r.Ref
-	if seq, ok := m.ciSequences[key]; ok && seq >= r.Sequence {
+	if seq, ok := m.ciSequences[r.Repo+"\x00"+r.Ref]; ok && seq >= r.Sequence {
 		return nil
 	}
+	return m.recordProjection(r, now)
+}
+
+// projectPublished makes a delivered publication's passing run the newest CI
+// result of the published ref, ordered after every run that exists now.
+func (m *runMemory) projectPublished(p model.Publication, now time.Time) error {
+	r, ok := m.runs[p.RunID]
+	if !ok {
+		return runProblem(publicerr.NotFound)
+	}
+	if r.Status != stepmodel.RunPassed || r.Origin.HasAssistance() || r.CommitSHA == nil || p.CommitSHA == nil || *r.CommitSHA != *p.CommitSHA {
+		return runProblem(publicerr.Conflict)
+	}
+	for _, run := range m.runs {
+		r.Sequence = max(r.Sequence, run.Sequence)
+	}
+	r.Ref = p.Ref
+	return m.recordProjection(r, now)
+}
+func (m *runMemory) recordProjection(r stateport.Run, now time.Time) error {
+	key := r.Repo + "\x00" + r.Ref
 	issue := m.ciIssue(r)
 	if r.Status == stepmodel.RunPassed && issue.ID == 0 {
 		m.ciSequences[key] = r.Sequence

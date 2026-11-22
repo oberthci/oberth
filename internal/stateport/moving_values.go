@@ -15,6 +15,11 @@ type PublicationResult struct {
 	Delivered, Retryable bool
 	Reason, Detail       string
 	Release              *model.ReleaseReceipt
+	// ProjectCI, on a delivery, makes the publication's passing run the
+	// newest CI result of the published branch: a fast-forward promotion
+	// leaves that branch exactly at the commit the run tested. Runs created
+	// before the delivery no longer move that branch's CI issue.
+	ProjectCI bool
 }
 
 // RecordFilter scopes records before their exclusive cursor and page limit.

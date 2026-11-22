@@ -19,7 +19,7 @@ func MovingSuite(t *testing.T, factory func(*testing.T) RunFixture) {
 			t.Run(name, func(t *testing.T) { checkCIPassedKeepsHumanInputs(t, factory(t), custom) })
 		}
 	})
-	for name, check := range map[string]func(*testing.T, RunFixture){"ci_budget": checkCIIssueBudget, "ci_human_inputs": checkCIRedKeepsHumanInputs, "publication": checkMovingPublication, "promotion": checkMovingPromotion, "nested_finish": checkMovingFinish, "inspection": checkMovingHolds, "inspection_evidence": checkInspectionEvidence, "release": checkMovingRelease, "rollback": checkMovingRollback, "refusals": checkMovingRefusals, "fast_forward_retry": checkMovingFastForward, "release_rerun": checkMovingReleaseRerun} {
+	for name, check := range map[string]func(*testing.T, RunFixture){"ci_budget": checkCIIssueBudget, "ci_human_inputs": checkCIRedKeepsHumanInputs, "publication": checkMovingPublication, "promotion": checkMovingPromotion, "nested_finish": checkMovingFinish, "inspection": checkMovingHolds, "inspection_evidence": checkInspectionEvidence, "release": checkMovingRelease, "rollback": checkMovingRollback, "refusals": checkMovingRefusals, "fast_forward_retry": checkMovingFastForward, "published_ci": checkPublishedCI, "release_rerun": checkMovingReleaseRerun} {
 		t.Run(name, func(t *testing.T) { check(t, factory(t)) })
 	}
 }

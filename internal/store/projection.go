@@ -56,6 +56,35 @@ func (s *Store) projectCI(ctx context.Context, tx *sql.Tx, r stateport.Run) erro
 	if previous >= r.Sequence {
 		return unchanged{}
 	}
+	return s.recordProjection(ctx, tx, r)
+}
+
+// projectPublished makes a delivered publication's passing run the newest CI
+// result of the published ref, ordered after every run that exists now: the
+// ref is at the commit that run tested, and older runs tested older commits.
+func (s *Store) projectPublished(ctx context.Context, tx *sql.Tx, p model.Publication) error {
+	r, err := loadRun(ctx, tx, p.RunID)
+	if err != nil {
+		return err
+	}
+	if r.Status != stepmodel.RunPassed || r.Origin.HasAssistance() || r.CommitSHA == nil || p.CommitSHA == nil || *r.CommitSHA != *p.CommitSHA {
+		return refuse(conflict, nil)
+	}
+	var counted bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_work_receipts WHERE run_id=?)`, r.ID).Scan(&counted); err != nil {
+		return databaseError(err)
+	}
+	if counted {
+		return nil
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT MAX(sequence) FROM runs`).Scan(&r.Sequence); err != nil {
+		return databaseError(err)
+	}
+	r.Ref = p.Ref
+	return s.recordProjection(ctx, tx, r)
+}
+
+func (s *Store) recordProjection(ctx context.Context, tx *sql.Tx, r stateport.Run) error {
 	id, err := s.applyCIOutcome(ctx, tx, r)
 	if err != nil {
 		return err

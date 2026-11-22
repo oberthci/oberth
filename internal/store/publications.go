@@ -105,6 +105,11 @@ func (s *Store) SettlePublication(ctx context.Context, action stateport.Action, 
 		p.UpdatedAt = s.options.Clock().UTC()
 		if result.Delivered {
 			p.Status = model.PublicationDelivered
+			if result.ProjectCI {
+				if err := s.projectPublished(ctx, tx, p); err != nil {
+					return err
+				}
+			}
 		} else if result.Retryable && p.Attempts < pushretry.MaxAttempts {
 			p.RetryAt = new(p.UpdatedAt.Add(pushretry.Delay(p.Attempts)))
 		} else {
