@@ -272,7 +272,7 @@ func (c *Cache) clone(ctx context.Context, repository, p string) error {
 	return c.publishClone(ctx, staging, p)
 }
 
-var errUpstreamMoved = errors.New("the upstream address changed during the first clone")
+var errUpstreamMoved = errors.New("the upstream address changed during the transfer")
 
 func refuse(field string) error {
 	reason, remedy := refusalText(field)

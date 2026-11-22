@@ -308,6 +308,43 @@ func TestPinRefreshAnnouncesTheProducersMoves(t *testing.T) {
 	}
 }
 
+// A fetch that outlives an upstream removed and added again under another
+// address imports and announces nothing from the old forge; the next refresh
+// reads the new address.
+func TestFetchOfAMovedUpstreamImportsNothing(t *testing.T) {
+	x := newFetchFixture(t, transferring)
+	moved := gittest.New(t)
+	var mu sync.Mutex
+	url := x.f.Bare
+	x.cfg.Upstream = func(context.Context, string) (gitcache.Remote, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return gitcache.Remote{URL: url, DefaultBranch: "refs/heads/main", RepositoryID: 1}, nil
+	}
+	c := x.start(t)
+	x.advance(t)
+	_, err := c.RemoteRef(shortContext(t), gittest.Repository, "refs/heads/main")
+	checkStillUpdating(t, err)
+	mu.Lock()
+	url = moved.Bare
+	mu.Unlock()
+	x.slow.release(t)
+	gitcache.WaitBackground(c)
+	if ref, err := c.ResolveRef(t.Context(), gittest.Repository, "refs/heads/main"); err != nil || ref.CommitSHA != x.f.Commit {
+		t.Fatal("the old forge's fetch moved the cache", ref, err)
+	}
+	x.mu.Lock()
+	announced := len(x.moves)
+	x.mu.Unlock()
+	if announced != 0 {
+		t.Fatal("the old forge's fetch was announced", announced)
+	}
+	head, err := c.RemoteRef(t.Context(), gittest.Repository, "refs/heads/main")
+	if err != nil || head.CommitSHA != moved.Commit {
+		t.Fatal("the next refresh did not read the new address", head, err)
+	}
+}
+
 const otherRepository = "origin/team/other"
 
 // pushFixture is a cache whose admission reads the forge's default head of

@@ -147,6 +147,11 @@ func (c *Cache) fetch(ctx context.Context, p, repo string, r Remote) (updates []
 	if len(after) == 0 {
 		return nil, &gitport.EmptyRepositoryError{}
 	}
+	// A long fetch can outlive an upstream removed and added again under
+	// another address: the old forge's content is not imported.
+	if current, err := c.remote(ctx, repo); err != nil || current.URL != r.URL || r.RepositoryID != 0 && current.RepositoryID != r.RepositoryID {
+		return nil, errors.Join(unavailable("refresh", errUpstreamMoved), err)
+	}
 	if err := c.lock(ctx, p); err != nil {
 		return nil, err
 	}
