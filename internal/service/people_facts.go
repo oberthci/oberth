@@ -24,9 +24,10 @@ func (s *Service) peopleAction(a actor.Actor, kind, reason, repo string) statepo
 // run, a push run of the repository's default branch, or a passing promotion
 // run, which is what the default branch becomes. A failed promotion leaves the
 // default branch where it was and its promoter sees the failure directly.
-// Other branches, tags and releases create, update and close no CI issue.
+// Other branches and tags, releases included, create, update and close no CI
+// issue.
 func (s *Service) ciIssueEvidence(ctx context.Context, r stateport.Run, o FinishedRun) (bool, error) {
-	if !ciVerdict(r, o) || r.Release {
+	if !ciVerdict(r, o) {
 		return false, nil
 	}
 	switch r.Origin.Trigger {
