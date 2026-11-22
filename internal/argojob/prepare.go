@@ -7,7 +7,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/identityname"
@@ -39,7 +38,7 @@ func (e admission) verifyIdentities(ctx context.Context, r admissioncontract.Ide
 		account, err := e.verifyAccount(ctx, name)
 		if err != nil {
 			if r.Mode != admissioncontract.ModeInspect || !apierrors.IsNotFound(err) {
-				return out, err
+				return out, accountProblem(false, err)
 			}
 			account = admissioncontract.AccountEvidence{Name: name}
 			out.State = admissioncontract.StateLiveRequired
@@ -51,21 +50,6 @@ func (e admission) verifyIdentities(ctx context.Context, r admissioncontract.Ide
 		}
 	}
 	return out, nil
-}
-func (e admission) verifyAccount(ctx context.Context, name string) (admissioncontract.AccountEvidence, error) {
-	if evidence, read := e.accounts[name]; read {
-		return evidence, nil
-	}
-	a, err := e.config.Accounts.Get(ctx, name, meta.GetOptions{})
-	if err != nil {
-		return admissioncontract.AccountEvidence{}, accountMissing(false, fmt.Errorf("account %s: %w", name, err))
-	}
-	if a.Name != name || a.UID == "" {
-		return admissioncontract.AccountEvidence{}, accountMissing(false, fmt.Errorf("account %s has no matching UID", name))
-	}
-	evidence := admissioncontract.AccountEvidence{Name: a.Name, UID: string(a.UID)}
-	e.accounts[name] = evidence
-	return evidence, nil
 }
 func (e admission) transform(ctx context.Context, w *wf.Workflow, in admissioncontract.TransformInput, p nativebinding.Preparation) error {
 	if err := ctx.Err(); err != nil {
@@ -101,7 +85,7 @@ func (e admission) transformLeaf(ctx context.Context, leaf nativeLeaf, in admiss
 	}
 	if in.Mode == admissioncontract.ModeSubmit {
 		if _, err := e.verifyAccount(ctx, account); err != nil {
-			return accountMissing(!p.Release, fmt.Errorf("step %s: %w", t.Name, err))
+			return accountProblem(!p.Release, fmt.Errorf("step %s: %w", t.Name, err))
 		}
 	}
 	t.ServiceAccountName, t.Executor = account, &wf.ExecutorConfig{ServiceAccountName: in.Identity.Pipeline.Name}

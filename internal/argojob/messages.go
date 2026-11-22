@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/publicerr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 const (
@@ -17,6 +18,8 @@ const (
 	bindingReason     = "Workflow ownership differs"
 	accountReason     = "Step account is missing"
 	ciAccountReason   = "CI account for the step is missing"
+	busyReason        = "Admission ran out of time"
+	busyRemedy        = "The cluster API was busy; push the same commit again."
 	holdReason        = "Hold is no longer available"
 	limitReason       = "Hold operation exceeds its limit"
 	unavailableReason = "Native execution is unavailable"
@@ -46,8 +49,26 @@ func accountMissing(ci bool, cause error) error {
 	if ci {
 		reason = ciAccountReason
 	}
-	e := publicerr.New(publicerr.Unavailable, reason, accountRemedy, cause)
-	if cause != nil {
+	return withDetail(publicerr.New(publicerr.Unavailable, reason, accountRemedy, cause))
+}
+
+// accountProblem names an account missing only when the cluster answered that
+// it is absent or may not be read or created; a rate limit, timeout or outage
+// is the admission running out of time, and pushing again is the remedy.
+func accountProblem(ci bool, cause error) error {
+	var uid *accountUIDError
+	if apierrors.IsNotFound(cause) || apierrors.IsForbidden(cause) || errors.As(cause, &uid) {
+		return accountMissing(ci, cause)
+	}
+	return withDetail(publicerr.New(publicerr.Unavailable, busyReason, busyRemedy, cause))
+}
+
+type accountUIDError struct{ name string }
+
+func (e *accountUIDError) Error() string { return "account " + e.name + " has no matching UID" }
+
+func withDetail(e *publicerr.Error) *publicerr.Error {
+	if cause := errors.Unwrap(e); cause != nil {
 		e.Detail = cause.Error()
 	}
 	return e

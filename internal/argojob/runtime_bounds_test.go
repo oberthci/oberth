@@ -38,7 +38,7 @@ func TestTerminalEvidenceWindowBoundary(t *testing.T) {
 }
 func TestPublicRefusalCatalogue(t *testing.T) {
 	t.Parallel()
-	catalogue := []error{absent(nil), ownership(nil), unavailable(nil), accountMissing(false, nil), accountMissing(true, nil), notHeld(nil), limited()}
+	catalogue := []error{absent(nil), ownership(nil), unavailable(nil), accountMissing(false, nil), accountMissing(true, nil), accountProblem(false, errors.New("rate limited")), notHeld(nil), limited()}
 	for _, err := range catalogue {
 		var public *publicerr.Error
 		if !errors.As(err, &public) {

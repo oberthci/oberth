@@ -14,8 +14,10 @@ import (
 	nativefake "github.com/oberthci/oberth/internal/argojob/fake"
 	"github.com/oberthci/oberth/internal/gitport"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	ktest "k8s.io/client-go/testing"
@@ -171,6 +173,38 @@ func TestSecondPushCreatesNoAccounts(t *testing.T) {
 	landedOK(t, c.push(t.Context(), request().Repository, "second", 40))
 	if created := c.budget.take()["create"]; created != 0 {
 		t.Fatal("second push re-created accounts", created)
+	}
+}
+
+// A push refused for want of cluster time says to push again; only an account
+// the cluster says is absent or may not be created keeps the install remedy.
+func TestAccountRefusalNamesItsCause(t *testing.T) {
+	t.Parallel()
+	timeout, install := "Admission ran out of time", "Install the admitted step account"
+	forbidden := func(ktest.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "serviceaccounts"}, "x", errors.New("no create"))
+	}
+	for _, tc := range []struct {
+		name, want, not string
+		budget         int
+		create         ktest.ReactionFunc
+	}{
+		{name: "ensure rate limited", budget: 1, want: timeout, not: install},
+		{name: "verify rate limited", budget: 2, want: timeout, not: install},
+		{name: "create forbidden", budget: 1000, create: forbidden, want: install, not: timeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c := newAdmissionCluster(t, tc.budget)
+			if tc.create != nil {
+				c.kube.PrependReactor("create", "serviceaccounts", tc.create)
+			}
+			err := c.push(t.Context(), request().Repository, "first", 40)
+			t.Log(err)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), tc.not) {
+				t.Fatalf("refusal does not name its cause:\n%v", err)
+			}
+		})
 	}
 }
 
