@@ -21,11 +21,12 @@ class GateVerdicts(unittest.TestCase):
         self.fixture = Path(self.directory.name)
         root = Path(__file__).resolve().parents[1]
         manifest = re.search(r"tool_paths=\((.*?)\)", (root / "hack/gate.sh").read_text(), re.S)
-        for name in shlex.split(manifest[1]):
+        plans = [str(p.relative_to(root)) for p in (root / "docs/plans").rglob("*") if p.is_file()]
+        # Contents only: a step receives the checkout with read-only files and the fixture edits its copies.
+        for name in [*shlex.split(manifest[1]), *plans]:
             target = self.fixture / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(root / name, target)
-        shutil.copytree(root / "docs/plans", self.fixture / "docs/plans")
         self.git("init", "-q", "-b", "main")
         for key in ("user.name", "user.email"):
             self.git("config", key, self.fixture.name)
@@ -249,8 +250,6 @@ esac
                       (self.fixture / "checks").read_text())
 
     def test_make_check_rejects_broken_plans_before_go(self):
-        root = Path(__file__).resolve().parents[1]
-        shutil.copytree(root / "docs/plans", self.fixture / "docs/plans", dirs_exist_ok=True)
         register = self.fixture / "docs/plans/retired.json"
         data = json.loads(register.read_text())
         data["rules"][0]["tokens"] = []
@@ -266,6 +265,24 @@ esac
         self.assertEqual(2, result.returncode, result.stdout)
         self.assertIn("retirement selectors missing", result.stdout)
         self.assertFalse(marker.exists(), result.stdout)
+
+    def test_fixture_edits_its_copies_of_a_read_only_checkout(self):
+        # A pipeline step receives the checkout with read-only files.
+        root = Path(__file__).resolve().parents[1]
+        checkout = Path(self.enterContext(tempfile.TemporaryDirectory(dir=self.fixture.parent)))
+        for name in ["hack/test_gate.py", *self.git("ls-files", "-z").decode().split("\0")[:-1]]:
+            (checkout / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(root / name, checkout / name)
+        for path in [*checkout.rglob("*"), checkout]:
+            path.chmod(path.stat().st_mode & ~0o222)
+        tests = ("test_branch_policy_changes_use_target_and_request_branch_check",
+                 "test_changed_tooling_uses_main_and_requests_selftest",
+                 "test_make_check_rejects_broken_plans_before_go")
+        result = subprocess.run(["python3", "-m", "unittest", *(f"test_gate.GateVerdicts.{t}" for t in tests)],
+            cwd=checkout / "hack", env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertIn("Ran 3 tests", result.stdout)
 
     def test_missing_names_policy_refuses_gate(self):
         with patch.dict(os.environ, {"OBERTH_GUARDS_NAMES_FILE":""}):
