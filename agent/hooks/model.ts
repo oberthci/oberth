@@ -149,8 +149,10 @@ export function boxRows(state: Snapshot, count: number, width: number): string[]
   return runs.length ? rows(runs, state.now, width, { label: '', text, first: true }) : []
 }
 
-// /oberth-runs ends a failed row with its failed step and reason, kept before the names.
-const reason = (run: Run) => run.status === 'failed' ? [failedStep(run), run.display_reason].filter(Boolean).join(': ') : ''
+// /oberth-runs ends a failed row with its failed step and reason and a cancelled row with
+// its reason, kept before the names; other reasons only repeat the status word.
+const explained = (run: Run) => run.status === 'failed' || run.status === 'cancelled'
+const reason = (run: Run) => explained(run) ? [failedStep(run), run.display_reason].filter(Boolean).join(': ') : ''
 
 export function table(runs: Run[], now: number, width: number): string {
   return runs.length ? rows(runs, now, width, { label: 'REASON', text: reason, first: false }).join('\n') : 'No runs.'

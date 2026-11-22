@@ -374,6 +374,22 @@ test('/oberth-runs prints the box rows and a reason for failed rows', { options 
   for (const line of tight) expect(line.length).toBeLessThanOrEqual(87)
 })
 
+test('/oberth-runs says why a run was cancelled and leaves other reasons out', { options }, async ($, on) => {
+  bottom(on)
+  mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+  cli(on, () => [
+    { ...run('aaaaaaaa000000000000000000000000', 'cancelled'), display_reason: 'branch deleted' },
+    { ...run('bbbbbbbb000000000000000000000000', 'passed'), display_reason: 'passed' },
+    { ...run(), display_reason: 'step running' },
+  ])
+  await startSession($, on)
+  const lines = (await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text!.split('\n')
+  expect(lines[1]).toMatch(/^aaaaaaaa .*■ cancelled .* branch deleted$/)
+  expect(lines[1]!.indexOf('branch deleted')).toBe(lines[0]!.indexOf('REASON'))
+  expect(lines[2]).toMatch(/ 1m$/)
+  expect(lines[3]).toMatch(/ 1m$/)
+})
+
 test('a failed row names its step and a watched row is marked, cut before the ref', { options }, async ($, on) => {
   bottom(on)
   mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
