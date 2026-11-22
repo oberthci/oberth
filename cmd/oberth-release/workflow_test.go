@@ -279,6 +279,21 @@ func TestReleaseCredentialVolumes(t *testing.T) {
 	}
 }
 
+// Publication and latest marking of any two release runs never interleave:
+// both steps hold one native Argo mutex.
+func TestReleasePublicationStepsShareOneMutex(t *testing.T) {
+	wf, err := argoworkflow.Decode(ownWorkflow(t, "release"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, template := range wf.Spec.Templates {
+		locked := template.Synchronization != nil && len(template.Synchronization.Mutexes) == 1 && template.Synchronization.Mutexes[0].Name == "oberth-release-publication"
+		if locked != (template.Name == "release-published-immutable" || template.Name == "latest-advanced-monotonic") {
+			t.Fatal("publication mutex differs", template.Name)
+		}
+	}
+}
+
 func assertSmallDAG(t *testing.T, name string) {
 	t.Helper()
 	body := string(ownWorkflow(t, name))
