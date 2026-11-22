@@ -88,8 +88,9 @@ func (c *Cache) headObject(ctx, wait context.Context, r Remote, head gitport.Ref
 func (c *Cache) headRead(ctx context.Context, p string, r Remote) (gitport.Ref, error) {
 	key := forgeJobKey(p, "admission-head", r, "")
 	run := func(ctx context.Context, _ *atomic.Bool) outcome {
+		generation := c.answers.generation(p)
 		head, err := c.remoteRef(ctx, p, r, r.DefaultBranch)
-		c.answers.record(key, head, err, c.config.Now())
+		c.answers.record(headRecord{key: key, store: p, generation: generation, at: c.config.Now()}, head, err)
 		return outcome{head: head, err: err}
 	}
 	ended := func(ctx context.Context, result outcome, end ending) {

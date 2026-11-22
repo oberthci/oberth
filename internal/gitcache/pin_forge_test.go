@@ -22,20 +22,22 @@ import (
 // does not answer within any caller's deadline. After holdOnly only its
 // commands that carry the given argument wait ("fetch": its fetches) and
 // its other commands answer; releaseOne lets one held command go. After
+// deliverLate a held command asks the forge first and hands its answer over
+// only when released. After
 // failWith, a command of
 // an armed forge prints the given diagnostic and fails at once instead, as
 // Git does when its SSH transport prints a reason. The log names the forge of
 // each held or failed command.
 type silentForge struct {
-	armed, only, failure, log string
-	names                     []string
-	release, releaseOne       func()
+	armed, only, late, failure, log string
+	names                           []string
+	release, releaseOne             func()
 }
 
 func holdForges(t *testing.T, cfg *gitcache.Config, binary string, forges map[string]string) *silentForge {
 	t.Helper()
 	dir := t.TempDir()
-	s := &silentForge{armed: filepath.Join(dir, "armed"), only: filepath.Join(dir, "only"), failure: filepath.Join(dir, "failure"), log: filepath.Join(dir, "forge")}
+	s := &silentForge{armed: filepath.Join(dir, "armed"), only: filepath.Join(dir, "only"), late: filepath.Join(dir, "late"), failure: filepath.Join(dir, "failure"), log: filepath.Join(dir, "forge")}
 	gate, script := filepath.Join(dir, "gate"), filepath.Join(dir, "git")
 	if err := syscall.Mkfifo(gate, 0600); err != nil {
 		t.Fatal(err)
@@ -47,8 +49,11 @@ func holdForges(t *testing.T, cfg *gitcache.Config, binary string, forges map[st
 	}
 	body := fmt.Sprintf("#!/bin/sh\nonly=$(cat '%[3]s' 2>/dev/null)\nforge= hit=\nfor a do\n  [ -n \"$only\" ] && [ \"$a\" = \"$only\" ] && hit=1\n%[1]sdone\n"+
 		"if [ -n \"$forge\" ] && [ -e '%[2]s' ] && grep -qx \"$forge\" '%[2]s' && { [ -z \"$only\" ] || [ -n \"$hit\" ]; }; then\n"+
-		"  echo \"$forge\" >> '%[4]s'\n  if [ -s '%[5]s' ]; then cat '%[5]s' >&2; exit 128; fi\n  read _ < '%[6]s'\nfi\nexec '%[7]s' \"$@\"\n",
-		match.String(), s.armed, s.only, s.log, s.failure, gate, binary)
+		"  echo \"$forge\" >> '%[4]s'\n  if [ -s '%[5]s' ]; then cat '%[5]s' >&2; exit 128; fi\n"+
+		"  if [ -e '%[8]s' ]; then\n    '%[7]s' \"$@\" > '%[8]s'.$$.out 2> '%[8]s'.$$.err; code=$?\n"+
+		"    read _ < '%[6]s'\n    cat '%[8]s'.$$.out; cat '%[8]s'.$$.err >&2; exit $code\n  fi\n"+
+		"  read _ < '%[6]s'\nfi\nexec '%[7]s' \"$@\"\n",
+		match.String(), s.armed, s.only, s.log, s.failure, gate, binary, s.late)
 	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +84,13 @@ func (s *silentForge) arm(t *testing.T, names ...string) {
 func (s *silentForge) holdOnly(t *testing.T, arg string) {
 	t.Helper()
 	if err := os.WriteFile(s.only, []byte(arg), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (s *silentForge) deliverLate(t *testing.T) {
+	t.Helper()
+	if err := os.WriteFile(s.late, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
 }
