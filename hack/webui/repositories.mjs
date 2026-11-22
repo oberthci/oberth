@@ -39,10 +39,22 @@ export async function repositories(client){
   await writeFile(`${client.artifacts}/repositories-strip-${width}-light.png`,Buffer.from(capture.data,'base64'));
   results.push({width,...page});
  }
+ // The four colours are drawn: one bar of each kind has its own visible fill.
+ const light=await barLooks(client,'light');
+ check(new Set(light.map(bar=>bar.fill)).size===4&&light.every(bar=>bar.fill!=='rgba(0, 0, 0, 0)'),'bar colours not four visible fills '+JSON.stringify(light));
+ results.push({light});
  // A bar opens its own run, not the row's run list.
  await client.evaluate(`document.querySelector('.repos a.row[data-key="origin/team/web"] .bar:last-child').click()`);
  const path=await client.evaluate(`new Promise(resolve=>{const test=()=>location.pathname.startsWith('/runs/')&&resolve(location.pathname+location.search);test();setTimeout(()=>resolve(location.pathname+location.search),1000);})`);
  check(path==='/runs/'+(0x7704).toString(16).padStart(32,'0'),'bar did not open its run '+path);
  await client.cdp('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});
  return results;
+}
+
+// barLooks reads, in one theme, the drawn fill and edge of the first bar of each kind.
+async function barLooks(client,theme){
+ await client.loaded('/repos','.repos .bar');
+ return client.evaluate(`(()=>{document.documentElement.dataset.theme=${JSON.stringify(theme)};
+  const looks=['passed','failed','running','other'].map(kind=>{const style=getComputedStyle(document.querySelector('.repos .bar.'+kind));return {kind,fill:style.backgroundColor,edge:style.borderTopStyle+' '+style.borderTopColor};});
+  document.documentElement.dataset.theme='light';return looks;})()`);
 }
