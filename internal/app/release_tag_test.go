@@ -21,6 +21,8 @@ type tagForge struct {
 	createsThen []int32
 	f           *fixture
 	receive     string
+	// after runs once the tag is delivered, as a late event in the gate.
+	after func()
 }
 
 func (g *tagForge) DeliverTag(ctx context.Context, ref gitport.Ref) error {
@@ -28,6 +30,9 @@ func (g *tagForge) DeliverTag(ctx context.Context, ref gitport.Ref) error {
 	g.delivered = append(g.delivered, ref)
 	g.runsAtThen = append(g.runsAtThen, err == nil)
 	g.createsThen = append(g.createsThen, g.f.creates.Load())
+	if g.refuse == nil && g.after != nil {
+		g.after()
+	}
 	return g.refuse
 }
 

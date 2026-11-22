@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitcache/gittest"
@@ -39,16 +40,26 @@ func newReleaseTagPush(t *testing.T) *releaseTagPush {
 // local tag, after the cache last read the forge) and then delivers ref.
 func (p *releaseTagPush) receive(t *testing.T, forgeFirst string, ref gitport.Ref) (delivery, receive error) {
 	t.Helper()
+	receive = p.gate(t, 0, func(ctx context.Context, s *gitcache.ReceiveSource) error {
+		if forgeFirst != "" {
+			if err := p.toForge(forgeFirst); err != nil {
+				return err
+			}
+		}
+		delivery = s.DeliverTag(ctx, ref)
+		return delivery
+	})
+	return delivery, receive
+}
+
+// gate runs one push of the tag with the given admission callback and timeout.
+func (p *releaseTagPush) gate(t *testing.T, timeout time.Duration, admit func(context.Context, *gitcache.ReceiveSource) error) error {
+	t.Helper()
 	f := p.f
 	c := configuredReceiveCache(t, f, func(cfg *gitcache.Config) {
+		cfg.AdmissionTimeout = timeout
 		cfg.PreReceive = func(ctx context.Context, _ gitcache.ReceiveEvent, s *gitcache.ReceiveSource) error {
-			if forgeFirst != "" {
-				if err := p.toForge(forgeFirst); err != nil {
-					return err
-				}
-			}
-			delivery = s.DeliverTag(ctx, ref)
-			return delivery
+			return admit(ctx, s)
 		}
 		cfg.Upstream = func(context.Context, string) (gitcache.Remote, error) {
 			return gitcache.Remote{RepositoryID: 1, URL: f.Bare, DefaultBranch: "refs/heads/main"}, nil
@@ -63,7 +74,7 @@ func (p *releaseTagPush) receive(t *testing.T, forgeFirst string, ref gitport.Re
 		p.forgeThen = p.forgeTag()
 		return nil, nil
 	}
-	return delivery, c.Receive(t.Context(), r)
+	return c.Receive(t.Context(), r)
 }
 
 func (p *releaseTagPush) toForge(local string) error {
@@ -152,6 +163,30 @@ func TestReleaseTagDeliveryRefusalsMoveNothing(t *testing.T) {
 			}
 			if p.delivered != 0 || p.forgeTag() != before {
 				t.Fatal("refused delivery moved the forge tag or reached delivery")
+			}
+		})
+	}
+}
+
+func TestDeliveredTagIsNotRefusedPastTheAdmissionDeadline(t *testing.T) {
+	t.Parallel()
+	for _, deliver := range []bool{true, false} {
+		t.Run(map[bool]string{true: "delivered", false: "nothing delivered"}[deliver], func(t *testing.T) {
+			p := newReleaseTagPush(t)
+			err := p.gate(t, 2*time.Second, func(ctx context.Context, s *gitcache.ReceiveSource) error {
+				if deliver {
+					if err := s.DeliverTag(ctx, p.tag); err != nil {
+						return err
+					}
+				}
+				<-ctx.Done()
+				return nil
+			})
+			if deliver && (err != nil || p.delivered != 1 || p.forgeThen != p.tag.ObjectSHA) {
+				t.Fatal("a delivered tag was refused at the deadline, spending its version", err, p.output.String())
+			}
+			if !deliver && (err == nil || p.delivered != 0) {
+				t.Fatal("a late approval without delivery passed the deadline", err)
 			}
 		})
 	}

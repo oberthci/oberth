@@ -42,6 +42,8 @@ func (e *PushRefusal) Unwrap() []error {
 }
 
 // Gate checks every pushed ref against quarantine before any ref moves.
+// Delivering the release tag is its last step: once the tag is on the forge,
+// the gate passes, since a refusal then would spend the version with no run.
 func (s *Submitter) Gate(ctx context.Context, r Receive) (PushResult, error) {
 	if r.ID == "" || r.Source == nil || len(r.Updates) == 0 {
 		return PushResult{}, refusal("request", nil)
@@ -53,22 +55,30 @@ func (s *Submitter) Gate(ctx context.Context, r Receive) (PushResult, error) {
 	if err == nil {
 		tag, err = releaseTag(a.Runs)
 	}
-	if err == nil && tag != nil {
-		err = deliverReleaseTag(ctx, r.Forge, *tag)
-	}
 	if ctx.Err() != nil {
 		return PushResult{}, &PushRefusal{Problems: []*Refusal{refusal("timeout", nil)}}
 	}
 	if err != nil {
 		return PushResult{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closing {
+	if s.isClosing() {
 		return PushResult{}, refusal("closed", nil)
 	}
+	if tag != nil {
+		if err = deliverReleaseTag(ctx, r.Forge, *tag); err != nil {
+			return PushResult{}, err
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.receives[r.ID] = a
 	return cloneResult(a.Result), nil
+}
+
+func (s *Submitter) isClosing() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closing
 }
 func (s *Submitter) preparePush(ctx context.Context, r Receive, replay bool) (acceptance, error) {
 	a := acceptance{BatchAcceptance: stateport.BatchAcceptance{ReceiveID: r.ID}}

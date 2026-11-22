@@ -209,6 +209,7 @@ func flowMessages() map[string][2]string {
 		"cursor":             {"Audit cursor did not advance.", "Report the server response; the audit tail has stopped."},
 		"release":            {"Release run or publication failed.", "Read the release run logs and publication receipt before trying again."},
 		"release_used":       {"The release run failed; its version is now used.", "Read the run logs, fix the cause, then release the next version."},
+		"release_unrun":      {"The release tag already exists, but it has no release run.", "Its version is used; release the next version."},
 		"release_head":       {"The checkout is not at the default-branch head.", "Check out the tested default-branch commit, then retry the release."},
 		"release_tag":        {"The release tag points to another commit.", "Use a new tag; an existing release tag is never moved."},
 		"release_checks":     {"Release checks refused the proposed tag.", "Apply the printed remedies, then rerun the same oberth release command."},

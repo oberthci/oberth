@@ -122,10 +122,14 @@ func (c *Cache) forgeHolds(ctx context.Context, p string, remote Remote, r model
 // pushIntent pushes the exact object fenced on its predecessor, then reads the
 // forge back; an empty predecessor means the ref must not exist yet.
 func (c *Cache) pushIntent(ctx context.Context, p string, remote Remote, r model.Publication) error {
+	output, pushErr := c.pushFenced(ctx, p, remote, r)
+	return c.confirmPublication(ctx, publicationAttempt{store: p, remote: remote, intent: r, output: output, err: pushErr})
+}
+
+func (c *Cache) pushFenced(ctx context.Context, p string, remote Remote, r model.Publication) ([]byte, error) {
 	args := []string{"push", "--progress", "--porcelain", "--force-with-lease=" + r.Ref + ":" + *r.PreviousSHA,
 		"--", remote.URL, r.ObjectSHA + ":" + r.Ref}
-	output, pushErr := c.capture(ctx, command{dir: p, args: args, remote: &remote}, 2<<20)
-	return c.confirmPublication(ctx, publicationAttempt{store: p, remote: remote, intent: r, output: output, err: pushErr})
+	return c.capture(ctx, command{dir: p, args: args, remote: &remote}, 2<<20)
 }
 
 type publicationAttempt struct {

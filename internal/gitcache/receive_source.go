@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/oberthci/oberth/internal/gitport"
 	"github.com/oberthci/oberth/internal/sourcecontract"
@@ -19,6 +20,8 @@ type ReceiveSource struct {
 	base, pushed *Cache
 	ctx          context.Context
 	event        ReceiveEvent
+	// delivered records a release tag this receive put on the forge.
+	delivered atomic.Bool
 }
 
 func (

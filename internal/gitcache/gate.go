@@ -203,6 +203,10 @@ func (
 		session.passed()
 	}
 	err := c.awaitAdmission(ctx, event, source)
+	if err == nil && source.delivered.Load() {
+		// A release tag is on the forge: refusing now would spend its version with no run.
+		return nil
+	}
 	if ctx.Err() != nil {
 		return &gateError{code: "unavailable", cause: context.Cause(ctx)}
 	}
@@ -217,7 +221,9 @@ func (
 }
 
 // Composition supplies the admission duration. Enforce its cancellation even when a
-// broken callback ignores it; a late result cannot approve or retain the source.
+// broken callback ignores it; a late result cannot approve or retain the source,
+// unless the callback already delivered a release tag: it is then awaited, since
+// a refusal would spend the tag's version with no run.
 func (c *Cache) awaitAdmission(ctx context.Context, event ReceiveEvent, source *ReceiveSource) error {
 	done := make(chan error, 1)
 	go func() { done <- c.config.PreReceive(ctx, event, source) }()
@@ -225,6 +231,13 @@ func (c *Cache) awaitAdmission(ctx context.Context, event ReceiveEvent, source *
 	case err := <-done:
 		return err
 	case <-ctx.Done():
+		if source.delivered.Load() {
+			// Past its forge write the callback only records its approval.
+			if err := <-done; err == nil {
+				return nil
+			}
+			return context.Cause(ctx)
+		}
 		select {
 		case <-done:
 		default:

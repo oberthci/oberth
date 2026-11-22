@@ -14,7 +14,8 @@ import (
 // exact object this receive creates at that tag, peeled to the exact commit,
 // through the installation's forge identity. A tag already on the forge at
 // that object counts as delivered; a tag there at any other object is never
-// moved. A delivered tag stays whatever the run does next.
+// moved. Once delivered, the receive's admission no longer refuses on its
+// deadline. A delivered tag stays whatever the run does next.
 func (s *ReceiveSource) DeliverTag(ctx context.Context, ref gitport.Ref) error {
 	ctx, cancel := s.scope(ctx)
 	defer cancel()
@@ -22,7 +23,11 @@ func (s *ReceiveSource) DeliverTag(ctx context.Context, ref gitport.Ref) error {
 		return refuse("immutable tag")
 	}
 	r := model.Publication{ID: "receive:" + s.event.ID, Actor: s.event.Actor, Repo: s.event.Repository, Ref: ref.Name, ObjectSHA: ref.ObjectSHA, CommitSHA: &ref.CommitSHA, PreviousSHA: new("")}
-	return s.pushed.deliverTag(ctx, r)
+	if err := s.pushed.deliverTag(ctx, r); err != nil {
+		return err
+	}
+	s.delivered.Store(true)
+	return nil
 }
 
 func (c *Cache) deliverTag(ctx context.Context, r model.Publication) error {
@@ -51,5 +56,10 @@ func (c *Cache) deliverTag(ctx context.Context, r model.Publication) error {
 	if peeled.CommitSHA != *r.CommitSHA {
 		return &RefusalError{reason: reasonPushCommit, remedy: remedyPushCommit}
 	}
-	return c.pushIntent(ctx, p, remote, r)
+	output, err := c.pushFenced(ctx, p, remote, r)
+	if err == nil {
+		// The forge accepted the create-only push; a read-back adds no certainty.
+		return nil
+	}
+	return c.confirmPublication(ctx, publicationAttempt{store: p, remote: remote, intent: r, output: output, err: err})
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/pushretry"
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
@@ -110,6 +111,12 @@ func release(s *flowSession, args []string) error {
 		return err
 	}
 	run, err := s.waitFor(apicontract.WaitArgs{Repo: repo, Ref: "refs/tags/" + tag, Trigger: string(model.TriggerTag)})
+	if publicerr.Classify(err).Code() == publicerr.NotFound {
+		// The push changed nothing: the tag came from the forge, so its version is spent.
+		problem := flowError("release_unrun", err)
+		problem.Context = []string{"Used version: " + tag}
+		return problem
+	}
 	if err != nil {
 		return err
 	}

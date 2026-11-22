@@ -22,7 +22,7 @@ func messages() map[string]message {
 		"release_rerun":   {"release rerun facts differ", "Rerun the original release with its unchanged tag, commit, workflow and parameters."},
 		"release_used":    {"release version is already used", "Release the next version; a release tag on the forge is never moved."},
 		"release_count":   {"push carries more than one release tag", "Push one release tag at a time."},
-		"tag_delivery":    {"release tag not delivered to the forge", "Fix the forge problem, then push the tag again; no run was started."},
+		"tag_delivery":    {"release tag not delivered to the forge", "Check the forge: if the tag is there, this version is used; release the next one."},
 		"assist":          {"assist unavailable", "assist is not available in this version; running without it"},
 		"push":            {"push refused; nothing ran", "Fix every reported finding, then push again."},
 		"config":          {"submission wiring is incomplete", "Configure every submission dependency before serving."},
