@@ -77,6 +77,10 @@ func Run(ctx context.Context, c Config, streams IO) error {
 }
 func stream(ctx context.Context, client *ssh.Client, command string, streams IO) error {
 	session, err := client.NewSession()
+	var opening *ssh.OpenChannelError
+	if errors.As(err, &opening) {
+		return interrupted(ctx, command, refused)
+	}
 	if err != nil {
 		return interrupted(ctx, command, lost)
 	}
@@ -88,8 +92,10 @@ func stream(ctx context.Context, client *ssh.Client, command string, streams IO)
 	if err != nil {
 		return transportError(ctx)
 	}
-	if err = session.Start(command); err != nil {
+	if err = session.Start(command); errors.Is(err, io.EOF) {
 		return interrupted(ctx, command, lost)
+	} else if err != nil {
+		return interrupted(ctx, command, refused)
 	}
 	done := make(chan struct{})
 	go func() { _, _ = io.Copy(pipe, input); _ = pipe.Close(); close(done) }()
@@ -129,10 +135,12 @@ func handshakeError(ctx context.Context, command string, err error) error {
 // The pins were read for this exact address, so a dial that fails reached no
 // server rather than a wrong one. A handshake that ends without a key or
 // identity refusal cannot be told from a server going away; its remedy says
-// both. A loss after the session began is the server going away.
+// both. A server that refuses the session or the Git command answered. A
+// loss after the session began is the server going away.
 const (
 	unanswered = iota
 	ended
+	refused
 	lost
 )
 
@@ -149,7 +157,9 @@ func interrupted(ctx context.Context, command string, stage int) error {
 	case unanswered:
 		return publicerr.New(publicerr.Unavailable, ReasonUnanswered, again, nil)
 	case ended:
-		return publicerr.New(publicerr.Unavailable, "The Git server ended the connection before Git began.", verb+" again in a moment; if it repeats, ask the administrator to check this identity.", nil)
+		return publicerr.New(publicerr.Unavailable, ReasonEnded, verb+" again in a moment; if it repeats, ask the administrator to check this identity.", nil)
+	case refused:
+		return publicerr.New(publicerr.Unavailable, ReasonRefused, verb+" again in a moment; if it repeats, ask the administrator to check this identity.", nil)
 	}
 	return publicerr.New(publicerr.Unavailable, ReasonLost, again, nil)
 }

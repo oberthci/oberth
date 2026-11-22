@@ -56,10 +56,15 @@ func (c *Cache) lateForge(p string, r Remote, err error) error {
 
 // trustedCache reports whether the cache at p was refreshed from r's forge
 // (its address and catalogue ID) within cacheTrustWindow, so its default head
-// may decide without the forge. A refresh from another address never counts.
+// may decide without the forge. A refresh from another address never counts,
+// nor one recorded after now (a clock that stepped back).
 func (c *Cache) trustedCache(p string, r Remote) bool {
 	last := c.lastRefresh(p)
-	return !last.IsZero() && c.config.Now().Sub(last) <= cacheTrustWindow && refreshedFrom(p) == forgeIdentity(r)
+	if last.IsZero() || refreshedFrom(p) != forgeIdentity(r) {
+		return false
+	}
+	age := c.config.Now().Sub(last)
+	return age >= 0 && age <= cacheTrustWindow
 }
 
 // forgeRefusal refuses a head read naming repo's forge. A forge that answered

@@ -36,6 +36,8 @@ func TestInterruptedConnectionsSayToTryAgain(t *testing.T) {
 		{"server did not answer", "git-receive-pack 'r.git'", "The Git server did not answer.", "Push again in a moment; the server may be restarting.", nil, nil},
 		{"handshake ended", "git-upload-pack 'r.git'", "The Git server ended the connection before Git began.", "Fetch again in a moment; if it repeats, ask the administrator to check this identity.", func(c net.Conn) { _ = c.Close() }, nil},
 		{"went away mid-transfer", "git-receive-pack 'r.git'", "The Git server went away during the transfer.", "Push again in a moment; the server may be restarting.", serveThenDrop(pinned, true), nil},
+		{"session refused", "git-upload-pack 'r.git'", ReasonRefused, "Fetch again in a moment; if it repeats, ask the administrator to check this identity.", serveRefusing(pinned, true), nil},
+		{"command refused", "git-upload-pack 'r.git'", ReasonRefused, "Fetch again in a moment; if it repeats, ask the administrator to check this identity.", serveRefusing(pinned, false), nil},
 		{"host key differs", "git-receive-pack 'r.git'", HostKeyMismatchReason, "Verify the server fingerprint and correct the pinned host key.", serveThenDrop(other, true), nil},
 		{"identity refused", "git-receive-pack 'r.git'", "Git SSH identity was refused.", "Use an active identity; ask the administrator to check revocation and access.", serveThenDrop(pinned, false), nil},
 	} {
@@ -142,6 +144,34 @@ func shimConfig(t *testing.T, host ssh.PublicKey, command string) Config {
 
 // serveThenDrop completes the handshake with key and, when admit is true,
 // accepts one session and its exec request, then drops the connection.
+// serveRefusing admits the identity, then refuses the session channel, or
+// accepts it and refuses the Git command.
+func serveRefusing(key ssh.Signer, session bool) func(net.Conn) {
+	return func(c net.Conn) {
+		defer c.Close()
+		cfg := &ssh.ServerConfig{PublicKeyCallback: func(ssh.ConnMetadata, ssh.PublicKey) (*ssh.Permissions, error) { return nil, nil }}
+		cfg.AddHostKey(key)
+		conn, channels, requests, err := ssh.NewServerConn(c, cfg)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		go ssh.DiscardRequests(requests)
+		incoming, open := <-channels
+		if !open {
+			return
+		}
+		if session {
+			_ = incoming.Reject(ssh.Prohibited, "no sessions")
+		} else if channel, channelRequests, err := incoming.Accept(); err == nil {
+			request := <-channelRequests
+			_ = request.Reply(false, nil)
+			defer channel.Close()
+		}
+		_ = conn.Wait()
+	}
+}
+
 func serveThenDrop(key ssh.Signer, admit bool) func(net.Conn) {
 	return func(c net.Conn) {
 		defer c.Close()

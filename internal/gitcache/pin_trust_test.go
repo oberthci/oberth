@@ -13,12 +13,16 @@ import (
 
 type trustCase struct {
 	name, diagnostic string
-	stale            bool
+	// age moves the clock after the start, which leaves the last refresh
+	// RefreshInterval old.
+	age time.Duration
 	// side pins a commit of another branch, which the cached default head
 	// does not reach.
 	side    bool
 	refusal string
 }
+
+const staleAge = gitcache.CacheTrustWindow
 
 // trustCases: the cache decides only for a slow or unreachable forge and a
 // cache refreshed from it within the trust window; a refused key or identity
@@ -26,9 +30,17 @@ type trustCase struct {
 func trustCases() []trustCase {
 	return []trustCase{
 		{name: "fresh cache, silent forge"},
-		{name: "stale cache, silent forge", stale: true, refusal: gitcache.ReasonForgeSilent},
+		{name: "stale cache, silent forge", age: staleAge, refusal: gitcache.ReasonForgeSilent},
+		{name: "refreshed exactly the window ago", age: gitcache.CacheTrustWindow - gitcache.RefreshInterval},
+		{name: "refreshed just over the window ago", age: gitcache.CacheTrustWindow - gitcache.RefreshInterval + time.Nanosecond, refusal: gitcache.ReasonForgeSilent},
+		{name: "refresh recorded after now", age: -2 * gitcache.RefreshInterval, refusal: gitcache.ReasonForgeSilent},
 		{name: "fresh cache, no server answered", diagnostic: gitssh.ReasonUnanswered},
-		{name: "stale cache, no server answered", diagnostic: gitssh.ReasonUnanswered, stale: true, refusal: gitcache.ReasonForgeSilent},
+		{name: "stale cache, no server answered", diagnostic: gitssh.ReasonUnanswered, age: staleAge, refusal: gitcache.ReasonForgeSilent},
+		{name: "fresh cache, server went away", diagnostic: gitssh.ReasonLost},
+		{name: "fresh cache, transport unavailable", diagnostic: gitssh.ReasonTransport},
+		{name: "fresh cache, ended before Git began", diagnostic: gitssh.ReasonEnded, refusal: gitcache.ReasonForgeRefused},
+		{name: "fresh cache, command refused", diagnostic: gitssh.ReasonRefused, refusal: gitcache.ReasonForgeRefused},
+		{name: "fresh cache, unknown line", diagnostic: "fatal: unexpected answer from the remote", refusal: gitcache.ReasonForgeRefused},
 		{name: "fresh cache, identity refused", diagnostic: "Git SSH identity was refused.", refusal: gitcache.ReasonForgeRefused},
 		{name: "fresh cache, host key mismatch", diagnostic: gitssh.HostKeyMismatchReason, refusal: gitcache.ReasonForgeRefused},
 		{name: "fresh cache, silent forge, commit the cached head does not reach", side: true, refusal: gitcache.ReasonForgeSilent},
@@ -51,11 +63,9 @@ func (x *pinFixture) prepare(t *testing.T, tc trustCase) string {
 	if tc.diagnostic != "" {
 		x.forge.failWith(t, tc.diagnostic)
 	}
-	if tc.stale {
-		x.mu.Lock()
-		x.now = x.now.Add(gitcache.CacheTrustWindow)
-		x.mu.Unlock()
-	}
+	x.mu.Lock()
+	x.now = x.now.Add(tc.age)
+	x.mu.Unlock()
 	return pinned
 }
 
