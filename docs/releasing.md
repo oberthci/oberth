@@ -144,6 +144,8 @@ publishes it without making it latest; it prints the version, file count and des
 Clean verification prints “Release verified.” and writes the receipt. Finalize prints where `latest`
 points; if it stays newer, nothing moved and exit 0 is intentional. Keep signed bytes for identical
 retries; other bytes for a published asset refuse. Retain the receipt and build evidence.
+Without the release tool, [publish-github-release.sh](../hack/publish-github-release.sh) uploads the
+same way and moves latest only forward (`--dry-run` prints its plan); verify the directory first.
 After confirming encrypted offline key custody, delete both plaintext copies:
 
 ```sh
