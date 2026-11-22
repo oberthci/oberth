@@ -136,6 +136,24 @@ func TestFailedPromotionCreatesNoCIIssue(t *testing.T) {
 	}
 }
 
+// A fast-forward promotion passes on its source run and starts no promotion
+// run, so the default branch issue stays as the last default branch run left it.
+//
+// Covers: REQ-C2-018
+func TestFastForwardPromotionLeavesDefaultBranchIssue(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	red := seedCI(f, "abcdef01000000000000000000000031", "refs/heads/main", model.TriggerBranch)
+	finishCI(t, f, red.ID, stepmodel.RunFailed)
+	source := f.seed(stepmodel.RunPassed)
+	if out := promote(t, f); out.RunID != source.ID {
+		t.Fatal("fast-forward promotion started a promotion run", out)
+	}
+	if rows := ciIssues(t, f); len(rows) != 1 || rows[0].State != model.IssueOpen || rows[0].CIWorkID != red.ID {
+		t.Fatal("fast-forward promotion changed the default branch issue", rows)
+	}
+}
+
 // promotionRun promotes the seeded passing topic run onto a merged result,
 // which starts a promotion run of the default branch.
 func promotionRun(t *testing.T, f *fixture) stateport.Run {

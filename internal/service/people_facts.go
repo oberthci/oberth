@@ -23,7 +23,9 @@ func (s *Service) peopleAction(a actor.Actor, kind, reason, repo string) statepo
 // ciIssueEvidence reports whether a finished run moves CI issues: a schedule
 // run, a push run of the repository's default branch, or a passing promotion
 // run, which is what the default branch becomes. A failed promotion leaves the
-// default branch where it was and its promoter sees the failure directly.
+// default branch where it was and its promoter sees the failure directly. A
+// fast-forward promotion starts no promotion run, so it closes nothing: the
+// next default-branch run or schedule does, or the administrator.
 // Other branches and tags, releases included, create, update and close no CI
 // issue.
 func (s *Service) ciIssueEvidence(ctx context.Context, r stateport.Run, o FinishedRun) (bool, error) {
