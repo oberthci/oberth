@@ -13,6 +13,8 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	nativefake "github.com/oberthci/oberth/internal/argojob/fake"
 	"github.com/oberthci/oberth/internal/gitport"
+	"github.com/oberthci/oberth/internal/stateport"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,6 +69,7 @@ type admissionCluster struct {
 	source    *fixture
 	submitter *app.Submitter
 	accounts  *slowAccounts
+	secrets   bool
 }
 
 // slowAccounts holds reads outside the fake cluster's own lock, as a slow
@@ -96,21 +99,23 @@ func newAdmissionCluster(t *testing.T, budget int) *admissionCluster {
 	})
 	c.kube.PrependReactor("*", "*", c.budget.react)
 	c.accounts = &slowAccounts{Accounts: c.kube.CoreV1().ServiceAccounts("runs")}
-	executor := argojob.New(argojob.Config{Accounts: c.accounts, Runs: f.runs.Store, Progress: f.runs.Store, Workflows: &nativefake.Workflows{}, Now: landedClock})
+	executor := argojob.New(argojob.Config{Accounts: c.accounts, SecretStore: scheduleStore(t), Runs: f.runs.Store, Progress: f.runs.Store, Workflows: &nativefake.Workflows{}, Now: landedClock})
 	authority, err := app.NewAuthority(app.AuthorityConfig{Namespace: "runs", ServerNamespace: "oberth", ArgoNamespace: "argo", ImagePrefixes: []string{"oberth.ci/"}, Grants: f.runs.Grants, EnsureAccount: executor.EnsureAccount,
 		Templates: func(context.Context, string) (*wf.WorkflowTemplate, error) { return nil, errors.New("unexpected template read") }})
 	landedOK(t, err)
 	f.authority.LoadFunc = authority.Load
 	deps := f.d
 	deps.Authority, deps.Native = f.authority, executor
+	deps.Preparation.HelperImage = "oberth.ci/oberth@sha256:" + strings.Repeat("b", 64)
 	c.submitter, err = app.New(deps)
 	landedOK(t, err)
 	t.Cleanup(func() { landedOK(t, c.submitter.Close(context.Background())) })
 	return c
 }
 
-// wideWorkflow runs n container steps one after another.
-func wideWorkflow(n int) *wf.Workflow {
+// wideWorkflow runs n container steps one after another; with secrets each
+// step reads its own granted secret path and so runs as its own account.
+func wideWorkflow(n int, secrets bool) *wf.Workflow {
 	w := workflow()
 	w.Spec.Entrypoint = "main"
 	main := wf.Template{Name: "main"}
@@ -118,14 +123,31 @@ func wideWorkflow(n int) *wf.Workflow {
 	for i := range n {
 		name := fmt.Sprintf("step-%d", i)
 		main.Steps = append(main.Steps, wf.ParallelSteps{Steps: []wf.WorkflowStep{{Name: name, Template: name}}})
-		w.Spec.Templates = append(w.Spec.Templates, wf.Template{Name: name, Container: &corev1.Container{Image: "oberth.ci/build:1", Command: []string{"true"}}})
+		step := wf.Template{Name: name, Container: &corev1.Container{Image: "oberth.ci/build:1", Command: []string{"true"}}}
+		if secrets {
+			step.Metadata.Annotations = map[string]string{argoworkflow.SecretPathsAnnotation: "ci/" + name}
+			step.Container.Command = []string{"oberth", "secretstore", "exec", "--", "true"}
+		}
+		w.Spec.Templates = append(w.Spec.Templates, step)
 	}
 	w.Spec.Templates = append(w.Spec.Templates, main)
 	return w
 }
 
+// grantSecrets grants each of n steps its own secret path.
+func (c *admissionCluster) grantSecrets(t *testing.T, n int) {
+	t.Helper()
+	c.secrets = true
+	for i := range n {
+		step := fmt.Sprintf("step-%d", i)
+		grant := stateport.GrantChange{Kind: stateport.GrantStorePath, Repository: request().Repository, File: ".oberth/build.yaml", Step: step, Path: "ci/" + step}
+		_, err := c.source.runs.ChangeGrant(t.Context(), stateport.Action{Actor: request().Actor.Identity}, grant)
+		landedOK(t, err)
+	}
+}
+
 func (c *admissionCluster) push(ctx context.Context, repository, id string, steps int) error {
-	source, raw := c.source.source, document(wideWorkflow(steps))
+	source, raw := c.source.source, document(wideWorkflow(steps, c.secrets))
 	source.Read = func(_ context.Context, _ gitport.Revision, path string) (gitport.File, error) {
 		return gitport.File{Path: path, Blob: strings.Repeat("c", 40), Mode: 0100644, Bytes: raw}, nil
 	}
@@ -150,6 +172,22 @@ func TestAdmissionRequestsDoNotGrowWithSteps(t *testing.T) {
 	}
 	if total(counts[40][0]) != total(counts[1][0]) || total(counts[40][1]) != total(counts[1][1]) {
 		t.Fatal("admission requests grow with steps", counts)
+	}
+}
+
+// Steps that each run as their own account cost two reads per account (ensure
+// and verify) and one create on the first push only: 82 reads for 40 such steps.
+func TestOwnAccountStepsReadEachAccountTwice(t *testing.T) {
+	t.Parallel()
+	c := newAdmissionCluster(t, 1000)
+	c.grantSecrets(t, 40)
+	landedOK(t, c.push(t.Context(), request().Repository, "first", 40))
+	first := c.budget.take()
+	landedOK(t, c.push(t.Context(), request().Repository, "second", 40))
+	second := c.budget.take()
+	t.Logf("40 own-account steps: first push %v, second push %v", first, second)
+	if first["create"] != 41 || second["create"] != 0 || second["get"] != 2*41 || total(second) != 2*41 {
+		t.Fatal("own-account steps cost more than two reads per account", first, second)
 	}
 }
 
