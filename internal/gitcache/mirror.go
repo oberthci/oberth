@@ -13,7 +13,7 @@ func refCountError() error {
 }
 
 func (c *Cache) tracking(ctx context.Context, p string) (map[string]string, error) {
-	return c.trackingAt(ctx, p, "refs/oberth/upstream/", reconciliationRefs)
+	return c.trackingAt(ctx, p, trackingPrefix, reconciliationRefs)
 }
 func (c *Cache) trackingAt(ctx context.Context, p, prefix string, limit int) (map[string]string, error) {
 	data, err := c.capture(
@@ -135,8 +135,8 @@ func (c *Cache) seedTracking(ctx context.Context, p, repo string) error {
 		var names []string
 		var tx strings.Builder
 		for _, ref := range batch {
-			names = append(names, "refs/oberth/upstream/"+strings.TrimPrefix(ref.Name, "refs/"))
-			fmt.Fprintf(&tx, "update refs/oberth/upstream/%s %s\n", strings.TrimPrefix(ref.Name, "refs/"), ref.ObjectSHA)
+			names = append(names, trackingName(ref.Name))
+			fmt.Fprintf(&tx, "update %s %s\n", trackingName(ref.Name), ref.ObjectSHA)
 		}
 		if err = c.run(
 			ctx,

@@ -33,7 +33,6 @@ const (
 	reasonForgeSilent      = "forge did not answer in time"
 	remedyForgeSilent      = "Retry in a minute; the cached head cannot decide this without the forge."
 	reasonForgeRefused     = "forge refused the head read"
-	remedyForgeRefused     = "Check the forge address, server key and host pins, then retry."
 	reasonOptionCount      = "push has more than two options"
 	reasonTagMoved         = "tag moved since admission"
 	reasonTagTarget        = "release tag must point at its commit"

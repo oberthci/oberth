@@ -123,9 +123,12 @@ func (c *Cache) trackedHead(ctx context.Context, p, branch string) (gitport.Ref,
 	return head, err
 }
 
+// trackingPrefix holds the last upstream value of every public ref.
+const trackingPrefix = "refs/oberth/upstream/"
+
 // trackingName is the ref that holds public ref name's last upstream value.
 func trackingName(name string) string {
-	return "refs/oberth/upstream/" + strings.TrimPrefix(name, "refs/")
+	return trackingPrefix + strings.TrimPrefix(name, "refs/")
 }
 
 // reaches reports whether commit is in the cache and reachable from head.

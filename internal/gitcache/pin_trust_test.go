@@ -7,6 +7,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitcache/gittest"
+	"github.com/oberthci/oberth/internal/gitport"
 	"github.com/oberthci/oberth/internal/gitssh"
 	"github.com/oberthci/oberth/internal/publicerr"
 )
@@ -119,7 +120,7 @@ func TestDefaultHeadReadFollowsThePinRule(t *testing.T) {
 func TestForgeRefusalMessagesFitTheirBounds(t *testing.T) {
 	for _, m := range [][2]string{
 		{gitcache.ReasonForgeSilent, gitcache.RemedyForgeSilent},
-		{gitcache.ReasonForgeRefused, gitcache.RemedyForgeRefused},
+		{gitcache.ReasonForgeRefused, gitport.ForgeOperatorRemedy},
 	} {
 		if publicerr.CheckMessage(m[0], 40) != nil || publicerr.CheckMessage(m[1], 120) != nil {
 			t.Fatal("message over its bound", m)

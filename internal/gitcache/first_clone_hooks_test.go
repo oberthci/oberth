@@ -19,7 +19,6 @@ const (
 	ReasonForgeSilent  = reasonForgeSilent
 	RemedyForgeSilent  = remedyForgeSilent
 	ReasonForgeRefused = reasonForgeRefused
-	RemedyForgeRefused = remedyForgeRefused
 )
 
 // WaitBackground waits for running first clones and refresh fetches,

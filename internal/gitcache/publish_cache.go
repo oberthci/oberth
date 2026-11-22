@@ -2,7 +2,6 @@ package gitcache
 
 import (
 	"context"
-	"strings"
 
 	"github.com/oberthci/oberth/internal/gitport"
 	"github.com/oberthci/oberth/internal/model"
@@ -47,7 +46,7 @@ func (c *Cache) recordPublication(ctx context.Context, p string, r model.Publica
 	if err = markReconciliation(p, updates); err != nil {
 		return err
 	}
-	native := append([]RefUpdate{{Ref: "refs/oberth/upstream/" + strings.TrimPrefix(r.Ref, "refs/"), NewSHA: r.ObjectSHA}}, updates...)
+	native := append([]RefUpdate{{Ref: trackingName(r.Ref), NewSHA: r.ObjectSHA}}, updates...)
 	if err = c.refTransaction(ctx, p, native); err != nil {
 		return err
 	}

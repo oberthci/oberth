@@ -46,7 +46,7 @@ func forgeSlow(err error) bool {
 // the cache may decide; otherwise the refusal that names r's repository.
 func (c *Cache) lateForge(p string, r Remote, err error) error {
 	if !forgeSlow(err) {
-		return forgeRefusal(reasonForgeRefused, remedyForgeRefused, r.repository, err)
+		return forgeRefusal(reasonForgeRefused, gitport.ForgeOperatorRemedy, r.repository, err)
 	}
 	if !c.trustedCache(p, r) {
 		return forgeRefusal(reasonForgeSilent, remedyForgeSilent, r.repository, err)
