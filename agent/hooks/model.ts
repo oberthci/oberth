@@ -27,12 +27,30 @@ export function decodeRun(value: unknown): Run {
   return run
 }
 
+const UNITS: [number, string][] = [[86400, 'd'], [3600, 'h'], [60, 'm'], [1, 's']]
+
+// 42s, 3m10s, 2h05m, 1d04h with two units; 42s, 3m, 2h, 1d with one.
+export function span(ms: number, units: 1 | 2): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000))
+  const index = UNITS.findIndex(([size]) => seconds >= size)
+  if (index < 0) return '0s'
+  const [size, unit] = UNITS[index]!
+  const head = `${Math.floor(seconds / size)}${unit}`
+  const below = UNITS[index + 1]
+  if (units === 1 || !below) return head
+  return head + String(Math.floor(seconds % size / below[0])).padStart(2, '0') + below[1]
+}
+
 export function duration(run: Run, now: number): string {
   const start = Date.parse(run.started_at ?? run.created_at)
   const end = run.finished_at ? Date.parse(run.finished_at) : now
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '—'
-  const minutes = Math.round((end - start) / 60000)
-  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`
+  return span(end - start, 2)
+}
+
+export function age(run: Run, now: number): string {
+  const created = Date.parse(run.created_at)
+  return Number.isFinite(created) ? span(now - created, 1) : '—'
 }
 
 export function shortID(id: string, runs: Run[]): string {
@@ -52,10 +70,14 @@ export function shown(value: unknown): number | undefined {
   return typeof count === 'number' && Number.isInteger(count) && count >= 0 && count <= 10 ? count : undefined
 }
 
+// A finished run keeps the box up this long, so its row is seen turning passed or failed.
+export const WINDOW_MS = 600000
+const lately = (run: Run, now: number) => active(run) || now - Date.parse(run.finished_at ?? '') < WINDOW_MS
+
 export function visible(state: Snapshot, count: number): Run[] {
   if (!state.reachable) return []
   const pins = state.pins.map(pin => pin.run)
-  if (![...state.recent, ...pins].some(active)) return []
+  if (![...state.recent, ...pins].some(run => lately(run, state.now))) return []
   const priority = [...pins.filter(active), ...state.recent, ...pins]
   return priority.filter((run, index) => priority.findIndex(row => row.id === run.id) === index).slice(0, count)
 }
@@ -63,30 +85,41 @@ export function visible(state: Snapshot, count: number): Run[] {
 export const failedStep = (run: Run) => run.status === 'failed' ? clean(run.failure?.failed_step_name ?? '') : ''
 export const outcome = (run: Run) => `${run.id}: ${run.status}${failedStep(run) ? `; step ${failedStep(run)}` : ''}`
 
-function columns(cells: string[][], gap: number): string[] {
+const HEADER = ['RUN', 'REPO', 'REF', 'STATUS', 'STEPS', 'TIME', 'AGE']
+// Repository and ref give way, wider first, down to this many cells each.
+const NARROWEST = 4
+const shortRepo = (repo: string) => repo.slice(repo.lastIndexOf('/') + 1) || repo
+const shortRef = (ref: string) => ref.replace(/^refs\/(?:heads|tags)\//, '') || ref
+const cut = (text: string, width: number) => text.length <= width ? text : text.slice(0, Math.max(0, width - 1)) + '…'
+
+// Aligned single lines of at most width cells: repository and ref shrink first, then the line is cut.
+function fit(cells: string[][], width: number): string[] {
   const widths = cells[0]!.map((_, index) => Math.max(...cells.map(row => row[index]!.length)))
-  return cells.map(row => row.map((cell, index) => cell.padEnd(widths[index]! + gap)).join('').trimEnd())
+  let over = widths.reduce((sum, size) => sum + size, widths.length - 1) - width
+  while (over > 0) {
+    const index = widths[1]! >= widths[2]! ? 1 : 2
+    if (widths[index]! <= NARROWEST) break
+    widths[index] = widths[index]! - 1
+    over--
+  }
+  return cells.map(row => cut(row.map((cell, index) => cut(cell, widths[index]!).padEnd(widths[index]!)).join(' ').trimEnd(), width))
 }
 
-export function boxRows(state: Snapshot, count: number): string[] {
+// The header and one line per run, shared by the box and /oberth-runs.
+export function rows(runs: Run[], now: number, width: number): string[] {
+  return fit([HEADER, ...runs.map(run => [
+    shortID(run.id, runs), shortRepo(run.repo), shortRef(run.ref), `${ICON[run.status]} ${run.status}`,
+    progress(run), duration(run, now), age(run, now),
+  ].map(clean))], width)
+}
+
+export function boxRows(state: Snapshot, count: number, width: number): string[] {
   const runs = visible(state, count)
-  if (!runs.length) return []
-  const known = [...state.recent, ...state.pins.map(pin => pin.run)]
-  return columns(runs.map(run => {
-    const step = failedStep(run)
-    const pinned = state.pins.some(pin => pin.run.id === run.id)
-    const end = duration(run, state.now) + (step ? ` [failed: ${step}]` : '') + (pinned ? ' ●' : '')
-    return [ICON[run.status], shortID(run.id, known), run.repo, run.ref, progress(run), end].map(clean)
-  }), 1)
+  return runs.length ? rows(runs, state.now, width) : []
 }
 
-export function table(runs: Run[], now: number): string {
-  if (!runs.length) return 'No runs.'
-  const header = ['RUN', 'REPO', 'REF', 'STATUS', 'STEPS', 'TIME', 'FAILED STEP', 'REASON']
-  const cells = [header, ...runs.map(run => [
-    run.id, run.repo, run.ref, `${ICON[run.status]} ${run.status}`, progress(run), duration(run, now), failedStep(run), run.display_reason,
-  ].map(clean))]
-  return columns(cells, 2).join('\n')
+export function table(runs: Run[], now: number, width: number): string {
+  return runs.length ? rows(runs, now, width).join('\n') : 'No runs.'
 }
 
 export function limit(value: unknown): number {

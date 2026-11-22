@@ -90,14 +90,14 @@ claude plugin configure oberth@oberthci --values-stdin <<'JSON'
 JSON
 ```
 Options take precedence; blank means unset. No profile hides the box. Use the verified
-executable, never a checkout file. The box shows up to `runs` runs (0 to 10; blank is three),
-none at 0, with progress and failed steps, refreshed every 15 seconds. `/oberth-runs [--limit=N]`
-shows the table; `/oberth-watch <id-or-prefix>` watches until the completion toast; the model
-uses the bridge's tools. Update with `claude plugin marketplace update oberthci`, then
-`claude plugin update oberth@oberthci` and a restart. Codex installs the skill through
-`agent/.codex-plugin/plugin.json` with `codex plugin marketplace add oberthci/oberth`, then
-`codex plugin add oberth@oberthci`. Register join's exact bridge line as in
-[agent connection](agents.md#connect-the-tools); this package has no above-prompt view for Codex.
+executable, never a checkout file. While a run is active or ended under 10 minutes ago, the box
+shows up to `runs` runs (0 to 10; blank is three; none at 0): id, repository, ref, status, steps,
+time, age. `/oberth-runs [--limit=N]` prints the same rows; `/oberth-watch <id-or-prefix>` watches
+until the completion toast; the model uses the bridge's tools. Update with
+`claude plugin marketplace update oberthci`, `claude plugin update oberth@oberthci` and a restart.
+Codex: `codex plugin marketplace add oberthci/oberth`, then `codex plugin add oberth@oberthci`
+(the skill from `agent/.codex-plugin/plugin.json`, no above-prompt view). Register join's exact
+bridge line as in [agent connection](agents.md#connect-the-tools).
 
 ## Upgrade
 

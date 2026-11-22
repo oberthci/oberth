@@ -3,8 +3,12 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Run, Snapshot } from '../types'
-import { decodeRun, progress, REFRESH_MS, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
+import { age, decodeRun, duration, progress, REFRESH_MS, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, span, table, visible, WINDOW_MS } from './model'
 import { SETUP } from './client'
+
+// The default run's row: id, short repository, short ref, then the status word beside its icon.
+const ROW = /^cad7d9ec oberth +v0\.24\.0 +▶ running /
+const HEADER = /^RUN +REPO +REF +STATUS +STEPS +TIME +AGE$/
 
 const options = { executable: '/verified/oberth', profile: 'joined-uplink' }
 const commandInput = { origin: { kind: 'plugin', name: 'oberth' },
@@ -92,7 +96,7 @@ test('unset executable refuses both commands without spawning', async ($, on) =>
   on('process.run', (_, e) => { calls.push(e); throw new Error('must not spawn') })
   const toasts: string[] = []
   on('ui.toast', (_, e) => { toasts.push(e.text); return { value: undefined } })
-  await text($, /▶ cad7d9ec/)
+  await text($, ROW)
   await startSession($, on)
   await startSession($, on)
   expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain('absolute verified path')
@@ -126,7 +130,7 @@ test('session start does not wait for the first refresh and slow reads coalesce'
   release()
   await refreshed
   await ui.unmount()
-  await text($, /▶ cad7d9ec/)
+  await text($, ROW)
 })
 
 test('relative executable refuses before process execution', { options: { executable: './oberth' } }, async ($, on) => {
@@ -177,37 +181,121 @@ for (const explicit of [true, false]) {
     })
 }
 
-test('one list per tick, whole fields, authoritative counts and disappearance', { options }, async ($, on) => {
+async function boxLines($: Engine, surface: 'terminal' | 'desktop' | 'mobile' = 'terminal', bodyColumns = 100) {
+  const ui = await $.ui.mount({ ...band, props: { ...band.props, bodyColumns }, surface })
+  const lines = (await ui.findAll({ type: 'Text' })).map(line => line.text)
+  await ui.unmount()
+  return lines
+}
+
+test('a finished run stays in place as passed for ten minutes, then the box goes', { options }, async ($, on) => {
   bottom(on)
   const clock = mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
   const calls: string[][] = []
-  const running = { ...run(), ref: 'refs/heads/a-ref-that-is-longer-than-any-fixed-column' }
-  let rows = [running, run('a4c399fd000000000000000000000000', 'passed')]
+  const older = { ...run('a4c399fd000000000000000000000000', 'passed'), created_at: '2026-11-17T22:00:00Z',
+    started_at: '2026-11-17T22:00:00Z', finished_at: '2026-11-17T23:00:00Z' }
+  let rows = [run(), older]
   on('process.run', (_, e) => {
     calls.push([...e.argv])
     return { value: { exitCode: 0, stdout: JSON.stringify({ runs: rows }), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   await startSession($, on)
   expect(calls[0]).toEqual(['/verified/oberth', 'run', 'list', '--limit', '3', '--json'])
-  await text($, /▶ cad7d9ec oberth refs\/heads\/a-ref-that-is-longer-than-any-fixed-column 6\/11 1m/)
+  for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
+    const lines = await boxLines($, surface)
+    expect(lines).toHaveLength(3)
+    expect(HEADER.test(lines[0]!)).toBe(true)
+    expect(lines[1]).toMatch(/^cad7d9ec oberth +v0\.24\.0 +▶ running +6\/11 +1m00s +1m$/)
+    expect(lines[2]).toMatch(/^a4c399fd oberth +v0\.24\.0 +✓ passed +6\/11 +1h00m +2h$/)
+  }
   await clock.advance(60000)
   expect(calls.length).toBe(5)
-  rows = rows.map(row => ({ ...row, status: 'passed' }))
+  rows = [{ ...run(), status: 'passed', passed: 11, finished_at: '2026-11-18T00:02:00Z' }, older]
   await clock.advance(15000)
-  const ui = await $.ui.mount({ ...band, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /cad7d9ec/ })).toBeUndefined()
-  await ui.unmount()
+  const passed = await boxLines($)
+  expect(passed[1]).toMatch(/^cad7d9ec oberth +v0\.24\.0 +✓ passed +11\/11 +2m00s +2m$/)
+  expect(passed[0]!.indexOf('STATUS')).toBe(passed[1]!.indexOf('✓'))
+  await clock.advance(WINDOW_MS - 30000)
+  expect((await boxLines($))[1]).toMatch(/^cad7d9ec .*✓ passed .* 11m$/)
+  await clock.advance(REFRESH_MS)
+  await noBox($)
   const before = calls.length
   await clock.advance(REFRESH_MS - 1)
   expect(calls.length - before).toBe(0)
   await clock.advance(1)
   expect(calls.length - before).toBe(1)
-  rows = [running]
+  rows = [run(), older]
   await clock.advance(REFRESH_MS)
-  expect(calls.length - before).toBe(2)
-  await text($, /▶ cad7d9ec/)
+  await text($, ROW)
+})
+
+test('two runs list newest first and keep their places as the newer one finishes', { options }, async ($, on) => {
+  bottom(on)
+  const clock = mock.clock(on, { now: Date.parse('2026-11-18T00:05:00Z') })
+  const newer = { ...run('e3d4dd29000000000000000000000000'), ref: 'refs/heads/smoke-2', created_at: '2026-11-18T00:04:00Z', started_at: '2026-11-18T00:04:00Z' }
+  const first = { ...run('f366936d000000000000000000000000'), ref: 'refs/heads/smoke-1' }
+  let rows = [newer, first]
+  cli(on, () => rows)
+  await startSession($, on)
+  expect((await boxLines($)).slice(1).map(line => line.slice(0, 8))).toEqual(['e3d4dd29', 'f366936d'])
+  rows = [{ ...newer, status: 'passed', finished_at: '2026-11-18T00:05:10Z' }, first]
   await clock.advance(REFRESH_MS)
-  expect(calls.length - before).toBe(3)
+  const lines = await boxLines($)
+  expect(lines[1]).toMatch(/^e3d4dd29 oberth +smoke-2 +✓ passed +6\/11 +1m10s +1m$/)
+  expect(lines[2]).toMatch(/^f366936d oberth +smoke-1 +▶ running +6\/11 +5m15s +5m$/)
+})
+
+test('rows stay single aligned lines within narrow widths', { options }, async ($, on) => {
+  bottom(on)
+  mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+  const rows = [
+    { ...run(), repo: 'origin/team/a-repository-name-that-exceeds-every-narrow-column', ref: 'refs/heads/topic' },
+    { ...run('aaaaaaaa000000000000000000000000', 'cancelled'), ref: 'refs/heads/a-branch-name-that-exceeds-every-narrow-column', finished_at: '2026-11-18T00:00:42Z' },
+  ]
+  cli(on, () => rows)
+  await startSession($, on)
+  const wide = await boxLines($, 'terminal', 200)
+  expect(wide[1]).toContain('a-repository-name-that-exceeds-every-narrow-column ')
+  expect(wide[2]).toContain(' 42s ')
+  for (const columns of [100, 64, 48, 40]) {
+    for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
+      const lines = await boxLines($, surface, columns)
+      expect(lines).toHaveLength(3)
+      for (const line of lines) expect(line.length).toBeLessThanOrEqual(columns - 4)
+      const status = lines[0]!.indexOf('STATUS')
+      expect(lines[1]!.indexOf('▶ running')).toBe(status)
+      expect(lines[2]!.indexOf('■ cancelled')).toBe(status)
+      if (columns < 100) expect(lines[1]!.slice(9, status)).toContain('…')
+    }
+  }
+  const tiny = await boxLines($, 'terminal', 24)
+  for (const line of tiny) expect(line.length).toBeLessThanOrEqual(20)
+  const ui = await $.ui.mount({ ...band, surface: 'terminal' })
+  for (const line of await ui.findAll({ type: 'Text' })) {
+    expect(line.props.wrap).toBe('truncate-end')
+    expect(line.props.maxLines).toBe(1)
+  }
+  await ui.unmount()
+})
+
+test('/oberth-runs prints the box header and rows', { options }, async ($, on) => {
+  bottom(on)
+  mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+  cli(on, () => [run(), run('aaaaaaaa000000000000000000000000')])
+  await startSession($, on)
+  const listed = await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })
+  expect(listed.text!.split('\n')).toEqual(await boxLines($, 'terminal', commandInput.presentation.columns + 4))
+  const narrow = await $.command.run({ ...commandInput, presentation: { isFullscreen: false, columns: 40 }, command: 'oberth-runs', args: '' })
+  for (const line of narrow.text!.split('\n')) expect(line.length).toBeLessThanOrEqual(40)
+})
+
+test('durations and ages read as seconds, then two units or one', async () => {
+  expect([0, 42000, 190000, 7500000, 100800000].map(ms => span(ms, 2))).toEqual(['0s', '42s', '3m10s', '2h05m', '1d04h'])
+  expect([0, 42000, 190000, 7500000, 100800000].map(ms => span(ms, 1))).toEqual(['0s', '42s', '3m', '2h', '1d'])
+  const item = { ...run(), finished_at: '2026-11-18T00:00:42Z' }
+  expect(duration(item, Date.parse('2026-11-18T01:00:00Z'))).toBe('42s')
+  expect(age(item, Date.parse('2026-11-18T01:00:00Z'))).toBe('1h')
+  expect(age(item, Date.parse('2026-11-17T23:00:00Z'))).toBe('0s')
 })
 
 test('idle and watched reads share the one interval', { options }, async ($, on) => {
@@ -253,7 +341,7 @@ test('pin missing from list stays visible, finishes with one toast and stops det
   expect((await $.command.run({ ...commandInput, command: 'oberth-watch', args: 'bbbbbbbb' })).text).toContain('Watching')
   await clock.advance(60000)
   expect(gets).toBe(5)
-  await text($, /▶ bbbbbbbb oberth v0.24.0 6\/11 .* ●/)
+  expect((await boxLines($))[1]).toMatch(/^bbbbbbbb oberth +v0\.24\.0 +▶ running +6\/11 /)
   current = { ...pinned, status: 'failed', failed: 1, failure: { failed_step: 'onExit[0].lint', failed_step_name: 'lint', node_id: 'generated-node-419' } } as Run
   await clock.advance(15000)
   expect(toasts).toEqual([`Oberth ${pinned.id}: failed; step lint`])
@@ -274,7 +362,7 @@ test('unreachable and truncated responses hide stale rows; the table returns pla
   let stderr = ''
   on('process.run', () => ({ value: { exitCode, stdout: JSON.stringify({ runs: [run()] }), stderr, isStdoutTruncated: truncated, isStderrTruncated: truncatedDiagnostic } }))
   await startSession($, on)
-  await text($, /▶ cad7d9ec/)
+  await text($, ROW)
   exitCode = 1
   stderr = 'The run selector is ambiguous.\nUse the complete run ID from the run table.'
   await clock.advance(15000)
@@ -290,7 +378,7 @@ test('unreachable and truncated responses hide stale rows; the table returns pla
   expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain('output limit')
 })
 
-test('table command keeps complete IDs, refs and reasons', { options }, async ($, on) => {
+test('table command shows the status word and no native names', { options }, async ($, on) => {
   bottom(on)
   mock.clock(on)
   const item = { ...run(undefined, 'failed'), display_reason: 'step failed',
@@ -304,10 +392,8 @@ test('table command keeps complete IDs, refs and reasons', { options }, async ($
   await startSession($, on)
   const command = await $.command.run({ ...commandInput, command: 'oberth-runs', args: '--limit=7' })
   expect(command.text).toBe((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '--limit 7' })).text)
-  expect(command.text).toContain(item.id)
-  expect(command.text).toContain(item.display_reason)
-  expect(command.text).toContain('FAILED STEP')
-  expect(command.text).toContain('verify-release-artifacts')
+  expect(command.text!.split('\n')[1]).toMatch(/^cad7d9ec oberth +v0\.24\.0 +✗ failed +6\/11 /)
+  expect(command.text).not.toContain('onExit[0]')
   expect(command.text).not.toContain('generated-node-419')
   expect(command.text).not.toContain('generated-pod-928')
   expect(calls[1]![4]).toBe('7')
@@ -324,8 +410,8 @@ test('short IDs disambiguate and non-hex IDs stay whole; unknown plans remain in
   expect(progress({ ...first, failed: 2, skipped: 1 })).toBe('9/11')
   expect(() => decodeRun({ ...first, step_count: undefined })).toThrow()
   expect(visible({ recent: [first], pins: [], now: 0, reachable: false }, 3)).toEqual([])
-  expect(table([{ ...first, ref: 'ref\u001b\u200b' }], 0)).not.toContain('\u001b')
-  expect(table([{ ...first, ref: 'ref\u001b\u200b' }], 0)).not.toContain('\u200b')
+  expect(table([{ ...first, ref: 'ref\u001b\u200b' }], 0, 100)).not.toContain('\u001b')
+  expect(table([{ ...first, ref: 'ref\u001b\u200b' }], 0, 100)).not.toContain('\u200b')
 })
 
 test('resolved checkout executable refuses without spawning', { options }, async ($, on) => {
@@ -464,7 +550,7 @@ for (const [name, runs, count] of [['unset', undefined, 3], ['empty', '', 3], ['
     for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
       const ui = await $.ui.mount({ ...band, surface })
       const lines = await ui.findAll({ type: 'Text' })
-      expect(lines.map(line => line.text.split(' ')[1])).toEqual(six.slice(0, count).map(run => run.id.slice(0, 8)))
+      expect(lines.map(line => line.text.split(' ')[0]).slice(1)).toEqual(six.slice(0, count).map(run => run.id.slice(0, 8)))
       await ui.unmount()
     }
   })
@@ -502,7 +588,7 @@ for (const runs of [11, -1, 2.5]) {
     expect(calls).toEqual([])
     expect(written.value).toBe(0)
     await noBox($)
-    expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain(six[5]!.id)
+    expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain(six[5]!.id.slice(0, 8))
   })
 }
 
@@ -514,7 +600,7 @@ test('runs 0 keeps the table and watches with completion toasts', { options: { .
   const notices = toasts(on)
   await $.session.start(start)
   const listed = await $.command.run({ ...commandInput, command: 'oberth-runs', args: '--limit=2' })
-  expect(listed.text).toContain(rows[1]!.id)
+  expect(listed.text).toContain(rows[1]!.id.slice(0, 8))
   expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '--limit 2' })).text).toBe(listed.text)
   for (const row of rows) {
     expect((await $.command.run({ ...commandInput, command: 'oberth-watch', args: row.id })).text).toContain('Watching')
@@ -543,42 +629,28 @@ test('a background refresh refused after unload stays handled', { options }, asy
   await $.session.start(start)
 })
 
-test('box fits whole repository and ref columns and names the failed plan step', { options }, async ($, on) => {
+test('box hugs its rows with short names and no native names', { options }, async ($, on) => {
   bottom(on)
   mock.clock(on)
-  const repository = 'origin/team/a-repository-name-that-exceeds-the-prototype-column-cap'
-  const ref = 'refs/heads/a-branch-name-that-exceeds-the-prototype-ref-column-cap'
   const rows = [
-    { ...run(), repo: 'short-repo', ref },
-    { ...run('aaaaaaaa000000000000000000000000', 'failed'), repo: repository, ref: 'refs/heads/main',
+    { ...run(), repo: 'origin/team/widget', ref: 'refs/tags/v1.2.0' },
+    { ...run('aaaaaaaa000000000000000000000000', 'failed'), ref: 'refs/heads/main',
       failure: { failed_step: 'onExit[0].verify-release-artifacts', failed_step_name: 'verify-release-artifacts', node_id: 'generated-node-419' },
       steps: [{ name: 'verify-release-artifacts', pod_name: 'generated-pod-928' }] },
   ]
-  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ runs: rows }),
-    stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  cli(on, () => rows)
   await startSession($, on)
   for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...band, surface })
     const box = await ui.find({ type: 'Box' })
     expect(box?.props.alignSelf).toBe('flex-start')
     expect(box?.props.width).toBeUndefined()
-    const lines = await ui.findAll({ type: 'Text' })
-    expect(lines.length).toBe(2)
-    expect(lines[0]!.text).toContain(ref)
-    expect(lines[1]!.text).toContain(repository)
-    const refColumn = 2 + 8 + 1 + repository.length + 1
-    expect(lines[0]!.text.indexOf(ref)).toBe(refColumn)
-    expect(lines[1]!.text.indexOf('refs/heads/main')).toBe(refColumn)
-    expect(lines[0]!.text.indexOf('6/11')).toBe(refColumn + ref.length + 1)
-    expect(lines[1]!.text.indexOf('6/11')).toBe(refColumn + ref.length + 1)
-    expect(lines[1]!.text).toContain('[failed: verify-release-artifacts]')
+    const lines = (await ui.findAll({ type: 'Text' })).map(line => line.text)
+    expect(lines[1]).toMatch(/^cad7d9ec widget +v1\.2\.0 +▶ running /)
+    expect(lines[2]).toMatch(/^aaaaaaaa oberth +main +✗ failed /)
     for (const line of lines) {
-      expect(line.props.wrap).toBe('wrap')
-      expect(line.text).not.toContain('…')
-      expect(line.text).not.toContain('onExit[0]')
-      expect(line.text).not.toContain('generated-node-419')
-      expect(line.text).not.toContain('generated-pod-928')
-      expect(line.text).toBe(line.text.trimEnd())
+      for (const native of ['onExit[0]', 'generated-node-419', 'generated-pod-928', 'refs/']) expect(line).not.toContain(native)
+      expect(line).toBe(line.trimEnd())
     }
     await ui.unmount()
   }
@@ -587,7 +659,7 @@ test('box fits whole repository and ref columns and names the failed plan step',
 test('absent failed step has no native-name fallback', async () => {
   const item = { ...run(undefined, 'failed'), node_id: 'generated-node-419', pod_name: 'generated-pod-928',
     detail: 'generated-pod-928 failed', failure: null }
-  const result = table([decodeRun(item)], 0)
+  const result = table([decodeRun(item)], 0, 100)
   expect(result).not.toContain('generated-node-419')
   expect(result).not.toContain('generated-pod-928')
   expect(() => decodeRun({ ...item, failure: { failed_step: 42, failed_step_name: 'test' } })).toThrow()
@@ -595,7 +667,7 @@ test('absent failed step has no native-name fallback', async () => {
 
 test('failed step name never falls back to the plan path', async () => {
   const item = { ...run(undefined, 'failed'), failure: { failed_step: 'onExit[0].cleanup', failed_step_name: '' } }
-  expect(table([decodeRun(item)], 0)).not.toContain('onExit[0].cleanup')
+  expect(table([decodeRun(item)], 0, 100)).not.toContain('onExit[0].cleanup')
   expect(() => decodeRun({ ...item, failure: { failed_step: 'onExit[0].cleanup', failed_step_name: 42 } })).toThrow()
 })
 
@@ -624,7 +696,7 @@ function v0307(on: On) {
   return calls
 }
 
-const SMOKE = /^▶ d7a7d438 192-168-86-247\/repos\/oberth-smoke refs\/heads\/smoke-2 0\/1 \d+m$/
+const SMOKE = /^d7a7d438 oberth-smoke smoke-2 ▶ running +0\/1 +\S+ +\S+$/
 
 test('a v0.30.7 run list reply with one running run draws the box', { options }, async ($, on) => {
   bottom(on)
@@ -634,10 +706,12 @@ test('a v0.30.7 run list reply with one running run draws the box', { options },
   for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...band, surface })
     const lines = await ui.findAll({ type: 'Text' })
-    expect(lines.map(line => line.text)).toHaveLength(2)
-    expect(SMOKE.test(lines[0]!.text)).toBe(true)
-    expect(lines[0]!.text.endsWith(' 2m')).toBe(true)
-    expect(lines[1]!.text.startsWith('✓ 0b4e2a91 ')).toBe(true)
+    expect(lines.map(line => line.text)).toEqual([
+      'RUN      REPO         REF     STATUS    STEPS TIME  AGE',
+      'd7a7d438 oberth-smoke smoke-2 ▶ running 0/1   1m59s 1m',
+      '0b4e2a91 oberth-smoke smoke-1 ✓ passed  1/1   20s   26m',
+    ])
+    expect(SMOKE.test(lines[1]!.text)).toBe(true)
     await ui.unmount()
   }
 })
@@ -654,7 +728,7 @@ test('the plugin registers no model tools and draws the box beside the oberth br
   await text($, SMOKE)
   await clock.advance(15000)
   expect(calls.filter(call => call.argv[2] === 'list')).toHaveLength(3)
-  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain('d7a7d4380c1e4b5f9a2b3c4d5e6f7a81')
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain('d7a7d438 oberth-smoke smoke-2 ▶ running')
 })
 
 test('blank, null and numeric-text runs options', async () => {

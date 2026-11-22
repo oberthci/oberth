@@ -6,7 +6,9 @@ import { active, boxRows, limit, outcome, REFRESH_MS, shown, SHOWN_REASON, SHOWN
 
 const empty: Snapshot = { recent: [], pins: [], reachable: false, now: 0 }
 const snapshot = atom({ plugin: 'oberth', key: 'snapshot' } as const, empty, { shape: 'runs-1' })
-const errorText = (error: unknown) => error instanceof Error ? error.message : 'Unable to read Oberth runs.'
+// The box's round border and one cell of padding on each side.
+const FRAME = 4
+const errorText =(error: unknown) => error instanceof Error ? error.message : 'Unable to read Oberth runs.'
 // count is how many runs the box shows; with none, only active watches are read.
 type Loop = { count: number; timer?: Timer; pending?: Promise<void>; stopped?: boolean }
 
@@ -70,7 +72,7 @@ function commands(on: On, options: PluginOptions) {
       const arg = e.args.trim()
       const match = /^(?:--limit[= ](\d+))?$/.exec(arg)
       if (!match) throw new Error('Use /oberth-runs [--limit=N].')
-      return { text: table(await list($, options, limit(match[1])), await $.clock.now()) }
+      return { text: table(await list($, options, limit(match[1])), await $.clock.now(), e.presentation.columns) }
     } catch (error) { return { text: errorText(error) } }
   })
   on('command.run', { command: 'oberth-watch' }, async ($, e) => {
@@ -130,11 +132,12 @@ export const register: Register = (on, options) => {
     const state = await read($, snapshot)
     const rows = visible(state, loop.count)
     if (!rows.length) return next(e)
-    const lines = boxRows(state, loop.count)
+    const [header, ...lines] = boxRows(state, loop.count, e.props.bodyColumns - FRAME)
     const { Box, Text } = $.ui.resolve(e)
     const color = (status: string) => status === 'passed' ? 'green' : status === 'failed' ? 'red' : status === 'cancelled' ? 'gray' : 'yellow'
     return <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor="gray" paddingX={1}>
-      {rows.map((run, index) => <Text wrap="wrap" color={color(run.status)}>{lines[index]}</Text>)}
+      <Text wrap="truncate-end" maxLines={1} dimColor>{header}</Text>
+      {rows.map((run, index) => <Text wrap="truncate-end" maxLines={1} color={color(run.status)}>{lines[index]}</Text>)}
     </Box>
   })
 }
