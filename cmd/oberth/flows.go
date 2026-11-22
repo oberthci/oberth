@@ -187,7 +187,7 @@ func flowError(key string, cause error) *publicerr.Error {
 
 // serverTrustRemedy names the flag and the file that holds the Oberth server's
 // SSH host keys, which is not the forge's.
-const serverTrustRemedy = "Pass --known-hosts with the SSH trust file that install or join printed."
+const serverTrustRemedy = "Pass --known-hosts with the SSH trust file that install printed."
 
 func flowMessages() map[string][2]string {
 	return map[string][2]string{

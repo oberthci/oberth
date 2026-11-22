@@ -13,7 +13,8 @@ import (
 )
 
 // Join binds the checkout with the Oberth server's SSH host keys the
-// invitation delivered; a home known_hosts file never stands in for them.
+// invitation delivered; a home known_hosts file never stands in for them, and
+// the refusal names what join can do: get a new invitation.
 func TestJoinBindingNeverFallsBackToHomeKnownHosts(t *testing.T) {
 	command := urlCheckoutCommand(t, fake.Bindings(), true)
 	homeKnownHosts(t, &command)
@@ -32,8 +33,8 @@ func TestJoinBindingNeverFallsBackToHomeKnownHosts(t *testing.T) {
 		t.Fatal("join bound the checkout with a home known_hosts file", bound)
 	}
 	session.failed(err)
-	if text := command.diagnostic.String(); !strings.Contains(text, "This profile saved no Oberth server SSH host keys.") || !strings.Contains(text, serverTrustRemedy) {
-		t.Fatal(text)
+	if text := command.diagnostic.String(); !strings.Contains(text, "The Oberth server's SSH host-key file was not found.") || !strings.Contains(text, joinTrustRemedy) || strings.Contains(text, "--known-hosts") {
+		t.Fatal("join's refusal names a remedy join cannot follow", text)
 	}
 	after, err := os.ReadFile(filepath.Join(command.app.directory, ".git", "config"))
 	if err != nil || !bytes.Equal(before, after) {

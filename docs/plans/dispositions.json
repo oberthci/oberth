@@ -9392,7 +9392,7 @@
   "spec_sha256": {
     "docs/plans/c1-transport-and-tool-registry.md": "d9a5966979bf2cd06412028dfa72d6d906e996631ca78f9156e5d204cfea26bb",
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
-    "docs/plans/c11-cli-and-server-composition.md": "c9b8bb00b98c7c4f2f1505f879898de3c2a9fd66c7c44c69d84578235ea5a76d",
+    "docs/plans/c11-cli-and-server-composition.md": "c67fc10ee56d779b972e1690aad5b56d15d57da85db72d5d9ceccbf54e29c3bf",
     "docs/plans/c12-agent-client.md": "42e5d73621e6fdc5b4f149e21079fb7ca57bfe0b3fb75abbee23b84b07a3b6bb",
     "docs/plans/c13-own-pipelines.md": "7bf8d26daa7f51f8897f126f230345f41b683bd6a06adc771f0bb491a2149fb7",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
@@ -10450,14 +10450,14 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** Binding uses a per-remote `file:///` address and pack commands on the dedicated `oberth` remote. Its pack commands use the server SSH endpoint saved by join, pinned by the Oberth server's SSH host keys that the selected profile saved at install or join (`--known-hosts` replaces them); without them `repo add` and join refuse and name `--known-hosts`, and `~/.ssh/known_hosts` is never read. The forge's key is `--expected-host-fingerprint`, pinned by the server. `repo add` checks Git's effective fetch and push addresses and transport policy; a rewrite or policy that prevents the intended binding refuses with a remedy. It replaces or clears only configuration that `repo add` itself wrote, including its obsolete push URLs, and leaves a person's settings and every other remote unchanged. An administrator binding clears only the product's stale uplink binding.",
+      "basis": "**Delta:** Binding uses a per-remote `file:///` address and pack commands on the dedicated `oberth` remote. Its pack commands use the server SSH endpoint saved by join, pinned by the Oberth server's SSH host keys that the selected profile saved at install or join (`--known-hosts` replaces them); without them `repo add` refuses and names `--known-hosts`, and join asks for a new invitation, and `~/.ssh/known_hosts` is never read. The forge's key is `--expected-host-fingerprint`, pinned by the server. `repo add` checks Git's effective fetch and push addresses and transport policy; a rewrite or policy that prevents the intended binding refuses with a remedy. It replaces or clears only configuration that `repo add` itself wrote, including its obsolete push URLs, and leaves a person's settings and every other remote unchanged. An administrator binding clears only the product's stale uplink binding.",
       "rows": [
         {
           "category": "CLI commands",
           "name": "oberth repo add",
           "disposition": "CHANGE",
           "reason": "Use a per-remote file address and pack commands, verify effective fetch/push addresses and transport policy, and change only configuration repo add itself wrote.",
-          "basis": "**Delta:** Binding uses a per-remote `file:///` address and pack commands on the dedicated `oberth` remote. Its pack commands use the server SSH endpoint saved by join, pinned by the Oberth server's SSH host keys that the selected profile saved at install or join (`--known-hosts` replaces them); without them `repo add` and join refuse and name `--known-hosts`, and `~/.ssh/known_hosts` is never read. The forge's key is `--expected-host-fingerprint`, pinned by the server. `repo add` checks Git's effective fetch and push addresses and transport policy; a rewrite or policy that prevents the intended binding refuses with a remedy. It replaces or clears only configuration that `repo add` itself wrote, including its obsolete push URLs, and leaves a person's settings and every other remote unchanged. An administrator binding clears only the product's stale uplink binding.",
+          "basis": "**Delta:** Binding uses a per-remote `file:///` address and pack commands on the dedicated `oberth` remote. Its pack commands use the server SSH endpoint saved by join, pinned by the Oberth server's SSH host keys that the selected profile saved at install or join (`--known-hosts` replaces them); without them `repo add` refuses and names `--known-hosts`, and join asks for a new invitation, and `~/.ssh/known_hosts` is never read. The forge's key is `--expected-host-fingerprint`, pinned by the server. `repo add` checks Git's effective fetch and push addresses and transport policy; a rewrite or policy that prevents the intended binding refuses with a remedy. It replaces or clears only configuration that `repo add` itself wrote, including its obsolete push URLs, and leaves a person's settings and every other remote unchanged. An administrator binding clears only the product's stale uplink binding.",
           "item": 122
         }
       ]

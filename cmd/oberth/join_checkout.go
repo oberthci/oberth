@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/oberthci/oberth/internal/client"
+	"github.com/oberthci/oberth/internal/publicerr"
 )
 
 func (s *flowSession) bindJoinedCheckout(dir string) (bool, error) {
@@ -25,7 +26,7 @@ func (s *flowSession) bindJoinedCheckout(dir string) (bool, error) {
 		return false, err
 	}
 	if err = checkCheckoutTrust(known, parsed); err != nil {
-		return false, err
+		return false, joinTrustRefusal(err)
 	}
 	if err = s.checkGitBinding(repo, "join"); err != nil {
 		return false, err
@@ -72,9 +73,21 @@ func (s *flowSession) joinedConnection(dir string) (client.Profile, string, erro
 		return profile, "", flowError("input", nil)
 	}
 	// The invitation's keys pin the server; a checkout's own settings never do.
-	known := profile.KnownHosts
-	if known == "" {
-		return profile, "", flowError("host_unsaved", nil)
+	return profile, profile.KnownHosts, nil
+}
+
+// joinTrustRemedy is what join can do about the server's SSH host keys: it
+// takes no file of its own, only an invitation that carries them.
+const joinTrustRemedy = "Ask the administrator for a new invitation and join with it."
+
+// joinTrustRefusal keeps a trust refusal's reason and file and replaces the
+// repo add remedy, which names a flag join does not have.
+func joinTrustRefusal(err error) error {
+	var problem *publicerr.Error
+	if !errors.As(err, &problem) || problem.Remedy() != serverTrustRemedy {
+		return err
 	}
-	return profile, known, nil
+	refusal := publicerr.New(problem.Code(), problem.Reason(), joinTrustRemedy, err)
+	refusal.ID, refusal.Context = problem.ID, problem.Context
+	return refusal
 }
