@@ -53,6 +53,7 @@ type diagnosis struct {
 
 func diagnose(n wf.NodeStatus, p *core.Pod, stop bool, template *wf.Template) (d diagnosis) {
 	defer func() { d.detail = holdDiagnosticDetail(d.detail, p) }()
+	n.Message = currentMessage(n)
 	d = diagnosis{reason: reasonUnknown, detail: n.Message, container: "main", class: stepmodel.FailureUnknown}
 	if p != nil && diagnosePod(&d, p, template) {
 		d = nativeDiagnosis(d, n)
@@ -77,6 +78,15 @@ func diagnose(n wf.NodeStatus, p *core.Pod, stop bool, template *wf.Template) (d
 	}
 	d.reason = nodeReason(n.Phase)
 	return d
+}
+
+// currentMessage drops the message Argo keeps from before the start, such as
+// PodInitializing, on a node that later succeeded; it no longer describes the step.
+func currentMessage(n wf.NodeStatus) string {
+	if n.Phase == wf.NodeSucceeded {
+		return ""
+	}
+	return n.Message
 }
 func diagnosePod(d *diagnosis, p *core.Pod, template *wf.Template) bool {
 	d.detail = p.Status.Message

@@ -268,7 +268,8 @@ func (e *Executor) observe(ctx context.Context, t *tracking) error {
 	}
 	var terminalError error
 	if (t.final != nil || terminalWorkflow(w)) && !t.completed {
-		terminalError = e.publish(ctx, t, o)
+		// A reader told the run finished sees its final steps and counts.
+		terminalError = errors.Join(e.saveSteps(ctx, t, o.Steps), e.publish(ctx, t, o))
 	}
 	w = o.workflow
 	e.capture(t, w, pods)
@@ -307,12 +308,19 @@ func (e *Executor) writeEvidence(ctx context.Context, id string, o Observation) 
 	}
 	return nil
 }
+func (e *Executor) saveSteps(ctx context.Context, t *tracking, steps []stepmodel.RunStep) error {
+	if reflect.DeepEqual(steps, t.previous) {
+		return nil
+	}
+	if err := e.config.Progress.SaveSteps(ctx, t.binding.RunID, steps); err != nil {
+		return err
+	}
+	t.previous = (stepmodel.RunSummary{Steps: steps}).Clone().Steps
+	return nil
+}
 func (e *Executor) saveObservation(ctx context.Context, t *tracking, o Observation, terminal bool) error {
-	if !reflect.DeepEqual(o.Steps, t.previous) {
-		if err := e.config.Progress.SaveSteps(ctx, t.binding.RunID, o.Steps); err != nil {
-			return err
-		}
-		t.previous = (stepmodel.RunSummary{Steps: o.Steps}).Clone().Steps
+	if err := e.saveSteps(ctx, t, o.Steps); err != nil {
+		return err
 	}
 	if !reflect.DeepEqual(o.Nodes, t.previousNodes) || terminal {
 		if err := e.writeEvidence(ctx, t.binding.RunID, o); err != nil {

@@ -63,6 +63,7 @@ func RunSuite(t *testing.T, factory func(*testing.T) RunFixture) {
 	for name, check := range map[string]func(*testing.T, RunFixture){
 		"plan_step_shape":      checkPlanStepShape,
 		"native_step_shape":    checkNativeStepShape,
+		"run_start":            checkRunStart,
 		"malformed_acceptance": checkMalformedAcceptance,
 		"progress_finish":      checkProgressFinish,
 		"initial_events":       checkInitialEvents,

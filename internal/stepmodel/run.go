@@ -25,6 +25,18 @@ type RunStep struct {
 	Logs             []LogSelector `json:"logs,omitzero"`
 }
 
+// RunStart is a run's start: the earliest of its recorded start and its steps'
+// starts, in UTC. It returns recorded itself when no step started earlier.
+func RunStart(recorded *time.Time, steps []RunStep) *time.Time {
+	start := recorded
+	for _, s := range steps {
+		if s.StartedAt != nil && (start == nil || s.StartedAt.Before(*start)) {
+			start = new(s.StartedAt.UTC())
+		}
+	}
+	return start
+}
+
 // RunSummary is the public run projection. DisplayReason is empty or a complete
 // phrase of at most 40 characters, without ellipsis or free-form native text.
 // Detail holds full diagnostics for on-demand display; views never truncate reasons.

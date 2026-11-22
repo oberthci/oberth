@@ -20,6 +20,13 @@ import (
 
 func realServerLogReader(t *testing.T) (serverLogs, stateport.Run) {
 	t.Helper()
+	document := strings.Replace(starterWorkflow(), "entrypoint: build", "entrypoint: pipeline", 1)
+	document = strings.Replace(document, "  templates:\n", "  templates:\n    - name: pipeline\n      dag:\n        tasks: [{name: build, template: build}]\n", 1)
+	return realServerLogReaderFor(t, document)
+}
+
+func realServerLogReaderFor(t *testing.T, document string) (serverLogs, stateport.Run) {
+	t.Helper()
 	db, err := store.Create(t.Context(), filepath.Join(t.TempDir(), "state.db"), store.DefaultOptions(fake.NewClock().Now))
 	if err != nil {
 		t.Fatal(err)
@@ -27,8 +34,6 @@ func realServerLogReader(t *testing.T) (serverLogs, stateport.Run) {
 	t.Cleanup(func() { _ = db.Close() })
 	repo := storetest.Repository(t, db)
 	sha := strings.Repeat("a", 40)
-	document := strings.Replace(starterWorkflow(), "entrypoint: build", "entrypoint: pipeline", 1)
-	document = strings.Replace(document, "  templates:\n", "  templates:\n    - name: pipeline\n      dag:\n        tasks: [{name: build, template: build}]\n", 1)
 	request := admissioncontract.PrepareRequest{Mode: admissioncontract.ModeInspect, Repository: repo.Canonical, RunID: "run-logs", Ref: "refs/heads/main", ObjectSHA: sha, CommitSHA: sha, FileBlob: sha, Trigger: model.TriggerBranch, SelectedFile: ".oberth/build.yaml", Document: []byte(document)}
 	prepared, err := argoworkflow.Prepare(t.Context(), request, argoworkflow.Policy{}, admissioncontract.PrepareHooks{OfflineValidation: true})
 	if err != nil {
@@ -77,6 +82,26 @@ func TestServerLogReaderHidesExecutorOutputByDefault(t *testing.T) {
 	result, err := reader.Read(t.Context(), run, apicontract.RunLogsArgs{ID: run.ID})
 	if err != nil || result.Content != "main output\n" || len(result.Containers) != 0 {
 		t.Fatal("executor output leaked", result, err)
+	}
+}
+
+// A single-template pipeline's step has an empty plan path; callers name it
+// as run get lists it, by its authored name.
+func TestServerLogReaderSelectsAStepByItsAuthoredName(t *testing.T) {
+	reader, run := realServerLogReaderFor(t, starterWorkflow())
+	entry := run.Admission.Plan.Entries[0]
+	if entry.Path != "" || entry.Name != "build" {
+		t.Fatal("fixture lost its single authored step", entry)
+	}
+	run.Status = stepmodel.RunPassed
+	saveReaderStep(t, reader, run, stepmodel.RunStep{Path: entry.Path, Name: entry.Name, Status: stepmodel.StepPassed})
+	captureReaderContainers(t, reader, run)
+	result, err := reader.Read(t.Context(), run, apicontract.RunLogsArgs{ID: run.ID, Step: "build"})
+	if err != nil || result.Content != "main output\n" {
+		t.Fatal("authored step name did not select its log", result, err)
+	}
+	if _, err = reader.Read(t.Context(), run, apicontract.RunLogsArgs{ID: run.ID, Step: "absent"}); err == nil {
+		t.Fatal("unknown step name selected a log")
 	}
 }
 

@@ -71,6 +71,7 @@ func (f *Runs) SaveSteps(ctx context.Context, id string, steps []stepmodel.RunSt
 			return err
 		}
 		r.LogicalStepCounts = counts
+		r.StartedAt = stepmodel.RunStart(r.StartedAt, steps)
 		r.Steps = append([]stepmodel.RunStep{}, steps...)
 		r = r.Clone()
 		m.runs[id] = r

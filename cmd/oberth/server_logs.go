@@ -26,14 +26,7 @@ func (l serverLogs) Read(ctx context.Context, r stateport.Run, q apicontract.Run
 	if err != nil {
 		return apicontract.LogResult{}, err
 	}
-	for _, e := range r.Admission.Plan.Entries {
-		request.PlannedSteps = append(request.PlannedSteps, e.Path)
-	}
-	for _, step := range steps {
-		if !slices.Contains(request.PlannedSteps, step.Path) {
-			request.PlannedSteps = append(request.PlannedSteps, step.Path)
-		}
-	}
+	request = selectPlannedStep(r, steps, request)
 	if request.Selector.NodeID == "" && !request.Selector.StepSet {
 		request.Selector = focusLogStep(r, steps, request.Selector)
 	}
@@ -50,6 +43,39 @@ func (l serverLogs) Read(ctx context.Context, r stateport.Run, q apicontract.Run
 		err = nil
 	}
 	return apicontract.LogResult{ID: r.ID, Content: string(body), Meta: meta, Containers: containers}, err
+}
+
+// selectPlannedStep lists the plan and observed step paths and resolves a step
+// selected by the name run get lists to its plan path.
+func selectPlannedStep(r stateport.Run, steps []stepmodel.RunStep, request runlog.ReadRequest) runlog.ReadRequest {
+	for _, e := range r.Admission.Plan.Entries {
+		request.PlannedSteps = append(request.PlannedSteps, e.Path)
+	}
+	for _, step := range steps {
+		if !slices.Contains(request.PlannedSteps, step.Path) {
+			request.PlannedSteps = append(request.PlannedSteps, step.Path)
+		}
+	}
+	if request.Selector.StepSet && !slices.Contains(request.PlannedSteps, request.Selector.Step) {
+		request.Selector.Step = authoredStepPath(steps, request.Selector.Step)
+	}
+	return request
+}
+
+// authoredStepPath is the plan path of the one step with this name; an unknown
+// name and a name several steps share stay as given.
+func authoredStepPath(steps []stepmodel.RunStep, step string) string {
+	path, found := step, false
+	for _, s := range steps {
+		if s.Name != step {
+			continue
+		}
+		if found {
+			return step
+		}
+		path, found = s.Path, true
+	}
+	return path
 }
 func (l serverLogs) listContainers(ctx context.Context, id string) (apicontract.LogResult, error) {
 	entries, err := l.owner.c.logs.Containers(ctx, id)

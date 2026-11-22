@@ -28,8 +28,26 @@ func (s *Store) SaveSteps(ctx context.Context, id string, steps []stepmodel.RunS
 		if _, err = tx.ExecContext(ctx, `INSERT INTO native_steps VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET value=excluded.value`, id, encode(steps)); err != nil {
 			return databaseError(err)
 		}
+		if err = recordStart(ctx, tx, id, steps); err != nil {
+			return err
+		}
 		return saveCounts(ctx, tx, id, counts)
 	})
+}
+
+// recordStart sets the run's start from its earliest observed step start.
+func recordStart(ctx context.Context, tx *sql.Tx, id string, steps []stepmodel.RunStep) error {
+	r, err := loadRun(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	start := stepmodel.RunStart(r.StartedAt, steps)
+	if start == r.StartedAt {
+		return nil
+	}
+	r.StartedAt = start
+	_, err = tx.ExecContext(ctx, `UPDATE runs SET summary=? WHERE id=?`, encode(r.RunSummary), id)
+	return databaseError(err)
 }
 
 // Steps returns the saved projection verbatim, or the plan and evidence before observation.

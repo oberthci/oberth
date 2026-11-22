@@ -6,6 +6,7 @@ import (
 	"github.com/oberthci/oberth/internal/stepmodel"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func checkPlanStepShape(t *testing.T, f RunFixture) {
@@ -57,6 +58,30 @@ func checkNativeStepShape(t *testing.T, f RunFixture) {
 		}
 	}
 	savedStepShape(t, f, id, steps)
+}
+
+// checkRunStart: a run starts when its first step starts; a later save never
+// moves the start forward, an earlier observed start moves it back.
+func checkRunStart(t *testing.T, f RunFixture) {
+	saved, err := f.Port.AcceptBatch(t.Context(), batchFor(t, f, RunCase{ID: "run-start"}))
+	mustRun(t, err)
+	id := saved.Runs[0].ID
+	steps, err := f.Port.Steps(t.Context(), id)
+	mustRun(t, err)
+	if r, err := f.Port.Run(t.Context(), id); err != nil || r.StartedAt != nil {
+		t.Fatal("an unobserved run has a start", r.StartedAt, err)
+	}
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	for _, c := range []struct{ step, want time.Time }{{base, base}, {base.Add(time.Minute), base}, {base.Add(-time.Second), base.Add(-time.Second)}} {
+		started := c.step.In(time.FixedZone("east", 3600))
+		steps[0].StartedAt = &started
+		mustRun(t, f.Port.SaveSteps(t.Context(), id, steps))
+		r, err := f.Port.Run(t.Context(), id)
+		mustRun(t, err)
+		if r.StartedAt == nil || !r.StartedAt.Equal(c.want) || r.StartedAt.Location() != time.UTC {
+			t.Fatal("run start is not its earliest step start in UTC", r.StartedAt, c.want)
+		}
+	}
 }
 
 func savedStepShape(t *testing.T, f RunFixture, id string, want []stepmodel.RunStep) {
