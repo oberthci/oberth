@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -97,7 +98,7 @@ func finalize(ctx context.Context, o options) error {
 
 // publishFiles makes the tag's GitHub release hold exactly these files. It
 // compares every asset already there before uploading anything, uploads the
-// manifest last, and publishes a draft without making it latest.
+// manifest last, confirms the draft, and publishes it without making it latest.
 func (p publication) publishFiles(ctx context.Context, tag string) error {
 	if err := p.tagPublished(ctx, tag); err != nil {
 		return err
@@ -128,8 +129,34 @@ func (p publication) publishFiles(ctx context.Context, tag string) error {
 			}
 		}
 	}
-	if release.Draft {
-		return p.publishDraft(ctx, release.ID)
+	if !release.Draft {
+		return nil
+	}
+	if err := p.confirmDraft(ctx, release.ID, names); err != nil {
+		return err
+	}
+	return p.publishDraft(ctx, release.ID)
+}
+
+// confirmDraft re-reads the draft and requires exactly the signed names, each
+// equal to its local bytes, before the release becomes public.
+func (p publication) confirmDraft(ctx context.Context, id int64, names []string) error {
+	var release githubRelease
+	if err := p.expect(ctx, get(p.repo("/releases/%d", id)), http.StatusOK, &release); err != nil {
+		return err
+	}
+	held := make([]string, 0, len(release.Assets))
+	for _, asset := range release.Assets {
+		held = append(held, asset.Name)
+	}
+	slices.Sort(held)
+	if want := slices.Sorted(slices.Values(names)); !slices.Equal(held, want) {
+		return fmt.Errorf("%w: the draft holds %s", assetsDiffer, strings.Join(held, ", "))
+	}
+	for _, asset := range release.Assets {
+		if err := p.sameAsset(ctx, asset); err != nil {
+			return err
+		}
 	}
 	return nil
 }

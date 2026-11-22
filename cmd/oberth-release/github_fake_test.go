@@ -23,6 +23,7 @@ type githubFake struct {
 	tags     map[string]bool
 	releases []*fakeRelease
 	latest   string
+	corrupt  string
 	calls    []string
 	bodies   []map[string]any
 }
@@ -175,6 +176,9 @@ func (f *githubFake) upload(w http.ResponseWriter, r *http.Request, path string)
 	if err != nil {
 		f.t.Error(err)
 		return
+	}
+	if name == f.corrupt {
+		body = append(body, " changed in transit"...)
 	}
 	release.put(name, body)
 	w.WriteHeader(http.StatusCreated)

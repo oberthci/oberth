@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -100,6 +101,30 @@ func TestPublicationResumesAnEarlierDraft(t *testing.T) {
 	want := []string{"POST " + fakeRepository + "/releases/1/assets?name=release.json", "PATCH " + fakeRepository + "/releases/1"}
 	if !reflect.DeepEqual(fake.writes(), want) || draft.Draft || len(fake.releases) != 1 {
 		t.Fatal("draft was not resumed", fake.writes())
+	}
+}
+
+// A draft becomes public only when it holds exactly the signed names and each
+// asset equals the local bytes.
+func TestPublicationConfirmsTheDraftBeforePublishing(t *testing.T) {
+	for _, fault := range []string{"stray asset", "changed upload"} {
+		t.Run(fault, func(t *testing.T) {
+			p, fake := githubFixture(t)
+			draft := fake.add("v1.0.0", true)
+			want := error(immutable)
+			if fault == "stray asset" {
+				draft.put("notes.txt", []byte("stray"))
+				want = assetsDiffer
+			} else {
+				fake.corrupt = "artifact"
+			}
+			if err := p.publishFiles(t.Context(), "v1.0.0"); !errors.Is(err, want) {
+				t.Fatal("unconfirmed draft was published", err)
+			}
+			if draft.Draft != true || slices.ContainsFunc(fake.writes(), func(call string) bool { return strings.HasPrefix(call, http.MethodPatch) }) {
+				t.Fatal("the draft became public", fake.writes())
+			}
+		})
 	}
 }
 
