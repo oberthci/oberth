@@ -97,7 +97,7 @@ func (c *Cache) startFetch(repo, p string, force bool) *transfer {
 		}
 		registered = remote.RepositoryID
 		updates, err := c.fetch(ctx, p, repo, remote)
-		return outcome{updates: updates, err: c.recordRefreshResult(ctx, p, err)}
+		return outcome{updates: updates, err: c.recordRefreshResult(p, err)}
 	}
 	ended := func(ctx context.Context, result outcome, end ending) {
 		if result.err == nil && len(result.updates) > 0 && end.unattended && sameRepository(registered, c.registeredID(ctx, repo)) {
@@ -115,12 +115,17 @@ func (c *Cache) recentRefresh(p string) (bool, error) {
 	last := c.lastRefresh(p)
 	return !last.IsZero() && c.config.Now().Sub(last) < RefreshInterval, nil
 }
-func (c *Cache) recordRefreshResult(ctx context.Context, p string, err error) error {
+
+// recordRefreshResult records a forge failure, also one that ended at the
+// background bound, unless the server is stopping: the next reads within
+// RefreshInterval say the forge could not be reached instead of starting the
+// whole transfer again.
+func (c *Cache) recordRefreshResult(p string, err error) error {
 	if err == nil {
 		return c.recordRefresh(p)
 	}
 	var outage *gitport.UnavailableError
-	if ctx.Err() == nil && errors.As(err, &outage) && outage.Op == "forge" {
+	if c.ctx.Err() == nil && errors.As(err, &outage) && outage.Op == "forge" {
 		if writeErr := writeDurable(filepath.Join(p, refreshFailureFile), []byte(c.config.Now().Format(time.RFC3339Nano))); writeErr != nil {
 			return writeErr
 		}

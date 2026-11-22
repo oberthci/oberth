@@ -216,7 +216,7 @@ func TestReadDuringLargeFetchServesTheCacheAndSaysWhy(t *testing.T) {
 // an error) is still reported as not answering, and the read is served from
 // the cache as before.
 func TestStalledForgeIsReportedAsNotAnswering(t *testing.T) {
-	for _, output := range []string{"", "fatal: the remote end hung up unexpectedly"} {
+	for _, output := range []string{"", "fatal: the remote end hung up unexpectedly", "remote: fatal: upload-pack is not allowed here"} {
 		t.Run(output, func(t *testing.T) {
 			x := newFetchFixture(t, output)
 			c := x.start(t)
@@ -237,6 +237,25 @@ func TestStalledForgeIsReportedAsNotAnswering(t *testing.T) {
 			x.slow.release(t)
 			gitcache.WaitBackground(c)
 		})
+	}
+}
+
+// A fetch that keeps sending past the background bound ends there and its
+// failure is recorded, so the next readers are told the forge could not be
+// reached instead of "still updating" again, and no new transfer starts
+// within the interval.
+func TestFetchEndingAtItsBoundIsRecorded(t *testing.T) {
+	x := newFetchFixture(t, transferring)
+	c := x.start(t)
+	x.advance(t)
+	gitcache.SetBackgroundBound(c, 300*time.Millisecond)
+	_, err := c.RemoteRef(shortContext(t), gittest.Repository, "refs/heads/main")
+	checkStillUpdating(t, err)
+	gitcache.WaitBackground(c)
+	_, err = c.RemoteRef(shortContext(t), gittest.Repository, "refs/heads/main")
+	var outage *gitport.UnavailableError
+	if !errors.As(err, &outage) || outage.Op != "forge" || x.slow.count(t, "refresh") != 1 {
+		t.Fatal("a fetch ended at its bound was not recorded as a forge failure", err, x.slow.count(t, "refresh"))
 	}
 }
 

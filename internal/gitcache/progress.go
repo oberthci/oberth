@@ -143,9 +143,14 @@ func (w commandWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
-// packArriving reports whether native fetch output shows the forge sending a
-// pack: its relayed progress or the local receiving count. An error the forge
-// prints before it stalls is neither.
+// packArriving reports whether native fetch output shows the forge preparing
+// or sending a pack: its relayed object progress or the local receiving
+// count. An error the forge prints, relayed or not, is neither.
 func packArriving(b []byte) bool {
-	return bytes.Contains(b, []byte("remote: ")) || bytes.Contains(b, []byte("Receiving objects"))
+	for _, phase := range []string{"Enumerating objects", "Counting objects", "Compressing objects", "Receiving objects"} {
+		if bytes.Contains(b, []byte(phase)) {
+			return true
+		}
+	}
+	return false
 }
