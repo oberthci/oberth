@@ -69,7 +69,7 @@ registry, publishes the files as the tag's GitHub release, verifies them in a cl
 `latest`. The build checks its commit without rerunning tests. Only signing gets the long-lived key,
 only the image push the registry login, only publish/finalize the GitHub token. Branch CI reaches
 neither those credentials nor the release cache. Oberth puts the tag on GitHub when it admits the
-release, before the run; if the run then fails, that version is used: release the next one.
+release, before the run; that uses the version: rerun a failed run or release the next one.
 
 Once, as administrator: edit [pipeline-resources.yaml](../.oberth/pipeline-resources.yaml) (storage
 class/sizes, positive `go` semaphore limit, HTTPS origin) and apply it in the pipeline namespace. It
