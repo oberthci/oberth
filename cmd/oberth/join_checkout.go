@@ -76,7 +76,7 @@ func (s *flowSession) joinedConnection(dir string) (client.Profile, string, erro
 		known = profile.KnownHosts
 	}
 	if known == "" {
-		known = filepath.Join(s.app.home(), ".ssh", "known_hosts")
+		return profile, "", flowError("host_unsaved", nil)
 	}
 	return profile, known, nil
 }

@@ -49,10 +49,3 @@ func validFlowArgs(name string, args []string) bool {
 	}
 	return false
 }
-
-func (a application) home() string {
-	if a.env == nil {
-		return ""
-	}
-	return a.env("HOME")
-}
