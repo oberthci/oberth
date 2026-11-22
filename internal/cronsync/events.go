@@ -29,16 +29,29 @@ func (c *Syncer) SyncAll(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return errors.Join(append(failures, err)...)
 		}
-		failures = append(failures, c.locked(ctx, func(ctx context.Context) error {
-			objects, err := c.list(ctx)
-			if err != nil {
-				return err
-			}
-			return c.attempt(ctx, repo, objects)
-		}))
+		failures = append(failures, c.locked(ctx, func(ctx context.Context) error { return c.startupStep(ctx, repo) }))
 	}
 	failures = append(failures, c.locked(ctx, c.passEnd))
 	return errors.Join(failures...)
+}
+
+// startupStep reconciles one repository of the startup pass from its current
+// catalogue record: one removed or replaced (same name, new ID) since the
+// pass read the catalogue is left to passEnd's prune, and an archived flag
+// set meanwhile is honoured.
+func (c *Syncer) startupStep(ctx context.Context, listed Repository) error {
+	repo, found, err := c.config.Repository(ctx, listed.Qualified)
+	if err != nil {
+		return problem(catalogFailure, err)
+	}
+	if !found || repo.ID != listed.ID {
+		return nil
+	}
+	objects, err := c.list(ctx)
+	if err != nil {
+		return err
+	}
+	return c.attempt(ctx, repo, objects)
 }
 
 // passEnd prunes the parents of repositories that left the catalogue during

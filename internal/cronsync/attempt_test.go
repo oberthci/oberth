@@ -116,6 +116,47 @@ func TestStartupPassServesOtherCallsBetweenRepositories(t *testing.T) {
 	})
 }
 
+// Each startup step reads its repository's current record: a repository
+// removed, replaced under a new ID or archived while the pass is on an
+// earlier one is not admitted from the record the pass started with, and its
+// old parent goes.
+func TestStartupStepUsesTheCurrentRepositoryRecord(t *testing.T) {
+	changes := map[string]func(cronsync.Repository) []cronsync.Repository{
+		"removed":  func(cronsync.Repository) []cronsync.Repository { return nil },
+		"replaced": func(r cronsync.Repository) []cronsync.Repository { r.ID = 18; return []cronsync.Repository{r} },
+		"archived": func(r cronsync.Repository) []cronsync.Repository { r.Archived = true; return []cronsync.Repository{r} },
+	}
+	for name, change := range changes {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			other := f.otherRepository()
+			f.sync()
+			old := f.object(other, "nightly")
+			before := len(f.calls)
+			f.gitHook = func(_ context.Context, verb, ref string) error {
+				if verb == "resolve" && ref == "refs/heads/main" {
+					f.mu.Lock()
+					f.repos = append([]cronsync.Repository{f.repo}, change(other)...)
+					f.mu.Unlock()
+				}
+				return nil
+			}
+			if err := f.c.SyncAll(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if slices.ContainsFunc(f.calls[before:], func(call cronsync.Preparation) bool { return call.Repository.ID == other.ID }) {
+				t.Fatal("a step admitted the repository from the record the pass started with")
+			}
+			for _, action := range f.native.Actions() {
+				if action.Verb == "delete" && action.Name == old.Name {
+					return
+				}
+			}
+			t.Fatal("the stale parent was kept", f.native.Actions())
+		})
+	}
+}
+
 // Once the supplied context ends, repositories the pass has not reached keep
 // their state instead of being recorded as failed.
 func TestPassLeavesUnreachedRepositoriesAsTheyAre(t *testing.T) {
