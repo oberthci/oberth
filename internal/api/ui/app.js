@@ -302,7 +302,7 @@ function runScreen(view, id) {
 function stepRow(view, step, path, pane) {
  return h("a", {class: "row", href: "#log", "data-key": step.plan_path, "aria-current": view.selected === step.plan_path ? "step" : null, onclick: event => {
   event.preventDefault(); chooseStep(view, step, path, pane, true);
- }}, state(step.status), h("span", {class: "mono"}, step.name), step.credential_intent ? h("span", {class: "secret"}, "secret") : h("span"), clock(step));
+ }}, state(step.status), h("span", {class: "mono step-name", title: step.name}, step.name), step.credential_intent ? h("span", {class: "secret"}, "secret") : h("span"), clock(step));
 }
 function chooseStep(view, step, path, pane, scroll) {
  view.selected = step.plan_path; view.logs?.abort(); view.logs = new AbortController();
