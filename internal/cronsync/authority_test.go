@@ -50,6 +50,36 @@ func TestResumeBeforeStartupPassKeepsAuthorityPause(t *testing.T) {
 	}
 }
 
+// A notice pass for a repository the catalogue no longer knows can run in the
+// startup window and run out of time; it must not let resumes through for the
+// repositories it never reached.
+func TestUnknownKeyPassDoesNotReopenResumeWindow(t *testing.T) {
+	f := newFixture(t)
+	other := f.otherRepository()
+	f.sync()
+	if err := f.authority(t.Context(), other, func(context.Context) error { return errors.New("publish failed") }); err == nil {
+		t.Fatal("a failed publication was reported as published")
+	}
+	restarted, err := cronsync.New(f.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notice, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	f.gitHook = func(_ context.Context, verb, name string) error {
+		if verb == "resolve" && name == "refs/heads/main" {
+			cancel()
+		}
+		return nil
+	}
+	_ = restarted.RefsChanged(notice, "origin/team/removed", nil)
+	f.gitHook = nil
+	var pending *publicerr.Error
+	if err := restarted.SetPause(t.Context(), other, "nightly"); !errors.As(err, &pending) || pending.Reason() != "schedule update is pending" || !f.object(other, "nightly").Spec.Suspend {
+		t.Fatal("an unknown-key pass that did not reach the repository reopened the resume window", err)
+	}
+}
+
 func TestCronAuthoritySuspendsBeforePublication(t *testing.T) {
 	f := newFixture(t)
 	f.sync()

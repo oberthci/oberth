@@ -68,21 +68,27 @@ func (c *Syncer) declarationAt(ctx context.Context, repo Repository, resolve fun
 // syncAll reconciles every repository, each within its own RepositoryAttempt,
 // so a slow one uses up only its own time; a repository the pass no longer
 // reaches within ctx keeps its state rather than being recorded as failed.
+// Resumes are let through only by a pass that went over every repository: a
+// pass that runs out of time keeps the block it found (after a restart, the
+// one set at construction).
 func (c *Syncer) syncAll(ctx context.Context) error {
+	prior := c.fullSyncFailed
 	repos, objects, err := c.passStart(ctx)
 	if err != nil {
 		return err
 	}
-	c.fullSyncFailed = false
+	reached := true
 	var failures []error
 	for _, repo := range repos {
 		if err := ctx.Err(); err != nil {
 			failures = append(failures, err)
+			reached = false
 			continue
 		}
 		failures = append(failures, c.attempt(ctx, repo, objects))
 	}
 	failures = append(failures, c.removeOrphans(ctx, repos, objects))
+	c.fullSyncFailed = prior && !reached
 	return errors.Join(failures...)
 }
 
