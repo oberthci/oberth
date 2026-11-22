@@ -43,7 +43,7 @@ func (s *Store) RegisterUpstream(ctx context.Context, action stateport.Action, i
 
 func validUpstream(input stateport.Upstream) bool {
 	endpoint, err := url.Parse(input.BaseURL)
-	return err == nil && endpoint.Host != "" && endpoint.User == nil && input.Kind != "" && input.KeyName != "" && !input.Removed
+	return err == nil && endpoint.Host != "" && reponame.ValidateForgeURL(endpoint) == nil && input.Kind != "" && input.KeyName != "" && !input.Removed
 }
 
 // RemoveUpstream refuses repository references and retains restrictive named scopes.

@@ -34,7 +34,7 @@ func TestRepoAddMalformedAddressHasAnAddressRemedyAndNoEcho(t *testing.T) {
 		t.Fatal(code)
 	}
 	text := command.diagnostic.String()
-	if !strings.Contains(text, "Repository address is invalid.") || !strings.Contains(text, "git@host:organization/repository.git") || strings.Contains(text, "private-marker") || strings.Contains(text, "regular file") {
+	if !strings.Contains(text, "Repository address is invalid.") || !strings.Contains(text, "user@host:path/repository.git") || strings.Contains(text, "private-marker") || strings.Contains(text, "regular file") {
 		t.Fatal(text)
 	}
 	assertNoRepoAdministration(t, b)

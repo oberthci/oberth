@@ -125,7 +125,7 @@ func (f *Runs) auditVisible(v model.AuditAction, scope []string) bool {
 
 func validUpstreamBinding(u stateport.Upstream) bool {
 	endpoint, err := url.Parse(u.BaseURL)
-	return err == nil && reponame.ValidateUpstreamName(u.Name) == nil && endpoint.Host != "" && endpoint.User == nil && u.Kind != "" && u.KeyName != "" && !u.Removed
+	return err == nil && reponame.ValidateUpstreamName(u.Name) == nil && endpoint.Host != "" && reponame.ValidateForgeURL(endpoint) == nil && u.Kind != "" && u.KeyName != "" && !u.Removed
 }
 
 func matchesAdministrativeFilter(q stateport.AdministrativeFilter, v model.AuditAction) bool {

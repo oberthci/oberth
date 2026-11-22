@@ -69,9 +69,7 @@ func (o *serverOwners) upstream(ctx context.Context, canonical string) (gitcache
 	}
 	remote := gitcache.Remote{DefaultBranch: o.settings.DefaultBranch}
 	base.Scheme = "ssh"
-	if base.User == nil {
-		base.User = url.User("git")
-	}
+	base.User = url.User(reponame.ForgeUser(base))
 	base.Host = sshURLHost(base)
 	remote.URL = base.String()
 	remote.SSHBinary = filepath.Join(o.runtimeDirectory(), "git-ssh")

@@ -10,8 +10,8 @@ import (
 	"github.com/oberthci/oberth/internal/apicontract"
 )
 
-func TestRepoAddNewUpstreamRequiresTwoPathSegments(t *testing.T) {
-	for _, path := range []string{"prefix/team/widget.git", "widget.git"} {
+func TestRepoAddNewUpstreamRequiresAnOrganizationInThePath(t *testing.T) {
+	for _, path := range []string{"widget.git", "/widget.git/"} {
 		t.Run(path, func(t *testing.T) {
 			b := fake.Bindings()
 			command := urlCheckoutCommand(t, b, false)

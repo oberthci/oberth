@@ -65,7 +65,7 @@ func TestUpstreamAuditRefusalDoesNotPersistPins(t *testing.T) {
 
 func TestInvalidUpstreamAddressRefusesBeforeHandshake(t *testing.T) {
 	t.Parallel()
-	for _, address := range []string{"ssh://forge.oberth.ci?x=1", "ssh://forge.oberth.ci?", "ssh://forge.oberth.ci#x", "ssh://git@forge.oberth.ci", "ssh://forge.oberth.ci:99999", "ssh://forge.oberth.ci:0", "ssh://forge.oberth.ci:"} {
+	for _, address := range []string{"ssh://forge.oberth.ci?x=1", "ssh://forge.oberth.ci?", "ssh://forge.oberth.ci#x", "ssh://git:secret@forge.oberth.ci", "ssh://-oProxyCommand=x@forge.oberth.ci", "ssh://forge.oberth.ci/srv/../team", "ssh://forge.oberth.ci:99999", "ssh://forge.oberth.ci:0", "ssh://forge.oberth.ci:"} {
 		t.Run(address, func(t *testing.T) {
 			p, _ := confirmationFixture(t)
 			p.f.c.People.Administration.(*testAdministration).Prepare = func(context.Context, apicontract.UpstreamAddArgs) (service.PreparedUpstream, error) {

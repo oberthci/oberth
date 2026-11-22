@@ -19,8 +19,8 @@ func repositoryUpstream(s *flowSession, u *url.URL, name string, flags *flag.Fla
 	if err != nil {
 		return source.Name, err
 	}
-	if !existing && len(strings.Split(strings.Trim(u.Path, "/"), "/")) != 2 {
-		return source.Name, publicerr.New(publicerr.InvalidInput, "A new upstream requires an organization/repository URL path.", "Use a forge URL shaped like ssh://host/organization/repository.git.", nil)
+	if !existing && !strings.Contains(strings.Trim(u.Path, "/"), "/") {
+		return source.Name, publicerr.New(publicerr.InvalidInput, "A new upstream needs an organization in the URL path.", "Use a forge URL shaped like ssh://host/organization/repository.git.", nil)
 	}
 	repo, err := repositoryFromURL(source.Name, u)
 	if err != nil {
@@ -56,7 +56,7 @@ func selectRepositoryUpstream(sources []apicontract.Upstream, u *url.URL, name s
 		}
 		name = derivedUpstreamName(u)
 	}
-	return apicontract.Upstream{Name: name, BaseURL: u.Scheme + "://" + u.Host}, false, nil
+	return apicontract.Upstream{Name: name, BaseURL: upstreamAddress(u)}, false, nil
 }
 
 func registerUpstream(s *flowSession, u *url.URL, source apicontract.Upstream, flags *flag.FlagSet) error {

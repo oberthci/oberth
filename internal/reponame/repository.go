@@ -25,6 +25,10 @@ func (e *InvalidNameError) Reason() string {
 		return "The organization name is invalid."
 	case "repository path":
 		return "The repository path is invalid."
+	case "forge user":
+		return "The forge SSH user name is invalid."
+	case "forge path":
+		return "The forge URL path is invalid."
 	}
 	return "The repository name is invalid."
 }
@@ -40,6 +44,10 @@ func (e *InvalidNameError) Remedy() string {
 		return "Use upstream/organization/name, such as origin/team/widget, without a leading slash or .git suffix."
 	case "organization":
 		return "Use a name like team with letters, digits, ._-; start alphanumeric and avoid consecutive dots."
+	case "forge user":
+		return "Use the forge's SSH user, like git: up to 32 letters, digits, ._-, starting alphanumeric."
+	case "forge path":
+		return "Use path parts like srv/team/widget.git: letters, digits, ._-, each starting alphanumeric."
 	default:
 		return "Use a name like widget with letters, digits, ._-; avoid consecutive dots and a .git suffix."
 	}

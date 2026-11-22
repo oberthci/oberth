@@ -28,10 +28,9 @@ type Result struct {
 	Updated bool `json:"updated,omitempty"`
 }
 
-// FirstRunNext is a new installation's next action. It names the one forge URL
-// shape repo add accepts: Oberth logs in to every forge as git, and a new
-// upstream's organization is the first of exactly two path parts.
-const FirstRunNext = "Add the deploy key to your forge, then run oberth repo add git@<forge>:<organization>/<repository>.git."
+// FirstRunNext is a new installation's next action. repo add takes the forge's
+// own SSH URL, with the forge's user and path.
+const FirstRunNext = "Add the deploy key to your forge; with its own SSH user and path, run oberth repo add <forge-url>."
 
 // UpdateNext replaces the first-run steps on an update of a completed
 // installation, which keeps its identities and records.

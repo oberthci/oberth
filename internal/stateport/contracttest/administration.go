@@ -46,6 +46,7 @@ func AdministrationSuite(t *testing.T, factory func(*testing.T) AdministrationFi
 		"audit_scope_filters":    checkAdministrativeAudit,
 		"audit_actor":            checkAdministrativeActor,
 		"upstream_binding":       checkUpstreamBinding,
+		"upstream_forge_user":    checkUpstreamForgeUser,
 		"reserved_global":        checkReservedGlobalUpstream,
 		"late_grant_rollback":    checkGrantRollback,
 		"late_audit_rollback":    checkAdministrativeRollback,

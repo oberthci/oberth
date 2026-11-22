@@ -107,10 +107,6 @@ func (a serverAdministration) configure(ctx context.Context, u stateport.Upstrea
 	if err != nil {
 		return "", err
 	}
-	user := "git"
-	if endpoint.User != nil {
-		user = endpoint.User.Username()
-	}
 	port := endpoint.Port()
 	if port == "" {
 		port = "22"
@@ -120,7 +116,7 @@ func (a serverAdministration) configure(ctx context.Context, u stateport.Upstrea
 		return "", err
 	}
 	path := filepath.Join(dir, "ssh-"+u.Name+".config")
-	data := sshConfiguration(sshConnection{Host: endpoint.Hostname(), Port: port, User: user, Key: key, Hosts: a.pinsPath()})
+	data := sshConfiguration(sshConnection{Host: endpoint.Hostname(), Port: port, User: reponame.ForgeUser(endpoint), Key: key, Hosts: a.pinsPath()})
 	return path, errors.Join(ctx.Err(), writeServerState(path, data))
 }
 func (a serverAdministration) PublicIdentity(ctx context.Context, name string) (apicontract.PublicIdentity, error) {

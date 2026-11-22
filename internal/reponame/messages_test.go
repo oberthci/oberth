@@ -8,7 +8,7 @@ import (
 )
 
 func TestRepositoryDiagnosticsAreShortWithFullValueContext(t *testing.T) {
-	for _, component := range []string{"", "upstream", "organization", "repository path", "repository name"} {
+	for _, component := range []string{"", "upstream", "organization", "repository path", "repository name", "forge user", "forge path"} {
 		for _, reserved := range []bool{false, true} {
 			e := &InvalidNameError{Component: component, Value: strings.Repeat("value", 100), reserved: reserved}
 			for text, limit := range map[string]int{e.Reason(): 80, e.Remedy(): 120} {

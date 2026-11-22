@@ -19,10 +19,11 @@ func (r Repository) URL(base string) (*url.URL, error) {
 	return u, nil
 }
 
-// MatchesURL compares the stored scheme, host, port and repository namespace.
+// MatchesURL compares the stored scheme, SSH user, host, port and repository
+// namespace.
 func (r Repository) MatchesURL(base string, supplied *url.URL) bool {
 	expected, err := r.URL(base)
-	return err == nil && expected.Scheme == supplied.Scheme && expected.Host == supplied.Host &&
+	return err == nil && expected.Scheme == supplied.Scheme && ForgeUser(expected) == ForgeUser(supplied) && expected.Host == supplied.Host &&
 		strings.TrimSuffix(expected.Path, ".git") == strings.TrimSuffix(strings.TrimRight(supplied.Path, "/"), ".git") &&
 		supplied.RawQuery == "" && !supplied.ForceQuery && supplied.Fragment == ""
 }

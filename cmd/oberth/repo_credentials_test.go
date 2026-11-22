@@ -54,31 +54,33 @@ func TestRepositoryURLDiagnosticsRedactPasswords(t *testing.T) {
 	}
 }
 
-func TestRepoAddRefusesOtherSSHUsersBeforeCheckoutAndDiscovery(t *testing.T) {
+// Each address would put an option into ssh or git, a second line into the
+// SSH configuration, or a path outside the namespace an upstream reaches.
+func TestRepoAddRefusesUnsafeForgeUsersAndPathsBeforeCheckoutAndDiscovery(t *testing.T) {
 	for _, joined := range []bool{false, true} {
-		for _, address := range []string{"ssh://private-user@forge.oberth.ci/team/widget.git", "private-user@forge.oberth.ci:team/widget.git"} {
-			t.Run(strconv.FormatBool(joined)+address, func(t *testing.T) { checkUnsupportedSSHUser(t, joined, address) })
+		for address, reason := range map[string]string{
+			"ssh://-oProxyCommand=x@forge.oberth.ci/team/widget.git": "forge SSH user name is invalid",
+			"ssh://a%0AProxyCommand%20x@forge.oberth.ci/team/w.git":  "forge SSH user name is invalid",
+			"ssh://forge.oberth.ci/srv/../other/widget.git":          "forge URL path is invalid",
+			"oberth@forge.oberth.ci:-upload/team/widget.git":         "forge URL path is invalid",
+			"ssh://forge.oberth.ci/srv/%2e%2e/team/widget.git":       "forge URL path is invalid",
+		} {
+			t.Run(strconv.FormatBool(joined)+address, func(t *testing.T) { checkUnsafeForgeAddress(t, joined, address, reason) })
 		}
 	}
 }
 
-func checkUnsupportedSSHUser(t *testing.T, joined bool, address string) {
+func checkUnsafeForgeAddress(t *testing.T, joined bool, address, reason string) {
 	t.Helper()
 	b := fake.Bindings()
 	command := urlCheckoutCommand(t, b, joined)
 	command.address = address
 	command.app.directory = filepath.Join(t.TempDir(), "absent-checkout")
 	if code := command.run(t, "--detail"); code != 1 {
-		t.Fatal("unsupported SSH user accepted", code)
+		t.Fatal("unsafe forge address accepted", code)
 	}
-	text := command.out.String() + command.diagnostic.String()
-	for _, want := range []string{"Oberth reaches forges as git@.", "Use git@host in the SSH forge URL and retry."} {
-		if !strings.Contains(text, want) {
-			t.Fatal("missing remedy", text)
-		}
-	}
-	if strings.Contains(text, "private-user") {
-		t.Fatal("unsupported user echoed", text)
+	if text := command.out.String() + command.diagnostic.String(); !strings.Contains(text, reason) {
+		t.Fatal("refusal did not name the unsafe part", text)
 	}
 	assertNoRepoAdministration(t, b)
 	_, _, calls := b.RepoList.Handler.(*fake.Handler[apicontract.RepoListArgs, apicontract.RepoPage]).Observed()

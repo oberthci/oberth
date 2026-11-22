@@ -13,6 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/reponame"
 	"github.com/oberthci/oberth/internal/stateport"
 )
 
@@ -282,7 +283,7 @@ func (s *Service) PrepareReceiveOutbox(ctx context.Context, c apicontract.Caller
 }
 
 func validUpstreamURL(u *url.URL) bool {
-	if u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Scheme != "https" && u.Scheme != "ssh" {
+	if u.Hostname() == "" || reponame.ValidateForgeURL(u) != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Scheme != "https" && u.Scheme != "ssh" {
 		return false
 	}
 	if port := u.Port(); port != "" {
