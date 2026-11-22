@@ -378,13 +378,15 @@ function reposScreen(view) {
  };
 }
 // A repository's last runs as bars, oldest left: green passed, red failed, yellow
-// queued or running, grey cancelled. Each bar opens its run; the row's own link
-// stays the keyboard's stop, so the bars take no tab stops of their own.
+// queued or running, grey cancelled. Each bar opens its run and names it in its
+// title. The bars sit inside the row's link, which stays the one stop for the
+// keyboard and for assistive technology: the strip is hidden from it and the
+// bars take no tab stops.
 const barColours = {passed: "passed", failed: "failed", queued: "running", running: "running"};
 function recentRuns(runs) {
- return h("span", {class: "recent"}, runs.map(run => {
+ return h("span", {class: "recent", "aria-hidden": "true"}, runs.map(run => {
   const words = run.status + " · " + refName(run.ref) + " · " + time(run.created_at);
-  return h("a", {class: "bar " + (barColours[run.status] || "other"), href: "/runs/" + encodeURIComponent(run.id), title: words, "aria-label": words, tabindex: "-1"});
+  return h("a", {class: "bar " + (barColours[run.status] || "other"), href: "/runs/" + encodeURIComponent(run.id), title: words, tabindex: "-1"});
  }));
 }
 function statusScreen(view) {

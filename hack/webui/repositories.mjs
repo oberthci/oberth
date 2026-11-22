@@ -17,14 +17,16 @@ export async function repositories(client){
   await client.cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
   const mark=client.requests.length;
   await client.loaded('/repos','.repos a.row');
-  const page=await client.evaluate(`({scroll:document.documentElement.scrollWidth,head:Array.from(document.querySelectorAll('.repos .head span')).map(node=>node.textContent),rows:Array.from(document.querySelectorAll('.repos a.row')).map(row=>({key:row.dataset.key,height:row.getBoundingClientRect().height,latest:row.children[2].textContent,branch:row.children[1].textContent,cells:Array.from(row.children).map(cell=>cell.getBoundingClientRect().height),bars:Array.from(row.querySelectorAll('.bar')).map(bar=>({colour:bar.classList[1],href:bar.getAttribute('href'),title:bar.title,label:bar.getAttribute('aria-label'),tab:bar.tabIndex,left:bar.getBoundingClientRect().left,width:bar.getBoundingClientRect().width,height:bar.getBoundingClientRect().height}))}))})`);
+  const page=await client.evaluate(`({scroll:document.documentElement.scrollWidth,head:Array.from(document.querySelectorAll('.repos .head span')).map(node=>node.textContent),rows:Array.from(document.querySelectorAll('.repos a.row')).map(row=>({key:row.dataset.key,height:row.getBoundingClientRect().height,latest:row.children[2].textContent,hidden:row.children[3].getAttribute('aria-hidden'),branch:row.children[1].textContent,cells:Array.from(row.children).map(cell=>cell.getBoundingClientRect().height),bars:Array.from(row.querySelectorAll('.bar')).map(bar=>({colour:bar.classList[1],href:bar.getAttribute('href'),title:bar.title,label:bar.getAttribute('aria-label'),tab:bar.tabIndex,left:bar.getBoundingClientRect().left,width:bar.getBoundingClientRect().width,height:bar.getBoundingClientRect().height}))}))})`);
   const reads=client.requests.slice(mark).filter(request=>request.path.startsWith('/api/repos')||request.path.startsWith('/api/runs'));
   check(reads.length===1&&new URL(reads[0].url).searchParams.get('recent_runs')==='true','the page did not read every strip with the repository list in one request '+JSON.stringify(reads));
   check(page.scroll<=width&&JSON.stringify(page.head)==='["REPOSITORY","DEFAULT BRANCH","LATEST RUN","LAST 20","BRANCHES"]','repositories page overflowed or lost its head '+JSON.stringify(page));
   for(const row of page.rows){
    const letters=spelled[row.key];
    check(JSON.stringify(row.bars.map(bar=>bar.colour))===JSON.stringify([...letters].map(letter=>colour[letter])),'bars out of order or miscoloured '+JSON.stringify(row));
-   check(row.bars.every((bar,index)=>bar.href==='/runs/'+(0x7700+index).toString(16).padStart(32,'0')&&bar.title===bar.label&&bar.title.split(' · ')[1]==='topic-'+index&&bar.tab===-1&&bar.width===5&&bar.height===16&&(!index||bar.left>row.bars[index-1].left)),'bar link, title or shape wrong '+JSON.stringify(row.bars));
+   check(row.bars.every((bar,index)=>bar.href==='/runs/'+(0x7700+index).toString(16).padStart(32,'0')&&bar.label===null&&bar.title.split(' · ')[1]==='topic-'+index&&bar.tab===-1&&bar.width===5&&bar.height===16&&(!index||bar.left>row.bars[index-1].left)),'bar link, title or shape wrong '+JSON.stringify(row.bars));
+   // The bars live inside the row's link: hidden from assistive technology, so the row reads as before.
+   check(row.hidden==='true','bar strip exposed inside the row link '+JSON.stringify(row));
    if(!letters)check(row.latest==='no runs'&&!row.bars.length,'repository without runs not marked '+JSON.stringify(row));
    // From 1024px each row is one line: no cell taller than the status pill's line. Narrower, a
    // long latest-run line wraps rather than being cut; the bars keep their one line.
