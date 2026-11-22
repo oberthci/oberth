@@ -4,7 +4,7 @@ import json
 import shutil
 import unittest
 
-from fetch_support import FetchCase, SOURCE, KEY_MARKER, check_pin, embedded_key, serve
+from fetch_support import DOWNLOAD, FetchCase, LATEST, SOURCE, KEY_MARKER, check_pin, embedded_key, serve
 
 
 class FetchContract(FetchCase):
@@ -51,13 +51,13 @@ class FetchContract(FetchCase):
                 with serve(self.files, self.requests) as origin:
                     self.assert_refused(self.fetch(origin, "--force"), target)
 
-    def test_redirects_on_every_artifact_are_refused(self):
+    def test_redirects_off_the_release_hosts_are_refused(self):
         foreign_requests = []
         target = self.preserved()
         with serve({}, foreign_requests) as foreign:
             for downloader in self.available("curl", "wget"):
                 for path in tuple(self.files):
-                    for destination in (foreign + "/redirect", "/same-host"):
+                    for destination in (foreign + "/redirect", "/same-host", "http://release-assets.githubusercontent.com/asset"):
                         with self.subTest(downloader=downloader, path=path, destination=destination):
                             saved = self.files[path]
                             self.files[path] = ("redirect", destination)
@@ -68,6 +68,57 @@ class FetchContract(FetchCase):
                             self.files[path] = saved
         self.assertEqual(foreign_requests, [])
         self.assertNotIn("/same-host", self.requests)
+
+    def asset_redirects(self, asset, origin):
+        """Serve every release file from the asset host, as GitHub does; latest goes through the tag address."""
+        assets = {}
+        for path in tuple(self.files):
+            assets["/asset" + path] = self.files[path]
+            self.files[path] = ("redirect", asset + "/asset" + path)
+        self.files[LATEST] = ("redirect", origin + DOWNLOAD + "/v1.2.3/latest-record")
+        self.files["/v1.2.3/latest-record"] = ("redirect", asset + "/asset" + LATEST)
+        return assets
+
+    def test_redirects_to_the_asset_host_are_followed(self):
+        for downloader in self.available("curl", "wget"):
+            with self.subTest(downloader=downloader):
+                self.release()
+                assets, asset_requests = {}, []
+                target = self.preserved()
+                with serve(assets, asset_requests) as asset, serve(self.files, self.requests) as origin:
+                    self.asset_host = asset
+                    assets.update(self.asset_redirects(asset, origin))
+                    result = self.fetch(origin, "--force", overrides=self.tools(downloader=downloader))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(target.read_bytes(), self.binary)
+                self.assertIn("/asset/v1.2.3/" + self.artifact, asset_requests)
+                self.assertIn("/asset" + LATEST, asset_requests)
+
+    def test_tampered_bytes_and_long_chains_after_redirect_are_refused(self):
+        for downloader in self.available("curl", "wget"):
+            for fault in ("tampered", "chain"):
+                with self.subTest(downloader=downloader, fault=fault):
+                    self.release()
+                    assets, asset_requests = {}, []
+                    target = self.preserved()
+                    with serve(assets, asset_requests) as asset, serve(self.files, self.requests) as origin:
+                        self.asset_host = asset
+                        assets.update(self.asset_redirects(asset, origin))
+                        path = "/asset/v1.2.3/" + self.artifact
+                        if fault == "tampered":
+                            assets[path] = b"tampered binary"
+                        else:
+                            for hop in range(4):
+                                assets[path + str(hop)] = ("redirect", asset + path + str(hop + 1))
+                            assets[path] = ("redirect", asset + path + "0")
+                        result = self.fetch(origin, "--force", overrides=self.tools(downloader=downloader))
+                    self.assert_refused(result, target)
+                    if fault == "tampered":
+                        self.assertIn(b"Release checksum is invalid.", result.stderr)
+                    else:
+                        self.assertIn(b"redirected elsewhere", result.stderr)
+                        self.assertIn(path + "1", asset_requests)
+                        self.assertNotIn(path + "2", asset_requests)
 
     def test_selected_artifact_refuses_missing_duplicate_or_invalid_digest(self):
         original = self.files["/v1.2.3/SHA256SUMS"]
@@ -126,7 +177,7 @@ class FetchContract(FetchCase):
         for record in records:
             with self.subTest(record=record):
                 self.release(record=json.dumps(record).encode())
-                self.files["/latest"] = json.dumps({"metadata": {"version": "v9.0.0"}, "version": "v1.2.3"}).encode()
+                self.files[LATEST] = json.dumps({"metadata": {"version": "v9.0.0"}, "version": "v1.2.3"}).encode()
                 with serve(self.files, self.requests) as origin:
                     result = self.fetch(origin, "--force")
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -166,7 +217,7 @@ class FetchContract(FetchCase):
         for path, data in list(self.files.items()):
             if path.startswith("/v1.2.2/"):
                 self.files[path.replace("/v1.2.2/", "/v1.2.3/")] = data
-        self.files["/latest"] = b'{"version":"v1.2.3","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+        self.files[LATEST] = b'{"version":"v1.2.3","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
         with serve(self.files, self.requests) as origin:
             result = self.fetch(origin, "--force")
         self.assert_refused(result, target)
@@ -190,7 +241,7 @@ class FetchContract(FetchCase):
                 with self.subTest(field=field, extra=extra):
                     version = "v1.2." + "3" * (123 + extra) if field == "version" else "v1.2.3"
                     self.release(version=version, binary=self.binary.ljust(128 + extra if field == "binary" else 128, b"\n"))
-                    path = {"sums": "/v1.2.3/SHA256SUMS", "bundle": "/v1.2.3/SHA256SUMS.sigstore.json", "record": "/v1.2.3/release.json", "latest": "/latest"}.get(field)
+                    path = {"sums": "/v1.2.3/SHA256SUMS", "bundle": "/v1.2.3/SHA256SUMS.sigstore.json", "record": "/v1.2.3/release.json", "latest": LATEST}.get(field)
                     if path:
                         padded = self.files[path].ljust(2048 + extra, b" ")
                         if field == "sums":
@@ -259,7 +310,7 @@ class FetchContract(FetchCase):
                     self.assertIn(b"Latest resolves to v1.2.3.", result.stdout)
                     self.assertIn(b"Latest is older than installed version.", result.stderr)
                     self.assertIn(b"Pass the desired version explicitly", result.stderr)
-                    self.assertEqual(self.requests, ["/latest"])
+                    self.assertEqual(self.requests, [LATEST])
                     result = self.fetch(origin, "--force", "v1.2.3")
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(target.read_bytes(), self.binary)

@@ -19,7 +19,7 @@ import (
 
 func TestOnlineReleaseAcceptsCompressedAndChunkedOrigins(t *testing.T) {
 	_, dir := signedInstallRelease(t, "v0.2.0")
-	for _, shape := range []string{"length", "gzip", "chunked", "gzip-over-bound", "chunked-over-bound", "tampered"} {
+	for _, shape := range []string{"length", "gzip", "chunked", "gzip-over-bound", "chunked-over-bound", "tampered", "redirected", "redirected-tampered"} {
 
 		t.Run(shape, func(t *testing.T) { checkOnlineReleaseShape(t, dir, shape) })
 	}
@@ -41,7 +41,7 @@ func checkOnlineReleaseShape(t *testing.T, dir, shape string) {
 		if !errors.Is(err, releaseverify.Limit) {
 			t.Fatal("body bound not enforced", err)
 		}
-	case shape == "tampered":
+	case strings.HasSuffix(shape, "tampered"):
 		if !errors.Is(err, releaseverify.Digest) {
 			t.Fatal("stream digest not checked", err)
 		}
@@ -55,6 +55,10 @@ func checkOnlineReleaseShape(t *testing.T, dir, shape string) {
 func standInReleaseOrigin(t *testing.T, dir, shape string) *httptest.Server {
 	t.Helper()
 	return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(shape, "redirected") && !strings.HasPrefix(r.URL.Path, "/asset/") {
+			http.Redirect(w, r, "https://release-assets.githubusercontent.com/asset/"+path.Base(r.URL.Path), http.StatusFound)
+			return
+		}
 		body, err := os.ReadFile(dir + "/" + path.Base(r.URL.Path))
 		if err != nil {
 			t.Error(err)
@@ -65,7 +69,7 @@ func standInReleaseOrigin(t *testing.T, dir, shape string) *httptest.Server {
 			if strings.Contains(shape, "over-bound") {
 				body = make([]byte, releaseverify.MaxMetadata+1)
 			}
-			if shape == "tampered" {
+			if strings.HasSuffix(shape, "tampered") {
 				body[0] ^= 1
 			}
 		}

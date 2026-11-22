@@ -54,8 +54,6 @@ metadata:
   namespace: REPLACE_WITH_PIPELINE_NAMESPACE
 data:
   origin: REPLACE_WITH_HTTPS_RELEASE_ORIGIN
-  publishExchange: REPLACE_WITH_HTTPS_PUBLISH_EXCHANGE
-  finalizeExchange: REPLACE_WITH_HTTPS_FINALIZE_EXCHANGE
 ---
 apiVersion: v1
 kind: Namespace

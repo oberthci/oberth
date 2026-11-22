@@ -45,9 +45,10 @@ const (
 	chartStamp          refusal = "Chart release placeholders are missing or repeated."
 	baseMismatch        refusal = "Base image differs from its reviewed pins."
 	binariesMismatch    refusal = "Image binaries differ from the shipped inventory."
-	latestInvalid       refusal = "Latest object is invalid."
-	latestBusy          refusal = "Latest changed repeatedly; try again."
-	storeFailure        refusal = "Release store refused the request."
+	latestInvalid       refusal = "GitHub's latest release has an invalid tag."
+	storeFailure        refusal = "GitHub refused the release request."
+	tagMissing          refusal = "Release tag is not on GitHub."
+	assetUnconfirmed    refusal = "Published release asset cannot be confirmed."
 	immutable           refusal = "Published release bytes differ."
 	notVerified         refusal = "Release has no matching clean verification."
 )
@@ -69,15 +70,16 @@ func (r refusal) Remedy() string {
 		keyMarkers:          "Restore exactly one public-key block in the fetcher.",
 		failure:             "Read the native error detail, fix the reported problem and retry.",
 		usage:               "Use base, package, key, pin, signature, verify, publish or finalize with required flags.",
-		releaseToken:        "Pass --token-file with the release store token.",
+		releaseToken:        "Pass --token-file with a GitHub token that may write this repository's releases.",
 		inputs:              "Provide the commands, chart, base layout and exact release version.",
 		basePin:             "Review the displayed base digest and write the canonical base-image pin.",
 		baseMismatch:        "Prepare the two-platform OCI base using the reviewed digest and Git pins.",
 		binariesMismatch:    "Rebuild all six binaries for their named targets from the admitted commit.",
 		chartStamp:          "Put each chart version and image digest placeholder on exactly one full line.",
-		latestInvalid:       "Repair the latest object with a valid version, commit and ETag before retrying.",
-		latestBusy:          "Try finalizing this verified release again after the concurrent update finishes.",
-		storeFailure:        "Check the release store's response and delegated publication permissions.",
+		latestInvalid:       "Mark a vMAJOR.MINOR.PATCH release as latest on GitHub, then retry.",
+		storeFailure:        "Read the GitHub answer in Detail and check the token's release write access.",
+		tagMissing:          "Push the release tag to GitHub, then retry publication.",
+		assetUnconfirmed:    "Check the named asset on GitHub; delete it only if its upload is incomplete.",
 		immutable:           "Use the existing identical release or publish a new version.",
 		notVerified:         "Run clean verification for these exact release bytes before advancing latest.",
 	}[r]

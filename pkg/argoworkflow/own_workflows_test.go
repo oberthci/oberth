@@ -58,7 +58,7 @@ func ownReleaseGrants(r admissioncontract.PrepareRequest) []admissioncontract.Gr
 	grants := []admissioncontract.GrantEvidence{}
 	for _, entry := range []struct{ kind, path, audience string }{
 		{"configmap", "release-config", ""}, {"secret", "oberth/data/release/signing", ""}, {"secret", "oberth/data/release/registry/config.json", ""},
-		{"identity", "identity", "oberth-publish"}, {"identity", "identity", "oberth-finalize"},
+		{"secret", "oberth/data/release/github-token", ""},
 	} {
 		grants = append(grants, admissioncontract.GrantEvidence{Repository: r.Repository, File: r.SelectedFile, Step: "*", Kind: entry.kind, Path: entry.path, Audience: entry.audience, Revision: "operator-approval", State: admissioncontract.StateVerified})
 	}

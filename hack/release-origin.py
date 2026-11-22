@@ -1,4 +1,4 @@
-"""Generate or check the standalone fetcher's snapshots of the public release address and version rule."""
+"""Generate or check the standalone fetcher's snapshots of the public release address, its redirect rule and the version rule."""
 # Spec: docs/plans/c13-own-pipelines.md#owned-data-and-public-contract
 import argparse
 from pathlib import Path
@@ -13,13 +13,18 @@ try:
 except OSError:
     raise SystemExit("Public release address is missing; check the canonical origin constant.") from None
 match = re.search(r'^const Origin = "([^"\n]+)"$', constant, re.M)
-if match is None:
+hosts = re.search(r'^const AssetHosts = "([a-z0-9. -]+)"$', constant, re.M)
+redirects = re.search(r'^const MaxRedirects = ([0-9]+)$', constant, re.M)
+if match is None or hosts is None or redirects is None:
     raise SystemExit("Public release address is missing; check the canonical origin constant.")
 script = root / "agent/skills/oberth/fetch-oberth"
 text = script.read_text()
-updated, count = re.subn(r"^[ \t]*origin=.*$", "origin=" + match[1], text, flags=re.M)
-if count != 1:
-    raise SystemExit("Fetcher address is missing or duplicated; restore one origin assignment.")
+updated = text
+for name, value in (("origin", match[1]), ("asset_hosts", "'" + " ".join("https://" + host + "/" for host in hosts[1].split()) + "'"),
+                    ("max_redirects", redirects[1])):
+    updated, count = re.subn(r"^[ \t]*" + name + r"=.*$", lambda _: name + "=" + value, updated, flags=re.M)
+    if count != 1:
+        raise SystemExit("Fetcher address is missing or duplicated; restore one " + name + " assignment.")
 try:
     pattern = (root / "internal/workflowpolicy/release-version.pattern").read_text().strip()
 except OSError:

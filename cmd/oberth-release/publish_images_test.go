@@ -1,19 +1,22 @@
 //go:build linux
 
-// These tests use Linux certificate-file trust for the local release store.
+// These tests run the built release tool against a local registry.
 package main
 
 import (
-	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/releaseverify"
 )
 
 func TestPublishProvesChartImagesBeforeWriting(t *testing.T) {
@@ -72,12 +75,30 @@ type imagePublicationCase struct {
 	code       int
 }
 
+// githubProxy stands between the tool and GitHub: it records each tunnel the
+// tool asks for and refuses it, so no test reaches the network.
+func githubProxy(t *testing.T) (*httptest.Server, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var tunnels []string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		tunnels = append(tunnels, r.Method+" "+r.Host)
+		mu.Unlock()
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(proxy.Close)
+	return proxy, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(tunnels)
+	}
+}
+
 func checkImagePublication(t *testing.T, tool string, files map[string][]byte, tc imagePublicationCase) {
 	code := tc.code
 	t.Helper()
-	store := &objectStore{files: make(map[string][]byte), t: t}
-	server := httptest.NewTLSServer(http.HandlerFunc(store.serve))
-	defer server.Close()
+	proxy, tunnels := githubProxy(t)
 	dir := t.TempDir()
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), body, 0600); err != nil {
@@ -86,26 +107,21 @@ func checkImagePublication(t *testing.T, tool string, files map[string][]byte, t
 	}
 	makeImageLayouts(t, dir)
 	credentials := t.TempDir()
-	ca, token := filepath.Join(credentials, "ca.pem"), filepath.Join(credentials, "token")
-	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600); err != nil {
-		t.Fatal(err)
-	}
+	token := filepath.Join(credentials, "token")
 	if err := os.WriteFile(token, []byte("fixture"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.CommandContext(t.Context(), tool, "publish", "--dir", dir, "--version", "v1.2.3", "--origin", server.URL, "--token-file", token)
-	command.Env = append(os.Environ(), "SSL_CERT_FILE="+ca)
+	command := exec.CommandContext(t.Context(), tool, "publish", "--dir", dir, "--version", "v1.2.3", "--origin", releaseverify.Origin, "--token-file", token)
+	command.Env = append(os.Environ(), "HTTPS_PROXY="+proxy.URL, "https_proxy="+proxy.URL, "NO_PROXY=", "no_proxy=")
 	output, err := command.CombinedOutput()
-	store.mu.Lock()
-	defer store.mu.Unlock()
 	if code == 200 {
-		if err != nil || len(store.files) != len(files) || string(output) != fmt.Sprintf("Published v1.2.3: %d files at %s/v1.2.3.\n", len(files), server.URL) {
-			t.Fatal("present images did not publish", err, string(output), len(store.files))
+		if err == nil || !slices.Equal(tunnels(), []string{"CONNECT api.github.com:443"}) {
+			t.Fatal("present images did not proceed to GitHub", err, string(output), tunnels())
 		}
 		return
 	}
-	if err == nil || len(store.files) != 0 {
-		t.Fatal("image refusal wrote files or succeeded", err, len(store.files))
+	if err == nil || len(tunnels()) != 0 {
+		t.Fatal("image refusal contacted GitHub or succeeded", err, tunnels())
 	}
 	assertImageRefusal(t, output, dir, tc)
 	if code == 404 {

@@ -22,8 +22,8 @@ case $operation in
     prepare-signing|sign|verify) ;;
     publish|finalize)
         [[ ${RELEASE_ORIGIN:-} = https://* ]] || fail 'Release origin is not HTTPS; configure an HTTPS origin.'
-        [[ -s ${RELEASE_TOKEN_FILE:-} ]] || fail 'Release token is missing; provide the projected token file.'
-        [[ ${RELEASE_EXCHANGE_URL:-} = https://* ]] || fail 'Token exchange is not HTTPS; configure an HTTPS endpoint.' ;;
+        github_token=${OBERTH_SECRETS_DIR:-}/oberth/data/release/github-token
+        [[ -n ${OBERTH_SECRETS_DIR:-} && -s $github_token ]] || fail 'GitHub release token is missing; grant it to this step.' ;;
     *) fail 'Release operation is invalid; use a documented release operation.' ;;
 esac
 if [[ $operation != sign && $operation != prepare-signing ]]; then
@@ -36,10 +36,6 @@ directory_failure() {
 prepare_directory() {
     mkdir -p "$2" 2>/dev/null && [[ -w $2 && -x $2 ]] || directory_failure "$1" "$2"
 }
-case $operation in
-    publish|finalize)
-        [[ -n ${RELEASE_AUDIENCE:-} ]] || fail 'Release audience is missing; set RELEASE_AUDIENCE for token exchange.' ;;
-esac
 prepare_directory RELEASE_PRIVATE "$private"
 chmod 700 "$private" 2>/dev/null || directory_failure RELEASE_PRIVATE "$private"
 export HOME=$private/home
@@ -49,22 +45,27 @@ check_cosign() {
     printf '%s  %s\n' ae1ecd212663f3693ad9edf8b1a183900c9a52d3155ba6e354237f9a0f6463fc "$private/cosign" | sha256sum -c - >/dev/null 2>"$private/cosign.error" || fail 'Signing tool digest differs; fetch the pinned signing tool.' "Detail: $private/cosign.error"
     chmod 700 "$private/cosign"
 }
-exchange() {
-    curl --proto '=https' --fail --silent --show-error --max-time 60 \
-        --data-urlencode grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
-        --data-urlencode subject_token_type=urn:ietf:params:oauth:token-type:jwt \
-        --data-urlencode "subject_token@$RELEASE_TOKEN_FILE" \
-        --data-urlencode "audience=$RELEASE_AUDIENCE" \
-        --output "$private/exchange.json" "$RELEASE_EXCHANGE_URL" 2>"$private/exchange.error" || fail 'Release token exchange failed; check the granted audience.'
-    python3 - "$private/exchange.json" "$private/access.token" 2>/dev/null <<'PY' || fail 'Release token is invalid; request a short-lived bearer token.'
-import json, pathlib, sys
-value = json.loads(pathlib.Path(sys.argv[1]).read_text())
-if (str(value.get("token_type", "")).lower() != "bearer" or type(value.get("expires_in")) is not int
-        or not 0 < value["expires_in"] <= 3600 or not value.get("access_token")):
-    sys.exit(1)
-pathlib.Path(sys.argv[2]).write_text(value["access_token"])
-PY
-    chmod 600 "$private/access.token"
+# GitHub answers a release download with a redirect to its asset host; follow
+# at most the canonical count, each over HTTPS under the origin or to an asset host.
+redirect_allowed() {
+    [[ $1 = "$RELEASE_ORIGIN"/* && $1 != *..* ]] && return 0
+    local host
+    for host in $(sed -n 's/^const AssetHosts = "\(.*\)"$/\1/p' internal/releaseverify/origin.go); do
+        [[ $1 = "https://$host/"* ]] && return 0
+    done
+    return 1
+}
+download() {
+    local address=$RELEASE_ORIGIN/$version/$1 hops=0 reply limit
+    limit=$(sed -n 's/^const MaxRedirects = \([0-9]*\)$/\1/p' internal/releaseverify/origin.go)
+    while :; do
+        reply=$(curl --proto '=https' --fail --silent --show-error --max-time 60 --max-filesize "$2" --max-redirs 0 \
+            --write-out '%{http_code} %{redirect_url}' --output "$clean/$1" "$address") || fail 'Release download failed; check the release address and version.'
+        [[ ${reply%% *} = 3* ]] || return 0
+        address=${reply#* }
+        hops=$((hops + 1))
+        (( hops <= limit )) && redirect_allowed "$address" || fail 'Release download redirected elsewhere; report the redirect.' "Target: $address"
+    done
 }
 case $operation in
     prepare-signing)
@@ -84,9 +85,8 @@ case $operation in
         "$tool" signature --dir "$dir" ;;
     publish|finalize)
         prepare_directory RELEASE_SHARED "$work"
-        exchange
         "$tool" "$operation" --dir "$dir" --version "$version" --origin "$RELEASE_ORIGIN" \
-            --token-file "$private/access.token" --receipt "$work/verified.json" ;;
+            --token-file "$github_token" --receipt "$work/verified.json" ;;
     verify)
         [[ ${RELEASE_ORIGIN:-} = https://* ]] || fail 'Release origin is not HTTPS; configure an HTTPS origin.'
         prepare_directory RELEASE_SHARED "$work"
@@ -94,14 +94,14 @@ case $operation in
         prepare_directory RELEASE_VERIFY_DIR "$verify_dir"
         clean=$(mktemp -d "$verify_dir/release.XXXXXX" 2>/dev/null) || directory_failure RELEASE_VERIFY_DIR "$verify_dir"
         for file in SHA256SUMS SHA256SUMS.sigstore.json; do
-            curl --proto '=https' --fail --silent --show-error --max-time 60 --max-filesize 1048576 --output "$clean/$file" "$RELEASE_ORIGIN/$version/$file"
+            download "$file" 1048576
         done
         "$tool" signature --dir "$clean"
         while IFS=' ' read -r digest file; do
             [[ $digest =~ ^[0-9a-f]{64}$ && $file =~ ^[a-z0-9][a-z0-9._-]*$ ]] || fail 'Release checksum line is invalid; fetch the exact release again.'
             maximum=536870912
             case $file in release.json) maximum=1048576;; oberth.tgz) maximum=67108864;; esac
-            curl --proto '=https' --fail --silent --show-error --max-time 60 --max-filesize "$maximum" --output "$clean/$file" "$RELEASE_ORIGIN/$version/$file"
+            download "$file" "$maximum"
         done < "$clean/SHA256SUMS"
         "$tool" verify --dir "$clean" --version "$version" --receipt "$work/verified.json" ;;
 esac

@@ -6,6 +6,7 @@ import (
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/releaseverify"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -22,26 +23,64 @@ func TestInstallationDownloadsFromPublicReleaseAddress(t *testing.T) {
 		_ = file.Close()
 		t.Fatal("fixture unexpectedly returned a release")
 	}
-	if address != "https://releases.oberth.ci/oberth/v1.2.3/release.json" {
+	if address != "https://github.com/oberthci/oberth/releases/download/v1.2.3/release.json" {
 		t.Fatal("installer uses a different public release address", address)
 	}
 }
 
+const assetAddress = "https://release-assets.githubusercontent.com/github-production-release-asset/1/2?sig=fixture"
+
+// redirectChain answers every request with a redirect to the next target,
+// and the last target with the release bytes.
+func redirectChain(calls *[]string, targets ...string) testTransport {
+	return func(r *http.Request) (*http.Response, error) {
+		*calls = append(*calls, r.URL.String())
+		if len(*calls) > len(targets) {
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("bytes")), Request: r}, nil
+		}
+		return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {targets[len(*calls)-1]}}, Body: http.NoBody, Request: r}, nil
+	}
+}
+
+func TestReleaseDownloadFollowsGitHubAssetRedirect(t *testing.T) {
+	for _, targets := range [][]string{{assetAddress}, {releaseverify.Origin + "/v1.2.3/release.json", assetAddress, assetAddress}} {
+		var calls []string
+		files := releaseHTTPFiles{ctx: t.Context(), version: "v1.2.3", transport: redirectChain(&calls, targets...)}
+		file, err := files.Open("release.json")
+		if err != nil {
+			t.Fatal("allowed redirect refused", err)
+		}
+		body, err := io.ReadAll(file)
+		if err != nil || string(body) != "bytes" || len(calls) != len(targets)+1 || calls[len(calls)-1] != assetAddress {
+			t.Fatal("asset redirect not followed", calls, err)
+		}
+		_ = file.Close()
+	}
+}
+
 func TestReleaseDownloadRefusesRedirectAndNamesTarget(t *testing.T) {
-	for _, target := range []string{releaseverify.Origin + "/moved", "https://other.oberth.ci/release", "http://other.oberth.ci/release"} {
-		t.Run(target, func(t *testing.T) {
-			calls := 0
-			files := releaseHTTPFiles{ctx: t.Context(), version: "v1.2.3", transport: testTransport(func(r *http.Request) (*http.Response, error) {
-				calls++
-				return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {target}}, Body: http.NoBody, Request: r}, nil
-			})}
+	for _, tc := range []struct {
+		name    string
+		targets []string
+	}{
+		{"other host", []string{"https://other.example.test/release"}},
+		{"plain HTTP", []string{"http://release-assets.githubusercontent.com/asset"}},
+		{"other repository", []string{"https://github.com/other/project/releases/download/v1.2.3/release.json"}},
+		{"look-alike host", []string{"https://release-assets.githubusercontent.com.example.test/asset"}},
+		{"asset then other host", []string{assetAddress, "https://other.example.test/release"}},
+		{"too many redirects", []string{assetAddress, assetAddress, assetAddress, assetAddress}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []string
+			files := releaseHTTPFiles{ctx: t.Context(), version: "v1.2.3", transport: redirectChain(&calls, tc.targets...)}
 			file, err := files.Open("release.json")
 			if file != nil {
 				_ = file.Close()
 				t.Fatal("redirect opened a file")
 			}
+			target := tc.targets[len(tc.targets)-1]
 			var problem *publicerr.Error
-			if !errors.As(err, &problem) || calls != 1 || !strings.Contains(strings.Join(problem.Context, "\n"), target) {
+			if !errors.As(err, &problem) || len(calls) != len(tc.targets) || !strings.Contains(strings.Join(problem.Context, "\n"), target) {
 				t.Fatal("redirect was followed or target hidden", calls, err)
 			}
 			app, _, diagnostic := fixture(t, fake.Bindings())

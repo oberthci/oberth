@@ -77,8 +77,14 @@ func cleanScriptEnvironment(t *testing.T, files map[string][]byte, public []byte
 	}
 	writeFixtureCommand(t, filepath.Join(bin, "curl"), `exec python3 - "$@" <<'PY_DOWNLOAD'
 import os, sys
-origin = os.environ["PUBLIC_ORIGIN"]
-arguments = [os.environ["DOWNLOAD_ORIGIN"] + value[len(origin):] if value.startswith(origin + "/") else value for value in sys.argv[1:]]
+origin, asset = os.environ["PUBLIC_ORIGIN"], "https://release-assets.githubusercontent.com/"
+def address(value):
+    if value.startswith(origin + "/"):
+        return os.environ["DOWNLOAD_ORIGIN"] + value[len(origin):]
+    if value.startswith(asset):
+        return os.environ["DOWNLOAD_ORIGIN"] + "/asset/" + value[len(asset):]
+    return value
+arguments = [address(value) for value in sys.argv[1:]]
 os.execv(os.environ["CURL_REAL"], [os.environ["CURL_REAL"], *arguments])
 PY_DOWNLOAD
 `)
@@ -105,22 +111,27 @@ printf verified > "$receipt";; *) exit 1;; esac
 	return env
 }
 func TestCleanVerificationUsesAuthenticatedDownloads(t *testing.T) {
-	for _, kind := range []string{"good", "signature", "payload"} {
+	const asset = "https://release-assets.githubusercontent.com/"
+	for _, kind := range []string{"good", "signature", "payload", "asset host", "asset host payload", "other host"} {
 		t.Run(kind, func(t *testing.T) {
 			files, public := signedDownloads(t)
 			env := cleanScriptEnvironment(t, files, public)
 			switch kind {
 			case "signature":
 				files["SHA256SUMS.sigstore.json"] = []byte(`{"messageSignature":{"signature":"YmFk"}}`)
-			case "payload":
+			case "payload", "asset host payload":
 				files["oberth-linux-amd64"] = []byte("tampered download")
 			}
-			configureDownloadOrigin(t, files, env)
+			redirect := map[string]string{"asset host": asset, "asset host payload": asset, "other host": "https://example.test/"}[kind]
+			configureDownloadOrigin(t, files, env, redirect)
 			output, err := releaseScript(t, "verify", env)
-			if (err == nil) != (kind == "good") {
+			if (err == nil) != (kind == "good" || kind == "asset host") {
 				t.Fatal("clean verification result", kind, err, string(output))
 			}
-			if kind == "good" {
+			if kind == "other host" && !strings.Contains(string(output), "Target: https://example.test/SHA256SUMS") {
+				t.Fatal("refused redirect hides its target", string(output))
+			}
+			if err == nil {
 				assertCleanDirectory(t, env)
 			} else if _, err := os.Stat(filepath.Join(env["RELEASE_SHARED"], "verified.json")); !os.IsNotExist(err) {
 				t.Fatal("failed download created a receipt", err)
@@ -128,10 +139,21 @@ func TestCleanVerificationUsesAuthenticatedDownloads(t *testing.T) {
 		})
 	}
 }
-func configureDownloadOrigin(t *testing.T, files map[string][]byte, env map[string]string) {
+
+// configureDownloadOrigin serves the files below the version path or, with a
+// redirect prefix, answers there with a redirect to prefix+name as GitHub does.
+func configureDownloadOrigin(t *testing.T, files map[string][]byte, env map[string]string, redirect string) {
 	t.Helper()
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, ok := files[strings.TrimPrefix(r.URL.Path, "/v1.2.3/")]
+		name, versioned := strings.CutPrefix(r.URL.Path, "/v1.2.3/")
+		if redirect != "" && versioned {
+			http.Redirect(w, r, redirect+name, http.StatusFound)
+			return
+		}
+		if redirect != "" {
+			name = strings.TrimPrefix(r.URL.Path, "/asset/")
+		}
+		body, ok := files[name]
 		if !ok {
 			w.WriteHeader(404)
 			return

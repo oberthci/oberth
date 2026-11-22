@@ -5,10 +5,10 @@ Use the [first-build commands](../README.md#first-green-build) on Kubernetes 1.3
 ## Obtain the CLI
 
 Run `sh <skill-directory>/fetch-oberth` from the [trusted skill](../agent/skills/oberth/SKILL.md).
-The [fetcher](../agent/skills/oberth/fetch-oberth) and CLI use
-`https://releases.oberth.ci/oberth`, the [canonical address](../internal/releaseverify/origin.go).
-The fetcher verifies the signed manifest and binary digest before replacing a binary; missing
-releases or signing keys stop it. Use the printed absolute path, never a checkout executable.
+The [fetcher](../agent/skills/oberth/fetch-oberth) and CLI read each tag's GitHub release at
+`https://github.com/oberthci/oberth/releases/download`, following redirects only to GitHub's asset
+hosts. They check the signed manifest and digests against the pinned key before replacing a binary;
+missing releases or keys stop them. Use the printed absolute path, never a checkout executable.
 
 ## Review and install
 

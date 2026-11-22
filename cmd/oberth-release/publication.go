@@ -1,229 +1,32 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/oberthci/oberth/internal/releaseverify"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"golang.org/x/mod/semver"
 )
 
-type publication struct {
-	origin, token, dir string
-	client             *http.Client
-	wait               func(context.Context, time.Duration) error
-}
-type latest struct {
+type verification struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
-}
-type verification struct {
-	latest
-	Sums string `json:"sums"`
+	Sums    string `json:"sums"`
 }
 
-func publicationFor(o options) (publication, error) {
-	token, err := os.ReadFile(o.token)
-	if err != nil || len(bytes.TrimSpace(token)) == 0 {
-		return publication{}, releaseToken
-	}
-	parsed, err := url.Parse(o.origin)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return publication{}, inputs
-	}
-	return publication{origin: strings.TrimRight(o.origin, "/"), token: strings.TrimSpace(string(token)), dir: o.dir, wait: waitRetry, client: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
-}
-func (p publication) request(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
-	request, err := http.NewRequestWithContext(ctx, method, p.origin+"/"+path, body)
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Authorization", "Bearer "+p.token)
-	return request, nil
-}
-func (p publication) createFiles(ctx context.Context, version string) error {
-	entries, err := os.ReadDir(p.dir)
-	if err != nil {
-		return err
-	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if strings.HasSuffix(entry.Name(), ".oci") && entry.IsDir() {
-			continue
-		}
-		if !entry.Type().IsRegular() {
-			return inputs
-		}
-		names = append(names, entry.Name())
-	}
-	slices.SortFunc(names, func(a, b string) int { return publicationRank(a) - publicationRank(b) })
-	for _, name := range names {
-		if err := p.createFile(ctx, version, name); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-func (p publication) createFile(ctx context.Context, version, name string) error {
-	file, err := os.Open(filepath.Join(p.dir, name))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-	info, err := file.Stat()
-	if err != nil {
-		return err
-	}
-	request, err := p.request(ctx, http.MethodPut, version+"/"+name, file)
-	if err != nil {
-		return err
-	}
-	request.ContentLength = info.Size()
-	request.Header.Set("If-None-Match", "*")
-	response, err := p.client.Do(request)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode == http.StatusPreconditionFailed {
-		return p.equalFile(ctx, version+"/"+name, name, info.Size())
-	}
-	if response.StatusCode != http.StatusCreated && response.StatusCode != http.StatusOK {
-		return storeFailure
-	}
-	return nil
-}
-func (p publication) equalFile(ctx context.Context, path, name string, size int64) error {
-	request, err := p.request(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return err
-	}
-	response, err := p.client.Do(request)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode != http.StatusOK {
-		return storeFailure
-	}
-	sum := sha256.New()
-	n, err := io.Copy(sum, io.LimitReader(response.Body, size+1))
-	if err != nil {
-		return err
-	}
-	want, err := hashFile(ctx, filepath.Join(p.dir, name))
-	if err != nil {
-		return err
-	}
-	if n != size || fmt.Sprintf("%x", sum.Sum(nil)) != want {
-		return immutable
-	}
-	return nil
-}
-func (p publication) current(ctx context.Context) (latest, string, error) {
-	var value latest
-	request, err := p.request(ctx, http.MethodGet, "latest", nil)
-	if err != nil {
-		return value, "", err
-	}
-	response, err := p.client.Do(request)
-	if err != nil {
-		return value, "", err
-	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusForbidden {
-		return value, "", nil
-	}
-	if response.StatusCode != http.StatusOK {
-		return value, "", storeFailure
-	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, releaseverify.MaxMetadata+1))
-	if err != nil {
-		return value, "", err
-	}
-	if len(body) > releaseverify.MaxMetadata || json.Unmarshal(body, &value) != nil || !workflowpolicy.IsReleaseVersion(value.Version) || response.Header.Get("ETag") == "" {
-		return value, "", latestInvalid
-	}
-	return value, response.Header.Get("ETag"), nil
-}
-func (p publication) advance(ctx context.Context, want latest) (latest, error) {
-	if !workflowpolicy.IsReleaseVersion(want.Version) {
-		return latest{}, inputs
-	}
-	body, err := json.Marshal(want)
-	if err != nil {
-		return latest{}, err
-	}
-	for attempt := 0; attempt < 5; attempt++ {
-		current, etag, err := p.current(ctx)
-		if err != nil {
-			return latest{}, err
-		}
-		switch semver.Compare(current.Version, want.Version) {
-		case 1:
-			return current, nil
-		case 0:
-			if current.Commit != want.Commit {
-				return latest{}, immutable
-			}
-			return current, nil
-		}
-		retry, err := p.compareAndSwap(ctx, body, etag)
-		if err != nil {
-			return latest{}, err
-		}
-		if !retry {
-			return want, nil
-		}
-		if err := p.backoff(ctx, attempt); err != nil {
-			return latest{}, err
-		}
-	}
-	return latest{}, latestBusy
-}
-func (p publication) compareAndSwap(ctx context.Context, body []byte, etag string) (bool, error) {
-	request, err := p.request(ctx, http.MethodPut, "latest", bytes.NewReader(body))
-	if err != nil {
-		return false, err
-	}
-	if etag == "" {
-		request.Header.Set("If-None-Match", "*")
-	} else {
-		request.Header.Set("If-Match", etag)
-	}
-	request.Header.Set("Content-Type", "application/json")
-	response, err := p.client.Do(request)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode == http.StatusPreconditionFailed {
-		return true, nil
-	}
-	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
-		return false, storeFailure
-	}
-	return false, nil
-}
 func writeVerification(ctx context.Context, o options, record releaseverify.Record) error {
 	sums, err := hashFile(ctx, filepath.Join(o.dir, "SHA256SUMS"))
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(verification{latest: latest{Version: record.Version, Commit: record.Commit}, Sums: sums})
+	body, err := json.Marshal(verification{Version: record.Version, Commit: record.Commit, Sums: sums})
 	if err != nil {
 		return err
 	}
@@ -274,7 +77,7 @@ func publish(ctx context.Context, o options) error {
 	if err := p.publishFiles(ctx, record.Version); err != nil {
 		return err
 	}
-	_, err = fmt.Printf("Published %s: %d files at %s/%s.\n", record.Version, len(publishedNames())+2, p.origin, record.Version)
+	_, err = fmt.Printf("Published %s: %d files at %s/%s.\n", record.Version, len(publishedNames())+2, releaseverify.Origin, record.Version)
 	return err
 }
 func finalize(ctx context.Context, o options) error {
@@ -289,19 +92,108 @@ func finalize(ctx context.Context, o options) error {
 	if err := verified(ctx, o, record); err != nil {
 		return err
 	}
-	return p.finish(ctx, latest{Version: record.Version, Commit: record.Commit}, os.Stdout)
+	return p.finish(ctx, record.Version, os.Stdout)
 }
 
-func (p publication) finish(ctx context.Context, want latest, output io.Writer) error {
-	current, err := p.advance(ctx, want)
+// publishFiles makes the tag's GitHub release hold exactly these files. It
+// compares every asset already there before uploading anything, uploads the
+// manifest last, and publishes a draft without making it latest.
+func (p publication) publishFiles(ctx context.Context, tag string) error {
+	if err := p.tagPublished(ctx, tag); err != nil {
+		return err
+	}
+	release, err := p.releaseFor(ctx, tag)
 	if err != nil {
 		return err
 	}
-	if current.Version != want.Version {
-		_, err = fmt.Fprintf(output, "Latest at %s/latest stays %s; %s was not made latest.\n", p.origin, current.Version, want.Version)
-	} else {
-		_, err = fmt.Fprintf(output, "Latest at %s/latest is %s.\n", p.origin, current.Version)
+	names, err := p.names()
+	if err != nil {
+		return err
 	}
+	existing := make(map[string]githubAsset, len(release.Assets))
+	for _, asset := range release.Assets {
+		existing[asset.Name] = asset
+	}
+	for _, name := range names {
+		if asset, ok := existing[name]; ok {
+			if err := p.sameAsset(ctx, asset); err != nil {
+				return err
+			}
+		}
+	}
+	for _, name := range names {
+		if _, ok := existing[name]; !ok {
+			if err := p.upload(ctx, release.ID, name); err != nil {
+				return err
+			}
+		}
+	}
+	if release.Draft {
+		return p.publishDraft(ctx, release.ID)
+	}
+	return nil
+}
+
+func (p publication) names() ([]string, error) {
+	entries, err := os.ReadDir(p.dir)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".oci") && entry.IsDir() {
+			continue
+		}
+		if !entry.Type().IsRegular() {
+			return nil, inputs
+		}
+		names = append(names, entry.Name())
+	}
+	slices.SortFunc(names, func(a, b string) int { return publicationRank(a) - publicationRank(b) })
+	return names, nil
+}
+
+// sameAsset accepts an existing asset only when GitHub's digest and size equal
+// the local file: published bytes are never replaced.
+func (p publication) sameAsset(ctx context.Context, asset githubAsset) error {
+	if asset.State != "uploaded" || !strings.HasPrefix(asset.Digest, "sha256:") {
+		return fmt.Errorf("%w: asset %s is %s with digest %q", assetUnconfirmed, asset.Name, asset.State, asset.Digest)
+	}
+	path := filepath.Join(p.dir, asset.Name)
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	digest, err := hashFile(ctx, path)
+	if err != nil {
+		return err
+	}
+	if asset.Size != info.Size() || asset.Digest != "sha256:"+digest {
+		return fmt.Errorf("%w: asset %s", immutable, asset.Name)
+	}
+	return nil
+}
+
+// finish marks the verified tag as GitHub's latest release only when it is
+// newer than the current latest, so latest never moves backwards.
+func (p publication) finish(ctx context.Context, tag string, output io.Writer) error {
+	current, err := p.latestTag(ctx)
+	if err != nil {
+		return err
+	}
+	page := "https://github.com/" + p.repository + "/releases/latest"
+	switch {
+	case current == tag:
+		_, err = fmt.Fprintf(output, "Latest at %s is %s.\n", page, tag)
+		return err
+	case current != "" && semver.Compare(current, tag) > 0:
+		_, err = fmt.Fprintf(output, "Latest at %s stays %s; %s was not made latest.\n", page, current, tag)
+		return err
+	}
+	if err := p.makeLatest(ctx, tag); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(output, "Latest at %s is %s.\n", page, tag)
 	return err
 }
 
@@ -331,21 +223,4 @@ func publicationRank(name string) int {
 		return 3
 	}
 	return 0
-}
-func waitRetry(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func (p publication) backoff(ctx context.Context, attempt int) error {
-	if attempt == 4 {
-		return nil
-	}
-	return p.wait(ctx, 100*time.Millisecond<<attempt)
 }

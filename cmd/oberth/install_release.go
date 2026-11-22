@@ -117,8 +117,13 @@ func (f releaseHTTPFiles) Open(name string) (fs.File, error) {
 
 const releaseRedirectID = "release-redirect"
 
-func releaseRedirect(request *http.Request, _ []*http.Request) error {
-	problem := publicerr.New(publicerr.Unavailable, "The release address redirected.", "Use the direct public release address and retry.", nil)
+// releaseRedirect follows GitHub's redirect to its asset host and refuses any
+// other target or a longer chain; the verifier still checks every byte.
+func releaseRedirect(request *http.Request, via []*http.Request) error {
+	if len(via) <= releaseverify.MaxRedirects && releaseverify.RedirectAllowed(request.URL) {
+		return nil
+	}
+	problem := publicerr.New(publicerr.Unavailable, "The release download redirected elsewhere.", "Use the official release address; report this redirect if it persists.", nil)
 	problem.ID = releaseRedirectID
 	problem.Context = []string{"Redirect target: " + request.URL.Redacted()}
 	return problem

@@ -111,10 +111,11 @@ func TestReleaseSigningAndRegistryGrantsStaySeparate(t *testing.T) {
 	called := false
 	hooks.TransformNative = func(_ context.Context, _ *wfv1.Workflow, input admissioncontract.TransformInput) error {
 		called = true
-		if len(input.SecretGrants) != 2 {
+		if len(input.SecretGrants) != 4 {
 			t.Fatal("secret delivery reached another step", input.SecretGrants)
 		}
-		for step, path := range map[string]string{"release-files-signed": "oberth/data/release/signing", "release-images-pushed": "oberth/data/release/registry/config.json"} {
+		for step, path := range map[string]string{"release-files-signed": "oberth/data/release/signing", "release-images-pushed": "oberth/data/release/registry/config.json",
+			"release-published-immutable": "oberth/data/release/github-token", "latest-advanced-monotonic": "oberth/data/release/github-token"} {
 			grants := input.SecretGrants[step]
 			if len(grants) != 1 || grants[0].Step != step || grants[0].Path != path {
 				t.Fatal("secret delivery crossed step grants", step, grants)

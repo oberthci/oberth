@@ -21,7 +21,7 @@ func TestPublicationTokenIsRefusedBeforeReleaseOrNetworkWork(t *testing.T) {
 			o := options{token: token, dir: filepath.Join(t.TempDir(), "absent"), origin: ":invalid"}
 			for _, operation := range []string{"publish", "finalize"} {
 				err := runOperation(t.Context(), operation, o)
-				if !errors.Is(err, releaseToken) || err.Error() != "Release token file is missing or empty." || releaseToken.Remedy() != "Pass --token-file with the release store token." {
+				if !errors.Is(err, releaseToken) || err.Error() != "Release token file is missing or empty." || releaseToken.Remedy() != "Pass --token-file with a GitHub token that may write this repository's releases." {
 					t.Fatal("token refusal came after other work or lost guidance", operation, err)
 				}
 			}

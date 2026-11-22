@@ -12,7 +12,7 @@ func TestDownloadedVerificationFailureStopsBeforeOutputs(t *testing.T) {
 	files, public := signedDownloads(t)
 	files["SHA256SUMS.sigstore.json"] = []byte(`{"messageSignature":{"signature":"YmFk"}}`)
 	env := cleanScriptEnvironment(t, files, public)
-	configureDownloadOrigin(t, files, env)
+	configureDownloadOrigin(t, files, env, "")
 	bundle := filepath.Join(env["RELEASE_DIR"], "SHA256SUMS.sigstore.json")
 	if err := os.WriteFile(bundle, []byte("local signature sentinel"), 0600); err != nil {
 		t.Fatal(err)

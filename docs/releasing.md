@@ -49,21 +49,22 @@ Outside releases are unknown; reruns keep facts but must clear the recorded vers
 identity or assistance refuses. Release arguments, defaults and global outputs cannot replace facts;
 builds keep their own values. Offline validation proves no live facts. Bootstrap by hand below. See
 [tag routing](pipelines.md#build-tags-and-release-tags) for file selection and ambiguity refusal.
-Set `release-config.origin` to `https://releases.oberth.ci/oberth`, the
+Release files are assets of the tag's GitHub release. Set `release-config.origin` to
+`https://github.com/oberthci/oberth/releases/download`, the
 [canonical address](../internal/releaseverify/origin.go); scripts refuse other addresses.
 Signatures are checked only against the committed pinned key; no public log is used.
 
 ## First release by hand
 
 Use Linux amd64, Go **go1.26.10**, Python 3, curl, Git, make, grep and `sha256sum` in a clean tree.
-Have registry write access, a versioned-store token and a separate `latest` update token.
+Have registry write access and a GitHub token file allowed to write this repository's releases.
 Allow about 12 GiB and eight minutes for the byte build; cold caches can take longer.
 Keep work and credentials outside Git; staging needs 0.7 GiB in `$TMPDIR`.
-Choose a stable `vMAJOR.MINOR.PATCH` strictly above `latest` (403 or 404 means no floor):
+Choose a stable `vMAJOR.MINOR.PATCH` strictly above `latest` (404 means no floor):
 
 ```sh
-export RELEASE_ORIGIN=https://releases.oberth.ci/oberth
-curl --fail --silent --show-error "$RELEASE_ORIGIN/latest"
+export RELEASE_ORIGIN=https://github.com/oberthci/oberth/releases/download
+curl --silent https://api.github.com/repos/oberthci/oberth/releases/latest | grep '"tag_name"'
 export VERSION="<version-above-latest>"
 export PATH="<go1.26.10-directory>/bin:$PATH" GOTOOLCHAIN=local
 go version
@@ -131,17 +132,18 @@ go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth.oci" \
 go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth-source-plugin.oci" \
   "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin:$VERSION"
 "$RELEASE_TOOL" publish --dir "$RELEASE_DIR" --version "$VERSION" --origin "$RELEASE_ORIGIN" \
-  --token-file "<publish-token-file>"
+  --token-file "<github-token-file>"
 bash hack/release.sh verify
 "$RELEASE_TOOL" finalize --dir "$RELEASE_DIR" --version "$VERSION" --origin "$RELEASE_ORIGIN" \
-  --token-file "<finalize-token-file>" --receipt "$RELEASE_SHARED/verified.json"
+  --token-file "<github-token-file>" --receipt "$RELEASE_SHARED/verified.json"
 ```
 
-Compare each printed push digest with the record's images. Publish checks public image
-reads and any existing signature before writing; it prints the version, file count and destination.
+Compare each printed push digest with the record's images. The tag must be on GitHub first. Publish
+checks public image reads and every existing asset before writing, uploads into a draft and
+publishes it without making it latest; it prints the version, file count and destination.
 Clean verification prints “Release verified.” and writes the receipt. Finalize prints where `latest`
 points; if it stays newer, nothing moved and exit 0 is intentional. Keep signed bytes for identical
-retries; another signature for a published version refuses. Retain the receipt and build evidence.
+retries; other bytes for a published asset refuse. Retain the receipt and build evidence.
 After confirming encrypted offline key custody, delete both plaintext copies:
 
 ```sh
@@ -149,29 +151,16 @@ python3 -c 'import pathlib,sys; [pathlib.Path(p).unlink() for p in sys.argv[1:]]
   "$RELEASE_WORK/release.key" "$OBERTH_SECRETS_DIR/oberth/data/release/signing"
 ```
 
-The pipeline's `publish` and `finalize` use `RELEASE_TOKEN_FILE`, `RELEASE_EXCHANGE_URL` and
-`RELEASE_AUDIENCE` for short-lived token exchange; a plain bearer file uses the direct tool above.
+The pipeline's `publish` and `finalize` read the same token from their own secret grant.
 
-## Release accounts and projected identities
+## Release accounts
 
-Admission chooses each credential-bearing step's account from its secret and audience grants. A
+Admission chooses each credential-bearing step's account from its secret grants. A
 server-classified release tag in default history uses deterministic release-step accounts; branches
 and ordinary tags use CI accounts. Author parameters and account names cannot select release
-authority. As administrator, grant the independent
-[token audiences](pipelines.md#secrets-and-identity):
-
-```sh
-oberth access allow --kind identity --audience oberth-publish \
-  <repo> .oberth/release.yaml release-published-immutable identity
-oberth access allow --kind identity --audience oberth-finalize \
-  <repo> .oberth/release.yaml latest-advanced-monotonic identity
-```
-
-Exact-step grants align secrets and identity on repository/file/step accounts; wildcards share one.
-Submission creates release accounts; pipeline and executor accounts stay
-separate. Supply source/workflow delivery, secret storage, publication and exchange services with
-separate publish/finalize permissions for the exact namespace, account and audience. Renames need
-new grants and trust; see [grant operations](operations.md#grants-and-secrets) and the
+authority. Exact-step grants align secrets on repository/file/step accounts; wildcards share one.
+Submission creates release accounts; pipeline and executor accounts stay separate. Renames need
+new grants; see [grant operations](operations.md#grants-and-secrets) and the
 [release account-name rule](../internal/identityname/name.go).
 
 ## Oberth's own releases
@@ -179,12 +168,12 @@ new grants and trust; see [grant operations](operations.md#grants-and-secrets) a
 Stages prepare the base and signer, build, sign, push images, publish files, verify in a clean Pod,
 and advance `latest`. Admission retains default-history/build facts; the build checks its commit
 without rerunning tests. Each step declares its own secret path: only signing gets the long-lived
-key, only the image push gets the registry login; publish/finalize get separate short-lived tokens.
+key, only the image push gets the registry login, only publish/finalize get the GitHub token.
 Branch CI reaches neither those credentials nor release cache.
 
 Edit [pipeline-resources.yaml](../.oberth/pipeline-resources.yaml), then apply it in the pipeline
-namespace. Set its storage class/sizes, positive `go` semaphore limit, HTTPS origin, exchange
-addresses. Publish reads repositories from the signed chart; caches need user/group 65534 access.
+namespace. Set its storage class/sizes, positive `go` semaphore limit and HTTPS origin.
+Publish reads repositories from the signed chart; caches need user/group 65534 access.
 Each run fetches its verified base; compilation caches contain no release base. Provision guest
 volume, VM API, executor permissions and VM capability separately;
 the manifest neither builds nor imports that disk.
@@ -197,8 +186,8 @@ oberth secret put --repo '<repo>' --file .oberth/build.yaml --step lint-and-guar
 ```
 
 `secret put` grants only the named step; keep the names list outside Git. Pushers can read it.
-Add [audience grants](#release-accounts-and-projected-identities); missing grants print remedies.
-Creating objects grants no access. Run these object grants as administrator, replacing `<repo>`:
+Missing grants print remedies. Creating objects grants no access. Run these object grants as
+administrator, replacing `<repo>`:
 
 ```sh
 oberth access allow --kind pvc --tier ci '<repo>' 'build-cache'
@@ -212,15 +201,20 @@ oberth access allow --kind configmap '<repo>' '.oberth/release.yaml' \
 ```
 
 `oberth-sync-limits/go` is a native lock; walk namespace/volume access needs VM capability, not
-direct cache grants. These grants configure no external exchange or registry rights.
+direct cache grants. These grants configure no GitHub or registry rights.
 
-Store the pinned key and the registry login at the paths their own steps declare:
+Store the pinned key, the registry login and the GitHub token at the paths their own steps declare
+(the token twice, once per step):
 
 ```sh
 oberth secret put --repo '<repo>' --file .oberth/release.yaml --step release-files-signed \
   oberth/data/release/signing < <private-key-file>
 oberth secret put --repo '<repo>' --file .oberth/release.yaml --step release-images-pushed \
   oberth/data/release/registry/config.json < <registry-login-file>
+oberth secret put --repo '<repo>' --file .oberth/release.yaml --step release-published-immutable \
+  oberth/data/release/github-token < <github-token-file>
+oberth secret put --repo '<repo>' --file .oberth/release.yaml --step latest-advanced-monotonic \
+  oberth/data/release/github-token < <github-token-file>
 ```
 
 Use `$DOCKER_CONFIG/config.json` as `<registry-login-file>`. `secretstore exec` delivers granted
@@ -234,12 +228,15 @@ Signed `SHA256SUMS` and `release.json` bind shipped digests; versioned objects a
 
 ## Verify downloaded bytes
 
+Release files are the assets of `https://github.com/oberthci/oberth/releases/tag/<version>`.
 `oberth-release <operation> --help` lists flags. Build from the trusted committed pin. Put the
 checksum list, bundle, record and release files in a clean directory, then run:
 
 ```sh
 oberth-release verify --dir <download-directory> --version <version>
 ```
+
+Where the files came from never decides trust; only the pinned key and the signed digests do.
 
 Local checks are not publication proof. Clean verification checks public images and CLI version to
 issue the `latest` receipt.

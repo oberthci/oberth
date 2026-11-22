@@ -122,20 +122,14 @@ spec:
           - {name: RELEASE_DIR, value: /work/shared/dist}
         volumeMounts: [{name: cache, mountPath: /cache}]
     - name: release-published-immutable
+      metadata:
+        annotations: {oberth.ci/secret-paths: oberth/data/release/github-token}
       inputs: *source-input
-      volumes:
-        - name: login
-          projected:
-            sources:
-              - serviceAccountToken: {audience: oberth-publish, expirationSeconds: 600, path: token}
       container:
-        args: [publish]
+        command: [/work/shared/oberth, secretstore, exec]
+        args: [--, bash, hack/release.sh, publish]
         env:
-          - {name: RELEASE_TOKEN_FILE, value: /run/identity/token}
-          - {name: RELEASE_AUDIENCE, value: oberth-publish}
           - {name: RELEASE_ORIGIN, valueFrom: {configMapKeyRef: {name: release-config, key: origin}}}
-          - {name: RELEASE_EXCHANGE_URL, valueFrom: {configMapKeyRef: {name: release-config, key: publishExchange}}}
-        volumeMounts: [{name: login, mountPath: /run/identity, readOnly: true}]
     - name: release-verifies-from-clean-pod
       inputs: *source-input
       volumes:
@@ -146,17 +140,11 @@ spec:
           - {name: RELEASE_ORIGIN, valueFrom: {configMapKeyRef: {name: release-config, key: origin}}}
         volumeMounts: [{name: verify, mountPath: /verify}]
     - name: latest-advanced-monotonic
+      metadata:
+        annotations: {oberth.ci/secret-paths: oberth/data/release/github-token}
       inputs: *source-input
-      volumes:
-        - name: login
-          projected:
-            sources:
-              - serviceAccountToken: {audience: oberth-finalize, expirationSeconds: 600, path: token}
       container:
-        args: [finalize]
+        command: [/work/shared/oberth, secretstore, exec]
+        args: [--, bash, hack/release.sh, finalize]
         env:
-          - {name: RELEASE_TOKEN_FILE, value: /run/identity/token}
-          - {name: RELEASE_AUDIENCE, value: oberth-finalize}
           - {name: RELEASE_ORIGIN, valueFrom: {configMapKeyRef: {name: release-config, key: origin}}}
-          - {name: RELEASE_EXCHANGE_URL, valueFrom: {configMapKeyRef: {name: release-config, key: finalizeExchange}}}
-        volumeMounts: [{name: login, mountPath: /run/identity, readOnly: true}]

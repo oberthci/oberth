@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"github.com/oberthci/oberth/internal/releaseverify"
 	"os"
 	"os/exec"
@@ -27,15 +26,18 @@ func releaseScript(t *testing.T, operation string, values map[string]string) ([]
 func releaseEnvironment(t *testing.T) map[string]string {
 	t.Helper()
 	dir := t.TempDir()
-	token := filepath.Join(dir, "subject")
-	if err := os.WriteFile(token, []byte("fixture"), 0600); err != nil {
+	secrets := filepath.Join(dir, "secrets")
+	if err := os.MkdirAll(filepath.Join(secrets, "oberth/data/release"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	return map[string]string{"VERSION": "v1.2.3", "RELEASE_ORIGIN": releaseverify.Origin, "RELEASE_EXCHANGE_URL": "https://identity.example.test", "RELEASE_TOKEN_FILE": token, "RELEASE_PRIVATE": filepath.Join(dir, "private"), "RELEASE_SHARED": filepath.Join(dir, "shared"), "RELEASE_VERIFY_DIR": filepath.Join(dir, "verify"), "RELEASE_AUDIENCE": "publish", "RELEASE_DIR": filepath.Join(dir, "dist"), "RELEASE_TOOL": filepath.Join(dir, "oberth-release")}
+	if err := os.WriteFile(filepath.Join(secrets, "oberth/data/release/github-token"), []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return map[string]string{"VERSION": "v1.2.3", "RELEASE_ORIGIN": releaseverify.Origin, "OBERTH_SECRETS_DIR": secrets, "RELEASE_PRIVATE": filepath.Join(dir, "private"), "RELEASE_SHARED": filepath.Join(dir, "shared"), "RELEASE_VERIFY_DIR": filepath.Join(dir, "verify"), "RELEASE_DIR": filepath.Join(dir, "dist"), "RELEASE_TOOL": filepath.Join(dir, "oberth-release")}
 }
 func TestReleaseScriptRefusals(t *testing.T) {
 	for _, tc := range []struct{ name, key, value, reason string }{
-		{"missing token", "RELEASE_TOKEN_FILE", "", "token is missing"},
+		{"missing token", "OBERTH_SECRETS_DIR", "", "token is missing"},
 		{"bad tag", "VERSION", "v1.2.3; command", "tag is invalid"},
 		{"non-HTTPS origin", "RELEASE_ORIGIN", "http://release.example.test", "origin is not HTTPS"},
 	} {
@@ -91,29 +93,26 @@ func TestReleaseRequiresTestedDefaultHistory(t *testing.T) {
 		})
 	}
 }
-func TestReleaseTokenLifetime(t *testing.T) {
-	for _, seconds := range []int{3600, 3601} {
-		t.Run(fmt.Sprint(seconds), func(t *testing.T) {
-			env := releaseEnvironment(t)
-			dir := t.TempDir()
-			response := filepath.Join(dir, "response.json")
-			if err := os.WriteFile(response, []byte(fmt.Sprintf(`{"token_type":"Bearer","expires_in":%d,"access_token":"fixture"}`, seconds)), 0600); err != nil {
-				t.Fatal(err)
-			}
-			curl := []byte("#!/bin/sh\nwhile [ $# -gt 0 ]; do if [ \"$1\" = --output ]; then shift; cp \"$RESPONSE\" \"$1\"; exit; fi; shift; done\nexit 1\n")
-			if err := os.WriteFile(filepath.Join(dir, "curl"), curl, 0700); err != nil {
-				t.Fatal(err)
-			}
-			tool := filepath.Join(dir, "tool")
-			if err := os.WriteFile(tool, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
-				t.Fatal(err)
-			}
-			env["PATH"], env["RESPONSE"], env["RELEASE_TOOL"] = dir+string(os.PathListSeparator)+os.Getenv("PATH"), response, tool
-			output, err := releaseScript(t, "publish", env)
-			if (err == nil) != (seconds == 3600) {
-				t.Fatalf("lifetime: %v %s", err, output)
-			}
-		})
+
+// The publish and finalize steps hand the granted GitHub token file to the
+// tool by path; the script reads no token itself.
+func TestReleaseScriptPassesTheGrantedGitHubToken(t *testing.T) {
+	for _, operation := range []string{"publish", "finalize"} {
+		env := releaseEnvironment(t)
+		dir := t.TempDir()
+		calls := filepath.Join(dir, "calls")
+		writeFixtureCommand(t, filepath.Join(dir, "tool"), `printf '%s\n' "$*" > "$TOOL_CALLS"
+`)
+		env["RELEASE_TOOL"], env["TOOL_CALLS"] = filepath.Join(dir, "tool"), calls
+		output, err := releaseScript(t, operation, env)
+		if err != nil {
+			t.Fatal(operation, err, string(output))
+		}
+		body, err := os.ReadFile(calls)
+		want := operation + " --dir " + env["RELEASE_DIR"] + " --version v1.2.3 --origin " + releaseverify.Origin + " --token-file " + env["OBERTH_SECRETS_DIR"] + "/oberth/data/release/github-token --receipt " + env["RELEASE_SHARED"] + "/verified.json\n"
+		if err != nil || string(body) != want {
+			t.Fatal("tool did not receive the granted token path", operation, string(body), err)
+		}
 	}
 }
 

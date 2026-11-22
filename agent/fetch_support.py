@@ -18,6 +18,10 @@ import unittest
 SOURCE = Path(__file__).resolve().parent / "skills/oberth/fetch-oberth"
 KEY_MARKER = "RELEASE_KEY_PLACEHOLDER"
 KEY_START = "<<'OBERTH_RELEASE_PUBLIC_KEY'\n"
+# A fixture server stands in for github.com: the origin is DOWNLOAD below it, and
+# LATEST is where GitHub answers with the newest release's record.
+DOWNLOAD = "/oberthci/oberth/releases/download"
+LATEST = "/oberthci/oberth/releases/latest/download/release.json"
 
 
 def embedded_key(script):
@@ -45,8 +49,9 @@ def serve(files, requests):
             pass
 
         def do_GET(self):
-            requests.append(self.path)
-            data = files.get(self.path)
+            path = self.path[len(DOWNLOAD):] if self.path.startswith(DOWNLOAD + "/") else self.path
+            requests.append(path)
+            data = files.get(path)
             if isinstance(data, tuple) and data[0] == "redirect":
                 self.send_response(302)
                 self.send_header("Location", data[1])
@@ -107,7 +112,7 @@ class FetchCase(unittest.TestCase):
         self.template = with_key(text, self.public.read_text())
         self.binary = b'#!/bin/sh\nprintf executed > "$HOME/executed"\n'
         self.artifact = "oberth-" + platform.system().lower() + "-" + {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}[platform.machine()]
-        self.files, self.requests = {}, []
+        self.files, self.requests, self.asset_host = {}, [], None
         self.release()
 
     def openssl(self, *args):
@@ -121,7 +126,7 @@ class FetchCase(unittest.TestCase):
         names += ["oberth-source-plugin-linux-amd64", "oberth-source-plugin-linux-arm64", "oberth.oci.tar", "oberth-source-plugin.oci.tar", "oberth.tgz", "release.json"]
         record = record if record is not None else json.dumps({"version": version, "commit": "a" * 40, "files": {name: digest for name in names if name != "release.json"}}, indent=2).encode()
         sums = manifest if manifest is not None else "".join((hashlib.sha256(record).hexdigest() if name == "release.json" else digest) + "  " + name + "\n" for name in sorted(names)).encode()
-        self.files["/latest"] = json.dumps({"version": version, "commit": "a" * 40}).encode()
+        self.files[LATEST] = json.dumps({"version": version, "commit": "a" * 40}).encode()
         self.files["/" + version + "/release.json"] = record
         self.files["/" + version + "/SHA256SUMS"] = sums
         payload = self.root / "sums"
@@ -132,9 +137,13 @@ class FetchCase(unittest.TestCase):
         self.files["/" + version + "/" + self.artifact] = binary
 
     def prepare(self, origin):
-        text, count = re.subn(r"^[ \t]*origin=.*$", lambda _: "origin=" + origin, self.template, flags=re.M)
+        text, count = re.subn(r"^[ \t]*origin=.*$", lambda _: "origin=" + origin + DOWNLOAD, self.template, flags=re.M)
         if count != 1:
             raise ValueError("Fetcher requires exactly one origin assignment.")
+        if self.asset_host is not None:
+            text, count = re.subn(r"^asset_hosts=.*$", lambda _: "asset_hosts=" + self.asset_host + "/", text, flags=re.M)
+            if count != 1:
+                raise ValueError("Fetcher requires exactly one asset_hosts assignment.")
         text = text.replace("--proto '=https'", "--proto '=https,http'").replace("--https-only", "")
         self.script.write_text(text)
 

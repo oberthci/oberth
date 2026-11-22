@@ -28,17 +28,17 @@ func TestReleaseScriptDirectoryRefusalsNameWritableRecovery(t *testing.T) {
 	}
 }
 
-func TestReleaseScriptMissingAudienceRefusesBeforeEffects(t *testing.T) {
-	for _, variable := range []string{"RELEASE_AUDIENCE"} {
+func TestReleaseScriptMissingGitHubTokenRefusesBeforeEffects(t *testing.T) {
+	for _, operation := range []string{"publish", "finalize"} {
 		env := releaseEnvironment(t)
-		env[variable] = ""
-		output, err := releaseScript(t, "publish", env)
-		want := "Release audience is missing; set RELEASE_AUDIENCE for token exchange.\n"
+		env["OBERTH_SECRETS_DIR"] = t.TempDir()
+		output, err := releaseScript(t, operation, env)
+		want := "GitHub release token is missing; grant it to this step.\n"
 		if err == nil || string(output) != want {
-			t.Fatal("missing environment lacks a release refusal", err, string(output))
+			t.Fatal("missing token lacks a release refusal", err, string(output))
 		}
 		if _, err := os.Stat(env["RELEASE_PRIVATE"]); !os.IsNotExist(err) {
-			t.Fatal("missing environment reached side effects", err)
+			t.Fatal("missing token reached side effects", err)
 		}
 	}
 }
@@ -113,7 +113,7 @@ func TestManualReleaseGuideCoversTheWholeHandoffWithinBudget(t *testing.T) {
 	for _, fact := range []string{
 		"built commit must be that public pinned commit", "scripts create no tag",
 		"strictly above", "12 GiB", "eight minutes", "0.7 GiB", "$TMPDIR",
-		"403 or 404 means no floor", "crane auth login europe-west4-docker.pkg.dev", "--password-stdin", "make, grep and",
+		"404 means no floor", "crane auth login europe-west4-docker.pkg.dev", "--password-stdin", "make, grep and",
 		`grep -E '"commit"|sha256:' "$RELEASE_DIR/release.json"`,
 		"prepare-signing", "sign offline", "Release bytes built.", "Release signature verified.",
 		"Release verified.", "file count and destination", "Finalize prints where `latest` points",

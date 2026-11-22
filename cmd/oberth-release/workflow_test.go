@@ -219,10 +219,10 @@ func releaseGrants(r admissioncontract.PrepareRequest) []admissioncontract.Grant
 	for _, item := range [][4]string{
 		{"release-files-signed", "secret", "oberth/data/release/signing", ""},
 		{"release-images-pushed", "secret", "oberth/data/release/registry/config.json", ""},
-		{"release-published-immutable", "identity", "oberth-publish", "oberth-publish"},
+		{"release-published-immutable", "secret", "oberth/data/release/github-token", ""},
 		{"release-published-immutable", "configmap", "release-config", ""},
 		{"release-verifies-from-clean-pod", "configmap", "release-config", ""},
-		{"latest-advanced-monotonic", "identity", "oberth-finalize", "oberth-finalize"},
+		{"latest-advanced-monotonic", "secret", "oberth/data/release/github-token", ""},
 		{"latest-advanced-monotonic", "configmap", "release-config", ""},
 	} {
 		grants = append(grants, admissioncontract.GrantEvidence{Repository: r.Repository, File: r.SelectedFile, Step: item[0], Kind: item[1], Path: item[2], Audience: item[3], State: admissioncontract.StateVerified, Revision: "1"})
@@ -263,12 +263,15 @@ func TestReleaseCredentialVolumes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"release-published-immutable", "latest-advanced-monotonic"} {
-		volumes := wf.GetTemplateByName(name).Volumes
-		if len(volumes) != 1 || volumes[0].Projected == nil || len(volumes[0].Projected.Sources) != 1 || volumes[0].Projected.Sources[0].ServiceAccountToken == nil {
-			t.Fatal("publisher authority is not a projected token")
+		template := wf.GetTemplateByName(name)
+		if template.Metadata.Annotations[argoworkflow.SecretPathsAnnotation] != "oberth/data/release/github-token" || len(template.Volumes) != 0 {
+			t.Fatal("publisher authority is not the granted GitHub token alone", name)
 		}
 	}
 	verify := wf.GetTemplateByName("release-verifies-from-clean-pod")
+	if verify.Metadata.Annotations[argoworkflow.SecretPathsAnnotation] != "" {
+		t.Fatal("verify has a token")
+	}
 	for _, volume := range verify.Volumes {
 		if volume.Projected != nil {
 			t.Fatal("verify has a token")
