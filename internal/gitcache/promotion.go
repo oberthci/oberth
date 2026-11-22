@@ -150,9 +150,7 @@ func (c *Cache) mergeSource(ctx context.Context, p string, r gitport.PromotionRe
 	if r.Target.CommitSHA == "" {
 		return r.Source.Commit, nil, nil
 	}
-	// A target in the tested commit's history fast-forwards: the tested commit
-	// itself becomes the result, so no merge is written and nothing is retested.
-	forward, err := c.ancestor(ctx, p, r.Target.CommitSHA, r.Source.Commit)
+	forward, err := c.fastForward(ctx, p, r.Target.CommitSHA, r.Source.Commit)
 	if err != nil {
 		return "", nil, err
 	}
@@ -160,6 +158,23 @@ func (c *Cache) mergeSource(ctx context.Context, p string, r gitport.PromotionRe
 		return r.Source.Commit, nil, nil
 	}
 	return c.merge(ctx, p, r.Target.CommitSHA, r.Source.Commit)
+}
+
+// fastForward reports whether the tested commit itself can become the result:
+// the target is in its history and it is committed later than the target, so
+// date-ordered versions still rank it above the head it replaces. Otherwise
+// the promotion writes the dated merge and runs CI on it.
+func (c *Cache) fastForward(ctx context.Context, p, base, source string) (bool, error) {
+	forward, err := c.ancestor(ctx, p, base, source)
+	if err != nil || !forward {
+		return false, err
+	}
+	based, err := c.committed(ctx, p, base)
+	if err != nil {
+		return false, err
+	}
+	tested, err := c.committed(ctx, p, source)
+	return err == nil && tested > based, err
 }
 func promotionRoots(r gitport.PromotionRequest) []string {
 	roots := []string{r.Source.Commit}

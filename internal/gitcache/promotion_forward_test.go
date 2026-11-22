@@ -44,6 +44,37 @@ func TestPromotionOfABranchFromAnUnmovedMainFastForwards(t *testing.T) {
 	}
 }
 
+// A tested descendant committed no later than main is no fast-forward: its own
+// date would not rank above main, so the promotion writes the merge dated one
+// second after main.
+func TestPromotionOfADescendantNotNewerThanMainMerges(t *testing.T) {
+	t.Parallel()
+	for name, tested := range map[string]string{"same second": laterDate, "older": testedDate} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := gittest.New(t)
+			c := f.Cache(t, nil)
+			f.Write(t, "main.txt", []byte("main\n"))
+			base := f.CommitFileAt(t, "main moves", laterDate)
+			f.Write(t, "feature.txt", []byte("feature\n"))
+			source := f.CommitFileAt(t, "tested work", tested)
+			f.Git(t, f.Store(), "fetch", f.Work, base, source)
+			prepared, err := c.PreparePromotion(t.Context(), gitport.PromotionRequest{
+				Repository:    gittest.Repository,
+				Source:        sourcecontract.Revision{Repository: gittest.Repository, Commit: source},
+				Target:        gitport.Ref{Name: "refs/heads/main", ObjectSHA: base, CommitSHA: base},
+				ActionReceipt: "promotion-not-newer",
+			})
+			if err != nil || prepared.Result.CommitSHA == source {
+				t.Fatalf("%+v %v", prepared.Result, err)
+			}
+			if got, want := commitSeconds(t, f, "%ct", prepared.Result.CommitSHA), commitSeconds(t, f, "%ct", base)+1; got != want {
+				t.Fatalf("merge dated %d, want %d", got, want)
+			}
+		})
+	}
+}
+
 // A main that moved after the branch was cut is no fast-forward: the
 // promotion writes the dated merge of the two.
 func TestPromotionOfABranchBesideAMovedMainMerges(t *testing.T) {

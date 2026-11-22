@@ -98,7 +98,7 @@ func promotionGit(t *testing.T, mainMoves bool) *gittest.Fixture {
 	g.Git(t, g.Work, "push", g.Bare, "main")
 	g.Git(t, g.Work, "checkout", "-b", "topic")
 	g.Write(t, "feature", []byte("tested source\n"))
-	g.Commit = g.CommitFile(t, "feature")
+	g.Commit = g.CommitFileAt(t, "feature", "2000-01-02T00:00:00Z")
 	g.Git(t, g.Work, "push", g.Bare, "topic")
 	if mainMoves {
 		g.Git(t, g.Work, "checkout", "main")
