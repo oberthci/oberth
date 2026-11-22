@@ -68,17 +68,17 @@ those definitions; they do not define rival DTOs.
   schedule carries its exact durable entry, never a guessed entry. require the exact
   trigger; incomplete run bindings cannot gain authority.
 - One plan comes from admitted YAML plus the retained template/default snapshots. Walk
-  entrypoint, DAG/steps, inline calls, onExit and lifecycle hooks, including named
-  shared references. Include admitted container, script, containerSet, resource and
-  suspend leaves, including a leaf entrypoint. Exclude structural grouping and retry
-  nodes. Identity is the native invocation path without Workflow prefix or retry suffix;
-  display names cannot establish identity. Preserve declaration ordinals as display
-  order, never execution order. Literal `withItems` expands statically;
-  runtime-dependent fan-out and recursion retain an expandable entry and make exactness
-  false. Native observations expand that entry in the display projection and fold retry
-  attempts into it. They never rewrite the immutable admitted plan. A leaf not reached
-  remains pending in the display, without a new run status. Public totals count the
-  complete logical display projection, including observed dynamic expansion,
+  entrypoint, DAG/steps, inline calls, onExit and lifecycle hooks, including named shared
+  references. Include admitted container, script, containerSet, resource and suspend leaves,
+  including a leaf entrypoint. Exclude structural grouping and retry nodes. Identity is the
+  native invocation path without Workflow prefix or retry suffix; display names cannot establish
+  identity. Display order is static run order: a DAG task after the tasks it depends on (ties in
+  declaration order), steps groups in order, a called template in place; never observed runtime
+  order. Literal `withItems` expands statically; runtime-dependent fan-out and recursion retain
+  an expandable entry and make exactness false. Native observations expand that entry in the
+  display projection and fold retry attempts into it. They never rewrite the immutable admitted
+  plan. A leaf not reached remains pending in the display, without a new run status. Public
+  totals count the complete logical display projection, including observed dynamic expansion,
   independently of paging; `steps_planned_exact` is false while expansion is unresolved.
   The admitted plan remains immutable. Every run admitted for execution has a
   plan; a failed receive record without admission has none. Credential flags
