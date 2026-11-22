@@ -14,12 +14,22 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
+// Hooks serve one admission; its steps share each account's single read.
 func (e *Executor) Hooks(p nativebinding.Preparation) admissioncontract.PrepareHooks {
-	return admissioncontract.PrepareHooks{LoginAudience: e.config.SecretStore.Access.Audience, VerifyIdentities: e.verifyIdentities, TransformNative: func(ctx context.Context, w *wf.Workflow, in admissioncontract.TransformInput) error {
-		return e.transform(ctx, w, in, p)
+	a := admission{Executor: e, accounts: map[string]admissioncontract.AccountEvidence{}}
+	return admissioncontract.PrepareHooks{LoginAudience: e.config.SecretStore.Access.Audience, VerifyIdentities: a.verifyIdentities, TransformNative: func(ctx context.Context, w *wf.Workflow, in admissioncontract.TransformInput) error {
+		return a.transform(ctx, w, in, p)
 	}}
 }
-func (e *Executor) verifyIdentities(ctx context.Context, r admissioncontract.IdentityRequest) (admissioncontract.IdentityEvidence, error) {
+
+// admission is one preparation's view of the cluster. Its hooks run one after
+// another, so accounts needs no lock; it is dropped with the hooks.
+type admission struct {
+	*Executor
+	accounts map[string]admissioncontract.AccountEvidence
+}
+
+func (e admission) verifyIdentities(ctx context.Context, r admissioncontract.IdentityRequest) (admissioncontract.IdentityEvidence, error) {
 	out := admissioncontract.IdentityEvidence{Namespace: r.Namespace, State: admissioncontract.StateVerified}
 	names := []string{r.PipelineAccount}
 	if r.ResourceAccount != "" {
@@ -42,7 +52,10 @@ func (e *Executor) verifyIdentities(ctx context.Context, r admissioncontract.Ide
 	}
 	return out, nil
 }
-func (e *Executor) verifyAccount(ctx context.Context, name string) (admissioncontract.AccountEvidence, error) {
+func (e admission) verifyAccount(ctx context.Context, name string) (admissioncontract.AccountEvidence, error) {
+	if evidence, read := e.accounts[name]; read {
+		return evidence, nil
+	}
 	a, err := e.config.Accounts.Get(ctx, name, meta.GetOptions{})
 	if err != nil {
 		return admissioncontract.AccountEvidence{}, accountMissing(false, fmt.Errorf("account %s: %w", name, err))
@@ -50,9 +63,11 @@ func (e *Executor) verifyAccount(ctx context.Context, name string) (admissioncon
 	if a.Name != name || a.UID == "" {
 		return admissioncontract.AccountEvidence{}, accountMissing(false, fmt.Errorf("account %s has no matching UID", name))
 	}
-	return admissioncontract.AccountEvidence{Name: a.Name, UID: string(a.UID)}, nil
+	evidence := admissioncontract.AccountEvidence{Name: a.Name, UID: string(a.UID)}
+	e.accounts[name] = evidence
+	return evidence, nil
 }
-func (e *Executor) transform(ctx context.Context, w *wf.Workflow, in admissioncontract.TransformInput, p nativebinding.Preparation) error {
+func (e admission) transform(ctx context.Context, w *wf.Workflow, in admissioncontract.TransformInput, p nativebinding.Preparation) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -71,7 +86,7 @@ type nativeLeaf struct {
 	key      string
 }
 
-func (e *Executor) transformLeaf(ctx context.Context, leaf nativeLeaf, in admissioncontract.TransformInput, p nativebinding.Preparation) error {
+func (e admission) transformLeaf(ctx context.Context, leaf nativeLeaf, in admissioncontract.TransformInput, p nativebinding.Preparation) error {
 	t, key, w := leaf.template, leaf.key, leaf.workflow
 	if err := ctx.Err(); err != nil {
 		return err
