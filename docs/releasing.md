@@ -57,7 +57,7 @@ Signatures are checked only against the committed pinned key; no public log is u
 ## Release Oberth through Oberth
 
 This is the normal path, as for any repository: push a branch, wait for its green CI, promote, wait
-for the default branch's green CI, then release a version strictly above `latest`:
+for the promotion to deliver, then release a version strictly above `latest`:
 
 ```sh
 oberth promote <tested-commit-sha>

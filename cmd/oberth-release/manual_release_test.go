@@ -101,6 +101,19 @@ func TestReleaseGuideStatesPinnedKeyAndPublisherTrust(t *testing.T) {
 	}
 }
 
+// A fast-forward promotion starts no default-branch run, so the normal path
+// waits for the promotion's delivery, which every promotion has.
+func TestReleaseGuideWaitsForThePromotionToDeliver(t *testing.T) {
+	body, err := os.ReadFile("../../docs/releasing.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(strings.Fields(string(body)), " ")
+	if !strings.Contains(text, "promote, wait for the promotion to deliver, then release") || strings.Contains(text, "default branch's green CI") {
+		t.Fatal("release guide waits for a default-branch run a fast-forward never starts")
+	}
+}
+
 func TestManualReleaseGuideCoversTheWholeHandoffWithinBudget(t *testing.T) {
 	body, err := os.ReadFile("../../docs/releasing.md")
 	if err != nil {
