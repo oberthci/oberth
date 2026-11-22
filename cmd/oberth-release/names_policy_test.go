@@ -182,7 +182,9 @@ exec "$@"
 echo diff >> "$STATIC_LOG"
 `)
 	writeFixtureCommand(t, filepath.Join(dir, "bin/go"), `[ -z "${OBERTH_GUARDS_NAMES_FILE:-}${OBERTH_SECRETS_DIR:-}" ] && [ "$GIT_CONFIG_COUNT" = 1 ] || exit 97
-case "$*" in *'version --short') cat hack/lint-version | sed 's/^v//';; *'run ./...') echo lint >> "$STATIC_LOG";; *) exit 98;; esac
+case "$*" in *'version --short') cat hack/lint-version | sed 's/^v//';;
+ *'run ./...') [ "$TMPDIR" = "$FIXTURE_ROOT/shared/tmp" ] || exit 93; echo lint >> "$STATIC_LOG";;
+ *) exit 98;; esac
 `)
 	git := "'" + fixtureExecutable(t, "git") + "' config "
 	writeFixtureCommand(t, filepath.Join(dir, "bin/python3"), `[ -z "${OBERTH_SECRETS_DIR:-}" ] || exit 97
