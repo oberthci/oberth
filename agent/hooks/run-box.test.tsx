@@ -245,6 +245,24 @@ test('two runs list newest first and keep their places as the newer one finishes
   expect(lines[2]).toMatch(/^f366936d oberth +smoke-1 +▶ running +6\/11 +5m15s +5m$/)
 })
 
+test('a watched run keeps the first row as it finishes behind three newer runs', { options }, async ($, on) => {
+  bottom(on)
+  const clock = mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+  const newer = ['c1', 'c2', 'c3'].map(prefix => run(prefix.repeat(4) + '0'.repeat(24)))
+  let watched = run('dddddddd000000000000000000000000')
+  on('process.run', (_, e) => ({ value: { exitCode: 0, stdout: JSON.stringify(e.argv[2] === 'get' ? watched : { runs: newer }),
+    stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  await startSession($, on)
+  await $.command.run({ ...commandInput, command: 'oberth-watch', args: watched.id })
+  await clock.advance(REFRESH_MS)
+  expect((await boxLines($)).slice(1).map(line => line.slice(0, 8))).toEqual(['dddddddd', 'c1c1c1c1', 'c2c2c2c2'])
+  watched = { ...watched, status: 'passed', finished_at: '2026-11-18T00:01:20Z' }
+  await clock.advance(REFRESH_MS)
+  const lines = await boxLines($)
+  expect(lines.slice(1).map(line => line.slice(0, 8))).toEqual(['dddddddd', 'c1c1c1c1', 'c2c2c2c2'])
+  expect(lines[1]).toMatch(/^dddddddd .*✓ passed .*●$/)
+})
+
 test('rows stay single aligned lines within narrow widths', { options }, async ($, on) => {
   bottom(on)
   mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })

@@ -78,7 +78,7 @@ export function visible(state: Snapshot, count: number): Run[] {
   if (!state.reachable) return []
   const pins = state.pins.map(pin => pin.run)
   if (![...state.recent, ...pins].some(run => lately(run, state.now))) return []
-  const priority = [...pins.filter(active), ...state.recent, ...pins]
+  const priority = [...pins, ...state.recent]
   return priority.filter((run, index) => priority.findIndex(row => row.id === run.id) === index).slice(0, count)
 }
 
