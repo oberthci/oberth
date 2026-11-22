@@ -111,6 +111,24 @@ func TestWorkflowGoStepsExecuteTheirWrittenScripts(t *testing.T) {
 	}
 }
 
+// The walk builds its own candidate bytes with the build's command.
+func TestWalkByteBuildExecutesItsWrittenScript(t *testing.T) {
+	wf, err := argoworkflow.Decode(ownWorkflow(t, "walk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := workflowFixture(t)
+	values := workflowValues(dir)
+	configureBaseFixture(t, dir)
+	for _, name := range []string{"prepare-base", "release-bytes-build"} {
+		if output, err := executeWorkflowTemplate(t, wf, wf.GetTemplateByName(name), values); err != nil {
+			t.Fatalf("walk %s failed: %v\n%s", name, err, output)
+		}
+	}
+	assertCompileCaches(t, dir, map[string]int{filepath.Join(dir, "cache", "build"): 6})
+	assertCandidateVersion(t, dir)
+}
+
 // executeGoStep runs one Go task's written script after its written predecessor.
 func executeGoStep(t *testing.T, wf *wfv1.Workflow, task wfv1.DAGTask) (string, string) {
 	t.Helper()
@@ -207,7 +225,7 @@ func TestReleaseWorkflowExecutesTestedHeadGate(t *testing.T) {
 	}
 }
 func TestWalkKeyUsesRunClaimAndPublicCloudInit(t *testing.T) {
-	wf, err := argoworkflow.Decode(ownWorkflow(t, "build"))
+	wf, err := argoworkflow.Decode(ownWorkflow(t, "walk"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +345,7 @@ func candidateBuildVersion(t *testing.T, dir string) string {
 }
 
 func TestWalkWorkflowRunsWrittenCommandAndCollectsFailure(t *testing.T) {
-	wf, err := argoworkflow.Decode(ownWorkflow(t, "build"))
+	wf, err := argoworkflow.Decode(ownWorkflow(t, "walk"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,12 +376,18 @@ func TestWalkWorkflowRunsWrittenCommandAndCollectsFailure(t *testing.T) {
 	}
 }
 func TestOnlyGoTasksReserveHeavyResources(t *testing.T) {
-	wf, err := argoworkflow.Decode(ownWorkflow(t, "build"))
+	for _, name := range []string{"build", "walk"} {
+		wf, err := argoworkflow.Decode(ownWorkflow(t, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(wf.Spec.TemplateDefaults.Container.Resources.Requests) != 0 || len(wf.Spec.TemplateDefaults.Container.Resources.Limits) != 0 {
+			t.Fatal("trivial tasks inherit heavy reservations", name)
+		}
+	}
+	wf, err := argoworkflow.Decode(ownWorkflow(t, "walk"))
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(wf.Spec.TemplateDefaults.Container.Resources.Requests) != 0 || len(wf.Spec.TemplateDefaults.Container.Resources.Limits) != 0 {
-		t.Fatal("trivial tasks inherit heavy reservations")
 	}
 	for _, name := range []string{"key", "walk"} {
 		if wf.GetTemplateByName(name).Container.Resources.Requests.Cpu().MilliValue() > 100 {

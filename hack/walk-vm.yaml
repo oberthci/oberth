@@ -1,0 +1,141 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: vm-walk
+  onExit: cleanup
+  activeDeadlineSeconds: 3600
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534, fsGroup: 65534, seccompProfile: {type: RuntimeDefault}}
+  volumeClaimTemplates:
+    - metadata: {name: work}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 6Gi}}
+  volumes:
+    - name: cache
+      persistentVolumeClaim: {claimName: build-cache}
+  templateDefaults:
+    container:
+      image: golang@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd
+      workingDir: /work/src
+      env:
+        - {name: GOMAXPROCS, value: '6'}
+        - {name: GOFLAGS, value: '-mod=readonly -buildvcs=false -p=2'}
+        - {name: GOCACHE, value: /cache/build}
+        - {name: GOMODCACHE, value: /cache/modules}
+        - {name: GOTMPDIR, value: /cache/tmp}
+        - {name: RELEASE_BASE, value: /work/shared/base-image}
+        - {name: RELEASE_DIR, value: /work/shared/dist}
+        - {name: GIT_CONFIG_COUNT, value: '1'}
+        - {name: GIT_CONFIG_KEY_0, value: safe.directory}
+        - {name: GIT_CONFIG_VALUE_0, value: /work/src}
+      volumeMounts:
+        - {name: cache, mountPath: /cache}
+        - {name: work, mountPath: /work/shared}
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: {drop: [ALL]}
+  templates:
+    - name: vm-walk
+      dag:
+        tasks:
+          - {name: prepare-base, template: prepare-base}
+          - {name: release-bytes-build, template: release-bytes-build, depends: prepare-base}
+          - {name: walk-vm-key-generated, template: key}
+          - {name: walk-vm-boots, template: vm, depends: walk-vm-key-generated, arguments: {parameters: [{name: cloud-init, value: '{{tasks.walk-vm-key-generated.outputs.parameters.cloud-init}}'}]}}
+          - {name: first-run-walk-passes, template: walk, depends: 'walk-vm-boots && release-bytes-build', arguments: {parameters: [{name: address, value: '{{tasks.walk-vm-boots.outputs.parameters.address}}'}]}}
+    - name: prepare-base
+      inputs:
+        artifacts: &source-artifacts
+          - name: source
+            path: /work/src
+            mode: 0755
+            plugin: {name: oberth, key: '{{workflow.parameters.oberth-source}}', configuration: '{"version":1,"kind":"main"}'}
+      synchronization:
+        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: go}}]
+      container:
+        command: [bash, hack/prepare-base.sh]
+        resources: {requests: {cpu: '1', memory: 256Mi}, limits: {cpu: '2', memory: 2Gi}}
+    - name: release-bytes-build
+      inputs:
+        artifacts: *source-artifacts
+      synchronization:
+        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: go}}]
+      container:
+        resources: {requests: {cpu: '2', memory: 2Gi}, limits: {cpu: '6', memory: 8Gi}}
+        command: [bash, -ec]
+        args:
+          - |
+            mkdir -p "$GOTMPDIR"
+            candidate=$(git rev-parse HEAD | python3 -c 'import sys; print("v0.0." + str(int(sys.stdin.read().strip()[:15], 16)))')
+            make build-bytes VERSION="$candidate"
+    - name: key
+      outputs:
+        parameters:
+          - {name: cloud-init, valueFrom: {path: /work/shared/walk-key/cloud-init}}
+      container:
+        workingDir: /work/shared
+        command: [bash, -ec]
+        args:
+          - |
+            umask 077
+            mkdir -p walk-key
+            cd walk-key
+            ssh-keygen -q -t ed25519 -N "" -f id_ed25519
+            python3 - <<'PY' > cloud-init
+            import json, pathlib
+            print("#cloud-config")
+            print(json.dumps({"users": [{"name": "walk", "sudo": "ALL=(ALL) NOPASSWD:ALL", "shell": "/bin/bash", "lock_passwd": True, "ssh_authorized_keys": [pathlib.Path("id_ed25519.pub").read_text().strip()]}], "ssh_pwauth": False, "disable_root": True}))
+            PY
+        volumeMounts: [{name: work, mountPath: /work/shared}]
+        resources: {requests: {cpu: 50m, memory: 32Mi}, limits: {cpu: '1', memory: 128Mi}}
+    - name: vm
+      inputs:
+        parameters: [{name: cloud-init}]
+      resource:
+        action: create
+        successCondition: status.ready = true
+        manifest: |
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
+          metadata: {name: '{{workflow.name}}', namespace: oberth-walk}
+          spec:
+            domain:
+              cpu: {cores: 4}
+              resources: {requests: {memory: 6Gi}}
+              devices:
+                disks:
+                  - {name: root, disk: {bus: virtio}}
+                  - {name: cloudinit, disk: {bus: virtio}}
+                interfaces: [{name: default, masquerade: {}}]
+            networks: [{name: default, pod: {}}]
+            volumes:
+              - name: root
+                ephemeral: {persistentVolumeClaim: {claimName: oberth-walk-vm}}
+              - name: cloudinit
+                cloudInitNoCloud:
+                  userDataBase64: "{{=sprig.b64enc(inputs.parameters['cloud-init'])}}"
+      outputs:
+        parameters:
+          - name: address
+            valueFrom: {jsonPath: '{.status.interfaces[0].ipAddress}'}
+    - name: walk
+      inputs:
+        parameters: [{name: address}]
+        artifacts: *source-artifacts
+      container:
+        command: [bash, hack/walk-vm.sh]
+        volumeMounts: [{name: work, mountPath: /work/shared}]
+        resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: '1', memory: 512Mi}}
+        env: [{name: WALK_VM_ADDRESS, value: '{{inputs.parameters.address}}'}]
+    - name: cleanup
+      steps:
+        - - name: walk-vm-deleted
+            template: delete-vm
+    - name: delete-vm
+      resource:
+        action: delete
+        manifest: |
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
+          metadata: {name: '{{workflow.name}}', namespace: oberth-walk}

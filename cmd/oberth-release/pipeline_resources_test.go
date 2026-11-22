@@ -24,9 +24,9 @@ type pipelineResource struct {
 	Data map[string]string
 }
 
-func pipelineResources(t *testing.T) map[string]pipelineResource {
+func pipelineResources(t *testing.T, path string) map[string]pipelineResource {
 	t.Helper()
-	body, err := os.ReadFile("../../.oberth/pipeline-resources.yaml")
+	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,43 +49,72 @@ func pipelineResources(t *testing.T) map[string]pipelineResource {
 	return objects
 }
 
+const (
+	buildResourcesFile = "../../.oberth/pipeline-resources.yaml"
+	walkResourcesFile  = "../../hack/walk-vm-resources.yaml"
+)
+
+// The build's file holds exactly what build and release read; the walk's
+// objects live in their own file beside the walk.
 func TestPipelineObjectsSupplyWorkflowReferences(t *testing.T) {
-	objects := pipelineResources(t)
+	objects := pipelineResources(t, buildResourcesFile)
+	used := map[string]bool{}
 	for _, name := range []string{"build", "release"} {
 		workflow, err := argoworkflow.Decode(ownWorkflow(t, name))
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertCacheObjects(t, objects, workflow.Spec.Volumes)
-		for _, template := range workflow.Spec.Templates {
-			assertCacheObjects(t, objects, template.Volumes)
-			assertConfigObjects(t, objects, template)
+		assertWorkflowObjects(t, objects, workflow, used)
+	}
+	for key := range objects {
+		if !used[key] {
+			t.Fatal("pipeline resources hold an object the build and release never read", key)
 		}
-		if name == "build" {
-			assertWalkObjects(t, objects, workflow)
+	}
+	walk, err := argoworkflow.Decode(ownWorkflow(t, "walk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	walkObjects := pipelineResources(t, walkResourcesFile)
+	for key := range walkObjects {
+		if _, shared := objects[key]; shared {
+			t.Fatal("walk object duplicated in the build's resources", key)
 		}
+	}
+	assertWorkflowObjects(t, objects, walk, map[string]bool{})
+	assertWalkObjects(t, walkObjects, walk)
+}
+
+func assertWorkflowObjects(t *testing.T, objects map[string]pipelineResource, workflow *wfv1.Workflow, used map[string]bool) {
+	t.Helper()
+	assertCacheObjects(t, objects, workflow.Spec.Volumes, used)
+	for _, template := range workflow.Spec.Templates {
+		assertCacheObjects(t, objects, template.Volumes, used)
+		assertConfigObjects(t, objects, template, used)
 	}
 }
 
-func assertCacheObjects(t *testing.T, objects map[string]pipelineResource, volumes []corev1.Volume) {
+func assertCacheObjects(t *testing.T, objects map[string]pipelineResource, volumes []corev1.Volume, used map[string]bool) {
 	t.Helper()
 	for _, volume := range volumes {
 		if volume.PersistentVolumeClaim == nil {
 			continue
 		}
-		name := volume.PersistentVolumeClaim.ClaimName
-		if object := objects["PersistentVolumeClaim/"+name]; object.Metadata.Namespace != "REPLACE_WITH_PIPELINE_NAMESPACE" {
-			t.Fatal("workflow cache has no pipeline claim", name)
+		key := "PersistentVolumeClaim/" + volume.PersistentVolumeClaim.ClaimName
+		if object := objects[key]; object.Metadata.Namespace != "REPLACE_WITH_PIPELINE_NAMESPACE" {
+			t.Fatal("workflow cache has no pipeline claim", key)
 		}
+		used[key] = true
 	}
 }
 
-func assertConfigObjects(t *testing.T, objects map[string]pipelineResource, template wfv1.Template) {
+func assertConfigObjects(t *testing.T, objects map[string]pipelineResource, template wfv1.Template, used map[string]bool) {
 	t.Helper()
 	if template.Synchronization != nil {
 		for _, semaphore := range template.Synchronization.Semaphores {
 			if key := semaphore.ConfigMapKeyRef; key != nil {
 				assertConfigKey(t, objects, key.Name, key.Key)
+				used["ConfigMap/"+key.Name] = true
 			}
 		}
 	}
@@ -94,6 +123,7 @@ func assertConfigObjects(t *testing.T, objects map[string]pipelineResource, temp
 			if env.ValueFrom != nil && env.ValueFrom.ConfigMapKeyRef != nil {
 				key := env.ValueFrom.ConfigMapKeyRef
 				assertConfigKey(t, objects, key.Name, key.Key)
+				used["ConfigMap/"+key.Name] = true
 			}
 		}
 	}

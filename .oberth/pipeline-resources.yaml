@@ -1,19 +1,7 @@
-# Replace every REPLACE_WITH_* value before applying this file.
-# Use the installation's pipeline namespace and writable cache storage.
-# Import the reviewed guest disk into its prepared volume separately; this file
-# binds that existing volume and does not create or populate a guest disk.
-# The single build workflow needs the VM API and this repository capability,
-# including for push CI. Replace <repo> and the executor account, then run as admin:
-# oberth workflow capability grant --repo '<repo>' --capability '{
-#   "namespace": "oberth-walk",
-#   "service_account": "REPLACE_WITH_VM_EXECUTOR_ACCOUNT",
-#   "resource_kinds": [{
-#     "api_version": "kubevirt.io/v1", "kind": "VirtualMachineInstance",
-#     "actions": ["create", "delete"]
-#   }]
-# }'
-# Verify with: oberth workflow capability get '<repo>'
-# Before the first push, store and grant the private names policy as admin:
+# The objects .oberth/build.yaml and .oberth/release.yaml read, and nothing else.
+# Replace every REPLACE_WITH_* value, then apply this file in the pipeline namespace.
+# Creating an object grants no access: run the grant and secret lines the refusals
+# print, listed in docs/releasing.md. Store the private names policy as admin:
 # oberth secret put --repo '<repo>' --file .oberth/build.yaml --step lint-and-guards-pass \
 #   oberth/policy/names < <private-names-file>
 # The policy is a delivered secret file, never a plain object in this manifest.
@@ -54,20 +42,3 @@ metadata:
   namespace: REPLACE_WITH_PIPELINE_NAMESPACE
 data:
   origin: REPLACE_WITH_HTTPS_RELEASE_ORIGIN
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: oberth-walk
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: oberth-walk-vm
-  namespace: oberth-walk
-spec:
-  accessModes: [ReadWriteOnce]
-  storageClassName: ''
-  volumeName: REPLACE_WITH_PREPARED_WALK_VOLUME
-  resources:
-    requests: {storage: REPLACE_WITH_WALK_SIZE}

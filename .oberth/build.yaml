@@ -2,7 +2,6 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 spec:
   entrypoint: build
-  onExit: cleanup
   activeDeadlineSeconds: 3600
   automountServiceAccountToken: false
   securityContext: {runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534, fsGroup: 65534, seccompProfile: {type: RuntimeDefault}}
@@ -46,9 +45,6 @@ spec:
           - {name: prepare-base, template: prepare-base}
           - {name: release-bytes-build, template: go, depends: prepare-base, arguments: {parameters: [{name: target, value: build-bytes}]}}
           - {name: lint-and-guards-pass, template: lint-and-guards-pass, depends: release-bytes-build}
-          - {name: walk-vm-key-generated, template: key, when: "'{{workflow.parameters.oberth-trigger}}' == 'promotion'"}
-          - {name: walk-vm-boots, template: vm, depends: walk-vm-key-generated, when: "'{{workflow.parameters.oberth-trigger}}' == 'promotion'", arguments: {parameters: [{name: cloud-init, value: '{{tasks.walk-vm-key-generated.outputs.parameters.cloud-init}}'}]}}
-          - {name: first-run-walk-passes, template: walk, depends: 'walk-vm-boots && release-bytes-build', when: "'{{workflow.parameters.oberth-trigger}}' == 'promotion'", arguments: {parameters: [{name: address, value: '{{tasks.walk-vm-boots.outputs.parameters.address}}'}]}}
     - name: go
       synchronization:
         semaphores:
@@ -98,78 +94,3 @@ spec:
       container:
         command: [bash, hack/prepare-base.sh]
         resources: {requests: {cpu: '1', memory: 256Mi}, limits: {cpu: '2', memory: 2Gi}}
-    - name: key
-      outputs:
-        parameters:
-          - {name: cloud-init, valueFrom: {path: /work/shared/walk-key/cloud-init}}
-      container:
-        workingDir: /work/shared
-        command: [bash, -ec]
-        args:
-          - |
-            umask 077
-            mkdir -p walk-key
-            cd walk-key
-            ssh-keygen -q -t ed25519 -N "" -f id_ed25519
-            python3 - <<'PY' > cloud-init
-            import json, pathlib
-            print("#cloud-config")
-            print(json.dumps({"users": [{"name": "walk", "sudo": "ALL=(ALL) NOPASSWD:ALL", "shell": "/bin/bash", "lock_passwd": True, "ssh_authorized_keys": [pathlib.Path("id_ed25519.pub").read_text().strip()]}], "ssh_pwauth": False, "disable_root": True}))
-            PY
-        volumeMounts: [{name: work, mountPath: /work/shared}]
-        resources: {requests: {cpu: 50m, memory: 32Mi}, limits: {cpu: '1', memory: 128Mi}}
-    - name: vm
-      inputs:
-        parameters: [{name: cloud-init}]
-      resource:
-        action: create
-        successCondition: status.ready = true
-        manifest: |
-          apiVersion: kubevirt.io/v1
-          kind: VirtualMachineInstance
-          metadata: {name: '{{workflow.name}}', namespace: oberth-walk}
-          spec:
-            domain:
-              cpu: {cores: 4}
-              resources: {requests: {memory: 6Gi}}
-              devices:
-                disks:
-                  - {name: root, disk: {bus: virtio}}
-                  - {name: cloudinit, disk: {bus: virtio}}
-                interfaces: [{name: default, masquerade: {}}]
-            networks: [{name: default, pod: {}}]
-            volumes:
-              - name: root
-                ephemeral: {persistentVolumeClaim: {claimName: oberth-walk-vm}}
-              - name: cloudinit
-                cloudInitNoCloud:
-                  userDataBase64: "{{=sprig.b64enc(inputs.parameters['cloud-init'])}}"
-      outputs:
-        parameters:
-          - name: address
-            valueFrom: {jsonPath: '{.status.interfaces[0].ipAddress}'}
-    - name: walk
-      inputs:
-        parameters: [{name: address}]
-        artifacts:
-          - name: source
-            path: /work/src
-            mode: 0755
-            plugin: {name: oberth, key: '{{workflow.parameters.oberth-source}}', configuration: '{"version":1,"kind":"main"}'}
-      container:
-        command: [bash, hack/walk-vm.sh]
-        volumeMounts: [{name: work, mountPath: /work/shared}]
-        resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: '1', memory: 512Mi}}
-        env: [{name: WALK_VM_ADDRESS, value: '{{inputs.parameters.address}}'}]
-    - name: cleanup
-      steps:
-        - - name: walk-vm-deleted
-            template: delete-vm
-            when: "'{{workflow.parameters.oberth-trigger}}' == 'promotion'"
-    - name: delete-vm
-      resource:
-        action: delete
-        manifest: |
-          apiVersion: kubevirt.io/v1
-          kind: VirtualMachineInstance
-          metadata: {name: '{{workflow.name}}', namespace: oberth-walk}

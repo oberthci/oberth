@@ -1,0 +1,31 @@
+# Objects only the VM install walk (hack/walk-vm.yaml) reads; the build and release
+# need none of them. Apply after .oberth/pipeline-resources.yaml, replacing every
+# REPLACE_WITH_* value. Import the reviewed guest disk into its prepared volume
+# separately (hack/vm-image/README.txt); this file binds that existing volume and
+# does not create or populate a guest disk. The walk also needs the VM API, an
+# executor account in the pipeline namespace with RBAC for VirtualMachineInstances
+# in oberth-walk, and this capability, granted as admin:
+# oberth workflow capability grant --repo '<repo>' --capability '{
+#   "namespace": "oberth-walk",
+#   "service_account": "REPLACE_WITH_VM_EXECUTOR_ACCOUNT",
+#   "resource_kinds": [{
+#     "api_version": "kubevirt.io/v1", "kind": "VirtualMachineInstance",
+#     "actions": ["create", "delete"]
+#   }]
+# }' --reason 'Run the VM install walk'
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oberth-walk
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: oberth-walk-vm
+  namespace: oberth-walk
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: ''
+  volumeName: REPLACE_WITH_PREPARED_WALK_VOLUME
+  resources:
+    requests: {storage: REPLACE_WITH_WALK_SIZE}

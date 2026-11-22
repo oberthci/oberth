@@ -14,9 +14,17 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
+// walkFile is the VM install walk. It lives outside .oberth/, so no push,
+// promotion, tag or schedule selects it; validation reads it as CI.
+const walkFile = "hack/walk-vm.yaml"
+
 func ownWorkflow(t *testing.T, name string) []byte {
 	t.Helper()
-	body, err := os.ReadFile("../../.oberth/" + name + ".yaml")
+	path := "../../.oberth/" + name + ".yaml"
+	if name == "walk" {
+		path = "../../" + walkFile
+	}
+	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,10 +33,13 @@ func ownWorkflow(t *testing.T, name string) []byte {
 func ownRequest(document []byte, name string, trigger model.RunTrigger) admissioncontract.PrepareRequest {
 	sha := strings.Repeat("a", 40)
 	revision := sourcecontract.Revision{Repository: "forge/oberthci/oberth", Commit: sha}
-	file := ".oberth/" + name + ".yaml"
+	file, resources := ".oberth/"+name+".yaml", ""
+	if name == "walk" {
+		file, resources = walkFile, "vm-executor"
+	}
 	return admissioncontract.PrepareRequest{Mode: admissioncontract.ModeSubmit, Document: document, Repository: revision.Repository, RunID: "own-run", Ref: "refs/heads/main", ObjectSHA: sha, CommitSHA: sha, Trigger: trigger, SelectedFile: file, FileBlob: sha,
 		SourceReceipt:   sourcecontract.Receipt{Version: 1, Revision: revision, ObjectSHA: sha, File: file, Blob: sha, DocumentDigest: sourcecontract.Digest(document)},
-		IdentityRequest: admissioncontract.IdentityRequest{Namespace: "ci", PipelineAccount: "ci-step", ResourceAccount: "vm-executor"}}
+		IdentityRequest: admissioncontract.IdentityRequest{Namespace: "ci", PipelineAccount: "ci-step", ResourceAccount: resources}}
 }
 func ownHooks(t *testing.T, request admissioncontract.PrepareRequest) admissioncontract.PrepareHooks {
 	return admissioncontract.PrepareHooks{
@@ -36,7 +47,10 @@ func ownHooks(t *testing.T, request admissioncontract.PrepareRequest) admissionc
 			return admissioncontract.ReleaseFacts{Version: "v1.2.3", TestedCommit: request.CommitSHA, DefaultCommit: request.CommitSHA, BuildStatus: "passed"}, nil
 		},
 		LoginAudience: chartLoginAudience(t), VerifyIdentities: func(_ context.Context, r admissioncontract.IdentityRequest) (admissioncontract.IdentityEvidence, error) {
-			e := admissioncontract.IdentityEvidence{Namespace: r.Namespace, Pipeline: admissioncontract.AccountEvidence{Name: r.PipelineAccount, UID: "pipeline"}, Resource: &admissioncontract.AccountEvidence{Name: r.ResourceAccount, UID: "resource"}, State: admissioncontract.StateVerified}
+			e := admissioncontract.IdentityEvidence{Namespace: r.Namespace, Pipeline: admissioncontract.AccountEvidence{Name: r.PipelineAccount, UID: "pipeline"}, State: admissioncontract.StateVerified}
+			if r.ResourceAccount != "" {
+				e.Resource = &admissioncontract.AccountEvidence{Name: r.ResourceAccount, UID: "resource"}
+			}
 			return e, nil
 		},
 		BindSource: func(_ context.Context, d sourcecontract.Descriptor) (sourcecontract.Binding, error) {
@@ -44,20 +58,30 @@ func ownHooks(t *testing.T, request admissioncontract.PrepareRequest) admissionc
 		},
 	}
 }
+
+// ownPolicy is what any repository's build and release get: claims, no capability.
 func ownPolicy() argoworkflow.Policy {
-	return argoworkflow.Policy{ServerNamespace: "oberth", ArgoNamespace: "argo", PVCClaims: map[string]bool{"build-cache": true, "release-cache": true},
-		Capability: &argoworkflow.Capability{Namespace: "oberth-walk", ServiceAccount: "vm-executor", ResourceKinds: []argoworkflow.ResourceKind{{APIVersion: "kubevirt.io/v1", Kind: "VirtualMachineInstance", Actions: []string{"create", "delete"}}}}}
+	return argoworkflow.Policy{ServerNamespace: "oberth", ArgoNamespace: "argo", PVCClaims: map[string]bool{"build-cache": true, "release-cache": true}}
+}
+
+// walkPolicy adds the VM capability only the walk asks for.
+func walkPolicy() argoworkflow.Policy {
+	p := ownPolicy()
+	p.Capability = &argoworkflow.Capability{Namespace: "oberth-walk", ServiceAccount: "vm-executor", ResourceKinds: []argoworkflow.ResourceKind{{APIVersion: "kubevirt.io/v1", Kind: "VirtualMachineInstance", Actions: []string{"create", "delete"}}}}
+	return p
 }
 func prepareOwn(t *testing.T, name string, trigger model.RunTrigger) (*admissioncontract.PreparedAdmission, error) {
 	t.Helper()
 	r := ownRequest(ownWorkflow(t, name), name, trigger)
 	p := ownPolicy()
-	if name == "build" {
+	switch name {
+	case "build":
 		r.Grants = namesGrants(r)
-	}
-	if name == "release" {
+	case "release":
 		r.Grants = releaseGrants(r)
 		p.Release = true
+	case "walk":
+		p = walkPolicy()
 	}
 	return argoworkflow.Prepare(t.Context(), r, p, ownHooks(t, r))
 }
@@ -65,7 +89,7 @@ func TestOwnPipelinesAdmit(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		trigger model.RunTrigger
-	}{{"build", model.TriggerBranch}, {"build", model.TriggerPromotion}, {"release", model.TriggerTag}} {
+	}{{"build", model.TriggerBranch}, {"build", model.TriggerPromotion}, {"release", model.TriggerTag}, {"walk", model.TriggerBranch}} {
 		p, err := prepareOwn(t, tc.name, tc.trigger)
 		if err != nil {
 			t.Fatal(err)
@@ -94,31 +118,93 @@ func TestOwnReleaseAdmits(t *testing.T) {
 	}
 }
 func TestOwnPlanStaysSmall(t *testing.T) {
-	for _, name := range []string{"build", "release"} {
+	for _, name := range []string{"build", "release", "walk"} {
 		assertSmallDAG(t, name)
 	}
-	p, err := prepareOwn(t, "build", model.TriggerPromotion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !p.View().Plan.Exact || len(p.View().Plan.Entries) != 8 {
-		t.Fatalf("plan: %+v", p.View().Plan)
-	}
-	want := []string{"prepare-base", "go-tests-pass-with-race", "release-bytes-build", "lint-and-guards-pass", "walk-vm-key-generated", "walk-vm-boots", "first-run-walk-passes", "walk-vm-deleted"}
-	for i, e := range p.View().Plan.Entries {
-		if e.Name != want[i] {
-			t.Fatalf("step %d: %s", i, e.Name)
+	for _, tc := range []struct {
+		name string
+		want []string
+	}{
+		{"build", []string{"prepare-base", "go-tests-pass-with-race", "release-bytes-build", "lint-and-guards-pass"}},
+		{"walk", []string{"prepare-base", "release-bytes-build", "walk-vm-key-generated", "walk-vm-boots", "first-run-walk-passes", "walk-vm-deleted"}},
+	} {
+		p, err := prepareOwn(t, tc.name, model.TriggerPromotion)
+		if err != nil {
+			t.Fatal(tc.name, err)
+		}
+		if !p.View().Plan.Exact || len(p.View().Plan.Entries) != len(tc.want) {
+			t.Fatalf("%s plan: %+v", tc.name, p.View().Plan)
+		}
+		for i, e := range p.View().Plan.Entries {
+			if e.Name != tc.want[i] {
+				t.Fatalf("%s step %d: %s", tc.name, i, e.Name)
+			}
 		}
 	}
 }
+
+// The promotion gate asks for what any repository's would: no resource
+// template, no VM, no capability, no resource account.
+func TestPromotionGateHasNoResourceOrVMStep(t *testing.T) {
+	p, err := prepareOwn(t, "build", model.TriggerPromotion)
+	if err != nil {
+		t.Fatal("promotion gate needs more than claims and its names grant", err)
+	}
+	for _, e := range p.View().Plan.Entries {
+		if strings.Contains(e.Name, "vm") || strings.Contains(e.Name, "walk") {
+			t.Fatal("VM step in the promotion gate", e.Name)
+		}
+	}
+	assertGateDeclaresNoVM(t)
+	assertVMStepNeedsCapability(t)
+}
+
+func assertGateDeclaresNoVM(t *testing.T) {
+	t.Helper()
+	wf, err := argoworkflow.Decode(ownWorkflow(t, "build"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wf.Spec.OnExit != "" {
+		t.Fatal("promotion gate has an exit handler", wf.Spec.OnExit)
+	}
+	for _, template := range wf.Spec.Templates {
+		if template.Resource != nil {
+			t.Fatal("resource template in the promotion gate", template.Name)
+		}
+	}
+	for _, task := range wf.GetTemplateByName("build").DAG.Tasks {
+		if task.When != "" {
+			t.Fatal("promotion runs work a branch does not", task.Name)
+		}
+	}
+}
+
+// assertVMStepNeedsCapability is the control: the walk's VM step put back
+// into the gate needs the capability again.
+func assertVMStepNeedsCapability(t *testing.T) {
+	t.Helper()
+	walk, err := argoworkflow.Decode(ownWorkflow(t, "walk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withVM := rewriteWorkflow(t, ownWorkflow(t, "build"), func(w *wfv1.Workflow) {
+		w.Spec.Templates = append(w.Spec.Templates, *walk.GetTemplateByName("delete-vm"))
+		dag := w.GetTemplateByName("build").DAG
+		dag.Tasks = append(dag.Tasks, wfv1.DAGTask{Name: "walk-vm-deleted", Template: "delete-vm"})
+	})
+	r := ownRequest(withVM, "build", model.TriggerPromotion)
+	r.Grants = namesGrants(r)
+	if _, err := argoworkflow.Prepare(t.Context(), r, ownPolicy(), ownHooks(t, r)); err == nil {
+		t.Fatal("VM step admitted without a capability")
+	}
+}
 func TestWalkVMManifestAdmits(t *testing.T) {
-	r := ownRequest(ownWorkflow(t, "build"), "build", model.TriggerPromotion)
-	p := ownPolicy()
-	p.Capability = nil
-	if _, err := argoworkflow.Prepare(t.Context(), r, p, ownHooks(t, r)); err == nil {
+	r := ownRequest(ownWorkflow(t, "walk"), "walk", model.TriggerBranch)
+	if _, err := argoworkflow.Prepare(t.Context(), r, ownPolicy(), ownHooks(t, r)); err == nil {
 		t.Fatal("VM without capability accepted")
 	}
-	p = ownPolicy()
+	p := walkPolicy()
 	p.Release = true
 	r.Trigger = model.TriggerTag
 	if _, err := argoworkflow.Prepare(t.Context(), r, p, ownHooks(t, r)); err == nil {
@@ -127,13 +213,13 @@ func TestWalkVMManifestAdmits(t *testing.T) {
 	bad := rewriteWorkflow(t, r.Document, func(w *wfv1.Workflow) {
 		w.GetTemplateByName("vm").Resource.Manifest = strings.ReplaceAll(w.GetTemplateByName("vm").Resource.Manifest, "namespace: oberth-walk", "namespace: other")
 	})
-	r = ownRequest(bad, "build", model.TriggerPromotion)
-	if _, err := argoworkflow.Prepare(t.Context(), r, ownPolicy(), ownHooks(t, r)); err == nil {
+	r = ownRequest(bad, "walk", model.TriggerBranch)
+	if _, err := argoworkflow.Prepare(t.Context(), r, walkPolicy(), ownHooks(t, r)); err == nil {
 		t.Fatal("VM in ungranted namespace accepted")
 	}
 }
 func TestRefsAreQuotedArguments(t *testing.T) {
-	for _, name := range []string{"build", "release"} {
+	for _, name := range []string{"build", "release", "walk"} {
 		t.Run(name, func(t *testing.T) { assertQuotedRefs(t, name) })
 	}
 }
@@ -309,7 +395,7 @@ func assertSmallDAG(t *testing.T, name string) {
 }
 
 func TestVMDoesNotUseCrossNamespaceOwnerReference(t *testing.T) {
-	workflow, err := argoworkflow.Decode(ownWorkflow(t, "build"))
+	workflow, err := argoworkflow.Decode(ownWorkflow(t, "walk"))
 	if err != nil {
 		t.Fatal(err)
 	}

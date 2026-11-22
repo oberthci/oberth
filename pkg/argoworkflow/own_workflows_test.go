@@ -33,10 +33,9 @@ func TestOwnWorkflowsSubmitAdmission(t *testing.T) {
 			}
 			p := Policy{ServerNamespace: "oberth-system", ArgoNamespace: "ci", PVCClaims: map[string]bool{"build-cache": true, "release-cache": true}}
 			if file == workflowpolicy.BuildFile {
-				r.IdentityRequest.ResourceAccount = "resources"
+				// The build gets what any repository's would: no capability or resource account.
 				hooks.LoginAudience = ownChartAudience(t)
 				r.Grants = ownNamesGrants(r)
-				p.Capability = &Capability{Namespace: "oberth-walk", ServiceAccount: "resources", ResourceKinds: []ResourceKind{{APIVersion: "kubevirt.io/v1", Kind: "VirtualMachineInstance", Actions: []string{"create", "delete"}}}}
 			} else {
 				r.Ref, r.Trigger = "refs/tags/v0.1.0", "tag"
 				p.Release = true
