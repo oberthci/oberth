@@ -31,6 +31,8 @@ const (
 	reasonAdmissionStuck   = "admission callback still running"
 	reasonOptionCount      = "push has more than two options"
 	reasonTagMoved         = "tag moved since admission"
+	reasonTagTarget        = "release tag must point at its commit"
+	remedyTagTarget        = "Tag the commit itself with one tag object of at most 64 KiB."
 	reasonTag              = "tags cannot move or be deleted"
 	remedyTag              = "Push a new tag name."
 	reasonProtected        = "branch deletion is protected"
