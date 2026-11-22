@@ -100,6 +100,14 @@ func (c *Cache) headRead(ctx context.Context, p string, r Remote) (gitport.Ref, 
 		}
 	}
 	job := c.joinTransfer(key, run, ended) //nolint:contextcheck // The cache lifetime owns the job, not the caller who waits for it.
+	if c.abandoned(job) {
+		// An earlier caller already waited for this read in vain: the forge
+		// is not answering in time, so later callers (the other pins of the
+		// same admission, a retry) decide at once instead of waiting again.
+		var expired context.CancelFunc
+		ctx, expired = context.WithTimeout(ctx, 0)
+		defer expired()
+	}
 	if result, ended := c.awaitTransfer(ctx, key, job); ended {
 		return result.head, result.err
 	}

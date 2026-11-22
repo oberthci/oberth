@@ -114,6 +114,14 @@ func (c *Cache) awaitTransfer(ctx context.Context, key string, t *transfer) (out
 	return result, true
 }
 
+// abandoned reports whether a caller already stopped waiting for t while it
+// still runs.
+func (c *Cache) abandoned(t *transfer) bool {
+	c.transfers.mu.Lock()
+	defer c.transfers.mu.Unlock()
+	return t.left
+}
+
 // leave marks that a caller stopped waiting while the transfer still runs. It
 // reports false when the transfer had already ended: the caller then takes
 // its result like any waiter, and no outcome falls between "continues" and
