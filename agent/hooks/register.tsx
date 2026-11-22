@@ -79,38 +79,13 @@ function commands(on: On, options: PluginOptions) {
     try { return { text: await watch($, options, e.args.trim()) } }
     catch (error) { return { text: errorText(error) } }
   })
-  on('tool.call', { tool: 'mcp__oberth__runs' }, async ($, e) => {
-    try {
-      const input = e as typeof e & { limit?: number }
-      return { result: table(await list($, options, limit(input.limit)), await $.clock.now()) }
-    } catch (error) { return { result: errorText(error), isError: true } }
-  })
-  on('tool.call', { tool: 'mcp__oberth__watch' }, async ($, e) => {
-    try {
-      const input = e as typeof e & { id?: string }
-      return { result: await watch($, options, typeof input.id === 'string' ? input.id.trim() : '') }
-    } catch (error) { return { result: errorText(error), isError: true } }
-  })
 }
 
+// The person's commands only: model tools here would be MCP server "oberth", the joined
+// bridge's name, and the bridge already serves the model.
 async function registerCommands($: EngineInterface) {
   await $.command.register({ name: 'oberth-runs', description: 'Show recent Oberth runs (/oberth-runs [--limit=N]).' })
   await $.command.register({ name: 'oberth-watch', description: 'Pin a run until completion (/oberth-watch <id or prefix>).' })
-}
-
-// The host serves these as MCP server "oberth" and refuses them while the session has the
-// joined bridge under that name; the bridge's tools then serve the model, and the box goes on.
-async function registerTools($: EngineInterface) {
-  const tools = [{
-    name: 'runs', description: 'Show recent Oberth runs with whole fields and authoritative plan counts.',
-    inputSchema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 50 } } },
-    isDeferred: false,
-  }, {
-    name: 'watch', description: 'Pin an Oberth run above the prompt until it finishes, with one completion toast.',
-    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
-    isDeferred: false,
-  }]
-  for (const tool of tools) await $.tool.register(tool).catch(() => undefined)
 }
 
 // The setup notice the box needs before it can read runs, or none.
@@ -142,7 +117,6 @@ export const register: Register = (on, options) => {
       if (loop.count) void poll($, options, loop)
       loop.timer = $.clock.every(15000, () => { void tick($, options, loop).catch(() => {}) })
     }
-    await registerTools($)
     return next(e)
   })
   on('session.end', async ($, e, next) => {

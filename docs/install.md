@@ -93,8 +93,8 @@ The options take precedence; a blank option means unset. No profile hides the bo
 verified executable, never a checkout file. The box shows up to `runs` runs (0 to 10; blank is
 three), none at 0, with progress and failed steps; refresh is every 15 seconds when
 active/watched, 60 when idle. `/oberth-runs [--limit=N]` shows the table;
-`/oberth-watch <id-or-prefix>` watches until the completion toast. The `runs` and `watch` tools
-do the same until the `oberth` bridge is registered. Codex installs the skill through
+`/oberth-watch <id-or-prefix>` watches until the completion toast; the model uses the bridge's
+tools, and the plugin adds none. Codex installs the skill through
 `agent/.codex-plugin/plugin.json` with `codex plugin marketplace add oberthci/oberth`, then
 `codex plugin add oberth@oberthci`. Register join's exact bridge line as in
 [agent connection](agents.md#connect-the-tools); this package has no above-prompt view for Codex.

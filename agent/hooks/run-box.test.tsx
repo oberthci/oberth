@@ -26,8 +26,10 @@ function run(id = 'cad7d9ec000000000000000000000000', status: Run['status'] = 'r
 // the snapshot observer is registered here, before any state hook a test adds beneath it.
 const writes = new WeakMap<On, () => Promise<void>>()
 
-// host: HOME, a path whose stat fails, and the host's refusal of the plugin's tools.
-type Host = { home?: string; missing?: string; toolRefusal?: string }
+// host: HOME and a path whose stat fails.
+type Host = { home?: string; missing?: string }
+// Model tools the plugin asked the host for, per test; the plugin must ask for none.
+const registeredTools = new WeakMap<On, string[]>()
 
 function bottom(on: On, resolved?: string, checkout = true, profileEnv?: string, host: Host = {}) {
   on('env.get', (_, e) => ({ value: e.name === 'OBERTH_PROFILE' ? profileEnv : e.name === 'HOME' ? host.home : undefined }))
@@ -42,9 +44,9 @@ function bottom(on: On, resolved?: string, checkout = true, profileEnv?: string,
   on('store.get', (_, e) => ({ value: store.get(e.key) }))
   on('store.set', (_, e) => { store.set(e.key, e.value); return { value: undefined } })
   on('command.register', (_, e) => ({ value: { command: e.name } }))
-  on('tool.register', (_, e) => {
-    return host.toolRefusal ? { deny: host.toolRefusal } : { value: { tool: `mcp__oberth__${e.name}` } }
-  })
+  const tools: string[] = []
+  registeredTools.set(on, tools)
+  on('tool.register', (_, e) => { tools.push(e.name); return { deny: 'MCP server "oberth" is the joined bridge.' } })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.end', () => ({ sessionId: 'ended' }))
   on('session.root', () => ({ value: '/checkout' }))
@@ -76,7 +78,7 @@ async function text($: Engine, expression: RegExp) {
   }
 }
 
-test('unset executable refuses commands and tools without spawning', async ($, on) => {
+test('unset executable refuses both commands without spawning', async ($, on) => {
   bottom(on)
   let stored: { value: { shape: string; value: Snapshot }; version: number } = {
     value: { shape: 'runs-1', value: { recent: [run()], pins: [], reachable: true, now: 0 } }, version: 1,
@@ -94,7 +96,7 @@ test('unset executable refuses commands and tools without spawning', async ($, o
   await startSession($, on)
   await startSession($, on)
   expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain('absolute verified path')
-  expect((await $.tool.call({ tool: 'mcp__oberth__runs' })).isError).toBe(true)
+  expect((await $.command.run({ ...commandInput, command: 'oberth-watch', args: run().id })).text).toContain('absolute verified path')
   expect(calls.length).toBe(0)
   expect(toasts.length).toBe(1)
   const ui = await $.ui.mount({ ...band, surface: 'terminal' })
@@ -149,7 +151,7 @@ test('unset profile without a checkout binding stays hidden, notifies once and n
   await clock.advance(120000)
   expect(toasts.length).toBe(1)
   expect(toasts[0]).toContain('Set profile to the uplink profile')
-  expect((await $.tool.call({ tool: 'mcp__oberth__runs' })).isError).toBe(true)
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain('OBERTH_PROFILE')
   expect((await $.command.run({ ...commandInput, command: 'oberth-watch', args: run().id })).text).toContain('OBERTH_PROFILE')
   const ui = await $.ui.mount({ ...band, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /cad7d9ec/ })).toBeUndefined()
@@ -245,7 +247,7 @@ test('pin missing from list stays visible, finishes with one toast and stops det
     return { value: { exitCode: 0, stdout: JSON.stringify(data), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   await startSession($, on)
-  expect((await $.tool.call({ tool: 'mcp__oberth__watch', id: 'bbbbbbbb' })).result).toContain('Watching')
+  expect((await $.command.run({ ...commandInput, command: 'oberth-watch', args: 'bbbbbbbb' })).text).toContain('Watching')
   await clock.advance(60000)
   expect(gets).toBe(5)
   await text($, /▶ bbbbbbbb oberth v0.24.0 6\/11 .* ●/)
@@ -260,7 +262,7 @@ test('pin missing from list stays visible, finishes with one toast and stops det
   expect(toasts.length).toBe(1)
 })
 
-test('unreachable and truncated responses hide stale rows; tools return plain failures', { options }, async ($, on) => {
+test('unreachable and truncated responses hide stale rows; the table returns plain failures', { options }, async ($, on) => {
   bottom(on)
   const clock = mock.clock(on)
   let exitCode = 0
@@ -276,9 +278,7 @@ test('unreachable and truncated responses hide stale rows; tools return plain fa
   const ui = await $.ui.mount({ ...band, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /cad7d9ec/ })).toBeUndefined()
   await ui.unmount()
-  const failed = await $.tool.call({ tool: 'mcp__oberth__runs' })
-  expect(failed.isError).toBe(true)
-  expect(failed.result).toBe(stderr)
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toBe(stderr)
   truncatedDiagnostic = true
   expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain('output limit')
   truncatedDiagnostic = false
@@ -287,7 +287,7 @@ test('unreachable and truncated responses hide stale rows; tools return plain fa
   expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain('output limit')
 })
 
-test('table command and model tool keep complete IDs, refs and reasons', { options }, async ($, on) => {
+test('table command keeps complete IDs, refs and reasons', { options }, async ($, on) => {
   bottom(on)
   mock.clock(on)
   const item = { ...run(undefined, 'failed'), display_reason: 'step failed',
@@ -300,8 +300,7 @@ test('table command and model tool keep complete IDs, refs and reasons', { optio
   })
   await startSession($, on)
   const command = await $.command.run({ ...commandInput, command: 'oberth-runs', args: '--limit=7' })
-  const tool = await $.tool.call({ tool: 'mcp__oberth__runs', limit: 7 })
-  expect(command.text).toBe(tool.result)
+  expect(command.text).toBe((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '--limit 7' })).text)
   expect(command.text).toContain(item.id)
   expect(command.text).toContain(item.display_reason)
   expect(command.text).toContain('FAILED STEP')
@@ -504,7 +503,7 @@ for (const runs of [11, -1, 2.5]) {
   })
 }
 
-test('runs 0 keeps the table, watches with completion toasts and both tools', { options: { ...options, runs: 0 } }, async ($, on) => {
+test('runs 0 keeps the table and watches with completion toasts', { options: { ...options, runs: 0 } }, async ($, on) => {
   bottom(on)
   const clock = mock.clock(on)
   let rows = [run(), run('aaaaaaaa000000000000000000000000')]
@@ -513,9 +512,10 @@ test('runs 0 keeps the table, watches with completion toasts and both tools', { 
   await $.session.start(start)
   const listed = await $.command.run({ ...commandInput, command: 'oberth-runs', args: '--limit=2' })
   expect(listed.text).toContain(rows[1]!.id)
-  expect((await $.tool.call({ tool: 'mcp__oberth__runs', limit: 2 })).result).toBe(listed.text)
-  expect((await $.command.run({ ...commandInput, command: 'oberth-watch', args: rows[0]!.id })).text).toContain('Watching')
-  expect((await $.tool.call({ tool: 'mcp__oberth__watch', id: rows[1]!.id })).result).toContain('Watching')
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '--limit 2' })).text).toBe(listed.text)
+  for (const row of rows) {
+    expect((await $.command.run({ ...commandInput, command: 'oberth-watch', args: row.id })).text).toContain('Watching')
+  }
   await noBox($)
   rows = rows.map(row => ({ ...row, status: 'passed' }))
   await clock.advance(15000)
@@ -639,17 +639,18 @@ test('a v0.30.7 run list reply with one running run draws the box', { options },
   }
 })
 
-// The joined bridge is MCP server "oberth", the name the host serves this plugin's tools under.
-const BRIDGE_REFUSAL = 'the session already has an MCP server named "oberth" in its MCP config; registering would replace it'
-
-test('a session with the oberth bridge refuses the model tools and still draws the box', { options }, async ($, on) => {
-  bottom(on, undefined, true, undefined, { toolRefusal: BRIDGE_REFUSAL })
+// The joined bridge is MCP server "oberth", the name the host would serve this plugin's tools under;
+// the kit's host refuses any, as a session with the bridge does.
+test('the plugin registers no model tools and draws the box beside the oberth bridge', { options }, async ($, on) => {
+  bottom(on)
   const clock = mock.clock(on, { now: Date.parse('2026-11-22T04:00:10Z') })
   const calls = v0307(on)
   await startSession($, on)
+  await startSession($, on)
+  expect(registeredTools.get(on)).toEqual([])
   await text($, SMOKE)
   await clock.advance(15000)
-  expect(calls.filter(call => call.argv[2] === 'list')).toHaveLength(2)
+  expect(calls.filter(call => call.argv[2] === 'list')).toHaveLength(3)
   expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain('d7a7d4380c1e4b5f9a2b3c4d5e6f7a81')
 })
 

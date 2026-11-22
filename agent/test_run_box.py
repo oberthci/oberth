@@ -85,6 +85,14 @@ def check_projection(contract):
             raise ValueError("CLI command result contract drift")
 
 
+def check_commands_only(module):
+    """The plugin's tools would be MCP server "oberth", the joined bridge's name: it registers none."""
+    if re.search(r"\$\.tool\.register|['\"]tool\.(?:call|run)['\"]|mcp__", module):
+        raise ValueError("the plugin registers or serves model tools")
+    if set(re.findall(r"\$\.command\.register\(\{ name: '([a-z-]+)'", module)) != {"oberth-runs", "oberth-watch"}:
+        raise ValueError("the person's commands are /oberth-runs and /oberth-watch")
+
+
 def check_paths(source):
     if re.search(r"token|ca.file|/home/|/Users/|~[/\\]|[A-Za-z]:\\Users\\|\.config/|process\.env|mcp.*call|run_list|run_get", source, re.I):
         raise ValueError("agent module must not name credentials, home paths or private routes")
@@ -114,6 +122,15 @@ class RunBoxContract(unittest.TestCase):
         for field in ("step_count", "steps_planned_exact", "finished_at", "status", "failed_step", "failed_step_name"):
             with self.subTest(field=field), self.assertRaises((ValueError, AttributeError)):
                 check_projection(contract.replace(field + ":", "missing_field:"))
+
+    def test_commands_and_no_model_tools(self):
+        module = (AGENT / "hooks/register.tsx").read_text()
+        check_commands_only(module)
+        tool = "\n  await $.tool.register({ name: 'runs' })"
+        for changed in (module + tool, module + "\n  on('tool.call', { tool: 'mcp__oberth__runs' }, f)",
+                        module.replace("name: 'oberth-watch'", "name: 'oberth-pin'")):
+            with self.assertRaises(ValueError):
+                check_commands_only(changed)
 
     def test_no_credentials_home_paths_or_old_routes(self):
         sources = [p for p in (AGENT / "hooks").glob("*.ts*") if ".test." not in p.name]

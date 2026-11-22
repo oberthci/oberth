@@ -63,7 +63,7 @@ the checkout. Keep using CLI commands until the tools are connected.
 The bridge uses the selected CLI profile and its pinned HTTPS trust. Without a profile it gives
 setup instructions and no tools; it does not try another installation.
 
-The optional [agent plugins](install.md#agent-plugins) add a run box and pin/completion tools.
+The optional [agent plugins](install.md#agent-plugins) add a run box and run/watch commands.
 
 ## Push, observe and respond
 
