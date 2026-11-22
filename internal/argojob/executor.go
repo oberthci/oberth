@@ -29,9 +29,10 @@ type Workflows interface {
 	Patch(context.Context, PatchRequest) (*wf.Workflow, error)
 }
 
-// Accounts reads the namespace-scoped accounts admission names.
+// Accounts reads and creates the namespace-scoped accounts admission names.
 type Accounts interface {
 	Get(context.Context, string, meta.GetOptions) (*core.ServiceAccount, error)
+	Create(context.Context, *core.ServiceAccount, meta.CreateOptions) (*core.ServiceAccount, error)
 }
 
 // Pods supplies live ownership reads, exec and log streams.

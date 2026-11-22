@@ -94,6 +94,17 @@ func (f Accounts) Get(_ context.Context, name string, _ meta.GetOptions) (*core.
 	return &core.ServiceAccount{ObjectMeta: meta.ObjectMeta{Name: name, UID: types.UID(uid)}}, nil
 }
 
+// Create records the account with the UID "uid-<name>".
+func (f Accounts) Create(_ context.Context, a *core.ServiceAccount, _ meta.CreateOptions) (*core.ServiceAccount, error) {
+	if _, ok := f.Names[a.Name]; ok {
+		return nil, apierrors.NewAlreadyExists(schema.GroupResource{Resource: "serviceaccounts"}, a.Name)
+	}
+	f.Names[a.Name] = "uid-" + a.Name
+	created := a.DeepCopy()
+	created.UID = types.UID(f.Names[a.Name])
+	return created, nil
+}
+
 type Pods struct {
 	Object         *core.Pod
 	GetFunc        func() (*core.Pod, error)

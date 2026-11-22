@@ -8,9 +8,6 @@ import (
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/stateport"
-	core "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type currentAuthority struct{ owner *serverOwners }
@@ -40,20 +37,6 @@ func (a currentAuthority) KeyPolicy(ctx context.Context, who actor.Actor) (servi
 	k, err := a.owner.c.store.Key(ctx, who.Fingerprint)
 	return service.KeyPolicy{Agent: k.Kind == "agent" || k.ParkOnPush}, err
 }
-func (o *serverOwners) account(ctx context.Context, name string) error {
-	client := o.cluster.Kube.CoreV1().ServiceAccounts(o.c.config.PipelineNamespace)
-	_, err := client.Get(ctx, name, meta.GetOptions{})
-	if !apierrors.IsNotFound(err) {
-		return err
-	}
-	no := false
-	_, err = client.Create(ctx, &core.ServiceAccount{ObjectMeta: meta.ObjectMeta{Name: name, Namespace: o.c.config.PipelineNamespace, Labels: map[string]string{"app.kubernetes.io/managed-by": "oberth"}}, AutomountServiceAccountToken: &no}, meta.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		return nil
-	}
-	return err
-}
-
 type authorityPublication struct{ owner *serverOwners }
 
 func (p authorityPublication) Publish(ctx context.Context, repository string, apply func(context.Context) (stateport.AuthoritySnapshot, error)) (unsynced, err error) {

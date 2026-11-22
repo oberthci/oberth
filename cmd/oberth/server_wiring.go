@@ -44,7 +44,7 @@ func (o *serverOwners) wiringPart(ctx context.Context) (Part, error) {
 }
 func (o *serverOwners) authorityConfiguration() app.AuthorityConfig {
 	c := o.c.config
-	return app.AuthorityConfig{ArgoNamespace: c.ArgoNamespace, ServerNamespace: c.Namespace, Namespace: c.PipelineNamespace, SecretstoreAddress: c.SecretStore.Address, ImagePrefixes: o.settings.ImagePrefixes, Defaults: o.settings.Defaults, Grants: o.c.store.Grants, Templates: o.template, EnsureAccount: o.account}
+	return app.AuthorityConfig{ArgoNamespace: c.ArgoNamespace, ServerNamespace: c.Namespace, Namespace: c.PipelineNamespace, SecretstoreAddress: c.SecretStore.Address, ImagePrefixes: o.settings.ImagePrefixes, Defaults: o.settings.Defaults, Grants: o.c.store.Grants, Templates: o.template, EnsureAccount: o.native.EnsureAccount}
 }
 func (o *serverOwners) template(ctx context.Context, name string) (*wf.WorkflowTemplate, error) {
 	return o.cluster.Argo.ArgoprojV1alpha1().WorkflowTemplates(o.c.config.PipelineNamespace).Get(ctx, name, meta.GetOptions{})
