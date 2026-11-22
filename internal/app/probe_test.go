@@ -25,7 +25,7 @@ func TestHonestRepositoryProbesContract(t *testing.T) {
 		return request().Ref, nil
 	}}
 	c := app.Checks{Git: git, Deadline: context.WithTimeout}
-	key := app.ProbeKey{Address: "forge:22", User: "git", Fingerprint: "key", PinsDigest: "pins", Repository: request().Repository}
+	key := app.ProbeKey{Address: "forge:22", Fingerprint: "key", PinsDigest: "pins", Repository: request().Repository}
 	result := c.CheckRepository(context.Background(), key)
 	if result.Reason != "repository check failed" || result.Detail != "ERR repository denied" {
 		t.Fatal(result)

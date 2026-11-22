@@ -8,7 +8,7 @@ import (
 	"github.com/oberthci/oberth/internal/gitport"
 )
 
-type ProbeKey struct{ Address, User, Fingerprint, PinsDigest, Repository string }
+type ProbeKey struct{ Address, Fingerprint, PinsDigest, Repository string }
 type ProbeResult struct {
 	Reason, Detail string
 }

@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"os"
 	"strings"
 
@@ -46,7 +45,7 @@ func (a serverAdministration) ProbeRepository(ctx context.Context, r stateport.R
 	if err != nil {
 		return err
 	}
-	key := app.ProbeKey{Address: u.BaseURL, User: storedForgeUser(u.BaseURL), Fingerprint: fmt.Sprintf("%x", sha256.Sum256([]byte(identity.PublicKey))), PinsDigest: fmt.Sprintf("%x", sha256.Sum256(pins)), Repository: r.Canonical}
+	key := app.ProbeKey{Address: u.BaseURL, Fingerprint: fmt.Sprintf("%x", sha256.Sum256([]byte(identity.PublicKey))), PinsDigest: fmt.Sprintf("%x", sha256.Sum256(pins)), Repository: r.Canonical}
 	result := a.owner.checks.CheckRepository(ctx, key)
 	if result.Detail != "" {
 		a.logCheck(ctx, r.Canonical, result)
@@ -78,16 +77,6 @@ func (a serverAdministration) ProbeRepository(ctx context.Context, r stateport.R
 		return problem
 	}
 	return nil
-}
-
-// storedForgeUser is the SSH account of a stored upstream address, which the
-// store accepted as a valid URL.
-func storedForgeUser(base string) string {
-	u, err := url.Parse(base)
-	if err != nil {
-		return reponame.DefaultForgeUser
-	}
-	return reponame.ForgeUser(u)
 }
 
 // logCheck puts a failed check's full cause in the server log; the caller's
