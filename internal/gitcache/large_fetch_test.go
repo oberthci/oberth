@@ -364,6 +364,34 @@ func TestFetchOfAMovedUpstreamImportsNothing(t *testing.T) {
 	}
 }
 
+// A fetch started inside a push (a pin of the pushed repository's own older
+// commit) runs on the store, never in the push's quarantine: it outlives the
+// push, whose quarantine is gone by then, and still lands.
+func TestFetchStartedInAPushOutlivesItsQuarantine(t *testing.T) {
+	x := newFetchFixture(t, transferring)
+	x.cfg.PreReceive = func(ctx context.Context, e gitcache.ReceiveEvent, s *gitcache.ReceiveSource) error {
+		_, _, err := s.Pin(ctx, sourcecontract.Revision{Repository: e.Repository, Commit: x.f.Commit})
+		return err
+	}
+	c := x.start(t)
+	gitcache.SetRefreshWait(c, 100*time.Millisecond)
+	next := x.advance(t)
+	var diagnostics strings.Builder
+	r := gateReceive(x.f)
+	r.AlwaysRun = true
+	r.Input = receiveRefInput(t, x.f, gitcache.RefUpdate{Ref: "refs/heads/feature", NewSHA: x.f.Commit})
+	r.Output = io.Discard
+	r.Diagnostics = &diagnostics
+	if err := c.Receive(t.Context(), r); err == nil || !strings.Contains(diagnostics.String(), gitport.FetchUnfinishedReason) {
+		t.Fatalf("the push was not told the forge copy is updating: %v\n%s", err, diagnostics.String())
+	}
+	x.slow.release(t)
+	gitcache.WaitBackground(c)
+	if ref, err := c.ResolveRef(t.Context(), gittest.Repository, "refs/heads/main"); err != nil || ref.CommitSHA != next {
+		t.Fatal("the fetch started in the push did not land after the push", ref, err)
+	}
+}
+
 const otherRepository = "origin/team/other"
 
 // pushFixture is a cache whose admission reads the forge's default head of
