@@ -18,6 +18,7 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache/gittest"
 	"github.com/oberthci/oberth/internal/gitport"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/sourcecontract"
 )
 
 // transferring is the progress line a held fetch prints first, as a forge
@@ -188,7 +189,7 @@ func TestLargeFetchFinishesAfterItsCallersLeave(t *testing.T) {
 		t.Fatal("the finished fetch did not announce its moves once", moves)
 	}
 	head, err := c.RemoteRef(t.Context(), gittest.Repository, "refs/heads/main")
-	if err != nil || head.CommitSHA != next || x.slow.count(t, "refresh") != 1 {
+	if err != nil || head.CommitSHA != next || x.slow.count(t, "refresh") != 1 || x.slow.count(t, "object") != 0 {
 		t.Fatal("the next caller did not read the fetched head from the cache", head, err)
 	}
 }
@@ -261,6 +262,29 @@ func TestStalledFetchEndsAtTheIdleLimit(t *testing.T) {
 	defer x.mu.Unlock()
 	if len(x.moves) != 0 {
 		t.Fatal("a stalled fetch announced moves", x.moves)
+	}
+}
+
+// A pin's producer head the cache lacks arrives with the producer's refresh
+// fetch, which continues past the admission; a head the cache has needs no
+// forge fetch at all.
+func TestPinOfAHeadTheCacheLacksWaitsForTheRefresh(t *testing.T) {
+	x := newFetchFixture(t, transferring)
+	c := x.start(t)
+	at := sourcecontract.Revision{Repository: gittest.Repository, Commit: x.f.Commit}
+	if _, reachable, err := c.Pin(t.Context(), at); err != nil || !reachable || x.slow.count(t, "object") != 0 {
+		t.Fatal("a head the cache has was fetched again", reachable, err, x.slow.count(t, "object"))
+	}
+	x.advance(t)
+	_, _, err := c.Pin(shortContext(t), at)
+	checkStillUpdating(t, err)
+	x.slow.release(t)
+	gitcache.WaitBackground(c)
+	if _, reachable, err := c.Pin(t.Context(), at); err != nil || !reachable {
+		t.Fatal("the pin was not admitted after the refresh", reachable, err)
+	}
+	if x.slow.count(t, "refresh") != 1 || x.slow.count(t, "object") != 0 {
+		t.Fatal("the producer head was not brought by one refresh", x.slow.count(t, "refresh"), x.slow.count(t, "object"))
 	}
 }
 
