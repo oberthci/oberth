@@ -29,13 +29,13 @@ those definitions; they do not define rival DTOs.
   from admission. Branches, promotions and ordinary tags select the build document.
   Version tags and configured release routes select the release document under C2/C4
   rules. There is exactly one build workflow for branch and promotion CI; the
-  product has no promotion-file selection. Admission inspects every declared
-  template even if its native condition will skip it, so admitting that document
-  requires its declared VM API and capability grant. C13 introduces no route or
+  product has no promotion-file selection. The build declares no resource
+  template, so admitting it needs no capability; the VM install walk is the
+  separate `hack/walk-vm.yaml`, which no run selects. C13 introduces no route or
   special run class. `.oberth/issues.yaml` retains the
   opt-in `{close_from_trailers: true}` policy; C2 owns its interpretation.
 - **Visible work.** Build has three leaves: `make test`, `make static` and
-  `make release-bytes`; promotion runs add the VM walk. Release has build, sign,
+  `make release-bytes`; promotions run the same leaves. Release has build, sign,
   publish, verify and finalize leaves. Preserve dependency gates and distinct logs/status. The C4 admission plan
   supplies their identity and count; harnesses and UI must not infer steps from shell
   commands or count structural nodes as work. **Delta:** consolidate repeated source,
@@ -152,8 +152,8 @@ Installation policy follows [C9 invariant 7](c9-install-and-upgrade.md#invariant
    code. The waiters-wake walk proves native wake-up after cancellation/failure.
 5. **Delta:** Release runs no tests. It builds the tagged commit at the default branch's
    head, which a passing build run tested. The release step checks those facts
-   and refuses any mismatch. The VM walk runs on promotions only; ordinary
-   branch builds start no VM. VM and static-Git base images are locally built
+   and refuses any mismatch. No branch, promotion or release run starts a VM;
+   only the walk's separate document declares one. VM and static-Git base images are locally built
    and pinned by digest.
 6. Charge source and delivered metadata, writable root, private caches, compiler scratch
    and logs to the appropriate bounded storage. Charge memory-backed volumes to memory.
@@ -198,7 +198,7 @@ The tooling inspection runs the complete check with external networking disabled
 provisioning the pinned inputs, and supplies private-name fixtures in content,
 paths and malformed policy to prove diagnostics disclose only masked locations
 and pattern indexes. The push walk admits the same build document for branch
-and promotion work, with its VM capability present; no alternate promotion file
+and promotion work, with no capability granted; no alternate promotion file
 or narrower template inspection earns a pass.
 
 `push` exercises the paired local build through real source delivery with
