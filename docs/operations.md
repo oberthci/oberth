@@ -15,7 +15,7 @@ Copy the run ID from push output or a list. Hexadecimal IDs accept unambiguous p
 more characters; copy scheduled run IDs in full. A run shows its trigger, schedule entry, rerun
 source, actor and assist request. Read the short reason, then expand Detail for the Pod name, full
 message and exit code. Show text whole: status reasons have at most 40 characters; refusals have an
-80-character reason and 120-character remedy. Steps appear in plan order
+80-character reason and 120-character remedy. Steps appear in run order, dependencies first
 ([pending steps](pipelines.md#plans-and-budgets)). Missing duration is not zero. Select a step,
 attempt or container for logs; page through incomplete windows and earlier output. A `secret` tag
 means declared credential intent, not that a value was read. Runs may be Argo-queued, waiting for a

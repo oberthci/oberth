@@ -123,7 +123,7 @@ func (p *planner) visit(n *node, path, name string) bool {
 	start, size := len(p.plan.Entries), p.bytes
 	p.active[n] = true
 	defer delete(p.active, n)
-	for _, c := range n.calls {
+	for _, c := range executionOrder(n.calls) {
 		if !p.invoke(c, path) {
 			p.plan.Entries = p.plan.Entries[:start]
 			p.bytes = size

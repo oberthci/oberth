@@ -166,14 +166,14 @@ Ordinary tags select `.oberth/build.yaml`; semantic versions such as `v0.1.0` se
 
 ## Plans and budgets
 
-The admitted plan is immutable. Pending entries exist before Pods start; retries stay attempts of
-one logical step. Dynamic placeholders represent unresolved expansion, so `step_count` is a lower
-bound while `steps_planned_exact` is false. Observations expand the display, not the plan. Pipeline
-files have a 1 MiB limit; submitted source-consuming Workflow specs have a 512 KiB limit. Display
-plan limits: 2,048 entries / 1 MiB; excess expansion collapses to dynamic placeholders. These plan
-budgets do not limit native fan-out or refuse admission for expansion. The server reserves at least
-1,856 MiB of source-delivery scratch, separate from step storage. Pushes allow 256 refs and a 1 GiB
-pack by default (`server.runtime.receive_max_input_bytes`).
+The admitted plan is immutable, in run order. Pending entries exist before Pods start; retries stay
+attempts of one logical step. Dynamic placeholders represent unresolved expansion, so `step_count`
+is a lower bound while `steps_planned_exact` is false. Observations expand the display, not the
+plan. Pipeline files have a 1 MiB limit; submitted source-consuming Workflow specs have a 512 KiB
+limit. Display plan limits: 2,048 entries / 1 MiB; excess expansion collapses to dynamic
+placeholders. These plan budgets do not limit native fan-out or refuse admission for expansion. The
+server reserves at least 1,856 MiB of source-delivery scratch, separate from step storage. Pushes
+allow 256 refs and a 1 GiB pack by default (`server.runtime.receive_max_input_bytes`).
 
 ## CI issues
 

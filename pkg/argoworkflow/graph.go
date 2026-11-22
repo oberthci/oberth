@@ -36,6 +36,7 @@ type call struct {
 	dynamic            bool
 	target             *node
 	hooks              []*call
+	after              []string
 }
 
 const maxInspectionNodes = 65536

@@ -104,7 +104,7 @@ func TestOwnPlanStaysSmall(t *testing.T) {
 	if !p.View().Plan.Exact || len(p.View().Plan.Entries) != 8 {
 		t.Fatalf("plan: %+v", p.View().Plan)
 	}
-	want := []string{"go-tests-pass-with-race", "prepare-base", "release-bytes-build", "lint-and-guards-pass", "walk-vm-key-generated", "walk-vm-boots", "first-run-walk-passes", "walk-vm-deleted"}
+	want := []string{"prepare-base", "go-tests-pass-with-race", "release-bytes-build", "lint-and-guards-pass", "walk-vm-key-generated", "walk-vm-boots", "first-run-walk-passes", "walk-vm-deleted"}
 	for i, e := range p.View().Plan.Entries {
 		if e.Name != want[i] {
 			t.Fatalf("step %d: %s", i, e.Name)
