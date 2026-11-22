@@ -76,7 +76,7 @@ spec:
           - {name: TARGET, value: '{{inputs.parameters.target}}'}
     - name: lint-and-guards-pass
       metadata:
-        annotations: {oberth.ci/secret-paths: oberth/policy/names}
+        annotations: {oberth.ci/secret-paths: 'oberth/policy/names,oberth/policy/identity'}
       inputs:
         artifacts: *source-artifacts
       synchronization:

@@ -76,7 +76,7 @@ func prepareOwn(t *testing.T, name string, trigger model.RunTrigger) (*admission
 	p := ownPolicy()
 	switch name {
 	case "build":
-		r.Grants = namesGrants(r)
+		r.Grants = policyGrants(r)
 	case "release":
 		r.Grants = releaseGrants(r)
 		p.Release = true
@@ -194,7 +194,7 @@ func assertVMStepNeedsCapability(t *testing.T) {
 		dag.Tasks = append(dag.Tasks, wfv1.DAGTask{Name: "walk-vm-deleted", Template: "delete-vm"})
 	})
 	r := ownRequest(withVM, "build", model.TriggerPromotion)
-	r.Grants = namesGrants(r)
+	r.Grants = policyGrants(r)
 	if _, err := argoworkflow.Prepare(t.Context(), r, ownPolicy(), ownHooks(t, r)); err == nil {
 		t.Fatal("VM step admitted without a capability")
 	}

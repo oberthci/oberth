@@ -27,3 +27,6 @@ differs from this pin; that check keeps the two aligned.
 `oberth/policy/names` is the private names policy's public secret path in
 `.oberth/build.yaml`. Store and grant it to `lint-and-guards-pass` before the
 first push; only its guard command receives the delivered file's path.
+`oberth/policy/identity` beside it holds the repository identity, one
+`Name <email>` line, that every commit's author and committer must match; only
+the guard command receives it, as Git configuration.

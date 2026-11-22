@@ -35,7 +35,7 @@ func TestOwnWorkflowsSubmitAdmission(t *testing.T) {
 			if file == workflowpolicy.BuildFile {
 				// The build gets what any repository's would: no capability or resource account.
 				hooks.LoginAudience = ownChartAudience(t)
-				r.Grants = ownNamesGrants(r)
+				r.Grants = ownPolicyGrants(r)
 			} else {
 				r.Ref, r.Trigger = "refs/tags/v0.1.0", "tag"
 				p.Release = true
@@ -79,9 +79,10 @@ func ownChartAudience(t *testing.T) string {
 	return values.SecretStore.Audience
 }
 
-func ownNamesGrants(r admissioncontract.PrepareRequest) []admissioncontract.GrantEvidence {
+func ownPolicyGrants(r admissioncontract.PrepareRequest) []admissioncontract.GrantEvidence {
 	return []admissioncontract.GrantEvidence{
 		{Repository: r.Repository, File: r.SelectedFile, Step: "lint-and-guards-pass", Kind: "secret", Path: "oberth/policy/names", Revision: "operator-approval", State: admissioncontract.StateVerified},
+		{Repository: r.Repository, File: r.SelectedFile, Step: "lint-and-guards-pass", Kind: "secret", Path: "oberth/policy/identity", Revision: "operator-approval", State: admissioncontract.StateVerified},
 	}
 }
 

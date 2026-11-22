@@ -86,9 +86,12 @@ oberth access allow --kind configmap '<repo>' '.oberth/release.yaml' \
   'latest-advanced-monotonic' 'release-config'
 oberth secret put --repo '<repo>' --file .oberth/build.yaml --step lint-and-guards-pass \
   oberth/policy/names < <private-names-file>
+oberth secret put --repo '<repo>' --file .oberth/build.yaml --step lint-and-guards-pass \
+  oberth/policy/identity < <identity-file>
 ```
 
-The names list stays outside Git; pushers can read it. The release needs exactly three secrets:
+Both stay outside Git; pushers can read them. The identity is the commits' one `Name <email>` line.
+The release needs exactly three secrets:
 
 - `oberth/data/release/registry/config.json` (step `release-images-pushed`): a Docker
   `config.json` logged in to `europe-west4-docker.pkg.dev` as `_json_key` with a service-account
@@ -215,8 +218,6 @@ python3 -c 'import pathlib,sys; [pathlib.Path(p).unlink() for p in sys.argv[1:]]
   "$RELEASE_WORK/release.key" "$OBERTH_SECRETS_DIR/oberth/data/release/signing"
 ```
 
-The pipeline's `publish` and `finalize` read the same token from their own secret grant.
-
 ## Release accounts
 
 Admission chooses each credential-bearing step's account from its secret grants. A
@@ -242,5 +243,4 @@ Signed `SHA256SUMS` and `release.json` bind shipped digests; versioned objects a
 [fetcher](../agent/skills/oberth/fetch-oberth) and installer verify before changing local state.
 
 Local checks are not publication proof. Clean verification checks public images and CLI version to
-issue the `latest` receipt.
-The workflow's 3,600-second deadline is a budget; end-to-end release time remains unmeasured.
+issue the `latest` receipt. The workflow's 3,600-second deadline is a budget, not a measured time.

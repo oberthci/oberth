@@ -1,10 +1,13 @@
 # The objects .oberth/build.yaml and .oberth/release.yaml read, and nothing else.
 # Replace every REPLACE_WITH_* value, then apply this file in the pipeline namespace.
 # Creating an object grants no access: run the grant and secret lines the refusals
-# print, listed in docs/releasing.md. Store the private names policy as admin:
+# print, listed in docs/releasing.md. Store the private names policy and the
+# repository identity (one "Name <email>" line) as admin:
 # oberth secret put --repo '<repo>' --file .oberth/build.yaml --step lint-and-guards-pass \
 #   oberth/policy/names < <private-names-file>
-# The policy is a delivered secret file, never a plain object in this manifest.
+# oberth secret put --repo '<repo>' --file .oberth/build.yaml --step lint-and-guards-pass \
+#   oberth/policy/identity < <identity-file>
+# Both are delivered secret files, never plain objects in this manifest.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
