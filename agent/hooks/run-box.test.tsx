@@ -410,6 +410,24 @@ test('a failed row names its step and a watched row is marked, cut before the re
   expect(narrow[1]).toMatch(/ 1m$/)
 })
 
+test('a width that is not a usable number of cells lays rows out at 80', { options }, async ($, on) => {
+  bottom(on)
+  mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+  const rows = [{ ...run(), ref: 'refs/heads/' + 'x'.repeat(90) }]
+  const at80 = table(rows, Date.parse('2026-11-18T00:01:00Z'), 80)
+  expect(at80).toContain('▶ running')
+  for (const width of [undefined, NaN, 0, 1, -5, Infinity]) {
+    expect(table(rows, Date.parse('2026-11-18T00:01:00Z'), width as number)).toBe(at80)
+  }
+  cli(on, () => rows)
+  await startSession($, on)
+  const ui = await $.ui.mount({ ...band, props: { ...band.props, bodyColumns: undefined as unknown as number }, surface: 'terminal' })
+  const box = (await ui.findAll({ type: 'Text' })).map(line => line.text)
+  await ui.unmount()
+  expect(box).toEqual(await boxLines($, 'terminal', 80 + 4))
+  expect(box[1]).toContain('▶ running')
+})
+
 test('durations and ages read as seconds, then two units or one', async () => {
   expect([0, 42000, 190000, 7500000, 100800000].map(ms => span(ms, 2))).toEqual(['0s', '42s', '3m10s', '2h05m', '1d04h'])
   expect([0, 42000, 190000, 7500000, 100800000].map(ms => span(ms, 1))).toEqual(['0s', '42s', '3m', '2h', '1d'])

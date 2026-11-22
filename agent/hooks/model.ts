@@ -110,9 +110,13 @@ function cut(text: string, width: number): string {
 // The last column: its header, each run's text, and whether it gives way before the names.
 type Last = { label: string; text: (run: Run) => string; first: boolean }
 
+// A width that is not a usable number of cells (absent, not a number, under 2) lays out at 80.
+const FALLBACK_WIDTH = 80
+
 // Aligned single lines of at most width cells. The last column and the names give way in
 // the order Last says (the last column goes when it cannot keep NARROWEST), then lines are cut.
-function fit(table: string[][], width: number, first: boolean): string[] {
+function fit(table: string[][], requested: number, first: boolean): string[] {
+  const width = Number.isFinite(requested) && requested >= 2 ? Math.floor(requested) : FALLBACK_WIDTH
   const widths = table[0]!.map((_, index) => Math.max(...table.map(row => cells(row[index]!))))
   const last = widths.length - 1
   // Cells the shown columns and the spaces between them take beyond the width.
