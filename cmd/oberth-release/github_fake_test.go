@@ -18,14 +18,15 @@ import (
 // githubFake keeps releases in memory and answers the REST calls publication
 // makes, refusing what GitHub refuses: a second asset of one name, deletes.
 type githubFake struct {
-	mu       sync.Mutex
-	t        *testing.T
-	tags     map[string]bool
-	releases []*fakeRelease
-	latest   string
-	corrupt  string
-	calls    []string
-	bodies   []map[string]any
+	mu        sync.Mutex
+	t         *testing.T
+	tags      map[string]string
+	annotated map[string]bool
+	releases  []*fakeRelease
+	latest    string
+	corrupt   string
+	calls     []string
+	bodies    []map[string]any
 }
 
 type fakeRelease struct {
@@ -35,9 +36,12 @@ type fakeRelease struct {
 
 const fakeRepository = "/repos/oberthci/oberth"
 
+// fakeCommit is the commit every fixture tag and signed record names.
+var fakeCommit = strings.Repeat("a", 40)
+
 func githubFixture(t *testing.T) (publication, *githubFake) {
 	t.Helper()
-	fake := &githubFake{t: t, tags: map[string]bool{"v1.0.0": true, "v2.0.0": true, "v3.0.0": true}}
+	fake := &githubFake{t: t, tags: map[string]string{"v1.0.0": fakeCommit, "v2.0.0": fakeCommit, "v3.0.0": fakeCommit}, annotated: map[string]bool{}}
 	server := httptest.NewServer(http.HandlerFunc(fake.serve))
 	t.Cleanup(server.Close)
 	dir := t.TempDir()
@@ -74,8 +78,8 @@ func (f *githubFake) serve(w http.ResponseWriter, r *http.Request) {
 func (f *githubFake) read(w http.ResponseWriter, path string) {
 	var release *fakeRelease
 	switch {
-	case strings.HasPrefix(path, "/git/ref/tags/"):
-		f.status(w, f.tags[strings.TrimPrefix(path, "/git/ref/tags/")])
+	case strings.HasPrefix(path, "/git/ref/tags/"), strings.HasPrefix(path, "/git/tags/"):
+		f.tagObject(w, path)
 		return
 	case path == "/releases":
 		f.answer(w, true, f.list())
@@ -90,10 +94,19 @@ func (f *githubFake) read(w http.ResponseWriter, path string) {
 	f.answer(w, release != nil, release)
 }
 
-func (f *githubFake) status(w http.ResponseWriter, ok bool) {
-	if !ok {
-		w.WriteHeader(http.StatusNotFound)
+// tagObject answers a tag reference with its commit, or for an annotated tag
+// with a tag object that /git/tags/ resolves to the commit.
+func (f *githubFake) tagObject(w http.ResponseWriter, path string) {
+	object := gitObject{}
+	if tag, ok := strings.CutPrefix(path, "/git/ref/tags/"); ok {
+		object.Object.Type, object.Object.SHA = "commit", f.tags[tag]
+		if f.annotated[tag] {
+			object.Object.Type, object.Object.SHA = "tag", "tag-object-"+tag
+		}
+	} else {
+		object.Object.Type, object.Object.SHA = "commit", f.tags[strings.TrimPrefix(path, "/git/tags/tag-object-")]
 	}
+	f.answer(w, object.Object.SHA != "", object)
 }
 
 func (f *githubFake) answer(w http.ResponseWriter, ok bool, value any) {

@@ -170,11 +170,21 @@ func (p publication) expect(ctx context.Context, call apiCall, want int, into an
 	return err
 }
 
-// tagPublished refuses before any write when the tag is not on GitHub, so
-// publishing a draft never makes GitHub create the tag itself.
-func (p publication) tagPublished(ctx context.Context, tag string) error {
+// gitObject is the object a GitHub tag reference or annotated tag points at.
+type gitObject struct {
+	Object struct {
+		Type string `json:"type"`
+		SHA  string `json:"sha"`
+	} `json:"object"`
+}
+
+// tagPublished refuses before any write unless the tag is on GitHub and,
+// through any annotated tags, names the signed commit: publishing a draft
+// never makes GitHub create the tag, and the release page shows that source.
+func (p publication) tagPublished(ctx context.Context, tag, commit string) error {
+	var ref gitObject
 	call := get(p.repo("/git/ref/tags/%s", url.PathEscape(tag)))
-	status, err := p.send(ctx, call, nil)
+	status, err := p.send(ctx, call, &ref)
 	switch {
 	case err != nil:
 		return err
@@ -182,6 +192,14 @@ func (p publication) tagPublished(ctx context.Context, tag string) error {
 		return tagMissing
 	case status != http.StatusOK:
 		return refused(status, call)
+	}
+	for hop := 0; ref.Object.Type == "tag" && hop < 4; hop++ {
+		if err := p.expect(ctx, get(p.repo("/git/tags/%s", url.PathEscape(ref.Object.SHA))), http.StatusOK, &ref); err != nil {
+			return err
+		}
+	}
+	if ref.Object.Type != "commit" || ref.Object.SHA != commit {
+		return fmt.Errorf("%w: %s on GitHub is %s %s, the record names %s", tagElsewhere, tag, ref.Object.Type, ref.Object.SHA, commit)
 	}
 	return nil
 }

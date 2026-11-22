@@ -261,7 +261,7 @@ func TestCanonicalArchive(t *testing.T) {
 }
 
 func TestReleaseCommandMessages(t *testing.T) {
-	for _, r := range []refusal{imageMissing, imagePrivate, imageRepositories, registryResponse, registryUnavailable, signingKeyMismatch, keyInvalid, keyReplace, keyPinInvalid, keyMarkers, failure, usage, releaseToken, inputs, basePin, baseMismatch, chartStamp, binariesMismatch, latestInvalid, storeFailure, tagMissing, assetUnconfirmed, immutable, notVerified, tokenShared, tokenInside, assetsDiffer, originDiffers} {
+	for _, r := range []refusal{imageMissing, imagePrivate, imageRepositories, registryResponse, registryUnavailable, signingKeyMismatch, keyInvalid, keyReplace, keyPinInvalid, keyMarkers, failure, usage, releaseToken, inputs, basePin, baseMismatch, chartStamp, binariesMismatch, latestInvalid, storeFailure, tagMissing, assetUnconfirmed, immutable, notVerified, tokenShared, tokenInside, assetsDiffer, originDiffers, tagElsewhere} {
 		if len(r.Error()) > 80 || len(r.Remedy()) > 120 || r.Remedy() == "" {
 			t.Fatal(r)
 		}

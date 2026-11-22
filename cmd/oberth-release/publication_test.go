@@ -56,16 +56,16 @@ func checkLatest(t *testing.T, tc latestCase) {
 func immutableObjects(t *testing.T) {
 	t.Helper()
 	p, fake := githubFixture(t)
-	if err := p.publishFiles(t.Context(), "v2.0.0"); err != nil {
+	if err := p.publishFiles(t.Context(), "v2.0.0", fakeCommit); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.publishFiles(t.Context(), "v2.0.0"); err != nil {
+	if err := p.publishFiles(t.Context(), "v2.0.0", fakeCommit); err != nil {
 		t.Fatal("equal rerun", err)
 	}
 	if err := os.WriteFile(filepath.Join(p.dir, "artifact"), []byte("changed bytes"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.publishFiles(t.Context(), "v2.0.0"); !errors.Is(err, immutable) {
+	if err := p.publishFiles(t.Context(), "v2.0.0", fakeCommit); !errors.Is(err, immutable) {
 		t.Fatal("changed version bytes accepted", err)
 	}
 	release := fake.find("v2.0.0", false)
@@ -76,7 +76,7 @@ func immutableObjects(t *testing.T) {
 
 func TestPublicationPublishesADraftWithoutMakingItLatest(t *testing.T) {
 	p, fake := githubFixture(t)
-	if err := p.publishFiles(t.Context(), "v1.0.0"); err != nil {
+	if err := p.publishFiles(t.Context(), "v1.0.0", fakeCommit); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"POST " + fakeRepository + "/releases", "POST " + fakeRepository + "/releases/1/assets?name=artifact", "PATCH " + fakeRepository + "/releases/1"}
@@ -95,7 +95,7 @@ func TestPublicationResumesAnEarlierDraft(t *testing.T) {
 	}
 	draft := fake.add("v1.0.0", true)
 	draft.put("artifact", []byte("release bytes"))
-	if err := p.publishFiles(t.Context(), "v1.0.0"); err != nil {
+	if err := p.publishFiles(t.Context(), "v1.0.0", fakeCommit); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"POST " + fakeRepository + "/releases/1/assets?name=release.json", "PATCH " + fakeRepository + "/releases/1"}
@@ -118,7 +118,7 @@ func TestPublicationConfirmsTheDraftBeforePublishing(t *testing.T) {
 			} else {
 				fake.corrupt = "artifact"
 			}
-			if err := p.publishFiles(t.Context(), "v1.0.0"); !errors.Is(err, want) {
+			if err := p.publishFiles(t.Context(), "v1.0.0", fakeCommit); !errors.Is(err, want) {
 				t.Fatal("unconfirmed draft was published", err)
 			}
 			if draft.Draft != true || slices.ContainsFunc(fake.writes(), func(call string) bool { return strings.HasPrefix(call, http.MethodPatch) }) {
@@ -146,7 +146,7 @@ func TestPublicationChecksExistingAssetsBeforeAnyWrite(t *testing.T) {
 			}
 			release := fake.add("v1.0.0", false)
 			release.Assets = append(release.Assets, tc.asset)
-			if err := p.publishFiles(t.Context(), "v1.0.0"); !errors.Is(err, tc.want) {
+			if err := p.publishFiles(t.Context(), "v1.0.0", fakeCommit); !errors.Is(err, tc.want) {
 				t.Fatal("existing asset was not refused", err)
 			}
 			if len(fake.writes()) != 0 {
@@ -156,9 +156,36 @@ func TestPublicationChecksExistingAssetsBeforeAnyWrite(t *testing.T) {
 	}
 }
 
+// The GitHub tag, plain or annotated, must name the signed record's commit.
+func TestPublicationBindsTheGitHubTagToTheSignedCommit(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		commit    string
+		annotated bool
+		want      error
+	}{
+		{"plain tag", fakeCommit, false, nil},
+		{"annotated tag", fakeCommit, true, nil},
+		{"plain tag elsewhere", strings.Repeat("b", 40), false, tagElsewhere},
+		{"annotated tag elsewhere", strings.Repeat("b", 40), true, tagElsewhere},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, fake := githubFixture(t)
+			fake.tags["v1.0.0"], fake.annotated["v1.0.0"] = tc.commit, tc.annotated
+			err := p.publishFiles(t.Context(), "v1.0.0", fakeCommit)
+			if !errors.Is(err, tc.want) && (tc.want != nil || err != nil) {
+				t.Fatal("tag binding differs", err)
+			}
+			if tc.want != nil && len(fake.writes()) != 0 {
+				t.Fatal("a tag elsewhere reached a write", fake.writes())
+			}
+		})
+	}
+}
+
 func TestPublicationRefusesAMissingTagBeforeAnyWrite(t *testing.T) {
 	p, fake := githubFixture(t)
-	if err := p.publishFiles(t.Context(), "v9.0.0"); !errors.Is(err, tagMissing) {
+	if err := p.publishFiles(t.Context(), "v9.0.0", fakeCommit); !errors.Is(err, tagMissing) {
 		t.Fatal("missing tag not refused", err)
 	}
 	if len(fake.writes()) != 0 {
@@ -174,7 +201,7 @@ func TestPublicationCommitsManifestLast(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := p.publishFiles(t.Context(), "v1.0.0"); err != nil {
+	if err := p.publishFiles(t.Context(), "v1.0.0", fakeCommit); err != nil {
 		t.Fatal(err)
 	}
 	writes := fake.writes()
@@ -194,7 +221,7 @@ func TestPublicationDoesNotUploadImageInputs(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := p.publishFiles(t.Context(), "v1.0.0"); err != nil {
+	if err := p.publishFiles(t.Context(), "v1.0.0", fakeCommit); err != nil {
 		t.Fatal(err)
 	}
 	release := fake.find("v1.0.0", false)
@@ -210,7 +237,7 @@ func TestReleaseStoreRefusals(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(p.dir, "artifact"), []byte("bytes"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.publishFiles(t.Context(), "v1.0.0"); !errors.Is(err, storeFailure) || !strings.Contains(err.Error(), "500") {
+	if err := p.publishFiles(t.Context(), "v1.0.0", fakeCommit); !errors.Is(err, storeFailure) || !strings.Contains(err.Error(), "500") {
 		t.Fatal("failed write accepted or status hidden", err)
 	}
 	if err := p.finish(t.Context(), "v1.0.0", io.Discard); !errors.Is(err, storeFailure) {

@@ -138,9 +138,10 @@ bash hack/release.sh verify
   --token-file "<github-token-file>" --receipt "$RELEASE_SHARED/verified.json"
 ```
 
-Compare each printed push digest with the record's images. The tag must be on GitHub first. Publish
-checks public image reads and every existing asset before writing, uploads into a draft and
-publishes it without making it latest; it prints the version, file count and destination.
+Compare each printed push digest with the record's images. Push the tag to GitHub first, at the
+signed commit. Publish checks it, public image reads and every existing asset before writing,
+uploads into a draft, confirms it and publishes it without making it latest; it prints the
+version, file count and destination.
 Clean verification prints “Release verified.” and writes the receipt. Finalize prints where `latest`
 points; if it stays newer, nothing moved and exit 0 is intentional. Keep signed bytes for identical
 retries; other bytes for a published asset refuse. Retain the receipt and build evidence.

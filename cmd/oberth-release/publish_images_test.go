@@ -165,7 +165,7 @@ func githubTLS(t *testing.T, fake *githubFake) (string, string) {
 func publishedThroughGitHub(t *testing.T, tool, dir, token string) {
 	t.Helper()
 	_, fake := githubFixture(t)
-	fake.tags["v1.2.3"] = true
+	fake.tags["v1.2.3"] = fakeCommit
 	address, ca := githubTLS(t, fake)
 	proxy, tunnels := githubProxy(t, address)
 	for _, name := range []string{"notes.txt", "github-token"} {

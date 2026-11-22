@@ -75,7 +75,7 @@ func publish(ctx context.Context, o options) error {
 		return inputs
 	}
 	p.dir = staged
-	if err := p.publishFiles(ctx, record.Version); err != nil {
+	if err := p.publishFiles(ctx, record.Version, record.Commit); err != nil {
 		return err
 	}
 	_, err = fmt.Printf("Published %s: %d files at %s/%s.\n", record.Version, len(publishedNames())+2, releaseverify.Origin, record.Version)
@@ -99,8 +99,8 @@ func finalize(ctx context.Context, o options) error {
 // publishFiles makes the tag's GitHub release hold exactly these files. It
 // compares every asset already there before uploading anything, uploads the
 // manifest last, confirms the draft, and publishes it without making it latest.
-func (p publication) publishFiles(ctx context.Context, tag string) error {
-	if err := p.tagPublished(ctx, tag); err != nil {
+func (p publication) publishFiles(ctx context.Context, tag, commit string) error {
+	if err := p.tagPublished(ctx, tag, commit); err != nil {
 		return err
 	}
 	release, err := p.releaseFor(ctx, tag)
