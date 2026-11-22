@@ -21,7 +21,7 @@ func checkUpstreamForgeUser(t *testing.T, f AdministrationFixture) {
 	if !found {
 		t.Fatal("forge user or namespace was not kept", rows)
 	}
-	for i, base := range []string{"ssh://-oProxyCommand=x@forge.oberth.ci/team", "ssh://git:secret@forge.oberth.ci/team", "ssh://a%0AUser%20b@forge.oberth.ci/team", "ssh://forge.oberth.ci/home/../team"} {
+	for i, base := range []string{"ssh://-oProxyCommand=x@forge.oberth.ci/team", "ssh://git:secret@forge.oberth.ci/team", "ssh://a%0AUser%20b@forge.oberth.ci/team", "ssh://forge.oberth.ci/home/../team", "https://glpat-AbCdEf0123456789xyz@forge.oberth.ci/team", "https://oauth2@forge.oberth.ci/team", "https://user:token@forge.oberth.ci/team"} {
 		refused := stateport.Upstream{Name: "refused-" + string(rune('a'+i)), Org: "refused-" + string(rune('a'+i)), Kind: "ssh", BaseURL: base, KeyName: "shared"}
 		if f.Port.RegisterUpstreamBinding(t.Context(), a, refused) == nil {
 			t.Fatal("unsafe forge address stored", base)

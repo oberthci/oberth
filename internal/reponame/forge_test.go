@@ -43,6 +43,10 @@ func TestForgeURLRefusesInjectedUsersAndPaths(t *testing.T) {
 		"ssh://forge.oberth.ci/repos/~/widget.git":                 "forge path",
 		"ssh://forge.oberth.ci/~user/repos/widget.git":             "forge path",
 		"ssh://forge.oberth.ci/~/../widget.git":                    "forge path",
+		"https://glpat-AbCdEf0123456789xyz@forge.oberth.ci/team":   "forge user",
+		"https://oauth2@forge.oberth.ci/team":                      "forge user",
+		"http://user@forge.oberth.ci/team":                         "forge user",
+		"https://user:token@forge.oberth.ci/team":                  "forge user",
 	} {
 		u, err := url.Parse(address)
 		if component == "" {

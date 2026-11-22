@@ -28,8 +28,9 @@ func ForgeUser(u *url.URL) string {
 // be ~, the SSH user's home.
 func ValidateForgeURL(u *url.URL) error {
 	if u.User != nil {
+		// Only SSH names an account; a user in any other scheme is a credential.
 		_, password := u.User.Password()
-		if password || !validForgeUser(u.User.Username()) {
+		if password || u.Scheme != "ssh" || !validForgeUser(u.User.Username()) {
 			return &InvalidNameError{Component: "forge user", Value: u.User.Username()}
 		}
 	}
