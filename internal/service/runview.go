@@ -219,15 +219,18 @@ func (s *Service) repoViews(ctx context.Context, repos []stateport.Repository, o
 }
 
 // runFacts gives each repository on the page its latest run and, when asked,
-// its recent runs.
+// its recent runs: one store read for the whole page, under the names already
+// narrowed to the caller's scope, as for the run list.
 func (s *Service) runFacts(ctx context.Context, repos []stateport.Repository, scope []string, wanted bool) ([]apicontract.Repository, error) {
 	latest, err := s.c.Runs.Runs(ctx, stateport.RunFilter{Repositories: scope, LatestRepository: true, Limit: stateport.RunPageLimit})
 	if err != nil {
 		return nil, err
 	}
-	recent, err := s.recentRuns(ctx, scope, wanted)
-	if err != nil {
-		return nil, err
+	var recent map[string][]stateport.RunMark
+	if wanted {
+		if recent, err = s.c.Runs.RecentRuns(ctx, scope); err != nil {
+			return nil, err
+		}
 	}
 	out := []apicontract.Repository{}
 	for _, r := range repos {
@@ -244,14 +247,6 @@ func (s *Service) runFacts(ctx context.Context, repos []stateport.Repository, sc
 	return out, nil
 }
 
-// recentRuns reads the strip of every repository on the page in one store call;
-// the names are already the caller's scope, as for the run list.
-func (s *Service) recentRuns(ctx context.Context, scope []string, wanted bool) (map[string][]stateport.RunMark, error) {
-	if !wanted {
-		return map[string][]stateport.RunMark{}, nil
-	}
-	return s.c.Runs.RecentRuns(ctx, scope)
-}
 func (s *Service) branchCount(ctx context.Context, v *apicontract.Repository) {
 	read, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()

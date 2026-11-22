@@ -43,10 +43,17 @@ func TestRepoListStripOnlyWhenAsked(t *testing.T) {
 	if page := listRepos(t, f, workerCaller(), false); f.store.Calls()["RecentRuns"] != 0 || page.Repositories[0].RecentRuns != nil {
 		t.Fatal("strip read although not asked for", f.store.Calls(), page.Repositories[0])
 	}
+	seen := 0
 	for _, r := range listRepos(t, f, apicontract.Caller{Actor: admin()}, true).Repositories {
-		if r.Repo == hiddenRepository && len(r.RecentRuns) != stateport.RecentRunLimit {
-			t.Fatal("unscoped caller lost a repository strip", r.RecentRuns)
+		if r.Repo == hiddenRepository {
+			seen++
+			if len(r.RecentRuns) != stateport.RecentRunLimit {
+				t.Fatal("unscoped caller lost a repository strip", r.RecentRuns)
+			}
 		}
+	}
+	if seen != 1 {
+		t.Fatal("unscoped caller did not see the repository hidden from the worker", seen)
 	}
 }
 
