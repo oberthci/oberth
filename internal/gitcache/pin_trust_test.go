@@ -14,7 +14,10 @@ import (
 type trustCase struct {
 	name, diagnostic string
 	stale            bool
-	refusal          string
+	// side pins a commit of another branch, which the cached default head
+	// does not reach.
+	side    bool
+	refusal string
 }
 
 // trustCases: the cache decides only for a slow or unreachable forge and a
@@ -28,11 +31,21 @@ func trustCases() []trustCase {
 		{name: "stale cache, no server answered", diagnostic: gitssh.ReasonUnanswered, stale: true, refusal: gitcache.ReasonForgeSilent},
 		{name: "fresh cache, identity refused", diagnostic: "Git SSH identity was refused.", refusal: gitcache.ReasonForgeRefused},
 		{name: "fresh cache, host key mismatch", diagnostic: gitssh.HostKeyMismatchReason, refusal: gitcache.ReasonForgeRefused},
+		{name: "fresh cache, silent forge, commit the cached head does not reach", side: true, refusal: gitcache.ReasonForgeSilent},
 	}
 }
 
-func (x *pinFixture) prepare(t *testing.T, tc trustCase) {
+// prepare starts the fixture for tc and returns the producer commit to pin.
+func (x *pinFixture) prepare(t *testing.T, tc trustCase) string {
 	t.Helper()
+	pinned := x.pipeline.Commit
+	if tc.side {
+		f := x.pipeline
+		f.Git(t, f.Work, "checkout", "-q", "-b", "side")
+		f.Write(t, "side", []byte("off the default branch"))
+		pinned = f.CommitFile(t, "side commit")
+		f.Git(t, f.Work, "push", "-q", f.Bare, "side")
+	}
 	x.start(t)
 	gitcache.SetHeadWait(x.c, 300*time.Millisecond)
 	if tc.diagnostic != "" {
@@ -43,6 +56,7 @@ func (x *pinFixture) prepare(t *testing.T, tc trustCase) {
 		x.now = x.now.Add(gitcache.CacheTrustWindow)
 		x.mu.Unlock()
 	}
+	return pinned
 }
 
 func checkTrust(t *testing.T, tc trustCase, repo string, err error) {
@@ -63,11 +77,14 @@ func TestPinFallsBackOnlyToARecentCacheForASlowForge(t *testing.T) {
 	for _, tc := range trustCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			x := newPinFixture(t)
-			x.prepare(t, tc)
 			at := x.pins()[1]
+			at.Commit = x.prepare(t, tc)
 			_, reachable, err := x.c.Pin(t.Context(), at)
 			if err == nil && !reachable {
 				t.Fatal("the pin was not decided")
+			}
+			if err != nil && reachable {
+				t.Fatal("a refused pin was reachable")
 			}
 			checkTrust(t, tc, at.Repository, err)
 		})
@@ -78,6 +95,9 @@ func TestPinFallsBackOnlyToARecentCacheForASlowForge(t *testing.T) {
 // rule, within the head wait.
 func TestDefaultHeadReadFollowsThePinRule(t *testing.T) {
 	for _, tc := range trustCases() {
+		if tc.side {
+			continue
+		}
 		t.Run(tc.name, func(t *testing.T) {
 			x := newPinFixture(t)
 			x.prepare(t, tc)
