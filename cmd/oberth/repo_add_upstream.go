@@ -109,9 +109,22 @@ func requireUpstreamURL(source apicontract.Upstream, u *url.URL, joined bool) er
 	if repo.MatchesURL(source.BaseURL, u) {
 		return nil
 	}
+	if !sameForgeAccount(source.BaseURL, u) {
+		problem := publicerr.New(publicerr.InvalidInput, "Another upstream already has this organization name.", "Use a different directory name for this forge; each organization name has one upstream.", nil)
+		problem.Context = []string{"Organization " + source.Org + ": upstream " + source.Name + ", " + redactedForgeURL(source.BaseURL), "Supplied URL: " + u.Redacted()}
+		return problem
+	}
 	problem := publicerr.New(publicerr.InvalidInput, "This organization uses "+source.Name+".", "Use its registered forge address; an organization has one upstream.", nil)
 	problem.Context = []string{"Upstream " + source.Name + ": " + redactedForgeURL(source.BaseURL), "Supplied URL: " + u.Redacted()}
 	return problem
+}
+
+// sameForgeAccount reports whether the stored and supplied addresses log in to
+// the same account on the same forge; another account or forge whose directory
+// has the same name only clashes with the stored organization name.
+func sameForgeAccount(base string, supplied *url.URL) bool {
+	stored, err := url.Parse(base)
+	return err == nil && stored.Scheme == supplied.Scheme && stored.Host == supplied.Host && reponame.ForgeUser(stored) == reponame.ForgeUser(supplied)
 }
 
 func redactedForgeURL(address string) string {

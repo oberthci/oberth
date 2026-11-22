@@ -53,7 +53,7 @@ func TestRepoAddOrganizationOnAnotherForgeHasCompleteRemedy(t *testing.T) {
 				t.Fatal("another forge accepted", code)
 			}
 			text := strings.Join(strings.Fields(command.diagnostic.String()), " ")
-			for _, message := range []string{"This organization uses one.", "Use its registered forge address; an organization has one upstream.", "Upstream one: ssh://forge.oberth.ci"} {
+			for _, message := range []string{"Another upstream already has this organization name.", "Use a different directory name for this forge; each organization name has one upstream.", "Organization team: upstream one, ssh://forge.oberth.ci"} {
 				if !strings.Contains(text, message) {
 					t.Fatal("incomplete organization remedy", message, text)
 				}

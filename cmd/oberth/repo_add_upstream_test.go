@@ -88,12 +88,28 @@ func assertReusedUpstreamURLRefusals(t *testing.T, command repoAddCommand, regis
 		case "base-path":
 			u.Path = "/another" + u.Path
 		}
-		t.Run(change, func(t *testing.T) { assertRefusedUpstreamURL(t, command, u.String(), registrations) })
+		// Another forge or account whose directory has the same name clashes with
+		// the organization; another namespace on the same account is the
+		// registered address mistyped.
+		messages := [2]string{"Another upstream already has this organization name.", "Use a different directory name for this forge; each organization name has one upstream."}
+		if change == "base-path" {
+			messages = [2]string{"This organization uses release-source.", "Use its registered forge address; an organization has one upstream."}
+		}
+		t.Run(change, func(t *testing.T) {
+			assertRefusedUpstreamURL(t, command, refusedUpstreamURL{u.String(), messages}, registrations)
+		})
 	}
 }
 
-func assertRefusedUpstreamURL(t *testing.T, command repoAddCommand, address string, registrations *atomic.Int32) {
+// refusedUpstreamURL is a changed address and the reason and remedy it gets.
+type refusedUpstreamURL struct {
+	address  string
+	messages [2]string
+}
+
+func assertRefusedUpstreamURL(t *testing.T, command repoAddCommand, refused refusedUpstreamURL, registrations *atomic.Int32) {
 	t.Helper()
+	address, messages := refused.address, refused.messages
 	originalAddress := command.address
 	command.address = address
 	command.app.directory = t.TempDir()
@@ -103,7 +119,7 @@ func assertRefusedUpstreamURL(t *testing.T, command repoAddCommand, address stri
 	before := registrations.Load()
 	code := command.run(t, "--upstream", "release-source")
 	text := strings.Join(strings.Fields(command.diagnostic.String()), " ")
-	if code != 1 || !strings.Contains(text, "This organization uses release-source.") || !strings.Contains(text, "Use its registered forge address; an organization has one upstream.") || !strings.Contains(text, originalAddress[:strings.LastIndex(originalAddress, "/team/")]) || !strings.Contains(text, address) {
+	if code != 1 || !strings.Contains(text, messages[0]) || !strings.Contains(text, messages[1]) || !strings.Contains(text, originalAddress[:strings.LastIndex(originalAddress, "/team/")]) || !strings.Contains(text, address) {
 		t.Fatal("different address not explained", code, command.diagnostic.String())
 	}
 	if registrations.Load() != before {
