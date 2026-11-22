@@ -278,15 +278,51 @@ test('rows stay single aligned lines within narrow widths', { options }, async (
   await ui.unmount()
 })
 
-test('/oberth-runs prints the box header and rows', { options }, async ($, on) => {
+const lintFailure = { failed_step: 'onExit[0].lint', failed_step_name: 'lint', node_id: 'generated-node-419' }
+
+test('/oberth-runs prints the box rows and a reason for failed rows', { options }, async ($, on) => {
   bottom(on)
   mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
-  cli(on, () => [run(), run('aaaaaaaa000000000000000000000000')])
+  const failed = { ...run('aaaaaaaa000000000000000000000000', 'failed'), display_reason: 'exited with code 2', failure: lintFailure }
+  let rows = [run(), run('bbbbbbbb000000000000000000000000')]
+  cli(on, () => rows)
   await startSession($, on)
-  const listed = await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })
-  expect(listed.text!.split('\n')).toEqual(await boxLines($, 'terminal', commandInput.presentation.columns + 4))
+  const listed = (await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text!.split('\n')
+  const box = await boxLines($, 'terminal', commandInput.presentation.columns + 4)
+  expect(listed[0]).toBe(box[0] + ' REASON')
+  expect(listed.slice(1)).toEqual(box.slice(1))
+  rows = [run(), failed]
+  const lines = (await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text!.split('\n')
+  expect(lines[1]!.endsWith(' 1m')).toBe(true)
+  expect(lines[2]).toMatch(/^aaaaaaaa oberth +v0\.24\.0 +✗ failed +6\/11 +1m00s +1m +lint: exited with code 2$/)
+  expect(lines[2]!.indexOf('lint')).toBe(lines[0]!.indexOf('REASON'))
   const narrow = await $.command.run({ ...commandInput, presentation: { isFullscreen: false, columns: 40 }, command: 'oberth-runs', args: '' })
   for (const line of narrow.text!.split('\n')) expect(line.length).toBeLessThanOrEqual(40)
+  // The reason stays whole; the names give way first.
+  rows = [{ ...failed, ref: 'refs/heads/own-v0.30.10', failure: { ...lintFailure, failed_step_name: 'go-tests-pass-with-race' } }]
+  const tight = (await $.command.run({ ...commandInput, presentation: { isFullscreen: false, columns: 87 }, command: 'oberth-runs', args: '' })).text!.split('\n')
+  expect(tight[1]).toMatch(/^aaaaaaaa obe… +own… +✗ failed .* go-tests-pass-with-race: exited with code 2$/)
+  for (const line of tight) expect(line.length).toBeLessThanOrEqual(87)
+})
+
+test('a failed row names its step and a watched row is marked, cut before the ref', { options }, async ($, on) => {
+  bottom(on)
+  mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+  const failed = { ...run('aaaaaaaa000000000000000000000000', 'failed'), ref: 'refs/heads/topic-branch',
+    failure: { ...lintFailure, failed_step_name: 'verify-release-artifacts' } }
+  cli(on, () => [run(), failed])
+  await startSession($, on)
+  await $.command.run({ ...commandInput, command: 'oberth-watch', args: run().id })
+  const wide = await boxLines($)
+  expect(wide[0]).toMatch(HEADER)
+  expect(wide[1]).toMatch(/^cad7d9ec .* 1m +●$/)
+  expect(wide[2]).toMatch(/^aaaaaaaa oberth +topic-branch +✗ failed +6\/11 +1m00s +1m +verify-release-artifacts$/)
+  const tight = await boxLines($, 'terminal', 63)
+  expect(tight[2]).toContain(' topic-branch ')
+  expect(tight[2]).toMatch(/ ver…$/)
+  const narrow = await boxLines($, 'terminal', 62)
+  expect(narrow[2]).toMatch(/ 1m$/)
+  expect(narrow[1]).toMatch(/ 1m$/)
 })
 
 test('durations and ages read as seconds, then two units or one', async () => {

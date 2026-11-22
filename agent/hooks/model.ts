@@ -86,40 +86,58 @@ export const failedStep = (run: Run) => run.status === 'failed' ? clean(run.fail
 export const outcome = (run: Run) => `${run.id}: ${run.status}${failedStep(run) ? `; step ${failedStep(run)}` : ''}`
 
 const HEADER = ['RUN', 'REPO', 'REF', 'STATUS', 'STEPS', 'TIME', 'AGE']
-// Repository and ref give way, wider first, down to this many cells each.
+// The last column, repository and ref (wider first) give way down to this many cells.
 const NARROWEST = 4
 const shortRepo = (repo: string) => repo.slice(repo.lastIndexOf('/') + 1) || repo
 const shortRef = (ref: string) => ref.replace(/^refs\/(?:heads|tags)\//, '') || ref
 const cut = (text: string, width: number) => text.length <= width ? text : text.slice(0, Math.max(0, width - 1)) + '…'
 
-// Aligned single lines of at most width cells: repository and ref shrink first, then the line is cut.
-function fit(cells: string[][], width: number): string[] {
+// The last column: its header, each run's text, and whether it gives way before the names.
+type Last = { label: string; text: (run: Run) => string; first: boolean }
+
+// Aligned single lines of at most width cells. The last column and the names give way in
+// the order Last says (the last column goes when it cannot keep NARROWEST), then lines are cut.
+function fit(cells: string[][], width: number, first: boolean): string[] {
   const widths = cells[0]!.map((_, index) => Math.max(...cells.map(row => row[index]!.length)))
-  let over = widths.reduce((sum, size) => sum + size, widths.length - 1) - width
-  while (over > 0) {
-    const index = widths[1]! >= widths[2]! ? 1 : 2
-    if (widths[index]! <= NARROWEST) break
-    widths[index] = widths[index]! - 1
-    over--
+  const last = widths.length - 1
+  const over = () => widths.reduce((sum, size) => sum + (size && size + 1), -1) - width
+  const shrinkLast = () => {
+    while (over() > 0 && widths[last]) widths[last] = widths[last]! > NARROWEST ? widths[last]! - 1 : 0
   }
-  return cells.map(row => cut(row.map((cell, index) => cut(cell, widths[index]!).padEnd(widths[index]!)).join(' ').trimEnd(), width))
+  const shrinkNames = () => {
+    while (over() > 0) {
+      const index = widths[1]! >= widths[2]! ? 1 : 2
+      if (widths[index]! <= NARROWEST) return
+      widths[index] = widths[index]! - 1
+    }
+  }
+  for (const shrink of first ? [shrinkLast, shrinkNames] : [shrinkNames, shrinkLast]) shrink()
+  return cells.map(row => cut(row.flatMap((cell, index) =>
+    widths[index] ? [cut(cell, widths[index]!).padEnd(widths[index]!)] : []).join(' ').trimEnd(), width))
 }
 
 // The header and one line per run, shared by the box and /oberth-runs.
-export function rows(runs: Run[], now: number, width: number): string[] {
-  return fit([HEADER, ...runs.map(run => [
+function rows(runs: Run[], now: number, width: number, last: Last): string[] {
+  return fit([[...HEADER, last.label], ...runs.map(run => [
     shortID(run.id, runs), shortRepo(run.repo), shortRef(run.ref), `${ICON[run.status]} ${run.status}`,
-    progress(run), duration(run, now), age(run, now),
-  ].map(clean))], width)
+    progress(run), duration(run, now), age(run, now), last.text(run),
+  ].map(clean))], width, last.first)
 }
 
+// The box ends a row with ● for a watched run and the failed step's name; both give way
+// before the names.
 export function boxRows(state: Snapshot, count: number, width: number): string[] {
   const runs = visible(state, count)
-  return runs.length ? rows(runs, state.now, width) : []
+  const watched = (run: Run) => state.pins.some(pin => pin.run.id === run.id) ? '●' : ''
+  const text = (run: Run) => [watched(run), failedStep(run)].filter(Boolean).join(' ')
+  return runs.length ? rows(runs, state.now, width, { label: '', text, first: true }) : []
 }
 
+// /oberth-runs ends a failed row with its failed step and reason, kept before the names.
+const reason = (run: Run) => run.status === 'failed' ? [failedStep(run), run.display_reason].filter(Boolean).join(': ') : ''
+
 export function table(runs: Run[], now: number, width: number): string {
-  return runs.length ? rows(runs, now, width).join('\n') : 'No runs.'
+  return runs.length ? rows(runs, now, width, { label: 'REASON', text: reason, first: false }).join('\n') : 'No runs.'
 }
 
 export function limit(value: unknown): number {
