@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"sync"
 
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/sourcecontract"
@@ -19,8 +20,12 @@ func sourcePolicy(raw []byte) (workflowpolicy.SourcePolicy, error) {
 
 // binder binds main to the admitted commit and a pin to its exact producer
 // commit, only for a pair the administrator's source policy lists. A
-// repository pinning its own older commit is such a pair too.
+// repository pinning its own older commit is such a pair too. One admission
+// decides each pinned revision once and reuses the decision for every
+// declaration of it: the same question gets the same answer, at the cost of
+// one forge read per producer commit.
 func (s *Submitter) binder(r Request, source Source) func(context.Context, sourcecontract.Descriptor) (sourcecontract.Binding, error) {
+	pins := pinDecisions{decided: map[sourcecontract.Revision]pinDecision{}}
 	return func(ctx context.Context, d sourcecontract.Descriptor) (sourcecontract.Binding, error) {
 		b := sourcecontract.Binding{Descriptor: d, RepositoryID: r.RepositoryID, Revision: sourcecontract.Revision{Repository: r.Repository, Commit: r.Ref.CommitSHA}}
 		if d.Kind == sourcecontract.Main {
@@ -35,7 +40,7 @@ func (s *Submitter) binder(r Request, source Source) func(context.Context, sourc
 			return b, refusal("pin", nil).withCommand(publicerr.SourcePinCommand(r.Repository, d.Repository, s.d.Version))
 		}
 		b.Revision = sourcecontract.Revision{Repository: d.Repository, Commit: d.Commit}
-		id, reachable, err := source.Pin(ctx, b.Revision)
+		id, reachable, err := pins.decide(ctx, source, b.Revision)
 		if err != nil {
 			return b, refusal("unavailable", err)
 		}
@@ -50,4 +55,27 @@ func (s *Submitter) binder(r Request, source Source) func(context.Context, sourc
 		b.RepositoryID, b.AuthorizationDigest = id, sourcecontract.Digest(proof)
 		return b, nil
 	}
+}
+
+// pinDecisions keeps one admission's decision for each pinned revision.
+type pinDecisions struct {
+	mu      sync.Mutex
+	decided map[sourcecontract.Revision]pinDecision
+}
+
+type pinDecision struct {
+	id        int64
+	reachable bool
+	err       error
+}
+
+func (p *pinDecisions) decide(ctx context.Context, source Source, at sourcecontract.Revision) (int64, bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if d, ok := p.decided[at]; ok {
+		return d.id, d.reachable, d.err
+	}
+	id, reachable, err := source.Pin(ctx, at)
+	p.decided[at] = pinDecision{id: id, reachable: reachable, err: err}
+	return id, reachable, err
 }
