@@ -62,9 +62,12 @@ func (e *Engine) saveProfile(p *Plan, i Identities, a admin) (Profile, error) {
 	// The key file is named by its public key, so a reused key keeps its file;
 	// each apply issues a new certificate under a new name.
 	keyName, certName := "admin-"+publicDigest(a.public)+".key", "admin-"+a.id+".crt"
+	// Every apply writes the stable key name, so it is replaced whole.
+	if err = c.replace(keyName, "admin-"+a.id+".key.tmp", a.key); err != nil {
+		return Profile{}, err
+	}
 	for name, data := range map[string][]byte{
-		keyName: a.key, certName: a.cert,
-		caName: i.CA.Data["tls.crt"], hostName: host,
+		certName: a.cert, caName: i.CA.Data["tls.crt"], hostName: host,
 	} {
 		if err = c.save(name, data); err != nil {
 			return Profile{}, err

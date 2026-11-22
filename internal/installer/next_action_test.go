@@ -1,9 +1,12 @@
 package installer_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +49,39 @@ func TestRetriedFreshInstallIsStillTheFirstRun(t *testing.T) {
 	}
 	if again := apply(t, f, prepare(t, f)); !again.Updated || again.Next != installer.UpdateNext {
 		t.Fatal("apply after a completed install is not an update", again.Updated, again.Next)
+	}
+}
+
+// A crash while the stable key name was first written leaves a partial file
+// there while the profile still names the earlier, intact key file. The next
+// apply replaces the partial file whole instead of refusing.
+func TestPartialAdministratorKeyFileIsReplaced(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	first := apply(t, f, prepare(t, f))
+	key, err := os.ReadFile(first.Profile.AdminKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	earlier := filepath.Join(f.dir, "admin-"+strings.Repeat("e", 64)+".key")
+	if err = os.WriteFile(earlier, key, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(first.Profile.AdminKey, key[:len(key)/2], 0600); err != nil {
+		t.Fatal(err)
+	}
+	profile := first.Profile
+	profile.AdminKey = earlier
+	raw, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(f.dir, "installation.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	second := apply(t, f, prepare(t, f))
+	if replaced, err := os.ReadFile(second.Profile.AdminKey); err != nil || second.Profile.AdminKey != first.Profile.AdminKey || !bytes.Equal(replaced, key) {
+		t.Fatal("partial key file was not replaced whole", err)
 	}
 }
 

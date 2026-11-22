@@ -141,6 +141,18 @@ func (c *ConfigDir) save(name string, b []byte) error {
 	return c.directory.Sync()
 }
 
+// replace publishes b under name through a synced temporary file and a rename,
+// so a crash never leaves a partial file under name.
+func (c *ConfigDir) replace(name, temp string, b []byte) error {
+	if err := c.save(temp, b); err != nil {
+		return err
+	}
+	if err := c.root.Rename(temp, name); err != nil {
+		return problem("custody", err)
+	}
+	return c.directory.Sync()
+}
+
 func isAbsent(err error) bool { return errors.Is(err, os.ErrNotExist) }
 func (c *ConfigDir) saveProfile(p Profile, id string) error {
 	if b, err := c.read("installation.json"); err == nil {
