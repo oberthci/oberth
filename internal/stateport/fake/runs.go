@@ -37,6 +37,7 @@ type runMemory struct {
 	grantRevision int64
 	issues        map[int64]model.Issue
 	ciSequences   map[string]int64
+	ciCounted     map[string]bool
 	issueID       int64
 	runs          map[string]stateport.Run
 	receipts      map[string]runReceipt
@@ -55,7 +56,7 @@ type runMemory struct {
 }
 
 func NewRuns(clock func() time.Time) *Runs {
-	return &Runs{clock: clock, changed: make(chan struct{}), data: runMemory{upstreams: map[string]stateport.Upstream{}, grants: map[string]stateport.GrantChange{}, issues: map[int64]model.Issue{}, ciSequences: map[string]int64{}, runs: map[string]stateport.Run{}, receipts: map[string]runReceipt{},
+	return &Runs{clock: clock, changed: make(chan struct{}), data: runMemory{upstreams: map[string]stateport.Upstream{}, grants: map[string]stateport.GrantChange{}, issues: map[int64]model.Issue{}, ciSequences: map[string]int64{}, ciCounted: map[string]bool{}, runs: map[string]stateport.Run{}, receipts: map[string]runReceipt{},
 		repos: map[string]stateport.Repository{}, obligations: map[string]stateport.Obligation{}, promotions: map[string]model.Promotion{},
 		native: map[string]nativeEvidence{}, pruned: map[string]int64{}, purges: map[string]stateport.PurgeReceipt{}, publications: map[string]model.Publication{}, dedupe: map[string]model.AgentEvent{}}}
 }
@@ -66,6 +67,7 @@ func (m runMemory) clone() runMemory {
 	m.grants = maps.Clone(m.grants)
 	m.issues = maps.Clone(m.issues)
 	m.ciSequences = maps.Clone(m.ciSequences)
+	m.ciCounted = maps.Clone(m.ciCounted)
 	m.pruned = maps.Clone(m.pruned)
 	m.runs = maps.Clone(m.runs)
 	m.receipts = maps.Clone(m.receipts)

@@ -32,6 +32,9 @@ func (m *runMemory) projectPublished(p model.Publication, now time.Time) error {
 	if r.Status != stepmodel.RunPassed || r.Origin.HasAssistance() || r.CommitSHA == nil || p.CommitSHA == nil || *r.CommitSHA != *p.CommitSHA {
 		return runProblem(publicerr.Conflict)
 	}
+	if m.ciCounted[r.ID] {
+		return nil
+	}
 	for _, run := range m.runs {
 		r.Sequence = max(r.Sequence, run.Sequence)
 	}
@@ -40,6 +43,7 @@ func (m *runMemory) projectPublished(p model.Publication, now time.Time) error {
 }
 func (m *runMemory) recordProjection(r stateport.Run, now time.Time) error {
 	key := r.Repo + "\x00" + r.Ref
+	m.ciCounted[r.ID] = true
 	issue := m.ciIssue(r)
 	if r.Status == stepmodel.RunPassed && issue.ID == 0 {
 		m.ciSequences[key] = r.Sequence

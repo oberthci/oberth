@@ -34,6 +34,26 @@ func checkPublishedCI(t *testing.T, f RunFixture) {
 	requireCIIssue(t, f, model.IssueOpen, next.ID)
 }
 
+// checkPublishedCICountedOnce: a run already counted for main, then published
+// with ProjectCI, settles as delivered and leaves the issue as a newer run set it.
+func checkPublishedCICountedOnce(t *testing.T, f RunFixture) {
+	p := moving(t, f)
+	a := stateport.Action{Actor: "operator"}
+	green := acceptOneRun(t, f, RunCase{ID: "ci-counted-green", Commit: strings.Repeat("e", 40)})
+	mustRun(t, f.Port.Finish(t.Context(), a, stateport.RunUpdate{ID: green.ID, Revision: green.Revision, Status: stepmodel.RunPassed, ProjectCI: true}))
+	red := acceptOneRun(t, f, RunCase{ID: "ci-counted-red", Commit: strings.Repeat("f", 40)})
+	mustRun(t, f.Port.Finish(t.Context(), a, stateport.RunUpdate{ID: red.ID, Revision: red.Revision, Status: stepmodel.RunFailed, ProjectCI: true}))
+	green, err := f.Port.Run(t.Context(), green.ID)
+	mustRun(t, err)
+	settleForward(t, p, forwardPublication(green, "ci-counted-publication"), true)
+	got, err := p.Publication(t.Context(), "ci-counted-publication")
+	mustRun(t, err)
+	if got.Status != model.PublicationDelivered {
+		t.Fatal("counted run did not settle as delivered", got.Status)
+	}
+	requireCIIssue(t, f, model.IssueOpen, red.ID)
+}
+
 // forwardPublication moves main from the red base to the tested run's commit.
 func forwardPublication(tested stateport.Run, id string) model.Publication {
 	pub := movingPublication(tested)
