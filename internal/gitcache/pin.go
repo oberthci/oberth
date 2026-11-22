@@ -31,28 +31,20 @@ func (c *Cache) DefaultAncestor(ctx context.Context, at sourcecontract.Revision)
 	return head, reachable, err
 }
 
-// defaultAncestor decides from the forge's current default head when the
-// forge answers within the head wait; the forge read continues in the
-// background. A forge that was slow or unreachable leaves the decision to the
-// head the cache holds, only while the cache was refreshed from the forge
-// within cacheTrustWindow and only for a commit that head reaches; any other
-// forge outcome refuses the pin naming the producer.
+// defaultAncestor decides from the forge's default head (admissionHead). Only
+// a head read that gave no head leaves the decision to the head the cache
+// holds, and only for a commit that head reaches.
 func (c *Cache) defaultAncestor(ctx context.Context, at sourcecontract.Revision) (int64, sourcecontract.Ref, bool, error) {
 	r, p, err := c.pinProducer(ctx, at)
 	if err != nil || r.RepositoryID == 0 {
 		return 0, sourcecontract.Ref{}, false, err
 	}
-	wait, cancel := context.WithTimeout(ctx, c.budgets.headWait)
-	head, err := c.policyHead(wait, at.Repository, r)
-	cancel()
-	if forgeError(err) {
-		if late := c.lateForge(p, at.Repository, err); late != nil {
-			return r.RepositoryID, sourcecontract.Ref{}, false, late
-		}
+	head, late, err := c.admissionHead(ctx, p, r)
+	if late != nil {
 		if held, reachable := c.heldAncestor(ctx, p, r.DefaultBranch, at.Commit); reachable {
 			return r.RepositoryID, held, true, nil
 		}
-		return r.RepositoryID, sourcecontract.Ref{}, false, forgeRefusal(reasonForgeSilent, remedyForgeSilent, at.Repository, err)
+		return r.RepositoryID, sourcecontract.Ref{}, false, forgeRefusal(reasonForgeSilent, remedyForgeSilent, at.Repository, late)
 	}
 	if isAbsent(err) {
 		return r.RepositoryID, sourcecontract.Ref{}, false, nil

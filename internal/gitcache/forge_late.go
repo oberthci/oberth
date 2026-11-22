@@ -80,11 +80,27 @@ func (c *Cache) DefaultHead(ctx context.Context, repo string) error {
 	if err != nil {
 		return err
 	}
-	wait, cancel := context.WithTimeout(ctx, c.budgets.headWait)
-	_, err = c.policyHead(wait, repo, r)
-	cancel()
-	if forgeError(err) {
-		return c.lateForge(p, repo, err)
-	}
+	_, _, err = c.admissionHead(ctx, p, r)
 	return err
+}
+
+// admissionHead reads r's default head for an admission decision within the
+// head wait. The forge's head decides when the forge answers, also while the
+// transfer of that head still runs: that read is refused and its retry finds
+// the transfer done. Only a head read that gave no head (late is the forge's
+// outcome) leaves the decision to the cache, under lateForge's rule.
+func (c *Cache) admissionHead(ctx context.Context, p string, r Remote) (head gitport.Ref, late, err error) {
+	wait, cancel := context.WithTimeout(ctx, c.budgets.headWait)
+	head, err = c.policyHead(wait, r.repository, r)
+	cancel()
+	switch {
+	case !forgeError(err):
+		return head, nil, err
+	case head.ObjectSHA != "":
+		return head, nil, forgeRefusal(reasonForgeSilent, remedyForgeSilent, r.repository, err)
+	}
+	if refusal := c.lateForge(p, r.repository, err); refusal != nil {
+		return gitport.Ref{}, nil, refusal
+	}
+	return gitport.Ref{}, err, nil
 }

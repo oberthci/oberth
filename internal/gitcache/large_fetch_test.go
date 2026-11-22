@@ -295,7 +295,8 @@ func TestPinOfAHeadTheCacheLacksWaitsForTheRefresh(t *testing.T) {
 		t.Fatal("a head the cache has was fetched again", reachable, err, x.slow.count(t, "object"))
 	}
 	x.advance(t)
-	_, _, err := c.Pin(shortContext(t), at)
+	gitcache.SetHeadWait(c, 50*time.Millisecond)
+	_, _, err := c.Pin(t.Context(), at)
 	checkStillUpdating(t, err)
 	x.slow.release(t)
 	gitcache.WaitBackground(c)
