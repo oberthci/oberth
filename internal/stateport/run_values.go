@@ -2,6 +2,7 @@ package stateport
 
 import (
 	"slices"
+	"time"
 
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/model"
@@ -94,6 +95,18 @@ type CatalogFilter struct {
 	Before          int64
 	Limit           int
 	IncludeArchived bool
+}
+
+// RecentRunLimit is how many of a repository's newest runs a repository list shows.
+const RecentRunLimit = 20
+
+// RunMark is one run in a repository's recent history: enough to colour it,
+// link to it and say what it ran, without its summary or steps.
+type RunMark struct {
+	ID        string              `json:"id"`
+	Status    stepmodel.RunStatus `json:"status"`
+	Ref       string              `json:"ref"`
+	CreatedAt time.Time           `json:"created_at"`
 }
 
 // RunState is the summary-only waiter view; it contains no admission or nodes.

@@ -82,9 +82,10 @@ type RepoArchiveArgs struct {
 }
 
 type RepoListArgs struct {
-	NamesOnly bool   `json:"names_only,omitempty" desc:"Read repository names and archive state without Git facts or latest runs." sensitive:"false" position:"0"`
-	Repo      string `json:"repo,omitempty" desc:"Read facts for one visible repository." format:"repo" sensitive:"false" position:"0"`
-	Archived  string `json:"archived,omitempty" desc:"Choose whether archived repository mappings are excluded, included or selected alone." sensitive:"false" position:"0"`
+	NamesOnly  bool   `json:"names_only,omitempty" desc:"Read repository names and archive state without Git facts or latest runs." sensitive:"false" position:"0"`
+	Repo       string `json:"repo,omitempty" desc:"Read facts for one visible repository." format:"repo" sensitive:"false" position:"0"`
+	Archived   string `json:"archived,omitempty" desc:"Choose whether archived repository mappings are excluded, included or selected alone." sensitive:"false" position:"0"`
+	RecentRuns bool   `json:"recent_runs,omitempty" desc:"Add each repository's last 20 runs, oldest first, with status, ref and time." sensitive:"false" position:"0"`
 }
 
 type RepoRemoveArgs struct {

@@ -24,6 +24,7 @@ type RunPort interface {
 	RunByCommit(context.Context, []string, string) (stateport.Run, error)
 	RunByRef(context.Context, []string, string) (stateport.Run, error)
 	Runs(context.Context, stateport.RunFilter) ([]stateport.Run, error)
+	RecentRuns(context.Context, []string) (map[string][]stateport.RunMark, error)
 	Steps(context.Context, string) ([]stepmodel.RunStep, error)
 	SaveSteps(context.Context, string, []stepmodel.RunStep) error
 	BeginPurge(context.Context, stateport.Action, string, string) error
@@ -76,6 +77,7 @@ func RunSuite(t *testing.T, factory func(*testing.T) RunFixture) {
 		"queries":              checkRunQueries,
 		"latest_cursor":        checkLatestCursor,
 		"latest_repository":    checkLatestRepository,
+		"recent_runs":          checkRecentRuns,
 		"commit_prefix":        checkCommitPrefix,
 		"scope_catalog":        checkScopeCatalog,
 		"cancel":               checkCancellation,

@@ -171,7 +171,7 @@ func (s *Service) repos(ctx context.Context, scope []string, options apicontract
 		if err != nil {
 			return nil, err
 		}
-		page, err := s.repoViews(ctx, selectArchivedRepositories(rows, options.Archived), options.NamesOnly)
+		page, err := s.repoViews(ctx, selectArchivedRepositories(rows, options.Archived), options)
 		if err != nil {
 			return nil, err
 		}
@@ -183,8 +183,8 @@ func (s *Service) repos(ctx context.Context, scope []string, options apicontract
 	}
 }
 
-func (s *Service) repoViews(ctx context.Context, repos []stateport.Repository, namesOnly bool) ([]apicontract.Repository, error) {
-	if namesOnly {
+func (s *Service) repoViews(ctx context.Context, repos []stateport.Repository, options apicontract.RepoListArgs) ([]apicontract.Repository, error) {
+	if options.NamesOnly {
 		out := make([]apicontract.Repository, 0, len(repos))
 		for _, r := range repos {
 			out = append(out, apicontract.Repository{Repo: r.Canonical, Archived: r.Archived})
@@ -198,24 +198,12 @@ func (s *Service) repoViews(ctx context.Context, repos []stateport.Repository, n
 	for i, r := range repos {
 		scope[i] = r.Canonical
 	}
-	latest, err := s.c.Runs.Runs(ctx, stateport.RunFilter{Repositories: scope, LatestRepository: true, Limit: stateport.RunPageLimit})
+	out, err := s.runFacts(ctx, repos, scope, options.RecentRuns)
 	if err != nil {
 		return nil, err
 	}
-	out := []apicontract.Repository{}
 	var wg sync.WaitGroup
 	slots := make(chan struct{}, 8)
-	for _, r := range repos {
-		v := apicontract.Repository{Repo: r.Canonical, Archived: r.Archived}
-		for _, run := range latest {
-			if run.Repo == r.Canonical {
-				latest := summary(run.RunSummary)
-				v.LatestRun = &latest
-				break
-			}
-		}
-		out = append(out, v)
-	}
 	for i := range out {
 		select {
 		case slots <- struct{}{}:
@@ -228,6 +216,41 @@ func (s *Service) repoViews(ctx context.Context, repos []stateport.Repository, n
 	}
 	wg.Wait()
 	return out, nil
+}
+
+// runFacts gives each repository on the page its latest run and, when asked,
+// its recent runs.
+func (s *Service) runFacts(ctx context.Context, repos []stateport.Repository, scope []string, wanted bool) ([]apicontract.Repository, error) {
+	latest, err := s.c.Runs.Runs(ctx, stateport.RunFilter{Repositories: scope, LatestRepository: true, Limit: stateport.RunPageLimit})
+	if err != nil {
+		return nil, err
+	}
+	recent, err := s.recentRuns(ctx, scope, wanted)
+	if err != nil {
+		return nil, err
+	}
+	out := []apicontract.Repository{}
+	for _, r := range repos {
+		v := apicontract.Repository{Repo: r.Canonical, Archived: r.Archived, RecentRuns: recent[r.Canonical]}
+		for _, run := range latest {
+			if run.Repo == r.Canonical {
+				latest := summary(run.RunSummary)
+				v.LatestRun = &latest
+				break
+			}
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// recentRuns reads the strip of every repository on the page in one store call;
+// the names are already the caller's scope, as for the run list.
+func (s *Service) recentRuns(ctx context.Context, scope []string, wanted bool) (map[string][]stateport.RunMark, error) {
+	if !wanted {
+		return map[string][]stateport.RunMark{}, nil
+	}
+	return s.c.Runs.RecentRuns(ctx, scope)
 }
 func (s *Service) branchCount(ctx context.Context, v *apicontract.Repository) {
 	read, cancel := context.WithTimeout(ctx, 2*time.Second)

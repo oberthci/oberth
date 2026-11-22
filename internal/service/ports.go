@@ -35,6 +35,7 @@ type RunStore interface {
 	RunByCommit(context.Context, []string, string) (stateport.Run, error)
 	RunByRef(context.Context, []string, string) (stateport.Run, error)
 	Runs(context.Context, stateport.RunFilter) ([]stateport.Run, error)
+	RecentRuns(context.Context, []string) (map[string][]stateport.RunMark, error)
 	Nodes(context.Context, string) ([]stateport.Node, error)
 	Steps(context.Context, string) ([]stepmodel.RunStep, error)
 	Finish(context.Context, stateport.Action, stateport.RunUpdate) error
