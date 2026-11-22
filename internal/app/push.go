@@ -49,8 +49,12 @@ func (s *Submitter) Gate(ctx context.Context, r Receive) (PushResult, error) {
 	ctx, cancel := s.d.Deadline(ctx, 30*time.Second)
 	defer cancel()
 	a, err := s.preparePush(ctx, r, false)
+	var tag *gitport.Ref
 	if err == nil {
-		err = deliverReleaseTags(ctx, r.Forge, a.Runs)
+		tag, err = releaseTag(a.Runs)
+	}
+	if err == nil && tag != nil {
+		err = deliverReleaseTag(ctx, r.Forge, *tag)
 	}
 	if ctx.Err() != nil {
 		return PushResult{}, &PushRefusal{Problems: []*Refusal{refusal("timeout", nil)}}
@@ -115,27 +119,37 @@ func (s *Submitter) preparePush(ctx context.Context, r Receive, replay bool) (ac
 	return a, nil
 }
 
-// deliverReleaseTags puts every admitted release tag on the forge before any
-// ref moves, so no release run exists for a tag the forge lacks. A failed
-// delivery refuses the whole push; a delivered tag stays, and its version is
-// then used even if the run fails.
-func deliverReleaseTags(ctx context.Context, forge TagForge, runs []stateport.Acceptance) error {
+// releaseTag is the push's one admitted release tag, exactly as admitted, or
+// nil. A push carries at most one release: several would reach the forge one
+// by one, and a refusal of a later one would leave earlier ones without a run.
+func releaseTag(runs []stateport.Acceptance) (*gitport.Ref, error) {
+	var tag *gitport.Ref
 	for _, run := range runs {
 		if run.Prepared == nil || !run.Release {
 			continue
 		}
-		v := run.Prepared.View()
-		tag := gitport.Ref{Name: v.Ref, ObjectSHA: v.ObjectSHA, CommitSHA: v.CommitSHA}
-		if forge == nil {
-			return undeliveredTag(tag, nil)
+		if tag != nil {
+			e := refusal("release_count", nil)
+			e.Ref = run.Request.Ref
+			return nil, &PushRefusal{Problems: []*Refusal{e}}
 		}
-		if err := forge.DeliverTag(ctx, tag); err != nil {
-			return undeliveredTag(tag, err)
+		v := run.Prepared.View()
+		tag = &gitport.Ref{Name: v.Ref, ObjectSHA: v.ObjectSHA, CommitSHA: v.CommitSHA}
+	}
+	return tag, nil
+}
+
+// deliverReleaseTag puts the admitted release tag on the forge before any ref
+// moves, so no release run exists for a tag the forge lacks. A failed delivery
+// refuses the whole push; a delivered tag stays, and its version is then used
+// even if the run fails.
+func deliverReleaseTag(ctx context.Context, forge TagForge, tag gitport.Ref) error {
+	var cause error
+	if forge != nil {
+		if cause = forge.DeliverTag(ctx, tag); cause == nil {
+			return nil
 		}
 	}
-	return nil
-}
-func undeliveredTag(tag gitport.Ref, cause error) error {
 	e := refusal("tag_delivery", cause)
 	e.Ref = tag.Name
 	return &PushRefusal{Problems: []*Refusal{e}}

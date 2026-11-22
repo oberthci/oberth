@@ -125,3 +125,20 @@ func TestGateDeliversNoTagForBranchesOrRefusedPushes(t *testing.T) {
 		t.Fatal("a refused release reached the forge", err)
 	}
 }
+
+func TestGateRefusesMoreThanOneReleaseTagBeforeAnyDelivery(t *testing.T) {
+	t.Parallel()
+	f, r := releaseFixture(t)
+	second := r.Updates[0]
+	second.Request.RunID, second.Request.Ref.Name, second.Request.Trigger = "r2", "refs/tags/v1.2.4", model.TriggerTag
+	r.Updates = append(r.Updates, second)
+	forge := &tagForge{f: f, receive: r.ID}
+	r.Forge = forge
+	_, err := f.new(t).Gate(context.Background(), r)
+	if err == nil || !strings.Contains(err.Error(), "push carries more than one release tag") || !strings.Contains(err.Error(), "refs/tags/v1.2.4") {
+		t.Fatal("several release tags in one push were not refused", err)
+	}
+	if len(forge.delivered) != 0 || saved(f, r.ID) || f.creates.Load() != 0 {
+		t.Fatal("a refused multi-release push reached the forge or left a run")
+	}
+}
