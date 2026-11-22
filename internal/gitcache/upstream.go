@@ -189,8 +189,11 @@ func (c *Cache) fetch(ctx context.Context, t fetchTarget) (updates []RefUpdate, 
 // content stays out, as it does for a first clone.
 func (c *Cache) sameUpstream(ctx context.Context, repo string, r Remote) error {
 	current, err := c.remote(ctx, repo)
-	if err != nil || current.URL != r.URL || r.RepositoryID != 0 && current.RepositoryID != r.RepositoryID {
-		return errors.Join(unavailable("refresh", errUpstreamMoved), err)
+	if err != nil {
+		return errors.Join(unavailable("refresh", errUpstreamUnread), err)
+	}
+	if current.URL != r.URL || r.RepositoryID != 0 && current.RepositoryID != r.RepositoryID {
+		return unavailable("refresh", errUpstreamMoved)
 	}
 	return nil
 }

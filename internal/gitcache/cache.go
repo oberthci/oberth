@@ -266,13 +266,21 @@ func (c *Cache) clone(ctx context.Context, repository, p string) error {
 	}
 	// The upstream can be removed and added again under another address while
 	// a long first clone runs: the old forge's content is not published.
-	if current, err := c.remote(ctx, repository); err != nil || current.URL != remote.URL {
-		return errors.Join(unavailable("initialize", errUpstreamMoved), err)
+	if current, err := c.remote(ctx, repository); err != nil {
+		return errors.Join(unavailable("initialize", errUpstreamUnread), err)
+	} else if current.URL != remote.URL {
+		return unavailable("initialize", errUpstreamMoved)
 	}
 	return c.publishClone(ctx, staging, p)
 }
 
-var errUpstreamMoved = errors.New("the upstream address changed during the transfer")
+// errUpstreamMoved and errUpstreamUnread say why a finished transfer was not
+// published: the upstream changed address, or its registration could not be
+// read again to tell.
+var (
+	errUpstreamMoved  = errors.New("the upstream address changed during the transfer")
+	errUpstreamUnread = errors.New("the upstream registration could not be read after the transfer")
+)
 
 func refuse(field string) error {
 	reason, remedy := refusalText(field)
