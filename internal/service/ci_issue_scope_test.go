@@ -48,7 +48,6 @@ func ciIssues(t *testing.T, f *fixture) []model.Issue {
 	return page.Issues
 }
 
-// Covers: REQ-C2-018
 func TestCIIssuesCoverOnlyDefaultBranchAndSchedules(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -80,7 +79,6 @@ func TestCIIssuesCoverOnlyDefaultBranchAndSchedules(t *testing.T) {
 	}
 }
 
-// Covers: REQ-C2-018
 func TestBranchPassLeavesDefaultBranchIssueOpen(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
@@ -100,8 +98,6 @@ func TestBranchPassLeavesDefaultBranchIssueOpen(t *testing.T) {
 
 // A passing promotion closes the default branch issue; a failed one leaves it
 // as the last default branch run left it.
-//
-// Covers: REQ-C2-018
 func TestPromotionPassClosesAndFailureLeavesDefaultBranchIssue(t *testing.T) {
 	t.Parallel()
 	for _, status := range []stepmodel.RunStatus{stepmodel.RunFailed, stepmodel.RunPassed} {
@@ -126,7 +122,6 @@ func TestPromotionPassClosesAndFailureLeavesDefaultBranchIssue(t *testing.T) {
 	}
 }
 
-// Covers: REQ-C2-018
 func TestFailedPromotionCreatesNoCIIssue(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
@@ -138,8 +133,6 @@ func TestFailedPromotionCreatesNoCIIssue(t *testing.T) {
 
 // A fast-forward promotion passes on its source run and starts no promotion
 // run, so the default branch issue stays as the last default branch run left it.
-//
-// Covers: REQ-C2-018
 func TestFastForwardPromotionLeavesDefaultBranchIssue(t *testing.T) {
 	t.Parallel()
 	f := setup(t)

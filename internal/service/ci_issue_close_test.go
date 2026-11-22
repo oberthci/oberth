@@ -15,8 +15,6 @@ import (
 
 // The installation administrator clears a CI issue that no later run will
 // close; an uplink, a scoped administrator included, still cannot, and a later failing default-branch run reopens it as usual.
-//
-// Covers: REQ-C2-018
 func TestAdministratorClosesCIIssue(t *testing.T) {
 	t.Parallel()
 	p := people(t)
