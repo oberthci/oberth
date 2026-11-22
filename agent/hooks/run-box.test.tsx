@@ -25,7 +25,10 @@ function run(id = 'cad7d9ec000000000000000000000000', status: Run['status'] = 'r
 // the snapshot observer is registered here, before any state hook a test adds beneath it.
 const writes = new WeakMap<On, () => Promise<void>>()
 
-function bottom(on: On, resolved?: string, checkout = true, profileEnv?: string) {
+// host: the host's refusal of the plugin's tools.
+type Host = { toolRefusal?: string }
+
+function bottom(on: On, resolved?: string, checkout = true, profileEnv?: string, host: Host = {}) {
   on('env.get', { name: 'OBERTH_PROFILE' }, () => ({ value: profileEnv }))
   const waiting: (() => void)[] = []
   on('state.set', { plugin: 'oberth', key: 'snapshot' }, async (_, e, next) => {
@@ -38,7 +41,9 @@ function bottom(on: On, resolved?: string, checkout = true, profileEnv?: string)
   on('store.get', (_, e) => ({ value: store.get(e.key) }))
   on('store.set', (_, e) => { store.set(e.key, e.value); return { value: undefined } })
   on('command.register', (_, e) => ({ value: { command: e.name } }))
-  on('tool.register', (_, e) => ({ value: { tool: `mcp__oberth__${e.name}` } }))
+  on('tool.register', (_, e) => {
+    return host.toolRefusal ? { deny: host.toolRefusal } : { value: { tool: `mcp__oberth__${e.name}` } }
+  })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.end', () => ({ sessionId: 'ended' }))
   on('session.root', () => ({ value: '/checkout' }))
@@ -586,3 +591,59 @@ test('failed step name never falls back to the plan path', async () => {
   expect(table([decodeRun(item)], 0)).not.toContain('onExit[0].cleanup')
   expect(() => decodeRun({ ...item, failure: { failed_step: 'onExit[0].cleanup', failed_step_name: 42 } })).toThrow()
 })
+
+// `run list --limit 3 --json` of a v0.30.7 server with one running run, byte for byte as the CLI prints it.
+const V0307_LIST = '{"runs":[{"id":"d7a7d4380c1e4b5f9a2b3c4d5e6f7a81","repo":"192-168-86-247/repos/oberth-smoke",' +
+  '"ref":"refs/heads/smoke-2","object_sha":"5c1f0e9a7b3d2c4e6f8a0b1c2d3e4f5a6b7c8d9e",' +
+  '"commit_sha":"5c1f0e9a7b3d2c4e6f8a0b1c2d3e4f5a6b7c8d9e","status":"running","display_reason":"step running",' +
+  '"created_at":"2026-11-22T03:58:10.123456Z","started_at":null,"finished_at":null,"step_count":1,' +
+  '"steps_planned_exact":true,"pending":0,"queued":0,"running":1,"passed":0,"failed":0,"skipped":0,"unknown":0,' +
+  '"actor":"192.168.64.1","trigger":"push","schedule_entry":"","assist_requested":false,"rerun_of":""},' +
+  '{"id":"0b4e2a91d3c54f6e8a7b9c0d1e2f3a41","repo":"192-168-86-247/repos/oberth-smoke","ref":"refs/heads/smoke-1",' +
+  '"object_sha":"1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b","commit_sha":"1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",' +
+  '"status":"passed","display_reason":"passed","created_at":"2026-11-22T03:33:34Z","started_at":null,' +
+  '"finished_at":"2026-11-22T03:33:54Z","step_count":1,"steps_planned_exact":true,"pending":0,"queued":0,' +
+  '"running":0,"passed":1,"failed":0,"skipped":0,"unknown":0,"actor":"192.168.64.1","trigger":"push",' +
+  '"schedule_entry":"","assist_requested":false,"rerun_of":""}],"next_cursor":""}\n'
+
+function v0307(on: On) {
+  const calls: { argv: readonly string[]; cwd?: string; env?: unknown }[] = []
+  on('process.run', (_, e) => {
+    calls.push({ argv: e.argv, cwd: e.init?.cwd, env: e.init?.env })
+    return { value: { exitCode: 0, stdout: V0307_LIST, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  return calls
+}
+
+const SMOKE = /^▶ d7a7d438 192-168-86-247\/repos\/oberth-smoke refs\/heads\/smoke-2 0\/1 \d+m$/
+
+test('a v0.30.7 run list reply with one running run draws the box', { options }, async ($, on) => {
+  bottom(on)
+  mock.clock(on, { now: Date.parse('2026-11-22T04:00:10Z') })
+  v0307(on)
+  await startSession($, on)
+  for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...band, surface })
+    const lines = await ui.findAll({ type: 'Text' })
+    expect(lines.map(line => line.text)).toHaveLength(2)
+    expect(SMOKE.test(lines[0]!.text)).toBe(true)
+    expect(lines[0]!.text.endsWith(' 2m')).toBe(true)
+    expect(lines[1]!.text.startsWith('✓ 0b4e2a91 ')).toBe(true)
+    await ui.unmount()
+  }
+})
+
+// The joined bridge is MCP server "oberth", the name the host serves this plugin's tools under.
+const BRIDGE_REFUSAL = 'the session already has an MCP server named "oberth" in its MCP config; registering would replace it'
+
+test('a session with the oberth bridge refuses the model tools and still draws the box', { options }, async ($, on) => {
+  bottom(on, undefined, true, undefined, { toolRefusal: BRIDGE_REFUSAL })
+  const clock = mock.clock(on, { now: Date.parse('2026-11-22T04:00:10Z') })
+  const calls = v0307(on)
+  await startSession($, on)
+  await text($, SMOKE)
+  await clock.advance(15000)
+  expect(calls.filter(call => call.argv[2] === 'list')).toHaveLength(2)
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain('d7a7d4380c1e4b5f9a2b3c4d5e6f7a81')
+})
+

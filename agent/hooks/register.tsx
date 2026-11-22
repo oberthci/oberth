@@ -93,19 +93,31 @@ function commands(on: On, options: PluginOptions) {
   })
 }
 
-async function registerActions($: EngineInterface) {
+async function registerCommands($: EngineInterface) {
   await $.command.register({ name: 'oberth-runs', description: 'Show recent Oberth runs (/oberth-runs [--limit=N]).' })
   await $.command.register({ name: 'oberth-watch', description: 'Pin a run until completion (/oberth-watch <id or prefix>).' })
-  await $.tool.register({
+}
+
+// The host serves these as MCP server "oberth" and refuses them while the session has the
+// joined bridge under that name; the bridge's tools then serve the model, and the box goes on.
+async function registerTools($: EngineInterface) {
+  const tools = [{
     name: 'runs', description: 'Show recent Oberth runs with whole fields and authoritative plan counts.',
     inputSchema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 50 } } },
     isDeferred: false,
-  })
-  await $.tool.register({
+  }, {
     name: 'watch', description: 'Pin an Oberth run above the prompt until it finishes, with one completion toast.',
     inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
     isDeferred: false,
-  })
+  }]
+  for (const tool of tools) await $.tool.register(tool).catch(() => undefined)
+}
+
+// The setup notice the box needs before it can read runs, or none.
+async function missingSetup($: EngineInterface, options: PluginOptions): Promise<{ key: string; text: string } | undefined> {
+  try { executable(options) } catch { return { key: 'executable-notice', text: SETUP } }
+  try { await profile($, options) } catch { return { key: 'profile-notice', text: PROFILE_SETUP } }
+  return undefined
 }
 
 async function setupNotice($: EngineInterface, key: string, message: string, mark: unknown = true) {
@@ -120,22 +132,17 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     loop.timer?.cancel()
     loop.stopped = false
-    await registerActions($)
+    await registerCommands($)
     if (count === undefined) await setupNotice($, 'runs-notice', `${SHOWN_REASON} ${SHOWN_REMEDY}`, String(options.runs))
-    try { executable(options) }
-    catch {
+    const missing = await missingSetup($, options)
+    if (missing) {
       await update($, snapshot, () => empty)
-      await setupNotice($, 'executable-notice', SETUP)
-      return next(e)
+      await setupNotice($, missing.key, missing.text)
+    } else {
+      if (loop.count) void poll($, options, loop)
+      loop.timer = $.clock.every(15000, () => { void tick($, options, loop).catch(() => {}) })
     }
-    try { await profile($, options) }
-    catch {
-      await update($, snapshot, () => empty)
-      await setupNotice($, 'profile-notice', PROFILE_SETUP)
-      return next(e)
-    }
-    if (loop.count) void poll($, options, loop)
-    loop.timer = $.clock.every(15000, () => { void tick($, options, loop).catch(() => {}) })
+    await registerTools($)
     return next(e)
   })
   on('session.end', async ($, e, next) => {
