@@ -99,7 +99,7 @@ func TestRegistrationNamesAbsoluteExecutable(t *testing.T) {
 
 	out.Reset()
 	s := flowSession{app: a}
-	if err := s.joined(model.InviteCertificate{Identity: "agent"}, "profile", false); err != nil || !strings.Contains(out.String(), real+" mcp --profile profile") {
+	if err := s.joined(model.InviteCertificate{Identity: "agent"}, "profile", filepath.Join(root, "ca.crt"), false); err != nil || !strings.Contains(out.String(), real+" mcp --profile profile") {
 		t.Fatal("join omitted registration")
 	}
 	assertInstallDispatchStaysSilent(t, a, &out)

@@ -268,7 +268,7 @@ func installationFacts(result installer.Result) []string {
 		"Administrator certificate: " + profile.AdminCert, "Administrator key: " + profile.AdminKey,
 		"Server CA: " + profile.CAFile, "SSH trust: " + profile.KnownHosts,
 		"SSH host fingerprint: " + result.SSHHostFingerprint, "Deploy public key: " + result.DeployPublicKey,
-		result.Next, result.StoreSnapshotHint, backup, result.BackupReminder}
+		result.Next, installWebView, result.StoreSnapshotHint, backup, result.BackupReminder}
 }
 
 func installationOutput(r installationRequest) error {

@@ -29,6 +29,9 @@ const UplinkPushKeyFile = "push.key"
 // HostKeysFile names the installation's SSH host keys in a joined profile.
 const HostKeysFile = "known_hosts"
 
+// UplinkCAFile names the installation's CA certificate in a joined profile.
+const UplinkCAFile = "ca.crt"
+
 // InvitationFileBytes bounds a whole invitation file; its host-key record may
 // use half of it, so every file an issuer writes is one join reads.
 const InvitationFileBytes = 16 << 10
@@ -220,7 +223,7 @@ func prepareJoin(dir string, invitation model.InvitationFile) (localKeys, error)
 	if err != nil {
 		return localKeys{}, err
 	}
-	values := map[string][]byte{"admin.key": keys.key, "admin.csr": keys.csr, UplinkPushKeyFile: keys.pushKey, "push.pub": keys.pushPublic, HostKeysFile: []byte(invitation.KnownHosts), "admin.crt": nil, "ca.crt": nil, "installation.json": nil}
+	values := map[string][]byte{"admin.key": keys.key, "admin.csr": keys.csr, UplinkPushKeyFile: keys.pushKey, "push.pub": keys.pushPublic, HostKeysFile: []byte(invitation.KnownHosts), "admin.crt": nil, UplinkCAFile: nil, "installation.json": nil}
 	if err = prepareJoinFiles(dir, values); err != nil {
 		return localKeys{}, err
 	}
@@ -230,7 +233,7 @@ func prepareJoin(dir string, invitation model.InvitationFile) (localKeys, error)
 func saveJoinFiles(dir string, result model.InviteCertificate, ca []byte, metadata Profile) error {
 	metadata.SSHURL = result.SSHURL
 	profile, _ := json.Marshal(metadata)
-	for name, data := range map[string][]byte{"admin.crt": []byte(result.Certificate), "ca.crt": ca, "installation.json": profile} {
+	for name, data := range map[string][]byte{"admin.crt": []byte(result.Certificate), UplinkCAFile: ca, "installation.json": profile} {
 		if err := WritePrivate(filepath.Join(dir, name), data); err != nil {
 			return err
 		}

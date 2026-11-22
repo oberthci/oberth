@@ -101,10 +101,10 @@ func join(s *flowSession, args []string) error {
 		problem.Context = []string{"File: " + args[0]}
 		return problem
 	}
-	return s.joined(result, name, bound)
+	return s.joined(result, name, filepath.Join(dir, client.UplinkCAFile), bound)
 }
 
-func (s *flowSession) joined(result model.InviteCertificate, name string, bound bool) error {
+func (s *flowSession) joined(result model.InviteCertificate, name, ca string, bound bool) error {
 	s.last, _ = json.Marshal(result)
 	if err := s.fact("identity: %s\nuplink profile: %s", result.Identity, name); err != nil {
 		return err
@@ -124,6 +124,9 @@ func (s *flowSession) joined(result model.InviteCertificate, name string, bound 
 		next = "next: git push oberth HEAD:refs/heads/<new-branch> -o oberth.run=1"
 	}
 	if err := s.fact("%s", next); err != nil || s.options.json {
+		return err
+	}
+	if err := s.fact("%s", joinedWebView(ca)); err != nil {
 		return err
 	}
 	return s.app.agentTools(name)

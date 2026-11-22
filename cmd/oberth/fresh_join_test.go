@@ -68,6 +68,18 @@ func TestFreshJoinCarriesAdvertisedSSHToCheckout(t *testing.T) {
 	if strings.Contains(out.String(), "next:\noberth repo add") || !strings.Contains(out.String(), "next:\noberth repo list") {
 		t.Fatal("joined uplink was directed to an administrator operation", out.String())
 	}
+	assertJoinedWebView(t, out.String(), options.CAFile)
+}
+
+// Join says how to open the web view, naming the CA file it saved.
+func assertJoinedWebView(t *testing.T, out, ca string) {
+	t.Helper()
+	if !strings.Contains(strings.Join(strings.Fields(out), " "), joinedWebView(ca)) {
+		t.Fatal("join does not say how to open the web view", out)
+	}
+	if _, err := client.ReadPublic(ca); err != nil {
+		t.Fatal("join names a CA file it did not save", err)
+	}
 }
 
 func assertAdvertisedJoinedPort(t *testing.T, dir string) {
