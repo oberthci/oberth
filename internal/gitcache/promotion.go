@@ -150,6 +150,15 @@ func (c *Cache) mergeSource(ctx context.Context, p string, r gitport.PromotionRe
 	if r.Target.CommitSHA == "" {
 		return r.Source.Commit, nil, nil
 	}
+	// A target in the tested commit's history fast-forwards: the tested commit
+	// itself becomes the result, so no merge is written and nothing is retested.
+	forward, err := c.ancestor(ctx, p, r.Target.CommitSHA, r.Source.Commit)
+	if err != nil {
+		return "", nil, err
+	}
+	if forward {
+		return r.Source.Commit, nil, nil
+	}
 	return c.merge(ctx, p, r.Target.CommitSHA, r.Source.Commit)
 }
 func promotionRoots(r gitport.PromotionRequest) []string {

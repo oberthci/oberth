@@ -34,9 +34,23 @@ type movingFixture struct {
 	starter *observedStarter
 }
 
+// newMovingFixture promotes a tested topic beside a default branch that moved
+// after the topic was cut, so the promotion writes a merge and runs CI on it.
 func newMovingFixture(t *testing.T) *movingFixture {
 	t.Helper()
-	f := &movingFixture{fixture: newFixture(t), git: promotionGit(t)}
+	return newMovingFixtureFrom(t, promotionGit(t, true))
+}
+
+// newForwardFixture promotes a tested topic cut from an unmoved default branch,
+// which fast-forwards.
+func newForwardFixture(t *testing.T) *movingFixture {
+	t.Helper()
+	return newMovingFixtureFrom(t, promotionGit(t, false))
+}
+
+func newMovingFixtureFrom(t *testing.T, g *gittest.Fixture) *movingFixture {
+	t.Helper()
+	f := &movingFixture{fixture: newFixture(t), git: g}
 	f.db = f.runs.Store
 	cache := f.git.Cache(t, nil)
 	f.moving = &observedMoving{MovingGit: cache}
@@ -73,7 +87,7 @@ func newMovingFixture(t *testing.T) *movingFixture {
 	return f
 }
 
-func promotionGit(t *testing.T) *gittest.Fixture {
+func promotionGit(t *testing.T, mainMoves bool) *gittest.Fixture {
 	t.Helper()
 	g := gittest.New(t)
 	w := workflow()
@@ -86,6 +100,13 @@ func promotionGit(t *testing.T) *gittest.Fixture {
 	g.Write(t, "feature", []byte("tested source\n"))
 	g.Commit = g.CommitFile(t, "feature")
 	g.Git(t, g.Work, "push", g.Bare, "topic")
+	if mainMoves {
+		g.Git(t, g.Work, "checkout", "main")
+		g.Write(t, "main-change", []byte("default branch moved\n"))
+		g.CommitFile(t, "move the default branch")
+		g.Git(t, g.Work, "push", g.Bare, "main")
+		g.Git(t, g.Work, "checkout", "topic")
+	}
 	return g
 }
 
