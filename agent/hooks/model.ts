@@ -1,6 +1,8 @@
 import type { Run, Snapshot } from '../types'
 
-export const ICON = { queued: '…', running: '▶', passed: '✓', failed: '✗', cancelled: '■' }
+// One refresh interval, active or idle: a run shorter than it can start and finish unseen.
+export const REFRESH_MS = 15000
+export const ICON ={ queued: '…', running: '▶', passed: '✓', failed: '✗', cancelled: '■' }
 export const active = (run: Run) => run.status === 'queued' || run.status === 'running'
 const clean = (text: string) => text.replace(/[\p{Cc}\p{Cf}]/gu, '')
 export const progress = (run: Run) =>

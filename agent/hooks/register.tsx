@@ -2,19 +2,18 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Register, Timer } from 'claude-code'
 import type { Snapshot } from '../types'
 import { checkedExecutable, get, list, profile, SETUP, PROFILE_SETUP } from './client'
-import { active, boxRows, limit, outcome, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
+import { active, boxRows, limit, outcome, REFRESH_MS, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
 
 const empty: Snapshot = { recent: [], pins: [], reachable: false, now: 0 }
 const snapshot = atom({ plugin: 'oberth', key: 'snapshot' } as const, empty, { shape: 'runs-1' })
 const errorText = (error: unknown) => error instanceof Error ? error.message : 'Unable to read Oberth runs.'
 // count is how many runs the box shows; with none, only active watches are read.
-type Loop = { count: number; timer?: Timer; pending?: Promise<void>; stopped?: boolean; refreshedAt?: number }
+type Loop = { count: number; timer?: Timer; pending?: Promise<void>; stopped?: boolean }
 
 async function tick($: EngineInterface, options: PluginOptions, loop: Loop) {
   const state = await read($, snapshot)
   if (!loop.count && !state.pins.some(pin => active(pin.run))) return
-  const interval = [...state.recent, ...state.pins.map(pin => pin.run)].some(active) ? 15000 : 60000
-  if (await $.clock.now() - (loop.refreshedAt ?? -Infinity) >= interval) await poll($, options, loop)
+  await poll($, options, loop)
 }
 
 // Background refreshes are never awaited by the host: a refused state call (for example
@@ -26,7 +25,6 @@ function poll($: EngineInterface, options: PluginOptions, loop: Loop) {
 
 async function refresh($: EngineInterface, options: PluginOptions, loop: Loop) {
   try {
-    loop.refreshedAt = await $.clock.now()
     const recent = loop.count ? await list($, options, loop.count) : []
     const before = await read($, snapshot)
     const missing = before.pins.filter(pin => active(pin.run) && !recent.some(run => run.id === pin.run.id))
@@ -115,7 +113,7 @@ export const register: Register = (on, options) => {
       await setupNotice($, missing.key, missing.text)
     } else {
       if (loop.count) void poll($, options, loop)
-      loop.timer = $.clock.every(15000, () => { void tick($, options, loop).catch(() => {}) })
+      loop.timer = $.clock.every(REFRESH_MS, () => { void tick($, options, loop).catch(() => {}) })
     }
     return next(e)
   })

@@ -91,8 +91,8 @@ JSON
 ```
 The options take precedence; a blank option means unset. No profile hides the box. Use the
 verified executable, never a checkout file. The box shows up to `runs` runs (0 to 10; blank is
-three), none at 0, with progress and failed steps; refresh is every 15 seconds when
-active/watched, 60 when idle. `/oberth-runs [--limit=N]` shows the table;
+three), none at 0, with progress and failed steps; it refreshes every 15 seconds, active or
+idle. `/oberth-runs [--limit=N]` shows the table;
 `/oberth-watch <id-or-prefix>` watches until the completion toast; the model uses the bridge's
 tools, and the plugin adds none. Codex installs the skill through
 `agent/.codex-plugin/plugin.json` with `codex plugin marketplace add oberthci/oberth`, then

@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Run, Snapshot } from '../types'
-import { decodeRun, progress, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
+import { decodeRun, progress, REFRESH_MS, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
 import { SETUP } from './client'
 
 const options = { executable: '/verified/oberth', profile: 'joined-uplink' }
@@ -198,17 +198,19 @@ test('one list per tick, whole fields, authoritative counts and disappearance', 
   expect(await ui.find({ type: 'Text', text: /cad7d9ec/ })).toBeUndefined()
   await ui.unmount()
   const before = calls.length
-  await clock.advance(60000)
+  await clock.advance(REFRESH_MS - 1)
+  expect(calls.length - before).toBe(0)
+  await clock.advance(1)
   expect(calls.length - before).toBe(1)
   rows = [running]
-  await clock.advance(60000)
+  await clock.advance(REFRESH_MS)
   expect(calls.length - before).toBe(2)
   await text($, /▶ cad7d9ec/)
-  await clock.advance(15000)
+  await clock.advance(REFRESH_MS)
   expect(calls.length - before).toBe(3)
 })
 
-test('watching a run switches idle reads to the active interval', { options }, async ($, on) => {
+test('idle and watched reads share the one interval', { options }, async ($, on) => {
   bottom(on)
   const clock = mock.clock(on)
   let lists = 0
@@ -220,15 +222,16 @@ test('watching a run switches idle reads to the active interval', { options }, a
     return { value: { exitCode: 0, stdout: JSON.stringify(detail ? run() : { runs: [] }),
       stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
+  expect(REFRESH_MS).toBe(15000)
   await startSession($, on)
-  await clock.advance(45000)
-  expect(lists).toBe(1)
+  await clock.advance(3 * REFRESH_MS)
+  expect(lists).toBe(4)
   await $.command.run({ ...commandInput, command: 'oberth-watch', args: run().id })
-  await clock.advance(15000)
-  expect(lists).toBe(2)
+  await clock.advance(REFRESH_MS)
+  expect(lists).toBe(5)
   expect(gets).toBe(2)
-  await clock.advance(15000)
-  expect(lists).toBe(3)
+  await clock.advance(REFRESH_MS)
+  expect(lists).toBe(6)
   expect(gets).toBe(3)
 })
 
