@@ -230,8 +230,9 @@ func editToolReply(data, payload []byte, text string) []byte {
 	if text != "" {
 		// A host given structured content shows the model only that, so a reply
 		// with a display block carries the JSON as its first text block instead.
+		// Hosts join text blocks as they are; the leading newline keeps the two apart.
 		delete(result, "structuredContent")
-		block, _ := json.Marshal(map[string]string{"type": "text", "text": text})
+		block, _ := json.Marshal(map[string]string{"type": "text", "text": "\n" + text})
 		content = append(content, block)
 	}
 	result["content"], _ = json.Marshal(content)

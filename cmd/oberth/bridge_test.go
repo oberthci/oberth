@@ -208,7 +208,7 @@ func TestMCPRunReadEndsWithDisplayBlock(t *testing.T) {
 		t.Fatalf("run read hides its display block: %+v", reply.Result)
 	}
 	block, ok := Display("run_get", json.RawMessage(content[0].Text))
-	if !ok || content[1].Text != block || !strings.Contains(block, "step failed") {
+	if !ok || content[1].Text != "\n"+block || !strings.Contains(block, "step failed") {
 		t.Fatalf("display block differs from the CLI's: %q", content[1].Text)
 	}
 }

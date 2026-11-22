@@ -88,7 +88,7 @@ func TestBridgeAppendsDisplayAfterUnchangedJSON(t *testing.T) {
 	if json.Unmarshal(p.frame(), &received) != nil || json.Unmarshal(<-original, &source) != nil {
 		t.Fatal("bad protocol")
 	}
-	if len(received.Result.Content) != 2 || !bytes.Equal(received.Result.Content[0], source.Result.Content[0]) || !bytes.Contains(received.Result.Content[1], []byte("renderer block")) {
+	if len(received.Result.Content) != 2 || !bytes.Equal(received.Result.Content[0], source.Result.Content[0]) || !bytes.Contains(received.Result.Content[1], []byte(`"text":"\nrenderer block"`)) {
 		t.Fatal("display replaced or changed original JSON")
 	}
 	// A host shows the model structured content alone when a reply has it.
