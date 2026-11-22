@@ -84,7 +84,8 @@ spec:
       container:
         command: [/work/shared/oberth, secretstore, exec]
         args: [--, bash, hack/static.sh]
-        env: [{name: BUILD_DEFAULT_REF, value: refs/heads/main}]
+        # Steps have no home directory: the linter's cache lives on the cache volume beside GOCACHE.
+        env: [{name: BUILD_DEFAULT_REF, value: refs/heads/main}, {name: GOLANGCI_LINT_CACHE, value: /cache/golangci-lint}]
         resources: {requests: {cpu: '2', memory: 2Gi}, limits: {cpu: '6', memory: 8Gi}}
     - name: prepare-base
       inputs:
