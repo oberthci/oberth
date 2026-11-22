@@ -74,7 +74,7 @@ func TestFreshJoinCarriesAdvertisedSSHToCheckout(t *testing.T) {
 // Join says how to open the web view, naming the CA file it saved.
 func assertJoinedWebView(t *testing.T, out, ca string) {
 	t.Helper()
-	if !strings.Contains(strings.Join(strings.Fields(out), " "), joinedWebView(ca)) {
+	if !strings.Contains(strings.Join(strings.Fields(out), " "), strings.Join(strings.Fields(joinedWebView(ca, []string{"origin"})), " ")) {
 		t.Fatal("join does not say how to open the web view", out)
 	}
 	if _, err := client.ReadPublic(ca); err != nil {

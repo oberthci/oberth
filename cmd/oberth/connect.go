@@ -126,7 +126,7 @@ func (s *flowSession) joined(result model.InviteCertificate, name, ca string, bo
 	if err := s.fact("%s", next); err != nil || s.options.json {
 		return err
 	}
-	if err := s.fact("%s", joinedWebView(ca)); err != nil {
+	if err := s.fact("%s", joinedWebView(ca, result.Scope)); err != nil {
 		return err
 	}
 	return s.app.agentTools(name)

@@ -140,7 +140,7 @@ func TestInstallationCredentialHeadingsAppearOnceForLongPaths(t *testing.T) {
 		}
 	}
 	for _, line := range strings.Split(out.String(), "\n") {
-		if !slices.Contains(values, line) && len([]rune(line)) > 80 {
+		if !slices.Contains(values, line) && !strings.HasPrefix(line, "oberth ") && len([]rune(line)) > 80 {
 			t.Fatal("prose exceeded display width", line)
 		}
 	}

@@ -28,7 +28,7 @@ func TestInstallOutputKeepsPathsAndSentencesWhole(t *testing.T) {
 		t.Fatal("sentence broken around the path", out.String())
 	}
 	for _, line := range lines {
-		if len([]rune(line)) > 80 && strings.TrimSpace(line) != key && strings.TrimSpace(line) != recovery {
+		if len([]rune(line)) > 80 && strings.TrimSpace(line) != key && strings.TrimSpace(line) != recovery && !strings.HasPrefix(line, "oberth ") {
 			t.Fatal("prose line over 80 columns", line)
 		}
 	}
