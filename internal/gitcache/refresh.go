@@ -241,7 +241,7 @@ func (c *Cache) cachedRead(ctx context.Context, repo string, notice io.Writer, e
 		age = max(time.Duration(0), c.config.Now().Sub(last)).Round(time.Second).String()
 	}
 	line := gitport.ForgeCacheNotice + age + "."
-	reason, detail := gitport.ForgeStatusReason, gitport.ForgeOperatorRemedy+" "+line
+	reason, detail := gitport.ForgeStatusReason, repo+": "+gitport.ForgeOperatorRemedy+" "+line
 	if !forge {
 		line = gitport.ForgeUpdatingNotice + age + "."
 		reason, detail = reasonForgeUpdating, line

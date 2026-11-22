@@ -120,7 +120,7 @@ func (c *Cache) commandFailure(s command, detail *nativeDetail, err error) error
 	}
 	if s.remote != nil {
 		if c.config.Log != nil {
-			c.config.Log(gitport.ForgeStatusReason, gitport.ForgeOperatorRemedy+" "+err.Error())
+			c.config.Log(gitport.ForgeStatusReason, s.remote.repository+": "+gitport.ForgeOperatorRemedy+" "+err.Error())
 		}
 		return unavailable("forge", err)
 	}

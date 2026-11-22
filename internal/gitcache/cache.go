@@ -57,6 +57,9 @@ type Config struct {
 type Remote struct {
 	URL, SSHBinary, SSHConfig, DefaultBranch string
 	RepositoryID                             int64
+	// repository is the canonical name the cache read the remote for; forge
+	// failures in the server log name it.
+	repository string
 }
 
 type Cache struct {

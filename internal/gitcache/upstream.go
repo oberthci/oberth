@@ -30,6 +30,7 @@ func (c *Cache) remote(ctx context.Context, repo string) (Remote, error) {
 	if err != nil {
 		return r, unavailable("read upstream configuration", err)
 	}
+	r.repository = repo
 	return validateRemote(r)
 }
 func validateRemote(r Remote) (Remote, error) {

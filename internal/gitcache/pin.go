@@ -154,6 +154,7 @@ func (c *Cache) producer(ctx context.Context, repo string) (Remote, error) {
 	if r.RepositoryID < 0 {
 		return Remote{}, refuse("producer registration")
 	}
+	r.repository = repo
 	r, err = validateRemote(r)
 	if err != nil {
 		return r, err

@@ -289,7 +289,7 @@ func (c *Cache) admissionAnswer(ctx context.Context, id string, source *ReceiveS
 				c.config.AdmissionMetric(reasonAdmissionStuck)
 			}
 			if c.config.Log != nil {
-				c.config.Log(reasonAdmissionStuck, id)
+				c.config.Log(reasonAdmissionStuck, source.event.Repository+": "+id)
 			}
 		}
 		return false, context.Cause(ctx)
