@@ -20,7 +20,8 @@ type ReleaseRuns interface {
 }
 
 // VerifiedReleaseFacts uses the ancestry decision's exact head and stored build
-// result. Successful and in-flight releases define this repository’s version floor.
+// result. Successful and in-flight releases define this repository’s version floor;
+// a version any earlier release run used is not released again.
 func VerifiedReleaseFacts(ctx context.Context, r Request, file string, runs ReleaseRuns) (admissioncontract.ReleaseFacts, error) {
 	if r.Original != nil {
 		return retainedReleaseFacts(ctx, r, file, runs)
@@ -32,7 +33,7 @@ func VerifiedReleaseFacts(ctx context.Context, r Request, file string, runs Rele
 	if !gitoid.Valid(facts.DefaultCommit) {
 		return facts, refusal("release_head", nil)
 	}
-	if err := newerRelease(ctx, r.Repository, facts.Version, runs); err != nil {
+	if err := newerRelease(ctx, releaseVersion{r.Repository, facts.Version, true}, runs); err != nil {
 		return facts, err
 	}
 	if err := passedBuild(ctx, r, runs); err != nil {
@@ -42,18 +43,40 @@ func VerifiedReleaseFacts(ctx context.Context, r Request, file string, runs Rele
 	return facts, nil
 }
 
-func newerRelease(ctx context.Context, repo, version string, runs ReleaseRuns) error {
-	filter := stateport.RunFilter{Repositories: []string{repo}, Trigger: model.TriggerTag, Limit: stateport.RunPageLimit}
+// releaseVersion is a proposed release. A fresh one, unlike a rerun, also
+// refuses a version any earlier release run used: its tag is on the forge.
+type releaseVersion struct {
+	repo, version string
+	fresh         bool
+}
+
+// blockedBy refuses the proposed release when a recorded release run holds
+// its version or a newer one.
+func (v releaseVersion) blockedBy(row stateport.Run) error {
+	known := strings.TrimPrefix(row.Ref, "refs/tags/")
+	if !row.Release || !workflowpolicy.IsReleaseVersion(known) {
+		return nil
+	}
+	active := row.Status == stepmodel.RunPassed || row.Status == stepmodel.RunQueued || row.Status == stepmodel.RunRunning
+	if active && semver.Compare(v.version, known) <= 0 {
+		return refusal("release_old", nil)
+	}
+	if v.fresh && known == v.version {
+		return refusal("release_used", nil)
+	}
+	return nil
+}
+
+func newerRelease(ctx context.Context, v releaseVersion, runs ReleaseRuns) error {
+	filter := stateport.RunFilter{Repositories: []string{v.repo}, Trigger: model.TriggerTag, Limit: stateport.RunPageLimit}
 	for {
 		rows, err := runs.Runs(ctx, filter)
 		if err != nil {
 			return err
 		}
 		for _, row := range rows {
-			known := strings.TrimPrefix(row.Ref, "refs/tags/")
-			active := row.Status == stepmodel.RunPassed || row.Status == stepmodel.RunQueued || row.Status == stepmodel.RunRunning
-			if row.Release && active && workflowpolicy.IsReleaseVersion(known) && semver.Compare(version, known) <= 0 {
-				return refusal("release_old", nil)
+			if err := v.blockedBy(row); err != nil {
+				return err
 			}
 			filter.Before = row.Sequence
 		}
@@ -101,7 +124,7 @@ func retainedReleaseFacts(ctx context.Context, r Request, file string, runs Rele
 		!gitoid.Valid(facts.DefaultCommit) || facts.BuildStatus != string(stepmodel.RunPassed) {
 		return facts, refusal("release_rerun", nil)
 	}
-	if err := newerRelease(ctx, r.Repository, facts.Version, runs); err != nil {
+	if err := newerRelease(ctx, releaseVersion{r.Repository, facts.Version, false}, runs); err != nil {
 		return facts, err
 	}
 	return facts, nil

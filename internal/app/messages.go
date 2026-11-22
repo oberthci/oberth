@@ -20,6 +20,7 @@ func messages() map[string]message {
 		"release_old":     {"release version is not newer", "Choose a higher version, or cancel the in-flight release: oberth run cancel <run> --force."},
 		"release_build":   {"release build has not passed", "Run .oberth/build.yaml on the tagged commit and wait for it to pass, then push the tag again."},
 		"release_rerun":   {"release rerun facts differ", "Rerun the original release with its unchanged tag, commit, workflow and parameters."},
+		"release_used":    {"release version is already used", "Release the next version; a release tag on the forge is never moved."},
 		"tag_delivery":    {"release tag not delivered to the forge", "Fix the forge problem, then push the tag again; no run was started."},
 		"assist":          {"assist unavailable", "assist is not available in this version; running without it"},
 		"push":            {"push refused; nothing ran", "Fix every reported finding, then push again."},

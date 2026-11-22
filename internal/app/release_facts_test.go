@@ -203,13 +203,39 @@ func TestReleaseVersionFloorIncludesInFlightRuns(t *testing.T) {
 				old := stateport.Run{RunSummary: stepmodel.RunSummary{ID: "other-release", Repo: r.Repository, Ref: "refs/tags/" + version, Status: status}, Origin: model.RunOrigin{RunCause: model.RunCause{Trigger: model.TriggerTag}}, Sequence: 2, Release: true}
 				_, err := app.VerifiedReleaseFacts(t.Context(), r, workflowpolicy.ReleaseFile, append(releaseHistory{old}, h...))
 				blocked := version != "v1.2.2" && (status == stepmodel.RunQueued || status == stepmodel.RunRunning || status == stepmodel.RunPassed)
-				if blocked {
+				switch {
+				case blocked:
 					expectRefusal(t, err, "release_old")
-				} else if err != nil {
+				case version == "v1.2.3":
+					// An ended release of the same version left its tag on the forge.
+					expectRefusal(t, err, "release_used")
+				case err != nil:
 					t.Fatal(err)
 				}
 			})
 		}
+	}
+}
+
+func TestReleaseOfAUsedVersionIsRefusedButItsRerunIsNot(t *testing.T) {
+	for _, status := range []stepmodel.RunStatus{stepmodel.RunFailed, stepmodel.RunCancelled} {
+		t.Run(string(status), func(t *testing.T) {
+			r, h := releaseRequest(), buildHistory()
+			facts, err := app.VerifiedReleaseFacts(t.Context(), r, workflowpolicy.ReleaseFile, h)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ended := stateport.Run{RunSummary: stepmodel.RunSummary{ID: "ended-release", Repo: r.Repository, Ref: r.Ref.Name, Status: status}, Origin: model.RunOrigin{RunCause: model.RunCause{Trigger: model.TriggerTag}}, Release: true, Sequence: 2, HasAdmission: true, Admission: admissioncontract.PreparedView{Workflow: &wf.Workflow{}, Repository: r.Repository, Ref: r.Ref.Name, ObjectSHA: r.Ref.ObjectSHA, CommitSHA: r.Ref.CommitSHA, Trigger: r.Trigger, SelectedFile: workflowpolicy.ReleaseFile}}
+			for name, value := range facts.Parameters() {
+				ended.Admission.Workflow.Spec.Arguments.Parameters = append(ended.Admission.Workflow.Spec.Arguments.Parameters, wf.Parameter{Name: name, Value: wf.AnyStringPtr(value)})
+			}
+			_, err = app.VerifiedReleaseFacts(t.Context(), r, workflowpolicy.ReleaseFile, append(releaseHistory{ended}, h...))
+			expectRefusal(t, err, "release_used")
+			r.Original = &ended
+			if _, err = app.VerifiedReleaseFacts(t.Context(), r, workflowpolicy.ReleaseFile, releaseHistory{ended}); err != nil {
+				t.Fatal("rerun of the used version refused", err)
+			}
+		})
 	}
 }
 
