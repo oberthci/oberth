@@ -275,11 +275,14 @@ type issueAction struct {
 
 // ciIssueClose admits the one change a person makes to a CI issue: an
 // unscoped administrator closes it, which clears an issue no later run will
-// close. Runs own every other change; a scoped administrator is refused like
-// any uplink.
+// close, and says why, since it overrides run evidence. Runs own every other
+// change; a scoped administrator is refused like any uplink.
 func ciIssueClose(a actor.Actor, q issueAction) error {
 	if q.Action != "issue_close" || !a.Admin || len(a.Scope) > 0 {
 		return refuse(ciIssueManaged)
+	}
+	if strings.TrimSpace(q.Reason) == "" {
+		return bad("reason")
 	}
 	return nil
 }

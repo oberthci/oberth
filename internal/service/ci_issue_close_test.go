@@ -38,6 +38,13 @@ func TestAdministratorClosesCIIssue(t *testing.T) {
 			t.Fatal("an uplink closed a CI issue", c.Actor.Identity)
 		}
 	}
+	for _, blank := range []string{"", "  "} {
+		e := closeIssue(t, p, adminCaller(), apicontract.IssueCloseArgs{ID: open.ID, Reason: blank})
+		requireField(t, e, "reason")
+		if ciIssue(t, p).State != model.IssueOpen {
+			t.Fatal("an administrator closed a CI issue without a reason")
+		}
+	}
 	const reason = "created by branch CI in error"
 	if e := closeIssue(t, p, adminCaller(), apicontract.IssueCloseArgs{ID: open.ID, Reason: reason}); e != nil {
 		t.Fatal(e)
