@@ -383,7 +383,7 @@ function repoRow(repo) {
  const cells = [h("span", {class: "mono"}, repo.repo), h("span", {class: "mono"}, repo.default_branch && refName(repo.default_branch)),
   h("span", {}, repo.latest_run ? [state(repo.latest_run.status), " · " + refName(repo.latest_run.ref) + " · " + time(repo.latest_run.created_at)] : "no runs"),
   h("span", {}, repo.branch_count === null ? "unknown" : String(repo.branch_count))];
- return h("a", {class: "row", href: "/runs?" + params({repo: repo.repo}), "data-key": repo.repo, "aria-label": cells.map(cell => cell.textContent.replace(/\s+/g, " ").trim()).join(" ")},
+ return h("a", {class: "row", href: "/runs?" + params({repo: repo.repo}), "data-key": repo.repo, "aria-label": cells.map(cell => cell.textContent.replace(/\s+/g, " ").trim()).filter(Boolean).join(" ")},
   cells.slice(0, 3), recentRuns(repo.recent_runs || []), cells[3]);
 }
 // A repository's last runs as bars, oldest left: green passed, red failed, yellow

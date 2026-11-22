@@ -126,7 +126,8 @@ func uiExample(t *testing.T) *fixture {
 }
 
 // exampleRepositories shapes the repository list as the server stores it: full
-// refs, and a latest run from an earlier day on a branch of ordinary length.
+// refs, a latest run from an earlier day on a branch of ordinary length, and a
+// repository whose default branch could not be read.
 func exampleRepositories(runs []apicontract.RunRecord, at time.Time) []apicontract.Repository {
 	api, web := runs[1].RunSummary, runs[2].RunSummary
 	api.Ref, api.CreatedAt = "refs/heads/w5/own-m3", at.Add(-24*time.Hour)
@@ -134,7 +135,7 @@ func exampleRepositories(runs []apicontract.RunRecord, at time.Time) []apicontra
 	return []apicontract.Repository{
 		{Repo: runs[0].Repo, DefaultBranch: "refs/heads/main", BranchCount: new(3), LatestRun: &api, RecentRuns: exampleMarks(at, "pfpppcfppppfrppppqfp")},
 		{Repo: runs[2].Repo, DefaultBranch: "refs/heads/main", LatestRun: &web, RecentRuns: exampleMarks(at, "ppfpr")},
-		{Repo: runs[3].Repo, DefaultBranch: "refs/heads/main"},
+		{Repo: runs[3].Repo},
 	}
 }
 

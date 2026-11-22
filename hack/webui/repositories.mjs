@@ -50,13 +50,15 @@ export async function repositories(client){
  check(new Set(mono.map(look)).size===4&&running.fill==='rgba(0, 0, 0, 0)'&&running.edge.startsWith('solid ')&&mono.every(bar=>bar.fill!=='rgba(0, 0, 0, 0)'||bar.edge.startsWith('solid ')),'mono bars not four visible looks '+JSON.stringify(mono));
  results.push({light,mono});
  // A row link's accessible name is its text cells, as on a page without bars: aria-hidden does not
- // take descendants out of a name, so the row names itself and no bar title may appear in it.
+ // take descendants out of a name, so the row names itself and no bar title may appear in it. An
+ // unread default branch leaves no gap in the label (the tree collapses spaces, so the label is read too).
  await client.loaded('/repos','.repos .bar');
  await client.cdp('Accessibility.enable');
  const {nodes}=await client.cdp('Accessibility.getFullAXTree');
  const names=nodes.filter(node=>node.role?.value==='link'&&!node.ignored).map(node=>node.name?.value||'');
- const rowText=await client.evaluate(`Array.from(document.querySelectorAll('.repos a.row')).map(row=>Array.from(row.children).filter(cell=>!cell.matches('.recent')).map(cell=>cell.textContent.replace(/\\s+/g,' ').trim()).join(' '))`);
- check(rowText.length===3&&rowText.every(text=>names.includes(text))&&!names.some(name=>name.includes(' · topic-')),'row link names are not their text cells '+JSON.stringify({rowText,names:names.filter(name=>name.includes('/'))}));
+ const rowText=await client.evaluate(`Array.from(document.querySelectorAll('.repos a.row')).map(row=>Array.from(row.children).filter(cell=>!cell.matches('.recent')).map(cell=>cell.textContent.replace(/\\s+/g,' ').trim()).filter(Boolean).join(' '))`);
+ const labels=await client.evaluate(`Array.from(document.querySelectorAll('.repos a.row')).map(row=>row.getAttribute('aria-label'))`);
+ check(JSON.stringify(labels)===JSON.stringify(rowText)&&rowText.length===3&&rowText.includes('mirror/tools/cli no runs unknown')&&rowText.every(text=>names.includes(text))&&!names.some(name=>name.includes(' · topic-')),'row link names are not their text cells '+JSON.stringify({rowText,names:names.filter(name=>name.includes('/'))}));
  results.push({rowNames:rowText});
  // A bar opens its own run, not the row's run list.
  await client.evaluate(`document.querySelector('.repos a.row[data-key="origin/team/web"] .bar:last-child').click()`);
