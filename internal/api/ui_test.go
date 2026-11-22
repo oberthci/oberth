@@ -24,10 +24,27 @@ func uiRequest(f *fixture, path string) *httptest.ResponseRecorder {
 	f.server.Handler().ServeHTTP(w, r)
 	return w
 }
+
+// uiScripts are the page's scripts, app.js first so its copy catalogue leads the sources.
+func uiScripts() []string { return []string{"app.js", "log.js", "issues.js"} }
+
+// Each script and the stylesheet stay under the 500-line file budget.
+func TestUIAssetsStayWithinTheFileBudget(t *testing.T) {
+	f := setup(t, nil)
+	for _, name := range append(uiScripts(), "app.css") {
+		if lines := strings.Count(uiRequest(f, "/assets/"+name).Body.String(), "\n"); lines == 0 || lines >= 500 {
+			t.Fatal("asset outside the file budget", name, lines)
+		}
+	}
+}
 func uiSources(t *testing.T) (string, string, string) {
 	t.Helper()
 	f := setup(t, nil)
-	return uiRequest(f, "/runs").Body.String(), uiRequest(f, "/assets/app.js").Body.String(), uiRequest(f, "/assets/app.css").Body.String()
+	scripts := ""
+	for _, name := range uiScripts() {
+		scripts += uiRequest(f, "/assets/"+name).Body.String()
+	}
+	return uiRequest(f, "/runs").Body.String(), scripts, uiRequest(f, "/assets/app.css").Body.String()
 }
 func TestUIShellPublicIdentical(t *testing.T) {
 	f := setup(t, nil)
@@ -59,7 +76,7 @@ func TestUIHeaders(t *testing.T) {
 func TestUIAssetsVersioned(t *testing.T) {
 	f := setup(t, nil)
 	shell := uiRequest(f, "/runs").Body.String()
-	for _, name := range []string{"app.js", "app.css"} {
+	for _, name := range append(uiScripts(), "app.css") {
 		w := uiRequest(f, "/assets/"+name)
 		if w.Header().Get("X-Content-Type-Options") != "nosniff" {
 			t.Fatal("asset sniffing permitted", name)
@@ -173,7 +190,7 @@ func TestUINeverTruncates(t *testing.T) {
 		}
 	}
 	if selector := clippingOutsideNames(css); selector != "" {
-		t.Fatal("CSS clips text outside repository and ref names", selector)
+		t.Fatal("CSS clips text outside names and issue titles", selector)
 	}
 	if regexp.MustCompile(`(?i)(?:max-height|line-clamp)\s*:`).MatchString(css) {
 		t.Fatal("CSS clips text")
@@ -186,10 +203,10 @@ func TestUINeverTruncates(t *testing.T) {
 }
 
 // clippingOutsideNames returns the first CSS selector that clips text but is not
-// a repository or ref name in a fixed-width list cell (each carries its whole
+// a repository or ref name, or an issue title, in a list cell (each carries its whole
 // name as a title). Reasons, messages and logs are never cut.
 func clippingOutsideNames(css string) string {
-	names := map[string]bool{".runs .row > .repo": true, ".runs .row > .ref": true, ".repo-filter": true, ".repo-group": true}
+	names := map[string]bool{".runs .row > .repo": true, ".runs .row > .ref": true, ".repo-filter": true, ".repo-group": true, ".issues .row > .title": true}
 	rules := regexp.MustCompile(`/\*[\s\S]*?\*/`).ReplaceAllString(css, "")
 	clips := regexp.MustCompile(`(?i)text-overflow|overflow(?:-[xy])?\s*:\s*(?:clip|hidden)\b`)
 	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(rules, -1) {

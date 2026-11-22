@@ -305,10 +305,10 @@ async function issueSearchAndStale(client){
  check(JSON.stringify(stale.map(row=>[row.id,row.touched]))===JSON.stringify([['70','stale · 3h untouched'],['68','stale · 26h untouched'],['42','stale · 10h untouched'],['1','stale · 24h untouched']])&&stale.every(row=>row.stale),'stale rows lack their reason line '+JSON.stringify(stale));
  const running=await client.evaluate(`(()=>{const probe=h('span',{class:'running'});document.body.append(probe);const colour=getComputedStyle(probe).color;probe.remove();return colour;})()`);
  check(stale.every(row=>row.colour===running),'stale text is not in the warning token '+JSON.stringify({running,stale}));
- check(JSON.stringify(stale[2].lock)==='"locked by editor · 5m left"'&&JSON.stringify(stale.map(row=>row.place))==='[["api","origin/team/api"],["origin","origin"],["cli","mirror/tools/cli"],["web","origin/team/web"]]','lock line or place wrong '+JSON.stringify(stale));
+ check(JSON.stringify(stale[2].lock)==='"editor · 5m left"'&&JSON.stringify(stale.map(row=>row.place))==='[["api","origin/team/api"],["origin","origin"],["cli","mirror/tools/cli"],["web","origin/team/web"]]','lock line or place wrong '+JSON.stringify(stale));
  await client.loaded('/issues','.issues a.row');
  const locked=await client.evaluate(`document.querySelector('.issues a.row[data-key="71"] .lock').textContent`);
- check(locked==='locked by agent-b · 3m left','lock holder and time left missing '+locked);
+ check(locked==='agent-b · 3m left','lock holder and time left missing '+locked);
  const mark=client.requests.length;
  await client.evaluate(`(()=>{const input=document.querySelector('.issue-search');input.focus();input.value='fla';input.dispatchEvent(new Event('input'));input.value='flaky';input.dispatchEvent(new Event('input'));})()`);
  await settle(client,`location.search==='?query=flaky'&&document.querySelectorAll('.issues a.row').length===9`,'search');

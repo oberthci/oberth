@@ -57,7 +57,8 @@ def source_texts(rows):
                 yield dict(file=str(path.relative_to(ROOT)), line=node.lineno, text=node.value)
     for path in [*sorted((ROOT / "hack").glob("*.sh")), ROOT / "agent/skills/oberth/fetch-oberth"]:
         yield from quoted_texts(path)
-    yield from quoted_texts(ROOT / "internal/api/ui/app.js")
+    for name in ("app.js", "log.js", "issues.js"):
+        yield from quoted_texts(ROOT / "internal/api/ui" / name)
     path = ROOT / "hack/guards/messages.json"
     for number, line in enumerate(path.read_text().splitlines(), 1):
         for literal in re.findall(r'"(?:[^"\\]|\\.)*"', line):

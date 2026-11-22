@@ -57,7 +57,7 @@ h1 { font-size: 18px; line-height: 1.25; margin: 4px 0 14px; }
 h2 { font-size: 14px; margin: 0; }
 p { margin: 6px 0; }
 pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
-.mono, .runs a.row, .repo-filter, .repo-group, .when, .duration, .identity, .terminal, .brand { font-family: var(--mono); }
+.mono, .runs a.row, .issues a.row, .repo-filter, .repo-group, .when, .duration, .identity, .terminal, .brand { font-family: var(--mono); }
 details { margin: 6px 0; }
 summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 details pre { padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2); font-size: 12px; }
@@ -189,18 +189,18 @@ main:has(> .repo-side) .filters > label { display: none; }
 }
 
 /* issues, the agents' workspace: chips with counts, search, a pager above
-   and below the table, and two-line rows as in the run list */
-.issues { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content max-content; column-gap: 16px; }
-.issues .row { grid-column: 1 / -1; grid-template-columns: subgrid; align-items: start; }
+   and below, and one line per issue in the run list's rhythm (a 22px line,
+   7px above and below). Only a title too long for its column ends in an
+   ellipsis; the row keeps the whole title as its title. */
+.issues { display: grid; grid-template-columns: max-content minmax(12ch, 1fr) max-content max-content max-content max-content; column-gap: 12px; }
+.issues .row { grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; padding-block: 7px; line-height: 22px; overflow-wrap: normal; }
+.issues .row > * { min-width: 0; white-space: nowrap; }
+.issues .row > .title { overflow: hidden; text-overflow: ellipsis; }
+.issues .row > .state { justify-self: start; align-self: center; }
 .issues > .empty { grid-column: 1 / -1; }
-.issues a.row > span { display: grid; justify-items: start; min-width: 0; }
-.issue-id { font-family: var(--mono); }
-.issue-id b { color: var(--muted); }
-.issue-id small, .issues .place, .issue-when time { color: var(--muted); font-size: 11px; }
+.issue-id b, .issue-id small, .issues .place, .touched { color: var(--muted); }
+.issue-id small { font-size: 11px; line-height: 1; }
 .issues .title { font-weight: 600; }
-.issue-work { gap: 2px; }
-.issues .lock { font-size: 11px; }
-.touched { color: var(--muted); font-size: 12px; }
 .touched.stale { color: var(--running); font-weight: 700; }
 .work.active { color: var(--accent); }
 .work.review { color: var(--fg); }
@@ -271,20 +271,18 @@ main:has(> .repo-side) .filters > label { display: none; }
  .terminal { min-height: 200px; }
  .repos .head, .issues .head { display: none; }
  .repos .row { grid-template-columns: auto 1fr; gap: 6px 16px; }
- /* An issue reads as two lines: number and title, then status, place, age
-    and a CI mark; a lock or a long title adds a line. */
+ /* As the run list on a phone: status and title on the first line; number,
+    repository, lock and age on the second. */
  .issues { display: block; }
- .issues a.row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 10px 8px; font-size: 12px; }
- .issues a.row > span { display: contents; }
- .issues .title { order: 1; flex: 1 1 calc(100% - 9ch); }
- .issue-id b { order: 0; }
- .issue-work .state { order: 2; }
- .issues .place { order: 3; }
- .issues .touched { order: 4; font-size: 11px; }
- .issue-id small { order: 5; }
- .issues .lock { order: 6; }
- .issues .place::before, .issues .touched::before, .issue-id small::before { content: "\00B7"; margin-right: 8px; color: var(--muted); }
- .issue-when time, .issue-id small.manual { display: none; }
+ .issues .row { grid-template-columns: max-content max-content max-content minmax(0, 1fr); grid-template-areas: "state title title title" "id place lock when"; gap: 0 8px; padding: 7px 8px; font-size: 12px; }
+ .issues .row > .state { grid-area: state; padding: 0 6px; gap: 5px; }
+ .issues .row > .title { grid-area: title; }
+ .issues .row > .issue-id { grid-area: id; }
+ .issues .row > .place { grid-area: place; }
+ .issues .row > .lock { grid-area: lock; }
+ .issues .row > .touched { grid-area: when; justify-self: end; }
+ .issues .row > :not(.state, .title) { font-size: 11px; }
+ .issue-id small.manual { display: none; }
  .filters > .issue-search { flex: 1 1 0; }
  .issue-head { padding: 12px; }
 }
@@ -296,7 +294,7 @@ main:has(> .repo-side) .filters > label { display: none; }
  main:has(> .run-layout) { max-width: none; position: relative; }
  main:has(> .runs) > h1 { position: absolute; width: 1px; height: 1px; margin: 0; clip-path: inset(50%); white-space: nowrap; }
  nav a { min-width: 72px; text-transform: lowercase; }
- .runs .state, .repos .state { height: 22px; }
+ .runs .state, .repos .state, .issues .state { height: 22px; }
  .run-head { border-width: 0 0 1px; border-radius: 0; }
  .run-head > h1 .state { height: 20px; border-radius: 11px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
  .run-head > h1 + p { margin-bottom: 0; border-bottom: 0; }

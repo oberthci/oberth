@@ -16,7 +16,8 @@ func browserNow() time.Time { return time.Date(2026, 11, 16, 20, 22, 0, 0, time.
 // across the work statuses and 8 closed, in three repositories, one
 // upstream and the installation. #70 is an active issue three hours
 // untouched, #68 a todo 26 hours untouched (both stale under 24h and 2h),
-// and an agent holds #71's lock for three more minutes.
+// an agent holds #71's lock for three more minutes, and #65's title is too
+// long for one line.
 func exampleIssues() []model.Issue {
 	titles := []string{"Flaky timeout in the cache warm-up", "Retry the forge push after a refused ref", "Document the release route for tags", "Shorten the admission refusal text", "Index the run list by repository", "Release notes miss the image digest", "Log tail drops the last partial line", "Schedule pause survives an upgrade"}
 	places := []struct{ upstream, repo string }{{"origin", "origin/team/api"}, {"origin", "origin/team/web"}, {"mirror", "mirror/tools/cli"}, {"origin", ""}, {"", ""}}
@@ -37,6 +38,7 @@ func exampleIssues() []model.Issue {
 	out[69].WorkStatus, out[69].UpdatedAt = model.IssueActive, now.Add(-3*time.Hour)
 	out[67].WorkStatus, out[67].UpdatedAt = model.IssueTodo, now.Add(-26*time.Hour)
 	out[70].WorkStatus, out[70].Lock = model.IssueActive, &model.IssueLock{Owner: "agent-b", AcquiredAt: now.Add(-2 * time.Minute), ExpiresAt: now.Add(3 * time.Minute)}
+	out[64].Title = "Retry the forge push after a refused ref when the remote rejects the pack because a protected branch rule changed between the fetch and the push"
 	out[41].Title, out[41].WorkStatus, out[41].Lock = "Flaky test in pkg/check", model.IssueActive, &model.IssueLock{Owner: "editor", ExpiresAt: now.Add(5 * time.Minute)}
 	for i := range out {
 		out[i].CreatedAt = out[i].UpdatedAt.Add(-time.Hour)

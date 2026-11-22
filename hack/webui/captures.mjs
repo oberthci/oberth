@@ -4,6 +4,7 @@ import {check} from './cdp.mjs';
 export async function captures(client){
  const {cdp,evaluate,loaded,events,origin}=client,shots=client.artifacts;
 const results=[];
+ let runRowHeight;
  for(const width of [360,1280]){
   await cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
   for(const theme of ['light','dark','mono','color']){
@@ -43,16 +44,20 @@ const results=[];
      check(metrics.runPieces.head==='Steps · 4'&&metrics.runPieces.failed==='test'&&metrics.runPieces.container==='Container'&&metrics.runPieces.select,'run page pieces missing '+JSON.stringify(metrics.runPieces));
      check(metrics.runPieces.gutter==='1\n2\n3\n4\n'&&metrics.runPieces.gutterLine===metrics.runPieces.preLine&&Math.abs(metrics.runPieces.gutterTop-metrics.runPieces.preTop)<0.5&&metrics.runPieces.selectable==='none','line numbers misaligned or selectable '+JSON.stringify(metrics.runPieces));
     }
-    // The issue workspace: seven counted chips, search, a pager above and below, and two-line rows (a phone row may add a line for a lock).
+    // The issue workspace: seven counted chips, search, a pager above and below, and the run list's rows: one
+    // line of the run row's height on a wide screen, at most two on a phone. Only the long title of #65 is
+    // cut, and it keeps its whole text as its title.
+    if(page==='runs')runRowHeight=metrics.rowHeights[0].height;
     if(page==='issues'){
-     metrics.issues=await evaluate(`({chips:document.querySelectorAll('.chips a .count').length,pages:Array.from(document.querySelectorAll('.pages .position')).map(node=>node.textContent),search:Boolean(document.querySelector('input.issue-search')),rows:Array.from(document.querySelectorAll('.issues a.row')).map(row=>{const style=getComputedStyle(row);return {key:row.dataset.key,lines:(row.getBoundingClientRect().height-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)-parseFloat(style.borderBottomWidth))/parseFloat(style.lineHeight)};})})`);
+     metrics.issues=await evaluate(`({chips:document.querySelectorAll('.chips a .count').length,pages:Array.from(document.querySelectorAll('.pages .position')).map(node=>node.textContent),search:Boolean(document.querySelector('input.issue-search')),rows:Array.from(document.querySelectorAll('.issues a.row')).map(row=>{const style=getComputedStyle(row),title=row.querySelector('.title');return {key:row.dataset.key,height:row.getBoundingClientRect().height,lines:(row.getBoundingClientRect().height-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)-parseFloat(style.borderBottomWidth))/parseFloat(style.lineHeight),cut:title.scrollWidth>title.clientWidth,whole:title.title===title.textContent};})})`);
      check(metrics.issues.chips===7&&JSON.stringify(metrics.issues.pages)==='["1-50 of 64","1-50 of 64"]'&&metrics.issues.search,'issue workspace pieces missing '+JSON.stringify(metrics.issues));
-     const limit=width===1280?2:3;
-     check(metrics.issues.rows.every(row=>row.lines<=limit+0.3),'issue rows exceed '+limit+' lines '+JSON.stringify(metrics.issues.rows.filter(row=>row.lines>limit+0.3)));
+     const wrong=metrics.issues.rows.filter(row=>!row.whole||(width===1280?Math.abs(row.height-runRowHeight)>=0.5||row.lines>1.02:row.lines>2.02));
+     check(!wrong.length,'issue rows are not the run list rows '+JSON.stringify({width,runRowHeight,wrong}));
+     if(width===1280)check(JSON.stringify(metrics.issues.rows.filter(row=>row.cut).map(row=>row.key))==='["65"]','only the long title is cut '+JSON.stringify(metrics.issues.rows.filter(row=>row.cut)));
     }
     if(page==='issue'){
      metrics.issue=await evaluate(`({back:document.querySelector('main > a.back')?.getAttribute('href'),states:Array.from(document.querySelectorAll('.issue-states .state')).map(node=>node.textContent),lock:document.querySelector('.issue-states .lock')?.textContent})`);
-     check(metrics.issue.back==='/issues'&&JSON.stringify(metrics.issue.states)==='["open","active"]'&&metrics.issue.lock==='locked by editor · 5m left','issue page pieces missing '+JSON.stringify(metrics.issue));
+     check(metrics.issue.back==='/issues'&&JSON.stringify(metrics.issue.states)==='["open","active"]'&&metrics.issue.lock==='editor · 5m left','issue page pieces missing '+JSON.stringify(metrics.issue));
     }
     metrics.fonts=await evaluate(`({body:getComputedStyle(document.body).fontFamily,log:document.querySelector('.terminal > pre')?getComputedStyle(document.querySelector('.terminal > pre')).fontFamily:null})`);
     if(theme==='light'||theme==='dark'){
