@@ -263,6 +263,33 @@ test('a watched run keeps the first row as it finishes behind three newer runs',
   expect(lines[1]).toMatch(/^dddddddd .*✓ passed .*●$/)
 })
 
+// Terminal cells as the test reads them: CJK ideographs and the one emoji used take two.
+const testCells = (line: string) => Array.from(line).reduce((sum, point) => sum + (/[一-鿿]|\u{1F600}/u.test(point) ? 2 : 1), 0)
+const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+test('wide characters count two cells and a cut never splits a code point', { options }, async ($, on) => {
+  bottom(on)
+  mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+  const wide = { ...run('aaaaaaaa000000000000000000000000', 'failed'), ref: 'refs/heads/' + '分支名称'.repeat(5),
+    display_reason: 'exited with code 2', failure: lintFailure }
+  const emoji = { ...run(), ref: 'refs/heads/ab\u{1F600}cdefgh' }
+  cli(on, () => [emoji, wide])
+  await startSession($, on)
+  for (const columns of [100, 80, 60]) {
+    const text = (await $.command.run({ ...commandInput, presentation: { isFullscreen: false, columns }, command: 'oberth-runs', args: '' })).text!
+    for (const line of text.split('\n')) expect(testCells(line)).toBeLessThanOrEqual(columns)
+    expect(text).not.toMatch(loneSurrogate)
+    const lines = text.split('\n')
+    expect(testCells(lines[1]!.slice(0, lines[1]!.indexOf('▶')))).toBe(testCells(lines[2]!.slice(0, lines[2]!.indexOf('✗'))))
+  }
+  const narrow = (await $.command.run({ ...commandInput, presentation: { isFullscreen: false, columns: 60 }, command: 'oberth-runs', args: '' })).text!
+  expect(narrow.split('\n')[1]).toContain(' ab… ')
+  for (const line of await boxLines($, 'terminal', 50)) {
+    expect(testCells(line)).toBeLessThanOrEqual(46)
+    expect(line).not.toMatch(loneSurrogate)
+  }
+})
+
 test('rows stay single aligned lines within narrow widths', { options }, async ($, on) => {
   bottom(on)
   mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })

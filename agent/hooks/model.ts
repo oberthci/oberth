@@ -90,17 +90,33 @@ const HEADER = ['RUN', 'REPO', 'REF', 'STATUS', 'STEPS', 'TIME', 'AGE']
 const NARROWEST = 4
 const shortRepo = (repo: string) => repo.slice(repo.lastIndexOf('/') + 1) || repo
 const shortRef = (ref: string) => ref.replace(/^refs\/(?:heads|tags)\//, '') || ref
-const cut = (text: string, width: number) => text.length <= width ? text : text.slice(0, Math.max(0, width - 1)) + '…'
+// Terminal cells of a code point: two for wide East Asian forms and emoji, otherwise one.
+const WIDE = /[\p{Emoji_Presentation}ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꥠ-꥿가-힣豈-﫿︰-﹏＀-｠￠-￦\u{20000}-\u{3FFFD}]/u
+const cellsOf = (point: string) => WIDE.test(point) ? 2 : 1
+const cells = (text: string) => Array.from(text).reduce((sum, point) => sum + cellsOf(point), 0)
+const pad = (text: string, width: number) => text + ' '.repeat(Math.max(0, width - cells(text)))
+
+// At most width cells, cut between code points and marked with an ellipsis.
+function cut(text: string, width: number): string {
+  if (cells(text) <= width) return text
+  let kept = ''
+  for (const point of text) {
+    if (cells(kept) + cellsOf(point) > width - 1) break
+    kept += point
+  }
+  return kept + '…'
+}
 
 // The last column: its header, each run's text, and whether it gives way before the names.
 type Last = { label: string; text: (run: Run) => string; first: boolean }
 
 // Aligned single lines of at most width cells. The last column and the names give way in
 // the order Last says (the last column goes when it cannot keep NARROWEST), then lines are cut.
-function fit(cells: string[][], width: number, first: boolean): string[] {
-  const widths = cells[0]!.map((_, index) => Math.max(...cells.map(row => row[index]!.length)))
+function fit(table: string[][], width: number, first: boolean): string[] {
+  const widths = table[0]!.map((_, index) => Math.max(...table.map(row => cells(row[index]!))))
   const last = widths.length - 1
-  const over = () => widths.reduce((sum, size) => sum + (size && size + 1), -1) - width
+  // Cells the shown columns and the spaces between them take beyond the width.
+  const over = () => widths.filter(Boolean).reduce((sum, size) => sum + size + 1, -1) - width
   const shrinkLast = () => {
     while (over() > 0 && widths[last]) widths[last] = widths[last]! > NARROWEST ? widths[last]! - 1 : 0
   }
@@ -112,8 +128,8 @@ function fit(cells: string[][], width: number, first: boolean): string[] {
     }
   }
   for (const shrink of first ? [shrinkLast, shrinkNames] : [shrinkNames, shrinkLast]) shrink()
-  return cells.map(row => cut(row.flatMap((cell, index) =>
-    widths[index] ? [cut(cell, widths[index]!).padEnd(widths[index]!)] : []).join(' ').trimEnd(), width))
+  return table.map(row => cut(row.flatMap((cell, index) =>
+    widths[index] ? [pad(cut(cell, widths[index]!), widths[index]!)] : []).join(' ').trimEnd(), width))
 }
 
 // The header and one line per run, shared by the box and /oberth-runs.
