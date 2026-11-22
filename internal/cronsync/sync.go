@@ -98,11 +98,11 @@ func (c *Syncer) passStart(ctx context.Context) ([]Repository, []wfv1.CronWorkfl
 	c.fullSyncFailed = true
 	repos, err := c.config.Repositories(ctx)
 	if err != nil {
-		return nil, nil, unstarted{problem(catalogFailure, err)}
+		return nil, nil, unreadable{problem(catalogFailure, err)}
 	}
 	objects, err := c.list(ctx)
 	if err != nil {
-		return nil, nil, unstarted{err}
+		return nil, nil, unreadable{err}
 	}
 	return repos, objects, nil
 }

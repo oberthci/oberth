@@ -67,16 +67,19 @@ type ChildRefusal struct{ cause error }
 func (e *ChildRefusal) Error() string { return problem(childMismatch, nil).Error() }
 func (e *ChildRefusal) Unwrap() error { return problem(childMismatch, e.cause) }
 
-// unstarted marks a full pass that failed before it reached any repository:
-// the catalogue or the native LIST could not be read.
-type unstarted struct{ error }
+// unreadable marks a full pass that could not read the catalogue or list the
+// native schedules, at its start or for its final prune.
+type unreadable struct{ error }
 
-func (e unstarted) Unwrap() error { return e.error }
+func (e unreadable) Unwrap() error { return e.error }
 
-// Unstarted reports whether err is a full pass that reached no repository,
-// which no later event repeats; per-repository failures are not.
-func Unstarted(err error) bool {
-	var failure unstarted
+// Unreadable reports whether err is a full pass that could not read the
+// catalogue or list the native schedules: at its start it reached no
+// repository, at its final prune it could neither prune nor lift the resume
+// block, and no later event repeats either. A repository's own failure is
+// not unreadable.
+func Unreadable(err error) bool {
+	var failure unreadable
 	return errors.As(err, &failure)
 }
 

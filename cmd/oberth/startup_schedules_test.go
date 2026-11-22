@@ -101,7 +101,7 @@ func (s *startupRepositories) wire(t *testing.T, f *serverFixture) {
 // A startup pass that cannot read the catalogue reached no repository, and
 // no later event repeats it: the part fails and the server stops, so the
 // restart retries it.
-func TestStartupPassThatReachesNoRepositoryStopsTheServer(t *testing.T) {
+func TestStartupPassThatCannotReadTheCatalogueStopsTheServer(t *testing.T) {
 	f := fixtureServer(t)
 	f.deps.constructors.WiringNew = func(ctx context.Context, c *composition) (Part, error) {
 		p, err := f.wiring(ctx, c)

@@ -9391,7 +9391,7 @@
   },
   "spec_sha256": {
     "docs/plans/c1-transport-and-tool-registry.md": "d9a5966979bf2cd06412028dfa72d6d906e996631ca78f9156e5d204cfea26bb",
-    "docs/plans/c10-schedules.md": "34f417309752e809bdf4f7f3b564dac0115bb368ccdb91f0401c1077d6a54d0c",
+    "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
     "docs/plans/c11-cli-and-server-composition.md": "857bab18143705bd661bbbec67d47e58114e22ae3166fd915a928f7d19cb3cf2",
     "docs/plans/c12-agent-client.md": "bb69fd9b2aec5887e02baf6e887df4b439102b4131062a518b112a1aa3d24260",
     "docs/plans/c13-own-pipelines.md": "2a2ec98164d0eee77c796cda88ac40c540639e78443d2fdb691d3bd34929a42d",

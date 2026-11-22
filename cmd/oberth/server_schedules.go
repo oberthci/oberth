@@ -30,7 +30,8 @@ func (o *serverOwners) scheduleConfig() {
 // unreadable schedule Git can neither delay nor fail the start. As with a ref
 // notice, a repository's failure goes to the log and to its schedule state,
 // and the next relevant event retries it. A pass that cannot read the
-// catalogue or list the cluster's schedules at all fails the part.
+// catalogue or list the cluster's schedules, at its start or for its final
+// prune, fails the part.
 func (c *composition) startupSchedules(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
@@ -38,9 +39,10 @@ func (c *composition) startupSchedules(ctx context.Context) error {
 	case <-c.health.readySignal:
 	}
 	err := c.schedules.SyncAll(ctx)
-	if cronsync.Unstarted(err) && ctx.Err() == nil {
-		// No repository was reached and no later event repeats a full pass:
-		// the part fails, and the restart (Kubernetes', not Oberth's) retries.
+	if cronsync.Unreadable(err) && ctx.Err() == nil {
+		// No later event repeats the pass's start or its final prune, which
+		// also lifts the resume block: the part fails, and the restart
+		// (Kubernetes', not Oberth's) retries.
 		return err
 	}
 	if err != nil && ctx.Err() == nil {
