@@ -22,6 +22,7 @@ import (
 func Verify(ctx context.Context, p Profile) error { return (EndpointVerifier{}).Verify(ctx, p) }
 
 // EndpointVerifier permits an injected dialer and clock for offline TLS contracts.
+// Dialers honor cancellation; Verify joins their callbacks before returning.
 type EndpointVerifier struct {
 	DialContext func(context.Context, string, string) (net.Conn, error)
 	Now         func() time.Time
@@ -32,10 +33,10 @@ func (v EndpointVerifier) Verify(ctx context.Context, p Profile) error {
 	if err != nil {
 		return err
 	}
-	transport := &http.Transport{DialContext: v.DialContext, TLSClientConfig: config}
-	defer transport.CloseIdleConnections()
+	transport := newEndpointTransport(config, v.DialContext)
+	defer transport.close()
 	client := &http.Client{
-		Transport:     transport,
+		Transport:     transport.http,
 		Timeout:       2 * time.Minute,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
