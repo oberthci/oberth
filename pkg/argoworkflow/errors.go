@@ -103,6 +103,8 @@ func literalMessages() map[string]message {
 		"reserved":              {"field belongs to Oberth or the native executor", "Remove this field or rename it outside the reserved names."},
 		"host":                  {"field grants access to the node", "Remove host access and use Pod-local storage, networking and containers."},
 		"patch":                 {"Pod patch can replace the assigned identity", "Remove podSpecPatch and declare native fields directly."},
+		"mutex_scope":           {"mutex is outside this repository", "Use a literal upstream/organization/repository/lock name for this repository, or an oberth-sync-limits semaphore."},
+		"mutex_namespace":       {"mutex is outside the pipeline namespace", "Omit the mutex namespace or set it to the pipeline namespace."},
 		"identity":              {"verified execution accounts are required", "Ask the operator to configure and verify the pipeline and resource accounts."},
 		"reference":             {"named namespaced template reference is required", "Use a literal namespaced templateRef and an existing named template."},
 		"cycle":                 {"shared template references contain a cycle", "Break the cycle containing a templateRef edge; local recursion is allowed."},

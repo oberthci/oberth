@@ -126,7 +126,7 @@ spec:
         annotations: {oberth.ci/secret-paths: oberth/data/release/github-token}
       inputs: *source-input
       synchronization:
-        mutexes: [{name: oberth-release-publication}]
+        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: release-publication}}]
       container:
         command: [/work/shared/oberth, secretstore, exec]
         args: [--, bash, hack/release.sh, publish]
@@ -146,7 +146,7 @@ spec:
         annotations: {oberth.ci/secret-paths: oberth/data/release/github-token}
       inputs: *source-input
       synchronization:
-        mutexes: [{name: oberth-release-publication}]
+        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: release-publication}}]
       container:
         command: [/work/shared/oberth, secretstore, exec]
         args: [--, bash, hack/release.sh, finalize]

@@ -365,17 +365,24 @@ func TestReleaseCredentialVolumes(t *testing.T) {
 	}
 }
 
-// Publication and latest marking of any two release runs never interleave:
-// both steps hold one native Argo mutex.
-func TestReleasePublicationStepsShareOneMutex(t *testing.T) {
+// Only one publication or latest-marking step runs at a time.
+func TestReleasePublicationStepsShareOneSemaphore(t *testing.T) {
 	wf, err := argoworkflow.Decode(ownWorkflow(t, "release"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	limits := pipelineResources(t, buildResourcesFile)["ConfigMap/oberth-sync-limits"]
+	if limits.Data["release-publication"] != "1" {
+		t.Fatal("publication semaphore must have capacity one")
+	}
 	for _, template := range wf.Spec.Templates {
-		locked := template.Synchronization != nil && len(template.Synchronization.Mutexes) == 1 && template.Synchronization.Mutexes[0].Name == "oberth-release-publication"
+		locked := false
+		if s := template.Synchronization; s != nil && len(s.Semaphores) == 1 {
+			sem := s.Semaphores[0]
+			locked = sem.Namespace == "" && sem.Database == nil && sem.ConfigMapKeyRef != nil && sem.ConfigMapKeyRef.Name == "oberth-sync-limits" && sem.ConfigMapKeyRef.Key == "release-publication"
+		}
 		if locked != (template.Name == "release-published-immutable" || template.Name == "latest-advanced-monotonic") {
-			t.Fatal("publication mutex differs", template.Name)
+			t.Fatal("publication semaphore differs", template.Name)
 		}
 	}
 }

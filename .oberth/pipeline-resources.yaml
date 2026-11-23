@@ -37,6 +37,7 @@ metadata:
   namespace: REPLACE_WITH_PIPELINE_NAMESPACE
 data:
   go: REPLACE_WITH_GO_PARALLELISM
+  release-publication: "1"
 ---
 apiVersion: v1
 kind: ConfigMap

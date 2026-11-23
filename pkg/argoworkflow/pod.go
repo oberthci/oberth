@@ -22,6 +22,9 @@ func (g *graph) synchronization(s *wfv1.Synchronization, where string) {
 	if s == nil {
 		return
 	}
+	for i, mutex := range s.Mutexes {
+		g.mutex(mutex, fmt.Sprintf("%s.mutexes[%d]", where, i))
+	}
 	for i, sem := range s.Semaphores {
 		if sem == nil {
 			continue
@@ -29,6 +32,20 @@ func (g *graph) synchronization(s *wfv1.Synchronization, where string) {
 		if sem.Database != nil || sem.Namespace != "" || sem.ConfigMapKeyRef == nil || sem.ConfigMapKeyRef.Name != "oberth-sync-limits" || !literal(sem.ConfigMapKeyRef.Key) {
 			g.refuse(fmt.Sprintf("%s.semaphores[%d]", where, i), "read")
 		}
+	}
+}
+func (g *graph) mutex(mutex *wfv1.Mutex, where string) {
+	if mutex == nil {
+		g.refuse(where, "mutex_scope")
+		return
+	}
+	// The slash terminates the exact catalogue repository, not a name prefix.
+	name, scoped := strings.CutPrefix(mutex.Name, g.request.Repository+"/")
+	if g.request.Repository == "" || !scoped || !literal(name) {
+		g.refuse(where+".name", "mutex_scope")
+	}
+	if mutex.Namespace != "" && mutex.Namespace != g.request.IdentityRequest.Namespace {
+		g.refuse(where+".namespace", "mutex_namespace")
 	}
 }
 func (g *graph) claims(claims []corev1.PersistentVolumeClaim, where string) {

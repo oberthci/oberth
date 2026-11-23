@@ -135,10 +135,10 @@ containers keep separate log selectors within native attempt evidence.
 - Refuse identity patches, host access, arbitrary Secret reads, reserved ownership
   metadata, executor names/volumes/env and ungranted credentials in every carrier,
   including defaults, inline calls and hooks. Preserve native placement, resources,
-  priority, retries, locks and optional deadlines. Semaphore reads stay in
-  same-namespace `oberth-sync-limits` to avoid data disclosure. No CPU math, capacity
-  queue, numeric resource grant, release lock or C4 run cap; the sole run cap belongs to
-  Argo globally.
+  priority, retries and optional deadlines. Mutex names must be literal
+  `<upstream>/<organization>/<repository>/<lock>` for the run's repository, in the pipeline namespace.
+  Semaphore reads stay in same-namespace `oberth-sync-limits`. No CPU math, capacity queue, numeric resource grant,
+  release lock or C4 run cap; the sole run cap belongs to Argo globally.
 - Validate exact grant audiences and main-only read-only token mounts. Projections
   expire in 600–3600 seconds; the store login token is mounted under the reserved
   `/run/oberth` root.
