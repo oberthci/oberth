@@ -12,7 +12,7 @@ import (
 
 func TestRepoAddRebindsExistingLocalAddresses(t *testing.T) {
 	for _, joined := range []bool{false, true} {
-		for _, shape := range []string{"main-ssh", "other-repository", "stale-pushurl"} {
+		for _, shape := range []string{"main-ssh", "other-repository", "stale-pushurl", "stale-known-hosts"} {
 			t.Run(shape+strconv.FormatBool(joined), func(t *testing.T) {
 				command, _ := bindingRepoCommand(t, joined)
 				git := rebindGit(t, &command, shape)
@@ -32,7 +32,7 @@ func TestRepoAddRebindsExistingLocalAddresses(t *testing.T) {
 }
 
 func TestJoinRebindsExistingLocalAddresses(t *testing.T) {
-	for _, shape := range []string{"main-ssh", "other-repository", "stale-pushurl"} {
+	for _, shape := range []string{"main-ssh", "other-repository", "stale-pushurl", "stale-known-hosts"} {
 		t.Run(shape, func(t *testing.T) {
 			command, _ := bindingRepoCommand(t, true)
 			git := rebindGit(t, &command, shape)
@@ -69,6 +69,13 @@ func rebindGit(t *testing.T, command *repoAddCommand, shape string) *bindingGit 
 	for _, setting := range settings {
 		if _, err := git.run(t.Context(), []string{"config", "--local", setting[0], setting[1]}); err != nil {
 			t.Fatal(err)
+		}
+	}
+	if shape == "stale-known-hosts" {
+		for _, path := range []string{"absent_hosts", "another_absent_hosts"} {
+			if _, err := git.run(t.Context(), []string{"config", "--local", "--add", "oberth.knownHosts", path}); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	return git
@@ -129,6 +136,9 @@ func installInheritedRemote(t *testing.T, git *bindingGit, scope, key string) {
 func assertReboundRemote(t *testing.T, git *bindingGit) {
 	t.Helper()
 	assertNativeBindingAddresses(t, git)
+	if value, err := git.run(t.Context(), []string{"config", "--local", "--get-all", "oberth.knownHosts"}); value != "" || err == nil {
+		t.Fatal("binding kept obsolete server trust configuration", value, err)
+	}
 	if names, err := git.run(t.Context(), []string{"remote"}); err != nil || names != "oberth" {
 		t.Fatal("preflight persisted another remote", names, err)
 	}

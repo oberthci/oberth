@@ -84,6 +84,9 @@ func (s *flowSession) bindGitRemote(repo, command string) error {
 			return err
 		}
 	}
+	if err := s.clearGitSetting("oberth.knownHosts"); err != nil {
+		return err
+	}
 	if err := s.clearGitSetting("remote.oberth.pushurl"); err != nil {
 		return err
 	}

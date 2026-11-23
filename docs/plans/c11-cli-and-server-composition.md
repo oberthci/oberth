@@ -140,7 +140,7 @@ dedicated `oberth` remote. Its pack commands use the server SSH endpoint saved
 by join, pinned by the Oberth server's SSH host keys that the selected profile saved at install or join (`--known-hosts` replaces them); without them `repo add` refuses and names `--known-hosts`, and join asks for a new invitation, and `~/.ssh/known_hosts` is never read. The forge's key is `--expected-host-fingerprint`, pinned by the server. `repo add` checks Git's effective fetch and push addresses and transport
 policy; a rewrite or policy that prevents the intended binding refuses with a
 remedy. It replaces or clears only configuration that `repo add` itself wrote,
-including its obsolete push URLs, and leaves a person's settings and every
+including its obsolete push URLs; `repo add` and join clear obsolete `oberth.knownHosts` settings, and leave a person's settings and every
 other remote unchanged. An administrator binding clears only the product's
 stale uplink binding.
 
