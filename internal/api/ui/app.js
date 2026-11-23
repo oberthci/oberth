@@ -301,16 +301,14 @@ function runScreen(view, id) {
 }
 function stepRows(view, steps, path, pane) {
  const rows = [];
- let group, box;
- for (const step of steps) {
-  if (step.parallel_group && step.parallel_group !== group) {
-   box = h("div", {class: "parallel-steps", "data-group": step.parallel_group});
-   rows.push(box);
-  }
-  group = step.parallel_group;
-  const row = stepRow(view, step, path, pane);
-  if (group) box.append(row);
-  else rows.push(row);
+ for (let start = 0; start < steps.length;) {
+  const group = steps[start].parallel_group;
+  let end = start + 1;
+  while (group && end < steps.length && steps[end].parallel_group === group) end++;
+  const items = steps.slice(start, end).map(step => stepRow(view, step, path, pane));
+  if (group && end - start > 1) rows.push(h("div", {class: "parallel-steps"}, h("span", {class: "parallel-rail", "aria-hidden": "true"}), ...items));
+  else rows.push(...items);
+  start = end;
  }
  return rows;
 }

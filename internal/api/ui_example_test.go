@@ -53,10 +53,10 @@ func uiExample(t *testing.T) *fixture {
 	end := at.Add(48 * time.Second)
 	sha := "1234567890abcdef1234567890abcdef12345678"
 	steps := []stepmodel.RunStep{
-		{Path: "z-checkout", Name: "checkout", Status: stepmodel.StepPassed, StartedAt: &at, FinishedAt: &end},
-		{Path: "y-build", Name: "install-release-support-and-golangci-lint", Status: stepmodel.StepPassed, CredentialIntent: true, StartedAt: &at, FinishedAt: &end},
-		{Path: "x-test", Name: "test", ParallelGroup: 1, Status: stepmodel.StepFailed, StartedAt: &at, FinishedAt: &end, AttemptCount: 2, DisplayReason: "test failed: exit 2", Detail: "The test command exited with code 2.", Attempts: []stepmodel.StepAttempt{{NodeID: "attempt-one", Status: stepmodel.StepFailed}, {NodeID: "attempt-two", Status: stepmodel.StepFailed}}, Logs: []stepmodel.LogSelector{{NodeID: "attempt-two", Container: "main"}}},
-		{Path: "w-publish", Name: "publish", ParallelGroup: 1, Status: stepmodel.StepPassed, StartedAt: &at, FinishedAt: &end},
+		{Path: "z-checkout", Name: "checkout", ParallelGroup: 1, Status: stepmodel.StepPassed, StartedAt: &at, FinishedAt: &end},
+		{Path: "y-build", Name: "install-release-support-and-golangci-lint", ParallelGroup: 1, Status: stepmodel.StepPassed, CredentialIntent: true, StartedAt: &at, FinishedAt: &end},
+		{Path: "x-test", Name: "test", ParallelGroup: 2, Status: stepmodel.StepFailed, StartedAt: &at, FinishedAt: &end, AttemptCount: 2, DisplayReason: "test failed: exit 2", Detail: "The test command exited with code 2.", Attempts: []stepmodel.StepAttempt{{NodeID: "attempt-one", Status: stepmodel.StepFailed}, {NodeID: "attempt-two", Status: stepmodel.StepFailed}}, Logs: []stepmodel.LogSelector{{NodeID: "attempt-two", Container: "main"}}},
+		{Path: "w-publish", Name: "publish", ParallelGroup: 2, Status: stepmodel.StepPassed, StartedAt: &at, FinishedAt: &end},
 	}
 	runs := []apicontract.RunRecord{
 		{RunSummary: stepmodel.RunSummary{ID: "11111111", Repo: "origin/team/api", Ref: "main", Status: stepmodel.RunPassed, CreatedAt: at, StartedAt: &at, FinishedAt: &end, CommitSHA: &sha, ObjectSHA: sha}, RunCause: model.RunCause{Actor: "owner", Trigger: model.TriggerPromotion}},

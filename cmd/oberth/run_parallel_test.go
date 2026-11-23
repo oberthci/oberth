@@ -16,6 +16,10 @@ func TestRunGetAndAgentBlockMarkParallelSteps(t *testing.T) {
 		{Path: "release-index", Name: "release-index", Status: stepmodel.StepFailed, ParallelGroup: 1},
 		{Path: "tools-dir", Name: "tools-dir", Status: stepmodel.StepPassed, ParallelGroup: 1},
 		{Path: "deprecations", Name: "deprecations", Status: stepmodel.StepPending, ParallelGroup: 1},
+		{Path: "unit", Name: "unit", Status: stepmodel.StepPassed, ParallelGroup: 2},
+		{Path: "lint", Name: "lint", Status: stepmodel.StepFailed, ParallelGroup: 2},
+		{Path: "docs", Name: "docs", Status: stepmodel.StepPending, ParallelGroup: 2},
+		{Path: "singleton", Name: "singleton", Status: stepmodel.StepPending, ParallelGroup: 3},
 		{Path: "finish", Name: "finish", Status: stepmodel.StepPending},
 	}}}
 	b := fake.Bindings()
@@ -32,9 +36,23 @@ func TestRunGetAndAgentBlockMarkParallelSteps(t *testing.T) {
 	if !ok || block != out.String() {
 		t.Fatal("agent display differs from run get", block, out.String())
 	}
-	for _, text := range []string{out.String(), block} {
-		if strings.Count(text, "│ ") != 3 || !strings.Contains(text, "│ tools-dir") || !strings.Contains(text, "│ release-index") || !strings.Contains(text, "│ deprecations") || strings.Contains(text, "│ profiles") || strings.Contains(text, "│ finish") {
-			t.Fatal("parallel step markers lost", text)
+	assertParallelMarks(t, out.String())
+	assertParallelMarks(t, block)
+}
+
+func assertParallelMarks(t *testing.T, text string) {
+	t.Helper()
+	for _, mark := range []string{"┌ ", "│ ", "└ "} {
+		if strings.Count(text, mark) != 2 {
+			t.Fatal("group ends lost", text)
 		}
+	}
+	for _, marked := range []string{"┌ release-index", "│ tools-dir", "└ deprecations", "┌ unit", "│ lint", "└ docs"} {
+		if !strings.Contains(text, marked) {
+			t.Fatal("wrong group boundary", marked, text)
+		}
+	}
+	if strings.Contains(text, "│ singleton") || strings.Contains(text, "┌ singleton") || strings.Contains(text, "└ singleton") {
+		t.Fatal("singleton grouped", text)
 	}
 }

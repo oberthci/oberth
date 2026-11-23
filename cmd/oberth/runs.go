@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -104,16 +103,13 @@ func commandWord(value string) string {
 
 func renderSteps(out io.Writer, steps []any, detail bool) error {
 	rows := [][]string{{"STEP", "STATUS", "REASON"}}
-	for _, value := range steps {
+	marks := parallelMarks(steps)
+	for index, value := range steps {
 		step, ok := value.(map[string]any)
 		if !ok {
 			return fmt.Errorf("invalid step row")
 		}
-		name := stepName(step)
-		number, _ := step["parallel_group"].(json.Number)
-		if group, _ := number.Int64(); group > 0 {
-			name = "│ " + name
-		}
+		name := marks[index] + stepName(step)
 		rows = append(rows, []string{name, publicText(step["status"]), publicText(step["display_reason"])})
 	}
 	if err := renderTable(out, rows); err != nil {
