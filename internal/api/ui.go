@@ -35,7 +35,7 @@ func (s *Server) serveUIOrAPI(w http.ResponseWriter, r *http.Request) {
 
 func loadUI() (uiBundle, error) {
 	b := uiBundle{assets: make(map[string]uiAsset)}
-	for name, kind := range map[string]string{"app.js": "text/javascript; charset=utf-8", "log.js": "text/javascript; charset=utf-8", "issues.js": "text/javascript; charset=utf-8", "app.css": "text/css; charset=utf-8"} {
+	for name, kind := range map[string]string{"app.js": "text/javascript; charset=utf-8", "log.js": "text/javascript; charset=utf-8", "issues.js": "text/javascript; charset=utf-8", "run.js": "text/javascript; charset=utf-8", "app.css": "text/css; charset=utf-8"} {
 		body, err := uiFiles.ReadFile("ui/" + name)
 		if err != nil {
 			return b, err

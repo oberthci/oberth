@@ -26,7 +26,7 @@ func uiRequest(f *fixture, path string) *httptest.ResponseRecorder {
 }
 
 // uiScripts are the page's scripts, app.js first so its copy catalogue leads the sources.
-func uiScripts() []string { return []string{"app.js", "log.js", "issues.js"} }
+func uiScripts() []string { return []string{"app.js", "log.js", "issues.js", "run.js"} }
 
 // Each script and the stylesheet stay under the 500-line file budget.
 func TestUIAssetsStayWithinTheFileBudget(t *testing.T) {

@@ -130,16 +130,15 @@ a.row:focus-visible { outline-offset: -2px; }
 .run-reason .failed-step { margin-right: 8px; }
 .run-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; font-size: 11px; }
 .run-metadata, .identity { display: flex; align-items: center; white-space: nowrap; }
+.run-metadata { min-width: 0; column-gap: 6px; }
+.run-metadata > * { flex-shrink: 0; }
+.run-metadata > .identity::before { content: "·"; }
+.run-metadata.only-ref .run-ref { flex-shrink: 1; white-space: normal; overflow-wrap: anywhere; }
 .identity { gap: 6px; margin: 0; font-size: inherit; color: var(--muted); }
 .run-meta details { display: contents; }
 .run-meta summary { grid-column: 2; font-size: inherit; line-height: inherit; }
 .run-meta details > :not(summary) { grid-column: 1 / -1; white-space: pre-wrap; overflow-wrap: anywhere; }
-.run-meta details > a { display: none; }
 .run-head + .toolbar:empty { display: none; }
-@media (max-width: 999px) {
- .run-meta .meta-extra { display: none; }
- .run-meta details[open] > a { display: block; }
-}
 .run-layout { display: grid; grid-template-columns: 22rem minmax(0, 1fr); gap: 16px; margin-top: 14px; }
 .steps { padding: 6px 0 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .steps-head { margin: 0; padding: 7px 14px 8px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }

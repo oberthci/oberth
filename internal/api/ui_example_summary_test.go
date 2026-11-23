@@ -24,7 +24,7 @@ func exampleSummaryRuns(t *testing.T, base apicontract.RunRecord) apicontract.Ha
 	store.SeedRepository(stateport.Repository{ID: 1, Upstream: "origin", Name: "web", Canonical: base.Repo})
 	for i, status := range []stepmodel.RunStatus{stepmodel.RunQueued, stepmodel.RunRunning, stepmodel.RunPassed, stepmodel.RunFailed, stepmodel.RunCancelled} {
 		for _, specific := range []bool{false, true} {
-			run := stateport.Run{RunSummary: base.RunSummary.Clone(), Origin: model.RunOrigin{RunCause: base.RunCause}}
+			run := stateport.Run{RunSummary: base.Clone(), Origin: model.RunOrigin{RunCause: base.RunCause}}
 			run.ID, run.Status, run.DisplayReason = fmt.Sprintf("a%030x%d", i, 0), status, ""
 			if specific {
 				run.ID, run.DisplayReason = fmt.Sprintf("b%030x%d", i, 0), "waiting for a node"
