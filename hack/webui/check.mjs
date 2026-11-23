@@ -12,18 +12,20 @@ import {liveness} from './liveness.mjs';
 import {startingRun} from './starting-run.mjs';
 import {progress} from './progress.mjs';
 import {runRows} from './run-rows.mjs';
+import {containersFit} from './containers.mjs';
 
 let client;
 try {
  client=await launch();
  step('browser behavior assertions');
  const only=process.argv.find(arg=>arg.startsWith('--only='))?.slice(7);
- if(only)check(['starting-run','liveness','run-header','run-rows','progress'].includes(only),'unknown browser check '+only);
+ if(only)check(['starting-run','liveness','run-header','run-rows','containers','progress'].includes(only),'unknown browser check '+only);
  const result={};
  if(!only||only==='starting-run'){result.startingRun=[];for(const path of ['prepare',''])result.startingRun.push(await startingRun(client,path));}
  if(!only||only==='progress')result.progress=await progress();
  if(!only||only==='liveness')result.liveness=await liveness(client);
  if(only==='run-header')result.runHeader=await runHeader(client);
+ if(!only||only==='containers')result.containers=await containersFit(client);
  if(!only||only==='run-rows')result.runRows=await runRows(client);
  if(!only)result.behavior=await behavior(client);
  if(!only){step('selected workflow views');result.selectedWorkflow=await selectedWorkflow(client);}
