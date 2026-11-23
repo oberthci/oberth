@@ -70,8 +70,8 @@ branch-name parameter and never becomes shell source.
 
 Use Argo steps, DAG dependencies, retries, synchronization and `activeDeadlineSeconds`.
 `oberth-sync-limits` keys are installation-wide and shared by all repositories.
-Mutex names are literal, e.g. `forge/team/app/publish`, for the exact repository. Omit the namespace
-for both lock kinds. Defaults and shared/inline templates follow this rule; names stay unchanged.
+Use literal `upstream/org/repo/lock` for your repository, e.g. `forge/team/app/publish`.
+Namespaces must be omitted, including in defaults and shared/inline templates; names stay unchanged.
 Oberth adds no ordering or capacity queue. Retries are step attempts; reruns are new runs.
 Memory limits are bounds; check OOM/eviction. `oberth lock status`: holders, waiters, `stale` runs.
 The single run cap is Argo `parallelism`, set by `runs.parallel` (default 4; 0 unlimited).

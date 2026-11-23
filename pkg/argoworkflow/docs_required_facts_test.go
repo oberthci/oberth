@@ -85,4 +85,7 @@ func TestDocumentationStatesSynchronizationScope(t *testing.T) {
 	if !strings.Contains(text, "`oberth-sync-limits` keys are installation-wide and shared by all repositories.") {
 		t.Fatal("pipeline guide omits the shared synchronization scope")
 	}
+	if !strings.Contains(text, "Use literal `upstream/org/repo/lock` for your repository, e.g. `forge/team/app/publish`.") {
+		t.Fatal("pipeline guide omits the mutex form beside its example")
+	}
 }
