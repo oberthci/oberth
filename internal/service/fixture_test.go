@@ -179,7 +179,7 @@ func (f *fixture) setupMoving(t *testing.T) {
 	f.holds = &testHolds{Stop: func(context.Context, stateport.Run, model.LiveHold) error { return nil }, Execute: func(context.Context, stateport.Run, model.LiveHold, apicontract.RunHoldExecArgs) (apicontract.ExecResult, error) {
 		return apicontract.ExecResult{}, nil
 	}}
-	f.c.Publications, f.c.Promotions, f.c.MovingGit = f.store, f.store, ports.MovingGitFuncs{RemoteRefFunc: f.moving.RemoteRef, PreparePromotionFunc: f.moving.PreparePromotion, PublishFunc: f.moving.Publish}
+	f.c.Publications, f.c.Promotions, f.c.MovingGit = f.store, f.store, ports.MovingGitFuncs{ObservedRefFunc: f.moving.RemoteRef, RemoteRefFunc: f.moving.RemoteRef, PreparePromotionFunc: f.moving.PreparePromotion, PublishFunc: f.moving.Publish}
 	f.c.HoldStore, f.c.Holds = f.store, ports.HoldExecFuncs{ListFunc: f.holds.List, AbandonFunc: f.holds.Abandon, ExecFunc: f.holds.Exec}
 	f.c.AfterFunc, f.c.NewID = f.timers.After, f.nextID
 	f.c.Now = func() time.Time { return at().Add(time.Duration(f.offset.Load())) }

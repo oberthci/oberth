@@ -108,6 +108,10 @@ func (c *Cache) remoteRef(ctx context.Context, p string, r Remote, ref string) (
 	if err != nil {
 		return gitport.Ref{}, err
 	}
+	return parseRemoteRef(data, ref)
+}
+
+func parseRemoteRef(data []byte, ref string) (gitport.Ref, error) {
 	var result gitport.Ref
 	for _, line := range strings.Split(string(data), "\n") {
 		f := strings.Fields(line)

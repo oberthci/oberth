@@ -214,9 +214,10 @@ func (f *composedFixture) storeOptions() store.Options {
 // composeForge fakes only the forge: its SSH endpoint runs the real Git pack
 // commands against an independent bare repository and joins them at teardown.
 type composedForge struct {
-	address string
-	key     ssh.PublicKey
-	config  *atomic.Pointer[ssh.ServerConfig]
+	address  string
+	key      ssh.PublicKey
+	config   *atomic.Pointer[ssh.ServerConfig]
+	sessions *atomic.Int64
 }
 
 func composeForge(t *testing.T, g *gittest.Fixture) composedForge {
@@ -241,6 +242,7 @@ func composeForge(t *testing.T, g *gittest.Fixture) composedForge {
 	ctx, cancel := context.WithCancel(t.Context())
 	var workers sync.WaitGroup
 	stopped := make(chan struct{})
+	sessions := &atomic.Int64{}
 	go func() {
 		defer close(stopped)
 		for {
@@ -248,11 +250,12 @@ func composeForge(t *testing.T, g *gittest.Fixture) composedForge {
 			if err != nil {
 				return
 			}
+			sessions.Add(1)
 			workers.Go(func() { composeForgeSession(ctx, conn, configuration.Load(), g) })
 		}
 	}()
 	t.Cleanup(func() { cancel(); _ = listener.Close(); <-stopped; workers.Wait() })
-	return composedForge{address: listener.Addr().String(), key: key, config: configuration}
+	return composedForge{address: listener.Addr().String(), key: key, config: configuration, sessions: sessions}
 }
 func composeForgeSession(ctx context.Context, conn net.Conn, cfg *ssh.ServerConfig, g *gittest.Fixture) {
 	defer conn.Close()

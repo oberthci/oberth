@@ -37,7 +37,8 @@ func TestForgeOutageBranchPushStartsExactRun(t *testing.T) {
 	if err != nil {
 		t.Fatal("forge outage stopped CI", err, out)
 	}
-	if strings.Count(out, gitport.ForgeCacheNotice) != 1 || strings.Contains(out, "fatal:") || strings.Contains(out, "server's own forge link") {
+	// A topic receive reads no forge state, so it cannot report a live outage.
+	if strings.Contains(out, gitport.ForgeCacheNotice) || strings.Contains(out, "fatal:") || strings.Contains(out, "server's own forge link") {
 		t.Fatal("wrong outage feedback", out)
 	}
 	run := f.waitRun(t, func(r stateport.Run) bool { return r.Origin.WorkflowUID != "" })

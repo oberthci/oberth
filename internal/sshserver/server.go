@@ -13,7 +13,6 @@ import (
 type Identity struct {
 	Actor, Fingerprint string
 	CanAccess          func(string) bool
-	AlwaysRun          bool
 }
 type Session struct {
 	Identity            Identity

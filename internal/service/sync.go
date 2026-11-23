@@ -37,11 +37,23 @@ func (s *Service) syncIntent(ctx context.Context, a actor.Actor, q apicontract.S
 	if r.Archived {
 		return model.Publication{}, archivedRepository(r.Canonical)
 	}
+	ref := q.Branch
+	if ref == "" {
+		return model.Publication{}, bad("branch")
+	}
+	if !strings.HasPrefix(ref, "refs/") {
+		ref = "refs/heads/" + ref
+	}
+	// Take the lease before syncHead's read can refresh the cache.
+	previous, err := s.publicationPredecessor(ctx, r.Canonical, ref)
+	if err != nil {
+		return model.Publication{}, err
+	}
 	head, err := s.syncHead(ctx, r.Canonical, q)
 	if err != nil {
 		return model.Publication{}, err
 	}
-	ref := head.Name
+	ref = head.Name
 	rows, err := s.c.Runs.Runs(ctx, stateport.RunFilter{Repositories: []string{r.Canonical}, Ref: ref, Limit: 1})
 	if err != nil {
 		return model.Publication{}, err
@@ -49,7 +61,7 @@ func (s *Service) syncIntent(ctx context.Context, a actor.Actor, q apicontract.S
 	if len(rows) > 0 && (rows[0].Release || rows[0].Origin.Trigger != model.TriggerBranch || (rows[0].Origin.HasAssistance())) {
 		return model.Publication{}, refuse(syncProtected)
 	}
-	p := model.Publication{ID: s.c.NewID(), Repo: r.Canonical, Ref: ref, ObjectSHA: q.SHA, CommitSHA: new(q.SHA), Actor: a.Identity}
+	p := model.Publication{ID: s.c.NewID(), Repo: r.Canonical, Ref: ref, ObjectSHA: q.SHA, CommitSHA: new(q.SHA), PreviousSHA: new(previous.ObjectSHA), Actor: a.Identity}
 	return p, nil
 }
 

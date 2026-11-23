@@ -137,17 +137,8 @@ func (o *serverOwners) receive(ctx context.Context, e gitcache.ReceiveEvent, sou
 	return r, nil
 }
 func (o *serverOwners) gate(ctx context.Context, e gitcache.ReceiveEvent, s *gitcache.ReceiveSource) error {
-	for _, update := range e.Updates {
-		if update.Ref == o.settings.DefaultBranch || strings.HasPrefix(update.Ref, "refs/tags/") {
-			if err := o.cache.DefaultHead(ctx, e.Repository); err != nil {
-				var empty *gitport.EmptyRepositoryError
-				if errors.As(err, &empty) && update.Ref == o.settings.DefaultBranch && update.NewSHA != "" {
-					continue
-				}
-				return err
-			}
-			break
-		}
+	if err := o.checkReceiveHead(ctx, e, s); err != nil {
+		return err
 	}
 	r, err := o.receive(ctx, e, s)
 	if err != nil {
@@ -156,6 +147,27 @@ func (o *serverOwners) gate(ctx context.Context, e gitcache.ReceiveEvent, s *git
 	r.Forge = s
 	_, err = o.wiring.Gate(ctx, r)
 	return err
+}
+
+func (o *serverOwners) checkReceiveHead(ctx context.Context, e gitcache.ReceiveEvent, s *gitcache.ReceiveSource) error {
+	hasTag := false
+	for _, update := range e.Updates {
+		if update.Ref == o.settings.DefaultBranch {
+			err := s.CheckDefaultPush(ctx, update)
+			var empty *gitport.EmptyRepositoryError
+			if errors.As(err, &empty) && update.NewSHA != "" {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+		}
+		hasTag = hasTag || strings.HasPrefix(update.Ref, "refs/tags/")
+	}
+	if hasTag {
+		return o.cache.DefaultHead(ctx, e.Repository)
+	}
+	return nil
 }
 func (o *serverOwners) deliver(ctx context.Context, e gitcache.ReceiveEvent) ([]string, error) {
 	if err := o.receiveDeliveryAuthority(ctx, e); err != nil {

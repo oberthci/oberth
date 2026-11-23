@@ -262,7 +262,7 @@ repositories. A manual schedule trigger uses ordinary admission; force bypasses 
   tags are creation-only and retain raw tag identity. Default/reserved branch deletion
   refuses. Current control-plane bounds stay: 256 updates/receive, 4096 public refs,
   255-byte ref suffix. Bounded deletion recovery and invalid-ref sanitation remain
-  safety behavior. These receive bounds are distinct from source-history export limits.
+  safety behavior. These receive bounds are distinct from source-history export limits. Topic pushes use cached state without a session refresh; default pushes always reach the gate and check the live forge head and fast-forward ancestry. Own pins read the live default head when the cached head is outside its trust window. Topic publication and sync lease the tracked forge head before a new read can advance it; a deliberate topic rewrite may replace that head. A missing topic is publishable only after the forge proves its default head exists; a topic cannot seed an empty forge.
 
 - Older branch results cannot overwrite a newer mirror head. Branch head check and
   publication share the repository lock; branch force-sync is an explicit existing

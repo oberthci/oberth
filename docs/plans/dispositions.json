@@ -9396,11 +9396,11 @@
     "docs/plans/c12-agent-client.md": "1839b17c036fa9a854df8097a076a712f84c9660b1945f029d5ae9efe728ddac",
     "docs/plans/c13-own-pipelines.md": "3264a0141755c9fc9b736ad06cc1589d23d855a1c0b51dced00d304a574db790",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
-    "docs/plans/c2-service-actions-and-history.md": "0d1544252d63033bf5583250cc347535cb83079b9e2f4fe021119f499ca45a3c",
-    "docs/plans/c3-wiring-and-submission.md": "2bda8b25776d7f78706a4f57316c82e3ccb7434a42c67f96bcb762f2c8b36a47",
+    "docs/plans/c2-service-actions-and-history.md": "5063c992c1b58cf5eb79f888a7f6ab13269c4353104df6b0557e1a4a982ddeb4",
+    "docs/plans/c3-wiring-and-submission.md": "94055286b7031b1604f326ca42b51240445b1a8b875384478f859cd68c688db7",
     "docs/plans/c4-admission-rules-and-plan.md": "d7c2a5a09ea28c71d5aa853d41db1e0f952cf1701ef8011e4d5db7b9b49f042a",
     "docs/plans/c5-native-execution.md": "f3ad4a361270e5fd47078a07a6e4e55dd99f76a8686c5e6f5b988092a24a8c38",
-    "docs/plans/c6-source-delivery.md": "a3846f5f32189988bc2135ff72d4db6cce88d68ed675df116e508bb84f29e113",
+    "docs/plans/c6-source-delivery.md": "2d523b04bda961c75aad98060d47de04cc7db05be06644a2fea3902fa1be29ab",
     "docs/plans/c7-durable-state.md": "62094b0475735bd2427ee573807cdc767a45befdaa86a0472f6587629d537361",
     "docs/plans/c8-logs.md": "e7e04d0a411011160a2f5cb9d885b7dbd6c55503452f5849a5b0557df4f67b63",
     "docs/plans/c9-install-and-upgrade.md": "39f45e5ac7d3f42393df0e930047ac078b8a235fa225cb349b440b0d5de7280b"
@@ -10929,7 +10929,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "| **Delta:** Sync | Publish only the exact current mirror head of one named non-default branch, including parked branches. Refuse default, internal promotion/release refs and ambiguous selectors. |",
+      "basis": "| **Delta:** Sync | Publish only the exact current mirror head of one named non-default branch, including parked branches. Capture the tracked forge predecessor before resolving the mirror can refresh it, and persist that lease with the intent. Refuse default, internal promotion/release refs and ambiguous selectors. |",
       "rows": [
         {
           "category": "MCP tools",
@@ -13580,7 +13580,7 @@
         "**Delta:**"
       ],
       "spec": "docs/plans/c7-durable-state.md:101",
-      "basis": "**Delta:** The grants baseline is schema 5, with only current records, constraints and query indexes and no configured release-role records. A layout pin for each schema number preserves its baseline digest; changing the layout requires a new number. Do not transplant the migration catalog. Future migrations keep immutable IDs, transactional receipts and unknown-ID refusal, including when numeric counts match. Daemon/admin open requires the exact supported schema; explicit creation and maintenance remain distinct. Opening a missing admin database must never create one."
+      "basis": "A layout pin for each schema number preserves its baseline digest; changing the layout requires a new number."
     },
     {
       "spec": "docs/plans/c7-durable-state.md:161",

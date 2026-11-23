@@ -43,8 +43,7 @@ func (o *serverOwners) sshIdentity(ctx context.Context, key ssh.PublicKey) (sshs
 		}
 		return sshserver.Identity{}, err
 	}
-	policy, err := (currentAuthority{o}).KeyPolicy(ctx, who)
-	return sshserver.Identity{Actor: who.Identity, Fingerprint: who.Fingerprint, CanAccess: who.CanTouchRepository, AlwaysRun: !policy.Agent}, err
+	return sshserver.Identity{Actor: who.Identity, Fingerprint: who.Fingerprint, CanAccess: who.CanTouchRepository}, nil
 }
 func (o *serverOwners) gitSession(ctx context.Context, s sshserver.Session) error {
 	who, err := (currentAuthority{o}).byFingerprint(ctx, s.Identity.Fingerprint, "ssh")
@@ -71,14 +70,11 @@ func (o *serverOwners) gitSession(ctx context.Context, s sshserver.Session) erro
 	if err != nil {
 		return err
 	}
-	if err := o.cache.RefreshRead(ctx, s.Command.Repository, s.Diagnostics); err != nil {
-		return err
-	}
 	head, err := o.receiveHead(ctx, s.Command.Repository)
 	if err != nil {
 		return err
 	}
-	return o.cache.Receive(ctx, gitcache.ReceiveRequest{Repository: s.Command.Repository, Actor: who.Identity, Fingerprint: who.Fingerprint, AllowDefault: !policy.Agent, AlwaysRun: s.Identity.AlwaysRun, Admission: gitcache.ReleaseAdmission{DefaultBranch: head.Name, SHA: head.CommitSHA}, Input: s.Input, Output: s.Output, Diagnostics: s.Diagnostics, Begin: s.Begin, End: s.End, Deliver: o.deliver})
+	return o.cache.Receive(ctx, gitcache.ReceiveRequest{Repository: s.Command.Repository, Actor: who.Identity, Fingerprint: who.Fingerprint, AllowDefault: !policy.Agent, AlwaysRun: !policy.Agent, Admission: gitcache.ReleaseAdmission{DefaultBranch: head.Name, SHA: head.CommitSHA}, Input: s.Input, Output: s.Output, Diagnostics: s.Diagnostics, Begin: s.Begin, End: s.End, Deliver: o.deliver})
 }
 
 func (o *serverOwners) receiveHead(ctx context.Context, repository string) (gitport.Ref, error) {

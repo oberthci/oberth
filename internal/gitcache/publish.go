@@ -216,6 +216,7 @@ func (c *Cache) checkIntentAncestry(ctx context.Context, p string, r model.Publi
 	}
 	return nil
 }
+
 func (c *Cache) checkAcceptedIntent(ctx context.Context, p string, r model.Publication) error {
 	local, err := c.resolve(ctx, p, r.Repo, r.Ref)
 	if err != nil && !isAbsent(err) {

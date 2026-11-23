@@ -185,6 +185,13 @@ func publicationBranchCases() []publicationCase {
 			p.predecessor(p.f.Commit)
 			p.f.Git(t, p.f.Store(), "update-ref", p.intent.Ref, p.unrelated)
 		}},
+		{name: "run branch exact rewrite", class: "ok", change: func(t *testing.T, p *publishFixture) {
+			p.intent.RunID = "run"
+			p.upstream(t, p.f.Commit)
+			p.object(p.unrelated)
+			p.predecessor(p.f.Commit)
+			p.f.Git(t, p.f.Store(), "update-ref", p.intent.Ref, p.unrelated)
+		}},
 		{name: "runless deletion", class: "ok", change: func(t *testing.T, p *publishFixture) {
 			p.upstream(t, p.f.Commit)
 			p.predecessor(p.f.Commit)

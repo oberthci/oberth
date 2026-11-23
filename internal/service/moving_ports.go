@@ -34,6 +34,7 @@ type PromotionStore interface {
 
 // MovingGit owns single-source preparation and exact fenced publication/read-back.
 type MovingGit interface {
+	ObservedRef(context.Context, string, string) (gitport.Ref, error)
 	RemoteRef(context.Context, string, string) (gitport.Ref, error)
 	PreparePromotion(context.Context, gitport.PromotionRequest) (gitport.Promotion, error)
 	Publish(context.Context, model.Publication) (gitport.PublicationReceipt, error)

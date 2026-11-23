@@ -11,11 +11,12 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/gitcache/gittest"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/stateport"
 	"golang.org/x/crypto/ssh"
 )
 
-func TestAdministratorTopicPushRefusesDeletedDefault(t *testing.T) {
+func TestAdministratorTopicPublicationRefusesDeletedDefault(t *testing.T) {
 	f := composeFixture(t, composeBinary(t))
 	f.prepareCommit(t)
 	f.prepareAdministrator(t)
@@ -34,17 +35,31 @@ func TestAdministratorTopicPushRefusesDeletedDefault(t *testing.T) {
 	}
 	f.git.Git(t, f.git.Bare, "update-ref", "refs/heads/existing", "refs/heads/main")
 	f.git.Git(t, f.git.Bare, "update-ref", "-d", "refs/heads/main")
+	forgeRefs := f.git.Git(t, f.git.Bare, "for-each-ref", "--format=%(refname) %(objectname)")
 	f.git.Write(t, "topic.txt", []byte("new topic\n"))
 	f.git.CommitFile(t, "topic after default deletion")
 	store := filepath.Join(filepath.Dir(f.config.DatabaseFile), "git", "origin", "team", "widget.git")
 	gittest.ExpireRefresh(t, store)
-	if output, err := f.pushResult(t, "refs/heads/topic"); err == nil || !strings.Contains(output, "upstream default branch was deleted") {
-		t.Fatal("topic push admitted without a default head", err, output)
+	// A cached topic receive cannot discover a later forge deletion. The live
+	// publication check must still refuse it, including an administrator's run.
+	before := f.forge.sessions.Load()
+	if output, err := f.pushResult(t, "refs/heads/topic"); err != nil {
+		t.Fatal("cached topic push refused before CI", err, output)
 	}
-	if refs := f.git.Git(t, store, "for-each-ref", "--format=%(refname)", "refs/heads/topic"); refs != "" {
-		t.Fatal("refused topic was accepted", refs)
+	if f.forge.sessions.Load() != before {
+		t.Fatal("cached topic receive consulted the forge")
 	}
-	if runs, err := f.owners.c.store.Runs(t.Context(), stateport.RunFilter{Limit: 2}); err != nil || len(runs) != 0 {
-		t.Fatal("refused topic started CI", runs, err)
+	run := f.waitRun(t, func(r stateport.Run) bool { return r.Origin.WorkflowUID != "" })
+	f.sourcePod(t, run)
+	f.finishNative(t, run)
+	publication := f.waitPublicationSettled(t, "publication:"+run.ID)
+	if publication.Status != model.PublicationFailed || !strings.Contains(publication.Detail, "upstream default branch was deleted") {
+		t.Fatal("topic publication did not refuse the deleted default", publication)
+	}
+	if refs := f.git.Git(t, f.git.Bare, "for-each-ref", "--format=%(refname)", "refs/heads/topic"); refs != "" {
+		t.Fatal("refused topic reached the forge", refs)
+	}
+	if refs := f.git.Git(t, f.git.Bare, "for-each-ref", "--format=%(refname) %(objectname)"); refs != forgeRefs {
+		t.Fatal("topic publication changed existing forge history", refs)
 	}
 }

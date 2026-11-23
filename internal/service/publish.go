@@ -171,7 +171,7 @@ func (s *Service) pushAttempt(ctx context.Context, p model.Publication) (string,
 	if p.PreviousSHA == nil {
 		previous := ""
 		if !strings.HasPrefix(p.Ref, "refs/tags/") {
-			ref, readErr := s.remoteRef(ctx, p.Repo, p.Ref)
+			ref, readErr := s.publicationPredecessor(ctx, p.Repo, p.Ref)
 			if readErr != nil {
 				return "", s.settle(ctx, p, readErr)
 			}
@@ -200,6 +200,25 @@ func (s *Service) pushAttempt(ctx context.Context, p model.Publication) (string,
 	}
 	return "", s.settle(ctx, p, err)
 }
+
+// Topic rewrites lease the forge value the cache already knew. A fresh live
+// read may discover someone else's commit and cannot authorize replacing it.
+func (s *Service) publicationPredecessor(ctx context.Context, repo, ref string) (gitport.Ref, error) {
+	branch, err := s.c.Source.DefaultBranch(ctx, repo)
+	if err != nil {
+		return gitport.Ref{}, err
+	}
+	if ref == branch {
+		return s.remoteRef(ctx, repo, ref)
+	}
+	head, err := s.c.MovingGit.ObservedRef(ctx, repo, ref)
+	var absent *gitport.AbsentError
+	if errors.As(err, &absent) {
+		return gitport.Ref{Name: ref}, nil
+	}
+	return head, err
+}
+
 func (s *Service) remoteRef(ctx context.Context, repo, ref string) (gitport.Ref, error) {
 	v, err := s.c.MovingGit.RemoteRef(ctx, repo, ref)
 	var absent *gitport.AbsentError
