@@ -11,6 +11,14 @@ import (
 // the Workflows the pinned controller leaves when a run holding locks is cancelled.
 const cancelledLocksFixture = "../../internal/argojob/testdata/cancelled-locks.json"
 
+func TestQueuedCancellationUsesPinnedShutdownSemantics(t *testing.T) {
+	command := controllerFixture.Command(controllerContext(t), t, "-test.count=1", "-test.timeout=180s", "-test.run=^TestOberthQueuedCancellationNeverStartsWork$", "-test.v")
+	command.Env = append(os.Environ(), "TMPDIR="+os.Getenv("GOTMPDIR"))
+	if raw, err := controllerOutput(command); err != nil {
+		t.Fatalf("queued cancellation: %v\n%s", err, raw)
+	}
+}
+
 func TestCancelledRunLockFixtureIsThePinnedControllerWrite(t *testing.T) {
 	t.Parallel()
 	directory := os.Getenv("OBERTH_CONTROLLER_OUTPUT")

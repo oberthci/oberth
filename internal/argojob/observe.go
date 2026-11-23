@@ -20,6 +20,7 @@ type Runs interface {
 	Runs(context.Context, stateport.RunFilter) ([]stateport.Run, error)
 	Steps(context.Context, string) ([]stepmodel.RunStep, error)
 	BindWorkflow(context.Context, stateport.Action, nativebinding.RunBinding) error
+	Obligations(context.Context, string) ([]stateport.Obligation, error)
 }
 
 // ProgressStore retains the native projection and raw evidence without control revisions.

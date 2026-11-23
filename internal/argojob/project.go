@@ -187,16 +187,11 @@ func runDetail(w *wf.Workflow) string {
 // runVerdict is the verdict of a finished Workflow. An unfinished one has
 // none: its queued or running status comes from stepmodel.Progress alone.
 func runVerdict(w *wf.Workflow) (stepmodel.RunStatus, string) {
-	if w.Status.Phase == wf.WorkflowSucceeded {
-		// Terminate releases a Workflow still pending on a workflow-level lock
-		// by marking it Succeeded; its entry node never succeeded.
-		if root, ok := w.Status.Nodes[w.Name]; w.Spec.Shutdown != "" && (!ok || root.Phase != wf.NodeSucceeded) {
-			return stepmodel.RunCancelled, reasonStopped
-		}
-		return stepmodel.RunPassed, reasonPassed
-	}
-	if w.Spec.Shutdown != "" {
+	if w.Spec.Shutdown.Enabled() {
 		return stepmodel.RunCancelled, reasonStopped
+	}
+	if w.Status.Phase == wf.WorkflowSucceeded {
+		return stepmodel.RunPassed, reasonPassed
 	}
 	return stepmodel.RunFailed, reasonRunFailed
 }
@@ -241,8 +236,12 @@ func finishProjection(out *Observation, w *wf.Workflow, rows []projected) {
 		return
 	}
 	out.Status, out.Reason = runVerdict(w)
-	if out.Status == stepmodel.RunCancelled && out.Failure != nil && out.Failure.Class != stepmodel.FailureCancelled {
-		out.Status = stepmodel.RunFailed
+	if out.Status == stepmodel.RunCancelled {
+		if out.Failure == nil {
+			out.Failure = &stepmodel.FailureRecord{}
+		}
+		out.Failure.Class = stepmodel.FailureCancelled
+		out.Failure.Retry = stepmodel.RetryHint{Action: stepmodel.RetryNone, ReasonCode: "cancelled"}
 	}
 	if out.Status == stepmodel.RunPassed {
 		out.Failure = nil

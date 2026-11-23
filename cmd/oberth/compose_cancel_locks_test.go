@@ -85,16 +85,16 @@ func (f *composedFixture) checkCancelledLockStatus(t *testing.T, run stateport.R
 	}
 }
 
-// cancelStillRunning cancels through the command line: the Workflow is
-// stopped and the run stays running until the Workflow itself ends.
+// cancelStillRunning cancels through the command line; the run stays queued
+// until its Workflow ends because no step has been observed running.
 func (f *composedFixture) cancelStillRunning(t *testing.T, run stateport.Run) {
 	t.Helper()
 	app, out, diagnostic := f.revokeApplication(t)
 	if code := app.run(t.Context(), []string{"run", "cancel", run.ID, "--reason", "free the lock"}); code != 0 {
 		t.Fatal("cancel failed", code, out.String(), diagnostic.String())
 	}
-	if f.nativeWorkflow(t, run).Spec.Shutdown != wf.ShutdownStrategyStop {
-		t.Fatal("cancel did not stop the Workflow")
+	if f.nativeWorkflow(t, run).Spec.Shutdown != wf.ShutdownStrategyTerminate {
+		t.Fatal("queued cancel did not terminate the Workflow")
 	}
 	if r, err := f.owners.c.store.Run(t.Context(), run.ID); err != nil || r.Status != stepmodel.RunQueued {
 		t.Fatal("run reported ended before its Workflow ended", r.Status, err)

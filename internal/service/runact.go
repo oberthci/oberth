@@ -43,7 +43,7 @@ func (s *Service) prepareCancel(ctx context.Context, a actor.Actor, q runAction)
 	if releaseLike(r) && !q.Force {
 		return nil, refuse(forceRequired)
 	}
-	input := stateport.RunCancellation{ID: r.ID, Revision: r.Revision, Terminate: releaseLike(r) || r.Origin.Trigger == model.TriggerPromotion}
+	input := stateport.RunCancellation{ID: r.ID, Revision: r.Revision, Terminate: r.Status == stepmodel.RunQueued || releaseLike(r) || r.Origin.Trigger == model.TriggerPromotion}
 	return bounded(func(ctx context.Context) (apicontract.Receipt, error) {
 		o, err := s.c.Runs.Cancel(ctx, stateport.Action{Actor: a.Identity, Reason: q.Reason}, input)
 		if err != nil {

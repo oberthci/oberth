@@ -137,7 +137,7 @@ const agentInstructions = `An agent push requests CI with -o oberth.run=1; other
 Keep one background events_wait {kinds:[run.held,run.finished], own:true, after_id, timeout_s:600} open while work is in flight.
 Start before pushing, or read the new run once with run_get after starting the wait.
 Act on every event, deduplicate IDs, resume with next_after_id even after timed_out; on a gap or lower latest_id read current state and resume from that boundary.
-run.finished: read run_get and failure.retry_hint.action. rerun: run_rerun once per code change; if that rerun also asks for rerun, show the reason, then stop and tell the person.
+run.finished: read run_get; if cancelled, show who cancelled and stop without fixing code or rerunning. Otherwise read failure.retry_hint.action. rerun: run_rerun once per code change; if that rerun also asks for rerun, show the reason, then stop and tell the person.
 none: read run_logs for failed_step and retry_hint.detail; if the logs show a code fault, fix the code, obtain commit/push consent and push again; otherwise show the reason, detail and log lines to the person and stop.
 wait (with after), retry_publication, or an unknown hint: show the reason and hint to the person, then stop; do not take an automatic action.
 run.held: read run_hold_list for live availability; inspect with run_hold_exec, push the fix, then release with run_hold_abandon. Never replay an exec after an uncertain reply.

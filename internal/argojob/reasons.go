@@ -55,7 +55,13 @@ type diagnosis struct {
 }
 
 func diagnose(n wf.NodeStatus, p *core.Pod, stop bool, template *wf.Template) (d diagnosis) {
-	defer func() { d.detail = holdDiagnosticDetail(d.detail, p) }()
+	defer func() {
+		// Shutdown owns the verdict; retain the native exit only as evidence.
+		if stop && terminalNode(n) {
+			d.reason, d.class = reasonStopped, stepmodel.FailureCancelled
+		}
+		d.detail = holdDiagnosticDetail(d.detail, p)
+	}()
 	n.Message = currentMessage(n)
 	d = diagnosis{reason: reasonUnknown, detail: n.Message, container: "main", class: stepmodel.FailureUnknown}
 	if p != nil && diagnosePod(&d, p, template) {
@@ -67,10 +73,6 @@ func diagnose(n wf.NodeStatus, p *core.Pod, stop bool, template *wf.Template) (d
 	}
 	if nativeExit(&d, n) {
 		return nativeDiagnosis(d, n)
-	}
-	if stop && terminalNode(n) {
-		d.reason, d.class = reasonStopped, stepmodel.FailureCancelled
-		return d
 	}
 	if p == nil && n.Type == wf.NodeTypePod && terminalNode(n) && strings.Contains(n.Message, "is forbidden") {
 		d.reason, d.class = reasonPodRefused, stepmodel.FailureInfrastructure

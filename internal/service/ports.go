@@ -40,6 +40,7 @@ type RunStore interface {
 	Steps(context.Context, string) ([]stepmodel.RunStep, error)
 	Finish(context.Context, stateport.Action, stateport.RunUpdate) error
 	Cancel(context.Context, stateport.Action, stateport.RunCancellation) (stateport.Obligation, error)
+	Obligations(context.Context, string) ([]stateport.Obligation, error)
 	BeginPurge(context.Context, stateport.Action, string, string) error
 	FinishPurge(context.Context, stateport.Action, string, string) error
 	PurgeReceipt(context.Context, string) (stateport.PurgeReceipt, error)
@@ -71,6 +72,7 @@ type Git interface {
 	ListRefs(context.Context, string) ([]gitport.Ref, error)
 	ReleaseTag(context.Context, stateport.Repository, gitport.Ref) (gitport.Ref, error)
 }
+
 // Lock is one run's place on one native lock: a holder, a waiter, or, when
 // Clear is set, a run that has ended while the workflow controller still counts
 // a unit for it; Clear is then the exact command that releases that unit.

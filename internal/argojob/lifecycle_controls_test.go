@@ -61,7 +61,7 @@ func TestRestartRestoresStoredFailureBeforeShutdown(t *testing.T) {
 	reports := 0
 	c.Reporter = &reportSpy{FinishedFunc: func(_ context.Context, _ string, o argojob.Observation) error {
 		reports++
-		if o.Status != stepmodel.RunFailed || o.Steps[0].Status != stepmodel.StepFailed || o.Reason != "exited with code 7" || o.Nodes[0].Exit == nil {
+		if o.Status != stepmodel.RunCancelled || o.Steps[0].Status != stepmodel.StepFailed || o.Reason != "stopped" || o.Steps[0].DisplayReason != "exited with code 7" || o.Nodes[0].Exit == nil {
 			t.Error("restart lost failure", o)
 		}
 		cancel()
@@ -110,6 +110,10 @@ func TestTerminalPublicationDoesNotDiscardLatePodEvidence(t *testing.T) {
 }
 
 type bindingRefusal struct{ owner *statefake.Runs }
+
+func (b bindingRefusal) Obligations(ctx context.Context, id string) ([]stateport.Obligation, error) {
+	return b.owner.Obligations(ctx, id)
+}
 
 func (b bindingRefusal) BindWorkflow(context.Context, stateport.Action, nativebinding.RunBinding) error {
 	return errors.New("binding unavailable")

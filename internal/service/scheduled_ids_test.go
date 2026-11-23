@@ -259,7 +259,7 @@ func TestScheduledRunIDRoutesCancellationToTheExactChild(t *testing.T) {
 	cancels := 0
 	f.exec.CancelFunc = func(_ context.Context, got stateport.Run, terminate bool) error {
 		cancels++
-		if got.ID != r.ID || terminate || got.Origin.WorkflowUID != r.Origin.WorkflowUID {
+		if got.ID != r.ID || !terminate || got.Origin.WorkflowUID != r.Origin.WorkflowUID {
 			t.Fatal("wrong child cancellation", got, terminate)
 		}
 		return nil
@@ -274,7 +274,7 @@ func TestScheduledRunIDRoutesCancellationToTheExactChild(t *testing.T) {
 	if err != nil || len(obligations) != 1 {
 		t.Fatal("cancel obligation", obligations, err)
 	}
-	if obligations[0].RunID != r.ID || obligations[0].Value != stateport.ObligationStop {
+	if obligations[0].RunID != r.ID || obligations[0].Value != stateport.ObligationTerminate {
 		t.Fatal("wrong child obligation", obligations)
 	}
 }

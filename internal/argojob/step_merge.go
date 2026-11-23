@@ -60,7 +60,7 @@ func mergeStep(row projected, old stepmodel.RunStep, raw map[string]stateport.No
 	return row
 }
 func mergeDiagnosis(row projected, old stepmodel.RunStep) projected {
-	if terminalStep(old.Status) && (mergeStatus(old.Status, row.step.Status) != row.step.Status || row.step.DisplayReason == reasonFailed || row.step.DisplayReason == reasonStopped || row.step.DisplayReason == reasonUnknown) {
+	if row.class != stepmodel.FailureCancelled && terminalStep(old.Status) && (mergeStatus(old.Status, row.step.Status) != row.step.Status || row.step.DisplayReason == reasonFailed || row.step.DisplayReason == reasonUnknown) {
 		row.step.DisplayReason, row.step.Detail, row.class = old.DisplayReason, old.Detail, stepmodel.FailureUnknown
 	}
 	// A step that passed since an unfinished observation keeps none of that

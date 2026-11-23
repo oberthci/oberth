@@ -30,6 +30,15 @@ func (e *Executor) Create(ctx context.Context, p *admissioncontract.PreparedAdmi
 	name := nativebinding.WorkflowName(v.RunID)
 	w := v.Workflow.DeepCopy()
 	w.Name, w.GenerateName = name, ""
+	obligations, err := e.config.Runs.Obligations(ctx, v.RunID)
+	if err != nil {
+		return nativebinding.RunBinding{}, err
+	}
+	for _, obligation := range obligations {
+		if obligation.Kind == "stop" {
+			w.Spec.Shutdown = wf.ShutdownStrategyTerminate
+		}
+	}
 	stampSubmission(w, v, r.RepositoryID)
 	instanceid.NewService(e.config.InstanceID).Label(w)
 	created, err := e.config.Workflows.Create(ctx, w, meta.CreateOptions{})
@@ -157,6 +166,9 @@ func (e *Executor) cancel(ctx context.Context, b nativebinding.RunBinding, mode 
 	}
 	if err = e.verifyObserved(ctx, b, w); err != nil {
 		return err
+	}
+	if terminalWorkflow(w) {
+		return nil
 	}
 	if w.Spec.Shutdown == wf.ShutdownStrategyTerminate || w.Spec.Shutdown == mode {
 		return nil

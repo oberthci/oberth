@@ -99,7 +99,7 @@ func TestTruthfulNativeObservationsContract(t *testing.T) {
 	w.Status.Phase = wf.WorkflowFailed
 	w.Spec.Shutdown = wf.ShutdownStrategyStop
 	final := project(t, argojob.Projection{Plan: plan, Workflow: w, Previous: first.Steps})
-	if final.Status != stepmodel.RunFailed || final.Steps[0].Status != stepmodel.StepFailed || final.Steps[0].DisplayReason != first.Steps[0].DisplayReason || final.Complete {
+	if final.Status != stepmodel.RunCancelled || final.Steps[0].Status != stepmodel.StepFailed || final.Steps[0].DisplayReason != first.Steps[0].DisplayReason || final.Complete {
 		t.Fatalf("failure vanished: %+v", final)
 	}
 	missing := project(t, argojob.Projection{Plan: plan, Workflow: w})

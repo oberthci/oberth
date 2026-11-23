@@ -84,7 +84,7 @@ func TestDynamicFailureAndOlderReplayAreMonotone(t *testing.T) {
 				found = s.Status == stepmodel.StepFailed
 			}
 		}
-		if !found || out.Nodes[0].Status != stepmodel.StepFailed || out.Status != stepmodel.RunFailed || missing && out.Complete {
+		if !found || out.Nodes[0].Status != stepmodel.StepFailed || out.Status != stepmodel.RunCancelled || missing && out.Complete {
 			t.Fatal("failure replayed or disappeared", out)
 		}
 	}
@@ -209,7 +209,7 @@ func TestKnownFailureSurvivesStoppedReplayOfSameFailedNode(t *testing.T) {
 	w.Status.Phase = wf.WorkflowFailed
 	w.Spec.Shutdown = wf.ShutdownStrategyStop
 	after := project(t, argojob.Projection{Workflow: w, Plan: plan, Previous: before.Steps, PreviousNodes: before.Nodes})
-	if after.Status != stepmodel.RunFailed || after.Steps[0].DisplayReason != "exited with code 7" {
-		t.Fatal("stop erased an observed failure", after)
+	if after.Status != stepmodel.RunCancelled || after.Steps[0].DisplayReason != "stopped" || after.Nodes[0].Exit == nil || *after.Nodes[0].Exit != 7 || after.Nodes[0].Status != stepmodel.StepFailed {
+		t.Fatal("stop lost the cancelled verdict or native failure evidence", after)
 	}
 }

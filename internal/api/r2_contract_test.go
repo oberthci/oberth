@@ -32,6 +32,7 @@ func TestInitializeTeachesPushWaitLogsFixPromoteRelease(t *testing.T) {
 		"Start before pushing", "next_after_id even after timed_out", "run.finished: read run_get",
 		"run_rerun once per code change", "then stop and tell the person", "none: read run_logs",
 		"retry_hint.detail", "if the logs show a code fault", "show the reason, detail and log lines to the person and stop",
+		"if cancelled, show who cancelled and stop without fixing code or rerunning",
 		"wait (with after), retry_publication, or an unknown hint", "do not take an automatic action",
 		"run_hold_list for live availability", "inspect with run_hold_exec, push the fix, then release with run_hold_abandon",
 		"passed unassisted run of that exact commit", "cancel and restart the one wait",

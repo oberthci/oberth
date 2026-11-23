@@ -17,7 +17,7 @@ consumer ports supply native clients, run writes and log capture.
 | Operation | Design |
 | --- | --- |
 | **Delta:** `Hooks` | Transform the admitted native object, verify named account UIDs, append source trust and wrap eligible assist leaves. C4 alone calls Prepare and seals; C5 does not decode or admit authored YAML. |
-| `Submit`, `Adopt`, `Cancel` | Post the sealed spec once under C3's fixed-length name. AlreadyExists or an uncertain reply gets one GET and a run/spec-identity check. Adopt reads cache then one live GET on a miss, verifies original UID/binding and never rebuilds. Only NotFound establishes absence. Patch shutdown with a test of exact UID/current mode; Stop never replaces Terminate. No Workflow Delete. |
+| `Submit`, `Adopt`, `Cancel` | Post the sealed spec once under C3's fixed-length name, applying an already-saved cancellation as Terminate in that POST. AlreadyExists or an uncertain reply gets one GET and a run/spec-identity check. Adopt reads cache then one live GET on a miss, verifies original UID/binding and never rebuilds. Only NotFound establishes absence. Leave completed Workflows unchanged. Patch shutdown with a test of exact UID/current mode; Stop never replaces Terminate. No Workflow Delete. |
 | **Delta:** `Project`, observation | Map native node boundary paths onto the immutable plan, stripping Workflow prefix and retry-child suffixes. Latest attempt decides; retain attempts and native Pod/container identities. Use plan order, with numeric loop indexes. Dynamic entries expand in place; terminal remainder becomes unknown. Merge prior evidence so a seen failure never disappears. Decode compressed nodes with Argo's packer; offloaded/missing nodes mean incomplete evidence. |
 | Watch | Two native informers for Workflows and Pods, managed fields stripped, 10-minute resync and watch-error health. Expose Workflow, Pods, OnChange and Healthy; reads are read-only. Client-go workqueue handles observation keys and retry after observation I/O errors. Sync before recovery and child discovery. Cache membership grants no authority. |
 | Logs | Verify Pod controller UID and node identity before and after opening pods/log. Select a failed init when main never started. Capture once per Pod UID/container, within 30 seconds; C8 stores bytes. |
@@ -161,7 +161,7 @@ source runtime, concrete Store, service, transport or installer imports.
 1. Audit, retained roots and Create use one sealed admission. C5 returns native
    name/UID for a write-once C2/C7 binding at acknowledgement or adoption. Until
    binding, source Load returns retryable 503. Recovery never posts replacement work.
-2. Argo Succeeded stays passed even with tolerated failed nodes. Missing exit
+2. Without shutdown, Argo Succeeded stays passed even with tolerated failed nodes. A shutdown verdict is cancelled; killed steps keep native exits as evidence, not author failures. Missing exit
    evidence is unknown. Run failure is infrastructure only if every failed step
    has typed infrastructure evidence. No message parsing or reboot inference
    grants retry authority; retry hints are advice only.
@@ -190,7 +190,7 @@ source runtime, concrete Store, service, transport or installer imports.
 | failed source init / authored init | `source delivery failed` / `init container failed` | infrastructure / author |
 | NodeShutdown / DisruptionTarget | `node shut down` / `Pod disrupted` | infrastructure |
 | Evicted without typed cause | `Pod evicted` | unknown |
-| Stop / Terminate | `stopped` | cancelled |
+| Stop / Terminate, including exit 143 | `stopped` | cancelled |
 | failed/error without exit or Pod | `ended without an exit code` | unknown |
 | Skipped / Omitted | `skipped by condition` / `omitted` | — |
 | terminal generic start or failed source init; authored containers never ran | `failed before starting` | infrastructure |
