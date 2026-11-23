@@ -33,6 +33,9 @@ func ownWorkflow(t *testing.T, name string) []byte {
 func ownRequest(document []byte, name string, trigger model.RunTrigger) admissioncontract.PrepareRequest {
 	sha := strings.Repeat("a", 40)
 	revision := sourcecontract.Revision{Repository: "forge/oberthci/oberth", Commit: sha}
+	if name == "release" {
+		revision.Repository = "github/oberthci/oberth"
+	}
 	file, resources := ".oberth/"+name+".yaml", ""
 	if name == "walk" {
 		file, resources = walkFile, "vm-executor"
@@ -257,18 +260,10 @@ func rewriteWorkflow(t *testing.T, body []byte, change func(*wfv1.Workflow)) []b
 	return raw
 }
 
-func TestOwnGoSemaphoreAndBranchSelection(t *testing.T) {
+func TestOwnBranchSelection(t *testing.T) {
 	wf, err := argoworkflow.Decode(ownWorkflow(t, "build"))
 	if err != nil {
 		t.Fatal(err)
-	}
-	goTemplate := wf.GetTemplateByName("go")
-	if goTemplate == nil || goTemplate.Synchronization == nil || len(goTemplate.Synchronization.Semaphores) != 1 {
-		t.Fatal("heavy Go steps have no semaphore")
-	}
-	semaphore := goTemplate.Synchronization.Semaphores[0].ConfigMapKeyRef
-	if semaphore == nil || semaphore.Name != "oberth-sync-limits" || semaphore.Key != "go" {
-		t.Fatal("semaphore differs")
 	}
 	unconditional := 0
 	for _, task := range wf.GetTemplateByName("build").DAG.Tasks {
@@ -366,26 +361,6 @@ func TestReleaseCredentialVolumes(t *testing.T) {
 }
 
 // Only one publication or latest-marking step runs at a time.
-func TestReleasePublicationStepsShareOneSemaphore(t *testing.T) {
-	wf, err := argoworkflow.Decode(ownWorkflow(t, "release"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	limits := pipelineResources(t, buildResourcesFile)["ConfigMap/oberth-sync-limits"]
-	if limits.Data["release-publish"] != "1" {
-		t.Fatal("publication semaphore must have capacity one")
-	}
-	for _, template := range wf.Spec.Templates {
-		locked := false
-		if s := template.Synchronization; s != nil && len(s.Semaphores) == 1 {
-			sem := s.Semaphores[0]
-			locked = sem.Namespace == "" && sem.Database == nil && sem.ConfigMapKeyRef != nil && sem.ConfigMapKeyRef.Name == "oberth-sync-limits" && sem.ConfigMapKeyRef.Key == "release-publish"
-		}
-		if locked != (template.Name == "release-published-immutable" || template.Name == "latest-advanced-monotonic") {
-			t.Fatal("publication semaphore differs", template.Name)
-		}
-	}
-}
 
 func assertSmallDAG(t *testing.T, name string) {
 	t.Helper()

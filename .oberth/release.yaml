@@ -30,7 +30,7 @@ spec:
         - {name: private, mountPath: /run/private}
       securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
       resources:
-        requests: {cpu: '1', memory: 512Mi}
+        requests: {cpu: '1', memory: 2Gi}
         limits: {cpu: '2', memory: 2Gi, ephemeral-storage: 3Gi}
   templates:
     - name: release
@@ -50,8 +50,6 @@ spec:
             path: /work/src
             mode: 0755
             plugin: {name: oberth, key: '{{workflow.parameters.oberth-source}}', configuration: '{"version":1,"kind":"main"}'}
-      synchronization:
-        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: go}}]
       volumes:
         - {name: cache, persistentVolumeClaim: {claimName: release-cache}}
       container:
@@ -79,12 +77,10 @@ spec:
           - {name: GIT_CONFIG_VALUE_0, value: /work/src}
         volumeMounts: [{name: cache, mountPath: /cache}]
         resources:
-          requests: {cpu: '2', memory: 2Gi}
+          requests: {cpu: '2', memory: 8Gi}
           limits: {cpu: '6', memory: 8Gi}
     - name: prepare-base
       inputs: *source-input
-      synchronization:
-        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: go}}]
       volumes:
         - {name: cache, persistentVolumeClaim: {claimName: release-cache}}
       container:
@@ -104,8 +100,6 @@ spec:
       metadata:
         annotations: {oberth.ci/secret-paths: oberth/data/release/registry/config.json}
       inputs: *source-input
-      synchronization:
-        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: go}}]
       volumes:
         - {name: cache, persistentVolumeClaim: {claimName: release-cache}}
       container:
@@ -126,7 +120,7 @@ spec:
         annotations: {oberth.ci/secret-paths: oberth/data/release/github-token}
       inputs: *source-input
       synchronization:
-        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: release-publish}}]
+        mutexes: [{name: github/oberthci/oberth/release-publish}]
       container:
         command: [/work/shared/oberth, secretstore, exec]
         args: [--, bash, hack/release.sh, publish]
@@ -146,7 +140,7 @@ spec:
         annotations: {oberth.ci/secret-paths: oberth/data/release/github-token}
       inputs: *source-input
       synchronization:
-        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: release-publish}}]
+        mutexes: [{name: github/oberthci/oberth/release-publish}]
       container:
         command: [/work/shared/oberth, secretstore, exec]
         args: [--, bash, hack/release.sh, finalize]

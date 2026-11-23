@@ -40,15 +40,12 @@ spec:
       dag:
         tasks:
           # Tests take the shipped Git from the prepared base: if the base pull fails, the push
-          # gets no test result. The wait costs no wall time only while the go semaphore is 1.
+          # gets no test result. Resource requests govern concurrent Go steps.
           - {name: go-tests-pass-with-race, template: go, depends: prepare-base, arguments: {parameters: [{name: target, value: test}]}}
           - {name: prepare-base, template: prepare-base}
           - {name: release-bytes-build, template: go, depends: prepare-base, arguments: {parameters: [{name: target, value: build-bytes}]}}
           - {name: lint-and-guards-pass, template: lint-and-guards-pass, depends: release-bytes-build}
     - name: go
-      synchronization:
-        semaphores:
-          - configMapKeyRef: {name: oberth-sync-limits, key: go}
       inputs:
         parameters: [{name: target}]
         artifacts: &source-artifacts
@@ -57,7 +54,7 @@ spec:
             mode: 0755
             plugin: {name: oberth, key: '{{workflow.parameters.oberth-source}}', configuration: '{"version":1,"kind":"main"}'}
       container:
-        resources: {requests: {cpu: '2', memory: 2Gi}, limits: {cpu: '6', memory: 8Gi}}
+        resources: {requests: {cpu: '2', memory: 8Gi}, limits: {cpu: '6', memory: 8Gi}}
         command: [bash, -ec]
         args:
           - |
@@ -79,8 +76,6 @@ spec:
         annotations: {oberth.ci/secret-paths: 'oberth/policy/names,oberth/policy/identity'}
       inputs:
         artifacts: *source-artifacts
-      synchronization:
-        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: go}}]
       container:
         command: [/work/shared/oberth, secretstore, exec]
         args: [--, bash, hack/static.sh]
@@ -93,12 +88,10 @@ spec:
           - {name: GOLANGCI_LINT_CACHE, value: /cache/golangci-lint}
           - {name: GOTMPDIR, value: /work/shared/tmp}
           - {name: GOMEMLIMIT, value: 6GiB}
-        resources: {requests: {cpu: '2', memory: 2Gi}, limits: {cpu: '6', memory: 8Gi}}
+        resources: {requests: {cpu: '2', memory: 8Gi}, limits: {cpu: '6', memory: 8Gi}}
     - name: prepare-base
       inputs:
         artifacts: *source-artifacts
-      synchronization:
-        semaphores: [{configMapKeyRef: {name: oberth-sync-limits, key: go}}]
       container:
         command: [bash, hack/prepare-base.sh]
-        resources: {requests: {cpu: '1', memory: 256Mi}, limits: {cpu: '2', memory: 2Gi}}
+        resources: {requests: {cpu: '1', memory: 2Gi}, limits: {cpu: '2', memory: 2Gi}}

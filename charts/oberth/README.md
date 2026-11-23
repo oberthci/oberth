@@ -29,6 +29,11 @@ configuration. The live walk must upgrade `--parallel 4` to `--parallel 2`, keep
 the controller Pod UID unchanged, and observe the new limit taking effect for
 new Workflows without restarting the controller.
 
+Pipeline resource manifests are applied separately from the chart. Existing
+ConfigMaps such as `oberth-sync-limits` are outside the release inventory;
+an ordinary chart upgrade leaves them untouched. The upgrade test also refuses
+unowned objects incorrectly recorded as obsolete in release history.
+
 `server.json` follows the CLI's configuration and composition types and is
 mounted at `/etc/oberth/config/server.json`. The sole configuration flag is:
 `/usr/local/bin/oberth serve --config /etc/oberth/config/server.json`.

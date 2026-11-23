@@ -69,7 +69,7 @@ branch-name parameter and never becomes shell source.
 ## Ordering, retries and deadlines
 
 Use Argo steps, DAG dependencies, retries, synchronization and `activeDeadlineSeconds`.
-`oberth-sync-limits` keys are installation-wide and shared by all repositories.
+Use resource requests and affinity for capacity; use repository mutexes for exclusive access.
 Use literal `upstream/org/repo/lock` for your repository, e.g. `forge/team/app/publish`.
 Namespaces must be omitted, including in defaults and shared/inline templates; names stay unchanged.
 Oberth adds no ordering or capacity queue. Retries are step attempts; reruns are new runs.

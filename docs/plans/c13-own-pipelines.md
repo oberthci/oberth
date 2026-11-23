@@ -143,13 +143,13 @@ Installation policy follows [C9 invariant 7](c9-install-and-upgrade.md#invariant
    become green through wrapper success. No vulnerability scanners run in the
    own pipelines. Assist remains off pending review and real-cluster checks;
    runs with an audited inspection exec or an armed step without a succeeded final
-   native result lose evidence eligibility. Asking for assist alone does not. Tests on the gittest fixture run the packaged static Git, exported from the run's checked base and named in `OBERTH_TEST_GIT`, so they wait for the base pull: a failed pull leaves the push without a test result, and the wait is free only while the `go` semaphore is 1.
+   native result lose evidence eligibility. Asking for assist alone does not. Tests on the gittest fixture run the packaged static Git, exported from the run's checked base and named in `OBERTH_TEST_GIT`, so they wait for the base pull: a failed pull leaves the push without a test result, and resource requests govern concurrent Go steps.
 4. Resource requests, limits, scratch, deadlines, parallelism and synchronization remain
    YAML-owned. Keep native workflow/publication locks where already authored. No server
    queue, CPU math, capacity gate or injected release lock. Configured build and release
-   deadlines are 3600 seconds. An Argo semaphore limits heavy Go steps to two
-   at once; its value is in one chart-rendered ConfigMap. Oberth adds no lock
-   code. The waiters-wake walk proves native wake-up after cancellation/failure.
+   deadlines are 3600 seconds. Heavy Go steps request their full memory limit;
+   capacity uses requests and affinity. Publication uses a repository-scoped mutex.
+   Oberth holds no lock sizes. The waiters-wake walk proves native wake-up after cancellation/failure.
 5. **Delta:** Release runs no tests. It builds the tagged commit at the default branch's
    head, which a passing build run tested. The release step checks those facts
    and refuses any mismatch. No branch, promotion or release run starts a VM;

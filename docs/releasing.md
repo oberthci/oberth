@@ -71,9 +71,9 @@ neither those credentials nor the release cache. Oberth puts the tag on GitHub w
 release, before the run; that uses the version: rerun a failed run or release the next one.
 Only an administrator may rerun a release run; agents can release the next version.
 
-Existing installations must add `release-publish: "1"` to `oberth-sync-limits` before the first
-release from this main. Edit [resources](../.oberth/pipeline-resources.yaml): storage, positive `go`
-limit, HTTPS origin; apply in the pipeline namespace. Caches need uid/gid 65534 access. Then grant:
+Edit [resources](../.oberth/pipeline-resources.yaml): storage and HTTPS origin; apply in the
+pipeline namespace. Set the two `release-publish` mutexes in release.yaml to your repository
+(`upstream/org/repo/release-publish`). Caches need uid/gid 65534 access. Then grant:
 
 ```sh
 oberth access allow --kind pvc --tier ci '<repo>' 'build-cache'

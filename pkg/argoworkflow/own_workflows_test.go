@@ -37,6 +37,8 @@ func TestOwnWorkflowsSubmitAdmission(t *testing.T) {
 				hooks.LoginAudience = ownChartAudience(t)
 				r.Grants = ownPolicyGrants(r)
 			} else {
+				r.Repository = "github/oberthci/oberth"
+				r.SourceReceipt.Revision.Repository = r.Repository
 				r.Ref, r.Trigger = "refs/tags/v0.1.0", "tag"
 				p.Release = true
 				hooks.LoginAudience = ownChartAudience(t)

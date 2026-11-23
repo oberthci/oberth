@@ -87,18 +87,6 @@ func TestDocumentationReleaseAccountNameRule(t *testing.T) {
 	}
 }
 
-func TestDocumentationRequiresReleaseLimitBeforeUpgradeRelease(t *testing.T) {
-	t.Parallel()
-	raw, err := os.ReadFile("../../docs/releasing.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := strings.Join(strings.Fields(string(raw)), " ")
-	if !strings.Contains(text, "Existing installations must add `release-publish: \"1\"` to `oberth-sync-limits` before the first release from this main.") {
-		t.Fatal("release guide omits the semaphore upgrade prerequisite")
-	}
-}
-
 func TestDocumentationStatesSynchronizationScope(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("../../docs/pipelines.md")
@@ -106,10 +94,26 @@ func TestDocumentationStatesSynchronizationScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := strings.Join(strings.Fields(string(raw)), " ")
-	if !strings.Contains(text, "`oberth-sync-limits` keys are installation-wide and shared by all repositories.") {
-		t.Fatal("pipeline guide omits the shared synchronization scope")
+	if !strings.Contains(text, "Use resource requests and affinity for capacity; use repository mutexes for exclusive access.") {
+		t.Fatal("pipeline guide omits native capacity and exclusivity controls")
 	}
 	if !strings.Contains(text, "Use literal `upstream/org/repo/lock` for your repository, e.g. `forge/team/app/publish`.") {
 		t.Fatal("pipeline guide omits the mutex form beside its example")
+	}
+}
+
+func TestDocumentationUsesNativeCapacityAndPublicationLocks(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"pipelines", "releasing"} {
+		raw, err := os.ReadFile("../../docs/" + name + ".md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "oberth-sync-limits") {
+			t.Fatal("guide refers to shared lock sizes", name)
+		}
+		if name == "releasing" && !strings.Contains(string(raw), "upstream/org/repo/release-publish") {
+			t.Fatal("release guide omits repository publication mutex")
+		}
 	}
 }
