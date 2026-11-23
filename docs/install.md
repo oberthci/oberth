@@ -47,19 +47,18 @@ oberth install --context <context> --namespace second \
 oberth install --context <context> --namespace second \
   --https-node-port 31443 --ssh-node-port 31022 --yes
 ```
-Endpoints default to the API host and chosen ports; `--url`/`--ssh-port` override public mappings.
-Review shows each public port beside its node port. If a port is busy, an interactive install asks
-for another; unattended commands refuse and name the flag to change. The profile defaults to
-`<context>-<namespace>`; `--profile` selects another. Reruns, upgrades and rollback require its
-original administrator key. A missing or different key causes a refusal. Saved namespaces and
-ports are reused. If no release revision exists, explicit answers replace the saved record and the
-review shows the changes. Pending revisions must match saved answers. Keep the profile while its
-administrator Secret remains. Hand-made namespaces stay unmarked and excluded from removal;
+Endpoints use the API host and chosen ports; `--url`/`--ssh-port` override public mappings.
+Review pairs public and node ports. For busy ports, interactive installs ask for another;
+unattended commands refuse and name the flag. The profile defaults to `<context>-<namespace>`;
+`--profile` selects another. Reruns, upgrades and rollback refuse without the original administrator
+key. Saved namespaces and ports are reused. Without a release revision, explicit answers replace
+the saved record; review shows changes. Pending revisions must match saved answers. Keep the profile
+while its administrator Secret remains. Hand-made namespaces stay unmarked and outside removal;
 `default` and `kube-*` are forbidden. Compatible foreign-owned definitions stay unchanged; review
-names their owner. Required schema fields and served/storage versions must match our pinned
-controller. Controller and workflows use the server namespace as Argo instance ID, so default Argo
-controllers skip them. Our controller watches only its pipeline namespace. Cluster-wide permission
-and policy names include custom namespaces. Rollback preserves shared workflow definitions.
+names owners. Required schema fields and served/storage versions must match our pinned controller.
+Controller and workflows use the server namespace as Argo instance ID; default Argo controllers skip
+them. Our controller watches only its pipeline namespace. Cluster-wide permission and policy names
+include custom namespaces. Rollback preserves shared workflow definitions.
 
 Removing the Argo release that owns the workflow definitions keeps them by resource policy, but
 every run object depends on those definitions. Upgrading that release with its chart defaults
@@ -80,10 +79,9 @@ Install reuses the administrator key; if missing, it refuses. Select with `OBERT
 
 ## Agent plugins
 
-Once the repository is public, Claude Code installs the skill and run box with
-`/plugin marketplace add oberthci/oberth` and `/plugin install oberth@oberthci`. Unset, the box
-runs the fetcher's `~/.local/bin/oberth` with `OBERTH_PROFILE` or the joined checkout's profile.
-Elsewhere, set executable and profile from join's `agent tools: stdio MCP server "oberth"` line:
+Once public, add the Claude Code skill and run box with `/plugin marketplace add oberthci/oberth`
+and `/plugin install oberth@oberthci`. Default: fetcher's `~/.local/bin/oberth`, `OBERTH_PROFILE` or
+joined checkout profile. Elsewhere, use join's `agent tools: stdio MCP server "oberth"` line:
 ```sh
 claude plugin configure oberth@oberthci --values-stdin <<'JSON'
 {"executable":"/absolute/verified/path/from-join","profile":"uplink-profile-from-join","runs":3}
@@ -96,11 +94,10 @@ time, age, failed step. `/oberth-runs [--limit=N]` adds why a run failed or was 
 `/oberth-watch <id-or-prefix>` toasts on completion; the model uses the bridge's tools. Update:
 `claude plugin marketplace update oberthci`, `claude plugin update oberth@oberthci`, restart.
 Codex: `codex plugin marketplace add oberthci/oberth`, then `codex plugin add oberth@oberthci`
-(the skill from `agent/.codex-plugin/plugin.json`). Register join's exact bridge line with
-`codex mcp add oberth -- <line>` as in [agent connection](agents.md#connect-the-tools). With Custom
-status line on in `/experimental`, `/statusline` offers `Oberth runs`: the box's cells for the
-latest three runs in the footer, refreshed every 15 seconds. Codex has no plugin commands or
-completion toasts; ask the model for the run list.
+(skill: `agent/.codex-plugin/plugin.json`). Register join's bridge line exactly with
+`codex mcp add oberth -- <line>` ([setup](agents.md#connect-the-tools)). Enable Custom status line
+in `/experimental`, restart, then choose `Oberth runs` in `/statusline`: the box's cells for three
+recent runs, refreshed every 15 seconds. No plugin commands or completion toasts; ask for runs.
 
 ## Upgrade
 
