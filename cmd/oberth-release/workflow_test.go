@@ -299,7 +299,8 @@ func releaseGrants(r admissioncontract.PrepareRequest) []admissioncontract.Grant
 	var grants []admissioncontract.GrantEvidence
 	for _, item := range [][4]string{
 		{"release-files-signed", "secret", "oberth/data/release/signing", ""},
-		{"release-images-pushed", "secret", "oberth/data/release/registry/config.json", ""},
+		{"release-images-pushed", "identity", "identity", "oberth-release-registry"},
+		{"release-images-pushed", "configmap", "release-config", ""},
 		{"release-published-immutable", "secret", "oberth/data/release/github-token", ""},
 		{"release-published-immutable", "configmap", "release-config", ""},
 		{"release-verifies-from-clean-pod", "configmap", "release-config", ""},

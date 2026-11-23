@@ -57,11 +57,12 @@ func TestOwnWorkflowsSubmitAdmission(t *testing.T) {
 
 func ownReleaseGrants(r admissioncontract.PrepareRequest) []admissioncontract.GrantEvidence {
 	grants := []admissioncontract.GrantEvidence{}
-	for _, entry := range []struct{ kind, path, audience string }{
-		{"configmap", "release-config", ""}, {"secret", "oberth/data/release/signing", ""}, {"secret", "oberth/data/release/registry/config.json", ""},
-		{"secret", "oberth/data/release/github-token", ""},
+	for _, entry := range []struct{ step, kind, path, audience string }{
+		{"*", "configmap", "release-config", ""}, {"*", "secret", "oberth/data/release/signing", ""},
+		{"release-images-pushed", "identity", "identity", "oberth-release-registry"},
+		{"*", "secret", "oberth/data/release/github-token", ""},
 	} {
-		grants = append(grants, admissioncontract.GrantEvidence{Repository: r.Repository, File: r.SelectedFile, Step: "*", Kind: entry.kind, Path: entry.path, Audience: entry.audience, Revision: "operator-approval", State: admissioncontract.StateVerified})
+		grants = append(grants, admissioncontract.GrantEvidence{Repository: r.Repository, File: r.SelectedFile, Step: entry.step, Kind: entry.kind, Path: entry.path, Audience: entry.audience, Revision: "operator-approval", State: admissioncontract.StateVerified})
 	}
 	return grants
 }

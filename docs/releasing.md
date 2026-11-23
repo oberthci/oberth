@@ -55,18 +55,12 @@ Signatures are checked only against the committed pinned key; no public log is u
 
 ## Release Oberth through Oberth
 
-This is the normal path, as for any repository: push a branch, wait for its green CI, promote, wait
-for the promotion to deliver, then release a version strictly above `latest`:
-
-```sh
-oberth promote <tested-commit-sha>
-oberth release <version-above-latest>
-```
+Push green CI, promote, wait for the promotion to deliver, then release strictly above `latest`.
 
 The release pipeline prepares the base and signer, builds, signs, pushes both images to the
 registry, publishes the files as the tag's GitHub release, verifies them in a clean Pod and advances
 `latest`. The build checks its commit without rerunning tests. Only signing gets the long-lived key,
-only the image push the registry login, only publish/finalize the GitHub token. Branch CI reaches
+only the image push a federated login, only publish/finalize the GitHub token. Branch CI reaches
 neither those credentials nor the release cache. Oberth puts the tag on GitHub when it admits the
 release, before the run; that uses the version: rerun a failed run or release the next one.
 Only an administrator may rerun a release run; agents can release the next version.
@@ -78,6 +72,10 @@ pipeline namespace. Set the two `release-publish` mutexes in release.yaml to you
 ```sh
 oberth access allow --kind pvc --tier ci '<repo>' 'build-cache'
 oberth access allow --kind pvc --tier release '<repo>' 'release-cache'
+oberth access allow --kind identity --audience 'oberth-release-registry' \
+  '<repo>' '.oberth/release.yaml' 'release-images-pushed' 'identity'
+oberth access allow --kind configmap '<repo>' '.oberth/release.yaml' \
+  'release-images-pushed' 'release-config'
 oberth access allow --kind configmap '<repo>' '.oberth/release.yaml' \
   'release-published-immutable' 'release-config'
 oberth access allow --kind configmap '<repo>' '.oberth/release.yaml' \
@@ -91,18 +89,23 @@ oberth secret put --repo '<repo>' --file .oberth/build.yaml --step lint-and-guar
 ```
 
 Both stay outside Git; pushers can read them. The identity is the commits' one `Name <email>` line.
-The release needs exactly three secrets:
+Registry pushes use workload identity federation:
+[setup](https://cloud.google.com/iam/docs/workload-identity-federation-with-kubernetes).
+An administrator configures the provider to trust the cluster issuer and audience
+`oberth-release-registry`, restricted to the exact granted release step account's subject.
+Allow that subject to impersonate a registry writer restricted to this image repository.
+Set `release-config.registry-provider` to
+`projects/NUMBER/locations/global/workloadIdentityPools/POOL/providers/PROVIDER`
+and `registry-account` to its account email. These are public configuration, not secret keys.
+Only the push step mounts a read-only 3600-second identity. `oberth-release registry-login`
+exchanges it with STS, impersonates the writer for one hour and writes a private login in memory.
+Exchange failure stops the push; no stored registry login is used. The release needs two secrets:
 
-- `oberth/data/release/registry/config.json` (step `release-images-pushed`): a Docker
-  `config.json` logged in to `europe-west4-docker.pkg.dev` as `_json_key` with a service-account
-  key (an access token expires within the hour); the by-hand `crane auth login` line writes it.
 - `oberth/data/release/signing` (step `release-files-signed`): the pinned private `release.key`.
 - `oberth/data/release/github-token` (steps `release-published-immutable` and
   `latest-advanced-monotonic`): a token with read/write contents on this repository only.
 
 ```sh
-oberth secret put --repo '<repo>' --file .oberth/release.yaml --step release-images-pushed \
-  oberth/data/release/registry/config.json < <registry-login-file>
 oberth secret put --repo '<repo>' --file .oberth/release.yaml --step release-files-signed \
   oberth/data/release/signing < <private-key-file>
 oberth secret put --repo '<repo>' --file .oberth/release.yaml --step release-published-immutable \
@@ -119,12 +122,10 @@ files below `OBERTH_SECRETS_DIR` without exporting values. Check local YAML agai
 
 ## First release by hand
 
-The fallback, and the bootstrap that pins the signing key. Use Linux amd64, Go **go1.26.10**,
-Python 3, curl, Git, make, grep and `sha256sum` in a clean tree.
-Have registry write access and a GitHub token file allowed to write this repository's releases.
-Allow about 12 GiB and eight minutes for the byte build; cold caches can take longer.
-Keep work and credentials outside Git; staging needs 0.7 GiB in `$TMPDIR`.
-Choose a stable `vMAJOR.MINOR.PATCH` strictly above `latest` (404 means no floor):
+Use Linux amd64, Go **go1.26.10**, Python 3, curl, Git, make, grep and `sha256sum` in a clean tree.
+Keep work private. Allow 12 GiB and eight minutes (more cold), plus 0.7 GiB in `$TMPDIR`.
+Have registry write access and a repository release-write token. Choose stable `vMAJOR.MINOR.PATCH`
+above `latest` (404 means no floor):
 
 ```sh
 export RELEASE_ORIGIN=https://github.com/oberthci/oberth/releases/download
@@ -185,7 +186,11 @@ bash hack/release.sh sign
 ```
 
 Signing prints “Release signature verified.”; local verification prints “Release verified.” Log in
-as `oauth2accesstoken` with a short-lived access token or `_json_key` with a service-account key:
+as `oauth2accesstoken` with a short-lived access token. Only where the cloud has no federation,
+a service-account JSON key may use `_json_key`. For a workflow fallback, replace the identity
+projection and login command with `secretstore exec --`, declare and grant
+`oberth/data/release/registry/config.json` to the push step alone, and set `DOCKER_CONFIG` to its
+delivered directory. Never fall back automatically after a federation failure.
 
 ```sh
 export DOCKER_CONFIG="$RELEASE_PRIVATE/registry"
@@ -220,12 +225,9 @@ python3 -c 'import pathlib,sys; [pathlib.Path(p).unlink() for p in sys.argv[1:]]
 
 ## Release accounts
 
-Admission chooses each credential-bearing step's account from its secret grants. A
-server-classified release tag in default history uses deterministic release-step accounts; branches
-and ordinary tags use CI accounts. Author parameters and account names cannot select release
-authority. Exact-step grants align secrets on repository/file/step accounts; wildcards share one.
-Submission creates release accounts; pipeline and executor accounts stay separate. Renames need
-new grants; see [grant operations](operations.md#grants-and-secrets) and the
+Exact repo/file/step grants select deterministic release accounts for admitted release tags.
+Branches and ordinary tags use CI accounts; YAML cannot choose release authority. Renames need new
+grants. See [grant operations](operations.md#grants-and-secrets) and the
 [release account-name rule](../internal/identityname/name.go).
 
 ## Verify downloaded bytes
@@ -238,9 +240,7 @@ checksum list, bundle, record and release files in a clean directory, then run:
 oberth-release verify --dir <download-directory> --version <version>
 ```
 
-Where the files came from never decides trust; only the pinned key and the signed digests do.
-Signed `SHA256SUMS` and `release.json` bind shipped digests; versioned objects are create-only. The
+Only the pinned key and signed digests decide trust. Versioned objects are create-only; the
 [fetcher](../agent/skills/oberth/fetch-oberth) and installer verify before changing local state.
-
-Local checks are not publication proof. Clean verification checks public images and CLI version to
-issue the `latest` receipt. The workflow's 3,600-second deadline is a budget, not a measured time.
+Clean verification checks public images and CLI version before issuing the `latest` receipt.
+The workflow's 3,600-second deadline is a budget, not a measured time.

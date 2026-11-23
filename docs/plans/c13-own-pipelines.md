@@ -216,3 +216,8 @@ monotonic latest marking and refusal of different bytes on rerun.
 
 **Delta:** Injected source/cache/run facts → authored native YAML; fragment expansion →
 native templates; publishing credentials → short-lived delegation; signing key → exact signing grant.
+
+The image-push leaf alone exchanges its exact-audience projected identity through
+cloud federation for a short-lived registry login in private memory scratch. A
+stored JSON key is only an alternative for clouds without federation, never an
+automatic fallback.

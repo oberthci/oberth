@@ -14,6 +14,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"helm.sh/helm/v3/pkg/chart/loader"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestReleasePushUsesGrantedRegistryLoginBeforePublication(t *testing.T) {
@@ -28,8 +29,55 @@ func TestReleasePushUsesGrantedRegistryLoginBeforePublication(t *testing.T) {
 	if dependencies["release-images-pushed"] != "release-files-signed" || dependencies["release-published-immutable"] != "release-images-pushed" {
 		t.Fatal("publication can run before signed images are pushed", dependencies)
 	}
-	for _, failure := range []string{"", "first push"} {
+	for _, failure := range []string{"", "login", "first push"} {
 		t.Run(failure, func(t *testing.T) { checkRegistryPushStep(t, wf, failure) })
+	}
+}
+
+func TestReleasePushHasIsolatedFederatedIdentity(t *testing.T) {
+	wf, err := argoworkflow.Decode(ownWorkflow(t, "release"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	projections := 0
+	for _, template := range wf.Spec.Templates {
+		for _, volume := range template.Volumes {
+			if volume.Projected == nil {
+				continue
+			}
+			projections++
+			assertRegistryIdentity(t, template, volume)
+		}
+	}
+	if projections != 1 {
+		t.Fatal("push has no isolated identity")
+	}
+}
+
+func assertRegistryIdentity(t *testing.T, template wfv1.Template, volume corev1.Volume) {
+	t.Helper()
+	if template.Name != "release-images-pushed" || len(volume.Projected.Sources) != 1 {
+		t.Fatal("registry identity crossed steps")
+	}
+	assertRegistryProjection(t, volume.Projected.Sources[0].ServiceAccountToken)
+	mounts := 0
+	for _, mount := range template.Container.VolumeMounts {
+		if mount.Name == volume.Name {
+			mounts++
+			if !mount.ReadOnly || mount.MountPath != "/run/registry-identity" {
+				t.Fatal("identity mount differs")
+			}
+		}
+	}
+	if mounts != 1 || template.Metadata.Annotations[argoworkflow.SecretPathsAnnotation] != "" {
+		t.Fatal("push can use a stored login or lacks its identity mount")
+	}
+}
+
+func assertRegistryProjection(t *testing.T, identity *corev1.ServiceAccountTokenProjection) {
+	t.Helper()
+	if identity == nil || identity.Audience != "oberth-release-registry" || identity.ExpirationSeconds == nil || *identity.ExpirationSeconds != 3600 || identity.Path != "jwt" {
+		t.Fatal("registry identity differs")
 	}
 }
 
@@ -37,11 +85,17 @@ func checkRegistryPushStep(t *testing.T, wf *wfv1.Workflow, failure string) {
 	t.Helper()
 	dir := registryPushFixture(t)
 	values := workflowValues(dir)
-	values["OBERTH_SECRETS_DIR"] = filepath.Join(dir, "secrets")
+	values["DOCKER_CONFIG"] = filepath.Join(dir, "registry")
 	values["PUSH_LOG"], values["PUSH_FAIL"] = filepath.Join(dir, "push.log"), failure
 	output, err := executeWorkflowTemplate(t, wf, wf.GetTemplateByName("release-images-pushed"), values)
 	if (err != nil) != (failure != "") || len(output) != 0 {
 		t.Fatal("push failure or credential output was mishandled", err, string(output))
+	}
+	if failure == "login" {
+		if _, err := os.Stat(values["PUSH_LOG"]); !os.IsNotExist(err) {
+			t.Fatal("failed login reached image push")
+		}
+		return
 	}
 	body, err := os.ReadFile(values["PUSH_LOG"])
 	if err != nil {
@@ -60,21 +114,15 @@ func checkRegistryPushStep(t *testing.T, wf *wfv1.Workflow, failure string) {
 func registryPushFixture(t *testing.T) string {
 	t.Helper()
 	dir := workflowFixture(t)
-	login := filepath.Join(dir, "secrets/oberth/data/release/registry")
-	if err := os.MkdirAll(login, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(login, "config.json"), []byte("fixture-login"), 0600); err != nil {
-		t.Fatal(err)
-	}
 	for _, image := range []string{"oberth", "oberth-source-plugin"} {
 		if err := os.MkdirAll(filepath.Join(dir, "shared/dist", image+".oci"), 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	writeFixtureCommand(t, filepath.Join(dir, "shared/oberth"), `[ "$1 $2 $3" = 'secretstore exec --' ] || exit 2
-shift 3
-exec "$@"
+	writeFixtureCommand(t, filepath.Join(dir, "shared/oberth-release"), `[ "$1" = registry-login ] || exit 2
+[ "$PUSH_FAIL" != login ] || exit 1
+mkdir -p "$DOCKER_CONFIG"
+printf fixture-login > "$DOCKER_CONFIG/config.json"
 `)
 	writeFixtureCommand(t, filepath.Join(dir, "bin/go"), `[ "$1 $2 $3 $4" = 'tool -modfile=hack/tools/crane.mod crane push' ] || exit 2
 [ "$(cat "$DOCKER_CONFIG/config.json")" = fixture-login ] || exit 3
@@ -111,10 +159,10 @@ func TestReleaseSigningAndRegistryGrantsStaySeparate(t *testing.T) {
 	called := false
 	hooks.TransformNative = func(_ context.Context, _ *wfv1.Workflow, input admissioncontract.TransformInput) error {
 		called = true
-		if len(input.SecretGrants) != 4 {
+		if len(input.SecretGrants) != 3 {
 			t.Fatal("secret delivery reached another step", input.SecretGrants)
 		}
-		for step, path := range map[string]string{"release-files-signed": "oberth/data/release/signing", "release-images-pushed": "oberth/data/release/registry/config.json",
+		for step, path := range map[string]string{"release-files-signed": "oberth/data/release/signing",
 			"release-published-immutable": "oberth/data/release/github-token", "latest-advanced-monotonic": "oberth/data/release/github-token"} {
 			grants := input.SecretGrants[step]
 			if len(grants) != 1 || grants[0].Step != step || grants[0].Path != path {
@@ -151,7 +199,7 @@ func TestReleaseRegistryLoginIsDeclaredByThePushStepOnly(t *testing.T) {
 	}
 	missing := r.Clone()
 	missing.Grants = slices.Delete(slices.Clone(missing.Grants), 1, 2)
-	want := "oberth secret put --repo '" + r.Repository + "' --file '.oberth/release.yaml' --step 'release-images-pushed' 'oberth/data/release/registry/config.json' < <value-file>"
+	want := "oberth access allow --kind identity --audience 'oberth-release-registry' '" + r.Repository + "' '.oberth/release.yaml' 'release-images-pushed' 'identity'"
 	if finding := releaseRefusal(t, missing, policy); finding.Command != want {
 		t.Fatal("a missing registry login does not print its own grant command", finding)
 	}

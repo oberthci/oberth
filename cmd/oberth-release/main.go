@@ -65,6 +65,7 @@ func (r refusal) Remedy() string {
 		return "Review the public key and rerun hack/release-pin.sh with --replace."
 	}
 	return map[refusal]string{
+		federationFailed:    "Check the provider, account, identity grant and new private login directory; then retry.",
 		imageMissing:        "Push the named image with the command in Detail, then retry publication.",
 		imagePrivate:        "Push the image if it is absent, then allow public reads; see Detail.",
 		imageRepositories:   "Set both image repositories in the chart, then rebuild and sign the release.",
@@ -119,6 +120,9 @@ func main() {
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return usage
+	}
+	if args[0] == "registry-login" {
+		return registryLogin(ctx, args[1:])
 	}
 	o := options{git: staticgit.Qualified}
 	flags := releaseFlags(&o)
