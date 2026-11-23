@@ -9,6 +9,19 @@ import (
 	"github.com/oberthci/oberth/internal/admissioncontract"
 )
 
+func TestOperationsExplainsParallelMarks(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/operations.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(strings.Fields(string(raw)), " ")
+	for _, fact := range []string{"web rail", "CLI/agent `┌│└`", "parallel groups with visible ends"} {
+		if !strings.Contains(text, fact) {
+			t.Fatal("operations omits parallel display guidance", fact)
+		}
+	}
+}
+
 func TestDocumentationStorageAndPlanContract(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("../../docs/pipelines.md")

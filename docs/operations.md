@@ -11,16 +11,16 @@ oberth run list
 oberth run get <run>
 oberth log <run> <step>
 ```
-Copy the run ID from push output or a list. Hexadecimal IDs accept unambiguous prefixes of eight or
-more characters; copy scheduled run IDs in full. A run shows its trigger, schedule entry, rerun
-source, actor and assist request. Read the short reason, then expand Detail for the Pod name, full
-message and exit code. Show text whole: status reasons have at most 40 characters; refusals have an
-80-character reason and 120-character remedy. Steps appear in run order, dependencies first
-([pending steps](pipelines.md#plans-and-budgets)). Missing duration is not zero. Select a step,
-attempt or container for logs; page through incomplete windows and earlier output. A `secret` tag
-means declared credential intent, not that a value was read. Runs may be Argo-queued, waiting for a
-node, running, passed, failed or cancelled. Holds are live observations of eligible containers.
-Passing and publication are separate facts: check publication if a tag has not reached the forge.
+Copy run IDs from push output or a list; hex prefixes must be unambiguous and at least eight
+characters. Use full scheduled IDs. Runs show trigger, schedule, rerun source, actor and assist
+request. Read the reason, then Detail for the Pod name, full message and exit code. Show text whole:
+status reasons have at most 40 characters; refusals have an 80-character reason and 120-character
+remedy. Steps follow dependency levels ([pending steps](pipelines.md#plans-and-budgets)). The web
+rail and CLI/agent `┌│└` marks enclose parallel groups with visible ends. Missing duration is not
+zero. Select a step, attempt or container for logs; page incomplete windows and earlier output. A
+`secret` tag means declared credential intent, not that a value was read. Runs may be Argo-queued,
+waiting for a node, running, passed, failed or cancelled. Holds show live eligible containers.
+Passing and publication are separate; check undelivered tags at the forge.
 
 ## Wait, retry and assist
 
