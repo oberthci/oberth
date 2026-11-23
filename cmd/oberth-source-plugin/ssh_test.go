@@ -101,9 +101,9 @@ func serveGitCommand(conn net.Conn, identity ssh.PublicKey, hosts []ssh.Signer) 
 	done := make(chan struct{})
 	go func() { ssh.DiscardRequests(requests); close(done) }()
 	defer func() { _ = native.Close(); <-done }()
-	return serveGitSession(conn, channels)
+	return serveGitSession(channels)
 }
-func serveGitSession(conn net.Conn, channels <-chan ssh.NewChannel) error {
+func serveGitSession(channels <-chan ssh.NewChannel) error {
 	channel, reqs, err := (<-channels).Accept()
 	if err != nil {
 		return err
@@ -131,5 +131,8 @@ func serveGitSession(conn net.Conn, channels <-chan ssh.NewChannel) error {
 	if err = channel.Close(); err != nil {
 		return err
 	}
-	return sshtest.Flush(conn)
+	// The request stream closes after the peer's close reply or transport EOF.
+	// Keep the buffered transport alive until then.
+	ssh.DiscardRequests(reqs)
+	return nil
 }
