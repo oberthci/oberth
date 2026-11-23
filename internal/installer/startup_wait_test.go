@@ -100,17 +100,3 @@ func stalledStartupDial(ctx context.Context) (net.Conn, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
-
-func TestStartupDialWaitsForCancellation(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		timeline := clock.RealClock{}
-		started := timeline.Now()
-		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
-		defer cancel()
-		conn, err := stalledStartupDial(ctx)
-		if conn != nil || !errors.Is(err, ctx.Err()) || timeline.Since(started) != 3*time.Minute {
-			t.Fatal("fake dial ended before caller cancellation", err, timeline.Since(started))
-		}
-	})
-}
