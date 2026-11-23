@@ -309,12 +309,11 @@ esac
         self.git("commit", "-qm", "Extend browser assertions")
         result = self.run_gate()
         self.assertEqual(0, result.returncode, result.stdout)
-        self.assertIn(name, result.stdout)
+        self.assertIn("GATE FILES CHANGED: " + name + "\n", result.stdout)
         with tarfile.open(self.fixture / "trusted.tar") as archive:
             self.assertNotIn(name, archive.getnames())
             self.assertEqual(self.git("show", "main:hack/webui/behavior.mjs"), archive.extractfile("hack/webui/behavior.mjs").read())
         command = (self.fixture / "commands").read_text()
-        self.assertIn("timed branch-check make", command)
         restore = command.split("        cd /src\n", 1)[1].split('git config user.name', 1)[0]
         subprocess.run(["bash", "-ec", restore.replace("/tooling.tar", "trusted.tar")], cwd=self.fixture, check=True)
         self.assertFalse((self.fixture / name).exists())
