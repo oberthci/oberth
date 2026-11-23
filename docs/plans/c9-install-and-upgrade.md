@@ -174,7 +174,7 @@ no service, wiring, native executor, source implementation or concrete Store.
    There is no policy probe.
 8. **Delta:** **Bound calls.** Planning and verification have a two-minute total budget.
    Every blocking command, read and status poll inherits cancellation and its advertised deadline.
-   Apply announces its readiness wait once and waits up to ten minutes, retrying attempts bounded to ten seconds.
+   Apply announces a ten-minute readiness wait; ten-second attempts retry unavailable or other-version servers.
    Permanent authority or trust failures stop immediately; classify transient retries, preserve causes and join owned work.
 9. **Delta:** **Native configuration.** Keep server and pipeline namespaces and identities
    distinct. Managed controllers get reviewed settings; external controllers are

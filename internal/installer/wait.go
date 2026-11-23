@@ -24,7 +24,12 @@ func (e *Engine) waitReady(ctx context.Context, p Profile) error {
 			return nil
 		}
 		var refusal *Problem
-		if !errors.As(err, &refusal) || refusal.Code != "starting" && refusal.Code != "connect" {
+		if !errors.As(err, &refusal) {
+			return err
+		}
+		switch refusal.Code {
+		case "starting", "connect", "ready-version":
+		default:
 			return err
 		}
 		if err = e.pause(ctx); err != nil {
