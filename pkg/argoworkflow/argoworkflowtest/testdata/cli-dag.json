@@ -1,0 +1,278 @@
+[
+  {
+    "name": "residue-lint"
+  },
+  {
+    "name": "contract-canonical",
+    "dependencies": [
+      "residue-lint"
+    ]
+  },
+  {
+    "name": "surface-registry",
+    "dependencies": [
+      "contract-canonical"
+    ]
+  },
+  {
+    "name": "contract-guard",
+    "dependencies": [
+      "surface-registry"
+    ]
+  },
+  {
+    "name": "cohort",
+    "dependencies": [
+      "contract-guard"
+    ]
+  },
+  {
+    "name": "profiles",
+    "dependencies": [
+      "cohort"
+    ]
+  },
+  {
+    "name": "release-index",
+    "dependencies": [
+      "profiles"
+    ]
+  },
+  {
+    "name": "tools-dir",
+    "dependencies": [
+      "profiles"
+    ]
+  },
+  {
+    "name": "link-go",
+    "dependencies": [
+      "tools-dir"
+    ]
+  },
+  {
+    "name": "install-systemd-tools",
+    "dependencies": [
+      "link-go"
+    ]
+  },
+  {
+    "name": "scan-systemd-tools",
+    "dependencies": [
+      "install-systemd-tools"
+    ]
+  },
+  {
+    "name": "install-golangci-lint",
+    "dependencies": [
+      "tools-dir"
+    ]
+  },
+  {
+    "name": "install-cosign",
+    "dependencies": [
+      "tools-dir"
+    ]
+  },
+  {
+    "name": "install-release-support",
+    "dependencies": [
+      "tools-dir",
+      "install-cosign"
+    ]
+  },
+  {
+    "name": "verify-release-tools",
+    "dependencies": [
+      "install-cosign",
+      "install-release-support"
+    ]
+  },
+  {
+    "name": "mod-tidy-check",
+    "dependencies": [
+      "link-go"
+    ]
+  },
+  {
+    "name": "mod-verify",
+    "dependencies": [
+      "link-go"
+    ]
+  },
+  {
+    "name": "prepare-openbao-cache",
+    "dependencies": [
+      "link-go"
+    ]
+  },
+  {
+    "name": "vet",
+    "dependencies": [
+      "install-golangci-lint",
+      "link-go"
+    ]
+  },
+  {
+    "name": "golangci-lint",
+    "dependencies": [
+      "vet"
+    ]
+  },
+  {
+    "name": "verify-tls-fingerprint-imports",
+    "dependencies": [
+      "vet"
+    ]
+  },
+  {
+    "name": "paired-chart",
+    "dependencies": [
+      "link-go",
+      "mod-tidy-check"
+    ]
+  },
+  {
+    "name": "verify-helm-schema",
+    "dependencies": [
+      "tools-dir"
+    ]
+  },
+  {
+    "name": "verify-version-pins",
+    "dependencies": [
+      "vet"
+    ]
+  },
+  {
+    "name": "smoke-port-chart-index",
+    "dependencies": [
+      "vet",
+      "verify-release-tools"
+    ]
+  },
+  {
+    "name": "deprecations",
+    "dependencies": [
+      "profiles"
+    ]
+  },
+  {
+    "name": "test",
+    "dependencies": [
+      "golangci-lint",
+      "mod-tidy-check",
+      "mod-verify",
+      "scan-systemd-tools",
+      "deprecations"
+    ]
+  },
+  {
+    "name": "test-ia32-probe",
+    "dependencies": [
+      "link-go"
+    ]
+  },
+  {
+    "name": "test-product-probes",
+    "dependencies": [
+      "link-go"
+    ]
+  },
+  {
+    "name": "test-systemd-budget",
+    "dependencies": [
+      "test"
+    ]
+  },
+  {
+    "name": "test-install-probes",
+    "dependencies": [
+      "link-go"
+    ]
+  },
+  {
+    "name": "demo-server-build",
+    "dependencies": [
+      "test"
+    ]
+  },
+  {
+    "name": "build-linux-amd64",
+    "dependencies": [
+      "test-systemd-budget",
+      "test-product-probes",
+      "test-install-probes"
+    ]
+  },
+  {
+    "name": "build-linux-arm64",
+    "dependencies": [
+      "test-systemd-budget",
+      "test-product-probes",
+      "test-install-probes"
+    ]
+  },
+  {
+    "name": "build-darwin-amd64",
+    "dependencies": [
+      "build-linux-amd64"
+    ]
+  },
+  {
+    "name": "build-darwin-arm64",
+    "dependencies": [
+      "build-linux-arm64"
+    ]
+  },
+  {
+    "name": "security",
+    "dependencies": [
+      "install-golangci-lint"
+    ]
+  },
+  {
+    "name": "fixture-cosign",
+    "dependencies": [
+      "test"
+    ]
+  },
+  {
+    "name": "trivy-fixture-build",
+    "dependencies": [
+      "fixture-cosign"
+    ]
+  },
+  {
+    "name": "trivy-db-update",
+    "dependencies": [
+      "trivy-fixture-build"
+    ]
+  },
+  {
+    "name": "trivy-fixture-qualify",
+    "dependencies": [
+      "trivy-db-update",
+      "security"
+    ]
+  },
+  {
+    "name": "bao-fixture-build",
+    "dependencies": [
+      "trivy-fixture-qualify"
+    ]
+  },
+  {
+    "name": "bao-fixture-controls",
+    "dependencies": [
+      "bao-fixture-build"
+    ]
+  },
+  {
+    "name": "test-openbao",
+    "dependencies": [
+      "bao-fixture-controls",
+      "prepare-openbao-cache"
+    ]
+  }
+]

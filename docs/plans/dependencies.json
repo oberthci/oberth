@@ -1578,7 +1578,8 @@
       "internal/gitssh"
     ],
     "cmd/oberth": [
-      "internal/sourceplugin"
+      "internal/sourceplugin",
+      "pkg/argoworkflow/argoworkflowtest"
     ],
     "internal/storetest": [
       "internal/store",
@@ -1663,6 +1664,12 @@
     ],
     "internal/installer": [
       "internal/argojob/argojobtest"
+    ],
+    "internal/api": [
+      "pkg/argoworkflow/argoworkflowtest"
+    ],
+    "pkg/argoworkflow": [
+      "pkg/argoworkflow/argoworkflowtest"
     ]
   },
   "retired": [
