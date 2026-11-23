@@ -27,6 +27,9 @@ func (g *graph) templateCalls(t *wfv1.Template, where string) []*call {
 	if t.DAG != nil {
 		calls = append(calls, g.dagCalls(t.DAG, where)...)
 	}
+	for _, c := range calls {
+		c.serial = t.Parallelism != nil && *t.Parallelism == 1
+	}
 	return calls
 }
 func (g *graph) dagCalls(dag *wfv1.DAGTemplate, where string) []*call {

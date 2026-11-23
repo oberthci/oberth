@@ -16,7 +16,7 @@ func (p *planner) parallelCalls(ordered []*call, levels map[*call]int) map[*call
 		if c.dag {
 			key = strconv.Itoa(levels[c])
 		}
-		if parallelLeaf(c) {
+		if parallelLeaf(c) && !c.serial {
 			keys[c] = key
 			counts[key]++
 		}
@@ -42,7 +42,7 @@ func parallelLeaf(c *call) bool {
 }
 
 func (p *planner) fanOutGroup(c *call, group int, dynamic bool) int {
-	if group == 0 && parallelLeaf(c) && (dynamic || len(c.items) > 1) {
+	if group == 0 && !c.serial && parallelLeaf(c) && (dynamic || len(c.items) > 1) {
 		p.nextGroup++
 		return p.nextGroup
 	}
