@@ -109,11 +109,20 @@ function runIdentity(run) {
 }
 function runOrigin(run) {
  const parts = [run.trigger && run.trigger + (run.schedule_entry ? " " + run.schedule_entry : ""), run.rerun_of && "rerun of " + run.rerun_of.slice(0, 8), run.actor && "by " + run.actor, run.assist_requested && "assist requested"].filter(Boolean);
- return parts.length ? h("p", {class: "muted", "aria-label": "Started by"}, parts.join(" · ")) : null;
+ return parts.join(" · ");
 }
-function runDetail(run) {
- return h("details", {}, h("summary", {}, "Detail"), run.detail ? h("pre", {}, run.detail) : null,
-  h("pre", {class: "mono"}, ["Run ID: " + run.id, "Object ID: " + run.object_sha, "Commit ID: " + (run.commit_sha || "unknown"), fullTimes(run)].filter(Boolean).join("\n")));
+function runDetail(run, open) {
+ return h("details", {open: open ? "" : null}, h("summary", {}, "Detail"), run.detail ? h("pre", {}, run.detail) : null,
+  h("pre", {class: "mono"}, ["Run ID: " + run.id, "Object ID: " + run.object_sha, "Commit ID: " + (run.commit_sha || "unknown"), run.repo + " · " + run.ref, runOrigin(run), fullTimes(run)].filter(Boolean).join("\n")), otherRuns(run));
+}
+function otherRuns(run) { return h("a", {href: "/runs?" + params({repo: run.repo, ref: run.ref})}, "Other runs of this ref"); }
+function runHeader(run, actions, open) {
+ const counts = [run.passed + "/" + (run.steps_planned_exact ? "" : ">=") + run.step_count + " passed", run.failed && run.failed + " failed", run.pending && run.pending + " pending"].filter(Boolean).join(" · ");
+ const cancel = ["queued", "running"].includes(run.status) ? actions.querySelector("button") : null;
+ return [h("h1", {class: "run-summary", title: run.repo + " · " + run.ref}, state(run.status), clock(run), h("span", {class: "run-counts"}, counts), cancel),
+  run.display_reason ? h("p", {class: "run-reason"}, run.failure ? h("b", {class: "failed-step"}, run.failure.failed_step_name || run.failure.failed_step) : null, run.display_reason) : null,
+  h("div", {class: "run-meta muted"}, h("div", {class: "run-metadata"}, runIdentity(run), runOrigin(run) ? h("span", {class: "meta-extra", "aria-label": "Started by"}, " · " + runOrigin(run)) : null,
+   h("span", {class: "meta-extra"}, " · ", run.started_at ? "Started " : "Created ", h("time", {datetime: run.started_at || run.created_at, title: fullTimes(run)}, time(run.started_at || run.created_at)), " · ", otherRuns(run))), runDetail(run, open))].filter(Boolean);
 }
 setInterval(() => document.querySelectorAll("[data-start]").forEach(node => { node.textContent = duration(node.dataset.start, node.dataset.end); }), 1000);
 function replace(region, nodes) {
@@ -283,13 +292,10 @@ function runScreen(view, id) {
   const repositories = await view.repositories;
   const holds = await call("run_hold_list", {id}, signal).catch(() => ({holds: [], unknown: true}));
   if (signal.aborted) return;
-  replace(header, [h("h1", {}, state(run.status), " ", h("span", {class: "mono"}, run.repo + " · " + run.ref)),
-   h("p", {}, run.failure ? h("b", {class: "failed-step"}, run.failure.failed_step_name || run.failure.failed_step) : null, run.display_reason), runIdentity(run), runOrigin(run),
-   h("p", {class: "muted"}, run.started_at ? "Started " : "Created ", when(run)), runDetail(run),
-   h("a", {href: "/runs?" + params({repo: run.repo, ref: run.ref})}, "Other runs of this ref"),
-   h("p", {}, (run.steps_planned_exact ? "" : ">=") + run.step_count + " steps · " + run.passed + " passed · " + run.failed + " failed · " + run.pending + " pending")].filter(Boolean));
-  header.append(runActions(view, run, repositories.repositories, holds.holds));
-  if (holds.unknown) header.append(h("p", {class: "muted"}, "hold availability unknown"));
+  const open = header.querySelector("details")?.open, actions = runActions(view, run, repositories.repositories, holds.holds);
+  replace(header, runHeader(run, actions, open));
+  if (holds.unknown) actions.append(h("p", {class: "muted"}, "hold availability unknown"));
+  header.after(actions); view.actions?.remove(); view.actions = actions;
   replace(steps, (run.steps || []).length ? [h("p", {class: "steps-head"}, "Steps · " + (run.steps_planned_exact ? "" : ">=") + run.step_count), ...stepRows(view, run.steps, path, pane)] : [empty(copy.emptySteps)]);
   if (run.next_step_offset !== undefined) steps.append(button("Next 100 steps", () => { view.offset = run.next_step_offset; refresh(view); }));
   if (view.offset) steps.append(button("First steps", () => { view.offset = 0; refresh(view); }));

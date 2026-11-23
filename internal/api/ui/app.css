@@ -117,17 +117,26 @@ a.row:focus-visible { outline-offset: -2px; }
 /* one run: header band, step list, terminal log */
 .back { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font-size: 11px; }
 .back:hover { color: var(--fg); border-color: var(--edge); text-decoration: none; }
-.run-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; padding: 14px 18px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-.run-head > * { margin: 0; }
-.run-head > h1 { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 15px; }
-.run-head > h1 + p { order: 1; flex-basis: calc(100% + 36px); margin: 8px -18px 4px; padding: 8px 18px; background: var(--panel2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 12px; }
-.run-head:has(> h1 .state.failed) > h1 + p { background: color-mix(in srgb, var(--failed) 7%, var(--panel)); border-color: color-mix(in srgb, var(--failed) 25%, var(--line)); }
-.run-head > h1 + p:empty { display: none; }
-.run-head > .identity, .run-head > p, .run-head > a { order: 2; font-size: 11px; }
-.run-head > details { order: 3; flex-basis: 100%; }
-.run-head > .toolbar { order: 4; flex-basis: 100%; margin: 6px 0 0; font-size: 12px; }
-.run-head > p.muted:last-child { order: 5; }
-.identity { display: flex; gap: 8px; color: var(--muted); white-space: nowrap; }
+.run-head { padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; line-height: 22px; }
+.run-summary { margin: 0; font-size: inherit; font-weight: 400; line-height: inherit; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.run-summary .state { padding: 0; border: 0; background: none; font-size: inherit; line-height: inherit; }
+.run-summary button { margin-left: auto; height: 22px; padding: 0 8px; }
+.run-counts { min-width: 0; }
+.run-summary > .duration:not(:empty)::before, .run-counts::before { content: "· "; }
+.run-reason { margin: 0; overflow-wrap: anywhere; }
+.run-reason .failed-step { margin-right: 8px; }
+.run-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; font-size: 11px; }
+.run-metadata, .identity { display: flex; align-items: center; white-space: nowrap; }
+.identity { gap: 6px; margin: 0; font-size: inherit; color: var(--muted); }
+.run-meta details { display: contents; }
+.run-meta summary { grid-column: 2; font-size: inherit; line-height: inherit; }
+.run-meta details > :not(summary) { grid-column: 1 / -1; white-space: pre-wrap; overflow-wrap: anywhere; }
+.run-meta details > a { display: none; }
+.run-head + .toolbar:empty { display: none; }
+@media (max-width: 999px) {
+ .run-meta .meta-extra { display: none; }
+ .run-meta details[open] > a { display: block; }
+}
 .run-layout { display: grid; grid-template-columns: 22rem minmax(0, 1fr); gap: 16px; margin-top: 14px; }
 .steps { padding: 6px 0 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .steps-head { margin: 0; padding: 7px 14px 8px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
@@ -273,8 +282,9 @@ a.repo-group .chevron { visibility: hidden; }
  .server .ver { display: none; }
  .server .reload { color: transparent; }
  .chips { gap: 6px; }
- .run-head { padding: 12px 12px 10px; }
- .run-head > h1 + p { flex-basis: calc(100% + 24px); margin: 8px -12px 4px; padding: 8px 12px; }
+ .run-head { padding: 6px 8px; }
+ .run-summary { gap: 4px; font-size: 10px; }
+ .run-summary .duration { font-size: inherit; }
  .run-layout { display: block; }
  .log { margin-top: 14px; }
  .terminal { min-height: 200px; }
@@ -299,9 +309,8 @@ a.repo-group .chevron { visibility: hidden; }
  .filters > .issue-search { flex: 1 1 0; }
  .issue-head { padding: 12px; }
 }
-/* The default design's frame as the previous dashboard set it: a 1440px
-   list column, lowercase tabs, the wider run column, 22px pills, and the
-   run page as one full-width frame with the back control in its header. */
+/* The default themes use a 1440px list, lowercase tabs, 22px status chips,
+   and a full-width run view. */
 :root:not([data-theme="mono"], [data-theme="color"]) {
  main { max-width: 1440px; }
  main:has(> .run-layout) { max-width: none; position: relative; }
@@ -309,14 +318,11 @@ a.repo-group .chevron { visibility: hidden; }
  nav a { min-width: 72px; text-transform: lowercase; }
  .runs .state, .repos .state, .issues .state { height: 22px; }
  .run-head { border-width: 0 0 1px; border-radius: 0; }
- .run-head > h1 .state { height: 20px; border-radius: 11px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
- .run-head > h1 + p { margin-bottom: 0; border-bottom: 0; }
  @media (min-width: 760px) {
   .run-layout { gap: 0; margin-top: 0; }
   .steps { border-width: 0 1px 0 0; border-radius: 0 0 8px 8px; }
   .log { padding: 12px 18px 0; }
   .brand { flex: 0 0 214px; margin-right: 0; }
-  main:has(> .run-layout) > .back { position: absolute; top: 30px; right: 36px; margin: 0; }
  }
  @media (max-width: 759px) {
   main { padding-inline: 8px; }
