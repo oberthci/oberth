@@ -33,8 +33,15 @@ the server agent-instruction constant and its test; C12 supplies its wording.
 | Observation | Paste the bridge's display block or `oberth run list` / `oberth run get <run>` output verbatim. The web link supplies a live screen. |
 
 **Delta:** `oberth mcp` is the authenticated model-tool connection; optional
-display plugins read only public CLI JSON. C11 owns the
-stdio bridge and its pinned installation transport. Registration explicitly
+display plugins read public CLI JSON. The bridge also advertises Codex's
+status-line entrypoint on `run_list`, serving `ui://oberth/runs` locally. It reads
+`run_list(limit: 3)` as the selected joined uplink and caches results and public
+refusals for 15 seconds. Only a host read starts a stale refresh; pending reads
+coalesce. Reads answer with a tree or placeholder within one second; EOF cancels
+refreshes. C12 owns this display and its Go renderer in
+`internal/client/bridge_statusline.go`, the second implementation of the run-box
+cells in `agent/hooks/model.ts`; changes to those cells check both renderers.
+C11 owns the stdio bridge and its pinned installation transport. Registration explicitly
 selects a joined uplink profile; without that flag only the checkout's local
 uplink binding selects credentials. Missing selection, admin profiles and
 unclassified profiles refuse before credential loading, stdin or network use,

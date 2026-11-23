@@ -9393,7 +9393,7 @@
     "docs/plans/c1-transport-and-tool-registry.md": "5659221f8d8ac6a3cb99a77d91911ef0e4bd7bda289d047cc0a5beec24b8d17b",
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
     "docs/plans/c11-cli-and-server-composition.md": "da3e5d49a307b81cfa23146fc450da5d090e67a2ff9703b43ec7ef9d36ed2bdf",
-    "docs/plans/c12-agent-client.md": "96a7f1cf35ffc15666d02a84f88095b6c833753ec2153254f5776f4a6e9ca21c",
+    "docs/plans/c12-agent-client.md": "c2218549424cffc1da9275211090ae7425b089abdbfc1cd941d9479124459bba",
     "docs/plans/c13-own-pipelines.md": "7bf8d26daa7f51f8897f126f230345f41b683bd6a06adc771f0bb491a2149fb7",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
     "docs/plans/c2-service-actions-and-history.md": "49cf98905c10f840c30ada436e6d0b20bbb532a54c67fdec5dc8196e4609c15e",
@@ -10646,7 +10646,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** `oberth mcp` is the authenticated model-tool connection; optional display plugins read only public CLI JSON. C11 owns the stdio bridge and its pinned installation transport. Registration explicitly selects a joined uplink profile; without that flag only the checkout's local uplink binding selects credentials. Missing selection, admin profiles and unclassified profiles refuse before credential loading, stdin or network use, with a join-first remedy. Install asks the person to join an uplink. The host's system trust and settings do not change.",
+      "basis": "**Delta:** `oberth mcp` is the authenticated model-tool connection; optional display plugins read public CLI JSON. The bridge also advertises Codex's status-line entrypoint on `run_list`, serving `ui://oberth/runs` locally. It reads `run_list(limit: 3)` as the selected joined uplink and caches results and public refusals for 15 seconds. Only a host read starts a stale refresh; pending reads coalesce. Reads answer with a tree or placeholder within one second; EOF cancels refreshes. C12 owns this display and its Go renderer in `internal/client/bridge_statusline.go`, the second implementation of the run-box cells in `agent/hooks/model.ts`; changes to those cells check both renderers. C11 owns the stdio bridge and its pinned installation transport. Registration explicitly selects a joined uplink profile; without that flag only the checkout's local uplink binding selects credentials. Missing selection, admin profiles and unclassified profiles refuse before credential loading, stdin or network use, with a join-first remedy. Install asks the person to join an uplink. The host's system trust and settings do not change.",
       "rows": [],
       "predicates": [
         {
@@ -10654,13 +10654,13 @@
           "name_regex": "^(?:oberth\\ mcp)$",
           "disposition": "CHANGE",
           "reason": "stdio bridge over the selected joined-uplink profile; registration names the verified absolute executable.",
-          "basis": "**Delta:** `oberth mcp` is the authenticated model-tool connection; optional display plugins read only public CLI JSON. C11 owns the stdio bridge and its pinned installation transport. Registration explicitly selects a joined uplink profile; without that flag only the checkout's local uplink binding selects credentials. Missing selection, admin profiles and unclassified profiles refuse before credential loading, stdin or network use, with a join-first remedy. Install asks the person to join an uplink. The host's system trust and settings do not change.",
+          "basis": "**Delta:** `oberth mcp` is the authenticated model-tool connection; optional display plugins read public CLI JSON. The bridge also advertises Codex's status-line entrypoint on `run_list`, serving `ui://oberth/runs` locally. It reads `run_list(limit: 3)` as the selected joined uplink and caches results and public refusals for 15 seconds. Only a host read starts a stale refresh; pending reads coalesce. Reads answer with a tree or placeholder within one second; EOF cancels refreshes. C12 owns this display and its Go renderer in `internal/client/bridge_statusline.go`, the second implementation of the run-box cells in `agent/hooks/model.ts`; changes to those cells check both renderers. C11 owns the stdio bridge and its pinned installation transport. Registration explicitly selects a joined uplink profile; without that flag only the checkout's local uplink binding selects credentials. Missing selection, admin profiles and unclassified profiles refuse before credential loading, stdin or network use, with a join-first remedy. Install asks the person to join an uplink. The host's system trust and settings do not change.",
           "item": 39
         }
       ]
     },
     {
-      "spec": "docs/plans/c12-agent-client.md:46",
+      "spec": "docs/plans/c12-agent-client.md:53",
       "markers": [
         "**Delta:**"
       ],
