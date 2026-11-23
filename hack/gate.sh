@@ -47,6 +47,10 @@ tool_paths=(
     .golangci.yml
     hack/README.md
     hack/check.sh
+    hack/lint-tool.sh
+    hack/tools
+    hack/test_docs.py
+    hack/base-image
     hack/ui-check.sh
     hack/webui
     hack/test_ui.py
@@ -118,7 +122,7 @@ container=$("${docker[@]}" create --cpus 2 --memory 7681m --pids-limit 512 \
         git -c init.defaultBranch=main clone -q --bare /source.bundle /repo.git
         git --git-dir=/repo.git worktree add -q --detach /src "$1"
         cd /src
-        for dir in hack/guards hack/plans hack/devloop docs/plans hack/webui; do
+        for dir in hack/guards hack/plans hack/devloop docs/plans hack/webui hack/base-image hack/tools; do
             if [[ -e $dir || -L $dir ]]; then find "$dir" -depth -delete; fi
         done
         tar -xf /tooling.tar

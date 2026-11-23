@@ -22,18 +22,15 @@ class GateVerdicts(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         manifest = re.search(r"tool_paths=\((.*?)\)", (root / "hack/gate.sh").read_text(), re.S)
         plans = [str(p.relative_to(root)) for p in (root / "docs/plans").rglob("*") if p.is_file()]
-        files = []
-        for name in shlex.split(manifest[1]):
-            source = root / name
-            if source.is_dir():
-                files.extend(str(p.relative_to(root)) for p in source.rglob("*") if p.is_file())
-            else:
-                files.append(name)
         # Contents only: a step receives the checkout with read-only files and the fixture edits its copies.
-        for name in [*files, *plans]:
-            target = self.fixture / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(root / name, target)
+        for name in [*shlex.split(manifest[1]), *plans]:
+            source = root / name
+            files = source.rglob("*") if source.is_dir() else [source]
+            for file in files:
+                if file.is_file():
+                    target = self.fixture / file.relative_to(root)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(file, target)
         self.git("init", "-q", "-b", "main")
         for key in ("user.name", "user.email"):
             self.git("config", key, self.fixture.name)
@@ -186,6 +183,49 @@ esac
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("main lacks hack/guards/main.go", result.stdout)
         self.assertFalse((self.fixture / "commands").exists())
+
+    def check_trusted_tools(self, files, addition=None):
+        for name in files:
+            path = self.fixture / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("branch tooling must not run\n")
+        if addition:
+            (self.fixture / addition).write_text("raise RuntimeError('branch tooling ran')\n")
+        self.git("add", *files, *([addition] if addition else []))
+        self.git("commit", "-qm", "Change check tooling")
+        result = self.run_gate()
+        self.assertEqual(0, result.returncode, result.stdout)
+        changed = next(line.removeprefix("GATE FILES CHANGED: ")
+                       for line in result.stdout.splitlines() if line.startswith("GATE FILES CHANGED: "))
+        with tarfile.open(self.fixture / "trusted.tar") as archive:
+            for name in files:
+                self.assertIn(name, changed.split())
+                self.assertEqual(archive.extractfile(name).read(), self.git("show", f"main:{name}"))
+            if addition:
+                self.assertIn(addition, changed.split())
+                self.assertNotIn(addition, archive.getnames())
+        command = (self.fixture / "commands").read_text()
+        self.assertEqual(command.splitlines()[-3], changed)
+        restore = command.split("        cd /src\n", 1)[1].split('git config user.name', 1)[0]
+        subprocess.run(["bash", "-ec", restore.replace("/tooling.tar", "trusted.tar")],
+                       cwd=self.fixture, check=True, timeout=10)
+        for name in files:
+            self.assertEqual((self.fixture / name).read_bytes(), self.git("show", f"main:{name}"))
+        if addition:
+            self.assertFalse((self.fixture / addition).exists())
+
+    def test_lint_launcher_and_modules_use_main_tooling(self):
+        self.check_trusted_tools(("hack/lint-tool.sh", "hack/tools/go.mod", "hack/tools/go.sum",
+                                  "hack/tools/deadcode.mod", "hack/tools/deadcode.sum"),
+                                 "hack/tools/branch.go")
+
+    def test_docs_check_uses_main_tooling(self):
+        self.check_trusted_tools(("hack/test_docs.py",))
+
+    def test_base_image_checks_use_only_main_directory(self):
+        self.check_trusted_tools(("hack/base-image/test_driver.py", "hack/base-image/test_recipe.py",
+                                  "hack/base-image/build.py", "hack/base-image/layout.py"),
+                                 "hack/base-image/test_branch.py")
 
     def test_main_guard_and_plan_additions_are_in_the_trusted_bundle(self):
         self.git("checkout", "-q", "main")
