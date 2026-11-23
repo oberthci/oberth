@@ -293,6 +293,7 @@ func rsSetup(t *testing.T, f *gittest.Fixture, sc rsScenario) *rsRun {
 	t.Helper()
 	control := rsControl(t, f, sc.Stops[0].Needle != "" || sc.Stops[1].Needle != "")
 	run := &rsRun{f: f, sc: sc, control: control, cfg: rsConfig(f, control)}
+	run.cfg.Log = func(reason, detail string) { t.Logf("%s: %s", reason, detail) }
 	c := rsOpen(t, run.cfg)
 	if err := c.Init(t.Context(), gittest.Repository); err != nil {
 		t.Fatal(err)
@@ -354,34 +355,6 @@ func (r *rsRun) quiesce(t *testing.T) {
 		case <-tick.C:
 		}
 	}
-}
-
-// rsControl writes the run's wrappers, killer and (for native stops) the
-// package's rename fault library.
-func rsControl(t *testing.T, f *gittest.Fixture, native bool) string {
-	t.Helper()
-	control := filepath.Join(f.Root, "ctl")
-	binary, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	files := map[string]string{"git": rsGitWrapper(control, f.Binary), "hook": rsHookWrapper(control, binary), "killer.py": rsKiller}
-	if native {
-		image, err := nativeFaultImage()
-		if err != nil {
-			t.Fatal(err)
-		}
-		files["fault.so"] = string(image)
-	}
-	if err = os.Mkdir(control, 0700); err != nil {
-		t.Fatal(err)
-	}
-	for name, body := range files {
-		if err = os.WriteFile(filepath.Join(control, name), []byte(body), 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return control
 }
 
 func rsRemove(t *testing.T, control string, names ...string) {
