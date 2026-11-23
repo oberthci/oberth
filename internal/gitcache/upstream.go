@@ -166,6 +166,9 @@ func (c *Cache) fetch(ctx context.Context, t fetchTarget) (updates []RefUpdate, 
 	if receivePending(p) {
 		return nil, refuse("pending receive")
 	}
+	if len(after) == 0 {
+		return nil, c.emptyRefresh(ctx, p)
+	}
 	before, err := c.tracking(ctx, p)
 	if err != nil {
 		return nil, err
@@ -180,6 +183,19 @@ func (c *Cache) fetch(ctx context.Context, t fetchTarget) (updates []RefUpdate, 
 		}
 	}
 	return c.mirror(ctx, p, mirrorChange{before: before, after: after, repository: repo})
+}
+
+// An empty forge is a bootstrap snapshot only while the cache has no refs.
+// Tracked, accepted and retained history must survive a forge that goes empty.
+func (c *Cache) emptyRefresh(ctx context.Context, p string) error {
+	refs, err := c.capture(ctx, command{dir: p, args: []string{"for-each-ref", "--count=1", "--format=%(refname)"}}, 1<<20)
+	if err != nil {
+		return err
+	}
+	if len(refs) != 0 {
+		return &gitport.EmptyRepositoryError{}
+	}
+	return nil
 }
 
 // sameUpstream refuses to import a fetch that outlived its upstream removed
