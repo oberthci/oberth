@@ -28,7 +28,8 @@ func (g *graph) templateCalls(t *wfv1.Template, where string) []*call {
 		calls = append(calls, g.dagCalls(t.DAG, where)...)
 	}
 	for _, c := range calls {
-		c.serial = t.Parallelism != nil && *t.Parallelism == 1
+		c.serial = t.Parallelism != nil && *t.Parallelism == 1 ||
+			g.workflow.Spec.Parallelism != nil && *g.workflow.Spec.Parallelism == 1
 	}
 	return calls
 }
