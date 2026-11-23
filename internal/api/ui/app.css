@@ -94,7 +94,7 @@ a.row:focus-visible { outline-offset: -2px; }
    for its column ends in an ellipsis and keeps the whole name as its title; a
    reason is never cut: the 40-character rule always fits its column (the row's
    12px inset comes out of the first and last columns). */
-.runs { display: grid; grid-template-columns: calc(12ch + 12px) minmax(4ch, 18ch) minmax(4ch, 24ch) max-content minmax(calc(40ch + 13px), 1fr); column-gap: 12px; }
+.runs { font-family: var(--mono); display: grid; grid-template-columns: calc(12ch + 12px) minmax(4ch, 18ch) minmax(4ch, 24ch) max-content minmax(calc(40ch + 13px), 1fr); column-gap: 12px; }
 .runs .row { grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; padding-block: 7px; line-height: 22px; overflow-wrap: normal; }
 .runs .row > * { min-width: 0; white-space: nowrap; }
 .runs .row > .repo, .runs .row > .ref { overflow: hidden; text-overflow: ellipsis; }
