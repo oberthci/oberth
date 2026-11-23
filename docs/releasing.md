@@ -71,9 +71,9 @@ only the image push the registry login, only publish/finalize the GitHub token. 
 neither those credentials nor the release cache. Oberth puts the tag on GitHub when it admits the
 release, before the run; that uses the version: rerun a failed run or release the next one.
 
-As administrator: edit [pipeline-resources.yaml](../.oberth/pipeline-resources.yaml) and apply it
-in the pipeline namespace. Set storage class/sizes, positive `go` limit and HTTPS origin; keep
-`release-publish: "1"`. Caches need user/group 65534 access. Then grant:
+Existing installations must add `release-publish: "1"` to `oberth-sync-limits` before the first
+release from this main. Edit [resources](../.oberth/pipeline-resources.yaml): storage, positive `go`
+limit, HTTPS origin; apply in the pipeline namespace. Caches need uid/gid 65534 access. Then grant:
 
 ```sh
 oberth access allow --kind pvc --tier ci '<repo>' 'build-cache'

@@ -61,3 +61,15 @@ func TestDocumentationReleaseAccountNameRule(t *testing.T) {
 		t.Fatal("release guide must link the account-name authority")
 	}
 }
+
+func TestDocumentationRequiresReleaseLimitBeforeUpgradeRelease(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile("../../docs/releasing.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(strings.Fields(string(raw)), " ")
+	if !strings.Contains(text, "Existing installations must add `release-publish: \"1\"` to `oberth-sync-limits` before the first release from this main.") {
+		t.Fatal("release guide omits the semaphore upgrade prerequisite")
+	}
+}
