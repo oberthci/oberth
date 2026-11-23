@@ -98,7 +98,7 @@ func (m Maintenance) servesTarget(ctx context.Context, r Record) bool {
 	return m.Engine.CheckEndpoint(probe, profile) == nil
 }
 
-// targetProbe bounds the review's readiness check of a server that may be down.
+// targetProbe bounds each readiness check during review and rollout.
 const targetProbe = 10 * time.Second
 
 func (m Maintenance) schemaRecovery(code string, cause error, r Record) *Problem {

@@ -38,17 +38,21 @@ func TestChartAndServerHaveIndependentLimits(t *testing.T) {
 		return nil
 	}}
 	announced := false
-	f.engine.CheckEndpoint = func(ctx context.Context, _ installer.Profile) error {
+	f.engine.CheckEndpoint = func(context.Context, installer.Profile) error {
 		if !announced {
 			t.Fatal("readiness limit was not announced")
 		}
 		if !errors.Is(chartContext.Err(), context.Canceled) {
 			t.Fatal("chart phase still owns readiness context")
 		}
+		return installer.NewProblem("starting", nil, "")
+	}
+	f.engine.Pause = func(ctx context.Context) error {
 		deadline, ok := ctx.Deadline()
 		if !ok || deadline.Sub(chartDeadline) < 4*time.Minute || deadline.Sub(chartDeadline) > 6*time.Minute {
 			t.Fatal("expected independent 5m chart and 10m server limits")
 		}
+		f.engine.CheckEndpoint = func(context.Context, installer.Profile) error { return nil }
 		return nil
 	}
 	if _, err := f.engine.Apply(t.Context(), p, p.Digest(), func(phase installer.Phase) error {
@@ -76,11 +80,13 @@ func TestServerDeadlineNamesServerPhase(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := setup(t)
 		p := prepare(t, f)
-		f.engine.CheckEndpoint = func(ctx context.Context, _ installer.Profile) error {
-			<-ctx.Done()
-			return ctx.Err()
+		waiting, cancel := context.WithTimeout(t.Context(), installer.ReadinessTimeout)
+		defer cancel()
+		f.engine.CheckEndpoint = func(context.Context, installer.Profile) error {
+			<-waiting.Done()
+			return waiting.Err()
 		}
-		_, err := f.engine.Apply(t.Context(), p, p.Digest(), nil)
+		_, err := f.engine.Apply(waiting, p, p.Digest(), nil)
 		var refusal *installer.Problem
 		if !errors.As(err, &refusal) || refusal.Code != "timeout" || !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatal("server deadline mislabeled", err)

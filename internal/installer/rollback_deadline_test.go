@@ -33,8 +33,14 @@ func TestRollbackHasSeparateChartAndReadinessDeadlines(t *testing.T) {
 	var chart context.Context
 	observed := false
 	f.engine.Charts = observingRevert{f.charts, func(ctx context.Context) { chart = ctx }}
-	f.engine.CheckEndpoint = func(ctx context.Context, _ installer.Profile) error {
-		observed = true
+	f.engine.CheckEndpoint = func(context.Context, installer.Profile) error {
+		if !observed {
+			observed = true
+			return installer.NewProblem("starting", nil, "")
+		}
+		return nil
+	}
+	f.engine.Pause = func(ctx context.Context) error {
 		assertRollbackDeadlines(t, chart, ctx)
 		return nil
 	}

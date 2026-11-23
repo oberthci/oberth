@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/oberthci/oberth/internal/apicontract"
@@ -115,7 +116,13 @@ func (s installationSession) applyUpgrade(ctx context.Context, plan *installer.U
 	ctx, cancel := context.WithTimeout(ctx, installer.ReadinessTimeout+10*time.Minute)
 	defer cancel()
 	rolled := s.engine.WatchController(ctx)
-	result, err := apply.maintenance.Upgrade(ctx, plan, approved, nil)
+	progress := func(phase installer.Phase) error {
+		if strings.HasPrefix(string(phase), string(installer.Waiting)) {
+			return writeWrapped(apply.out, string(phase))
+		}
+		return nil
+	}
+	result, err := apply.maintenance.Upgrade(ctx, plan, approved, progress)
 	if err != nil {
 		return err
 	}

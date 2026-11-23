@@ -70,12 +70,14 @@ func TestLateReadyReplyCannotPassDeadline(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		f := setup(t)
-		f.engine.CheckEndpoint = func(ctx context.Context, _ installer.Profile) error {
-			<-ctx.Done()
+		waiting, cancel := context.WithTimeout(t.Context(), installer.ReadinessTimeout)
+		defer cancel()
+		f.engine.CheckEndpoint = func(context.Context, installer.Profile) error {
+			<-waiting.Done()
 			return nil
 		}
 		p := prepare(t, f)
-		_, err := f.engine.Apply(t.Context(), p, p.Digest(), nil)
+		_, err := f.engine.Apply(waiting, p, p.Digest(), nil)
 		var refusal *installer.Problem
 		if !errors.As(err, &refusal) || refusal.Code != "timeout" || !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatal("late readiness bypassed the deadline", err)

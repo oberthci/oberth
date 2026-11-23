@@ -14,7 +14,7 @@ func (e *Engine) waitReady(ctx context.Context, p Profile) error {
 		if err := ctx.Err(); err != nil {
 			return problem("timeout", err)
 		}
-		err := e.CheckEndpoint(ctx, p)
+		err := e.probeReady(ctx, p)
 		// A connection attempt can time out while the rollout still has time.
 		// Only the readiness context owns the command's deadline.
 		if ctx.Err() != nil {
@@ -31,6 +31,12 @@ func (e *Engine) waitReady(ctx context.Context, p Profile) error {
 			return problem("timeout", err)
 		}
 	}
+}
+
+func (e *Engine) probeReady(ctx context.Context, p Profile) error {
+	probe, cancel := context.WithTimeout(ctx, targetProbe)
+	defer cancel()
+	return e.CheckEndpoint(probe, p)
 }
 
 // pause is one step of the readiness wait; an injected Pause replaces it in tests.
