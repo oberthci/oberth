@@ -22,6 +22,17 @@ func TestOperationsExplainsParallelMarks(t *testing.T) {
 	}
 }
 
+func TestOperationsPointsMissingTagsToPublication(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/operations.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(strings.Fields(string(raw)), " ")
+	if !strings.Contains(text, "check publication if a tag has not reached the forge") {
+		t.Fatal("operations must direct missing tags to publication")
+	}
+}
+
 func TestDocumentationStorageAndPlanContract(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("../../docs/pipelines.md")

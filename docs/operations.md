@@ -20,7 +20,7 @@ rail and CLI/agent `┌│└` marks enclose parallel groups with visible ends. 
 zero. Select a step, attempt or container for logs; page incomplete windows and earlier output. A
 `secret` tag means declared credential intent, not that a value was read. Runs may be Argo-queued,
 waiting for a node, running, passed, failed or cancelled. Holds show live eligible containers.
-Passing and publication are separate; check undelivered tags at the forge.
+Passing and publication are separate; check publication if a tag has not reached the forge.
 
 ## Wait, retry and assist
 
