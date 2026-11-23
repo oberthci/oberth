@@ -118,7 +118,7 @@ async function actions(client,label,path,tool){
  return {second,blocked,rebuilt,refreshed};
 }
 
-// Connection trouble never fills the page: the header light turns amber after two
+// Connection trouble shows a notice: the header light turns amber after two
 // failed requests in a row, red with a reload link after 30 s, and back when the server answers.
 async function offline(client){
  await client.loaded('/runs','.runs a.row');await pause(20);
@@ -140,7 +140,7 @@ async function offline(client){
   }finally{view.controller.abort();window.fetch=original;performance.now=clock;observer.disconnect();}
  })()`);
  check(result.reads>=2&&result.waits>=2,'offline check missed the read/wait retry cycle '+JSON.stringify(result));
- check(result.notices===0&&result.notice==='','connection trouble filled the page '+JSON.stringify(result));
+ check(result.notices>0&&result.notice==='','connection notice did not clear on recovery '+JSON.stringify(result));
  check(result.before.state==='normal'&&result.before.mark==='mark passed'&&result.before.reload==='hidden','header did not start normal '+JSON.stringify(result.before));
  check(result.reconnecting.state==='reconnecting'&&result.reconnecting.mark==='mark running'&&result.reconnecting.title.startsWith('Reconnecting to Oberth.')&&result.reconnecting.reload==='hidden','two failures did not show reconnecting '+JSON.stringify(result.reconnecting));
  check(result.unreachable.state==='unreachable'&&result.unreachable.mark==='mark failed'&&result.unreachable.title.includes('reload this page')&&result.unreachable.label.startsWith('Oberth is not reachable.')&&result.unreachable.reload==='visible'&&result.unreachable.version==='hidden','30 s of failures did not show unreachable with reload '+JSON.stringify(result.unreachable));

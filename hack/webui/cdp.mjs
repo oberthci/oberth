@@ -81,6 +81,6 @@ export async function launch(options = {}) {
    try{await deadline('close browser',()=>send('Browser.close'));}
    finally{ws.close();browser.kill('SIGTERM');server.kill('SIGTERM');await deadline('close example server',()=>serverExit);}
   }
-  return {artifacts,origin,token,cdp,evaluate,nextEvent,loaded,events,requests,injection,checkFatal:()=>{if(fatalError)throw fatalError;},close};
+  return {artifacts,origin,token,cdp,evaluate,nextEvent,loaded,events,requests,injection,pauseServer:paused=>server.kill(paused?'SIGSTOP':'SIGCONT'),checkFatal:()=>{if(fatalError)throw fatalError;},close};
  }catch(error){closing=true;ws?.close();browser?.kill('SIGTERM');server.kill('SIGTERM');await serverExit;throw error;}
 }

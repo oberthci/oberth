@@ -221,10 +221,11 @@ func clippingOutsideNames(css string) string {
 	}
 	return ""
 }
-func TestUINoPollingTimers(t *testing.T) {
+func TestUILiveObservationUsesEvents(t *testing.T) {
 	_, js, _ := uiSources(t)
-	if strings.Count(js, "setInterval(") != 1 || strings.Count(js, "setTimeout(") != 1 || !strings.Contains(js, "setTimeout(finish, milliseconds)") {
-		t.Fatal("polling timer")
+	// The display clock and bounded status probe do not poll run data.
+	if strings.Count(js, "setInterval(") != 2 || strings.Count(js, "setTimeout(") != 2 || !strings.Contains(js, "setInterval(readStatus, 2000)") || !strings.Contains(js, "setTimeout(finish, milliseconds)") {
+		t.Fatal("unexpected polling timer")
 	}
 	if strings.Contains(js, "http-equiv") || !strings.Contains(js, `call("events_wait"`) {
 		t.Fatal("live observation absent")

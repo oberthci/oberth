@@ -263,9 +263,10 @@ the script has no folding rule. Live updates use `events_wait` to trigger reads.
 Signed-out visitors see only the sign-in card. The header starts hidden and appears
 only after an accepted bearer or browser certificate sign-in; a 401 hides it.
 Navigation keeps the sign-in card until the server answers.
-First-load connection trouble shows a reconnecting notice while the header and
-sign-in card are both hidden.
-An available answer clears this notice on every route.
+Visible signed-in pages make a bounded status read every two seconds, including
+idle pages. Connection trouble shows the reconnecting notice and changes the
+server light; an available answer clears both on every route. First-load trouble
+also shows the notice while the header and sign-in card are both hidden.
 
 ## Inspections
 

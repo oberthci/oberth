@@ -56,8 +56,7 @@ async function exchange(path, options = {}) {
  topbar.hidden = false; signin.hidden = true; main.hidden = false;
  return response;
 }
-// Connection trouble shows in the header light, or a startup notice before
-// sign-in is accepted; background reads retry it quietly.
+// Connection trouble shows in the header light and the reconnecting notice.
 const unavailable = status => [502, 503, 504].includes(status);
 const trouble = error => !error.reason || unavailable(error.status);
 function retryAfter(value) { return /^\d+$/.test(value || "") ? Number(value) * 1000 : 5000; }
@@ -444,7 +443,7 @@ document.addEventListener("keydown", event => {
 });
 // The top bar's light carries the connection: normal; reconnecting after two failed
 // requests in a row; unreachable once requests have failed for 30 s. Any answer resets it,
-// and the version and readiness come from the status read the Status page makes.
+// and bounded status reads supply version and readiness while the page is visible.
 const server = document.querySelector("#server"), connection = {failures: 0, since: 0, ready: null}, unreachableAfter = 30000;
 function reached(ok) {
  const was = server.dataset.state || "normal";
@@ -452,7 +451,7 @@ function reached(ok) {
  else if (!connection.failures++) connection.since = performance.now();
  server.dataset.state = ok ? "normal" : performance.now() - connection.since >= unreachableAfter ? "unreachable" : connection.failures > 1 ? "reconnecting" : "normal";
  if (ok) { connection.notice?.remove(); connection.notice = null; }
- else if (topbar.hidden && signin.hidden && !connection.notice?.isConnected) {
+ else if (signin.hidden && (topbar.hidden || server.dataset.state !== "normal") && !connection.notice?.isConnected) {
   connection.notice = empty(copy.reconnecting); notice.append(connection.notice);
  }
  paintServer();
@@ -466,8 +465,15 @@ function paintServer() {
  server.setAttribute("aria-label", words.join(" ") + " Version " + (server.querySelector(".ver").textContent || "unknown") + ".");
 }
 function readStatus() {
- get("/api/status").then(status => { connection.ready = status.ready; server.querySelector(".ver").textContent = status.version; paintServer(); }).catch(() => {});
+ if (document.hidden || !signin.hidden || connection.reading) return;
+ const controller = new AbortController();
+ connection.reading = controller;
+ const timeout = setTimeout(() => controller.abort(new DOMException("Status read timed out", "TimeoutError")), 1000);
+ get("/api/status", controller.signal).then(status => { connection.ready = status.ready; server.querySelector(".ver").textContent = status.version; paintServer(); }).catch(() => {}).finally(() => { clearTimeout(timeout); connection.reading = null; });
 }
+// A bounded, single status read detects a silent server even during an idle event wait.
+setInterval(readStatus, 2000);
+document.addEventListener("visibilitychange", () => { if (document.hidden) connection.reading?.abort(); else readStatus(); });
 server.querySelector(".reload").addEventListener("click", event => { event.preventDefault(); location.reload(); });
 if (localStorage.getItem("oberth.token")) readStatus();
 route();
