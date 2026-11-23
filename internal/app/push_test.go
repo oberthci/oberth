@@ -123,10 +123,19 @@ func TestGateSkipsParkedDeletedAndNoPipeline(t *testing.T) {
 			if skip != "" && reads != 0 {
 				t.Fatal("skipped ref read YAML")
 			}
-			if skip == "parked" && !strings.Contains(strings.Join(result.Lines(), "\n"), "-o oberth.run=1") {
-				t.Fatal(result.Lines())
+			if skip == "parked" {
+				assertParkedHint(t, result)
 			}
 		})
+	}
+}
+
+func assertParkedHint(t *testing.T, result app.PushResult) {
+	t.Helper()
+	for _, text := range []string{"Push a new commit to this ref", "-o oberth.run=1", "an unchanged push starts nothing"} {
+		if !strings.Contains(strings.Join(result.Lines(), "\n"), text) {
+			t.Fatal("parked hint cannot be followed", result.Lines())
+		}
 	}
 }
 func TestGateMissingReleaseRefuses(t *testing.T) {

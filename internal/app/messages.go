@@ -52,7 +52,7 @@ func messages() map[string]message {
 		"failed":          {"run submission failed", "Read the run detail for the cause."},
 		"started":         {"run started", ""},
 		"accepted":        {"run accepted", ""},
-		"parked":          {"branch parked; nothing ran", "Run it with git push -o oberth.run=1."},
+		"parked":          {"branch parked; nothing ran", "Push a new commit to this ref with -o oberth.run=1; an unchanged push starts nothing."},
 		"deleted":         {"ref deleted; nothing ran", ""},
 		"absent":          {"no pipeline; nothing ran", "Add the selected pipeline file to start CI."},
 	}

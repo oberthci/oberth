@@ -15,7 +15,7 @@ func TestPushFeedbackIsCompleteWithoutInternalCodes(t *testing.T) {
 		out  app.Outcome
 		want string
 	}{
-		{"parked", app.Outcome{Ref: "refs/heads/topic", State: "parked"}, "refs/heads/topic: branch parked; nothing ran. Run it with git push -o oberth.run=1."},
+		{"parked", app.Outcome{Ref: "refs/heads/topic", State: "parked"}, "refs/heads/topic: branch parked; nothing ran. Push a new commit to this ref with -o oberth.run=1; an unchanged push starts nothing."},
 		{"deleted", app.Outcome{Ref: "refs/heads/topic", State: "deleted"}, "refs/heads/topic: ref deleted; nothing ran."},
 		{"absent", app.Outcome{Ref: "refs/heads/topic", File: ".oberth/build.yaml", State: "absent"}, "refs/heads/topic .oberth/build.yaml: no pipeline; nothing ran. Add the selected pipeline file to start CI."},
 		{"accepted", app.Outcome{Ref: "refs/heads/topic", RunID: "r1", State: "accepted", WatchURL: "https://oberth.ci/runs/r1"}, "refs/heads/topic r1: run accepted.\n  watch: https://oberth.ci/runs/r1"},
