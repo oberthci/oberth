@@ -12,6 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"slices"
 )
 
@@ -85,11 +86,10 @@ func (s *Submitter) preparePush(ctx context.Context, r Receive, replay bool) (ac
 	a.Repository, a.Actor = r.Updates[0].Request.Repository, r.Updates[0].Request.Actor.Clone()
 	problems := &PushRefusal{}
 	for _, u := range r.Updates {
-		d, err := s.d.Service.Decide(ctx, service.RefUpdate{ID: r.ID, Repo: u.Request.Repository, Ref: u.Request.Ref.Name, PreviousSHA: u.PreviousSHA, ObjectSHA: u.Request.Ref.ObjectSHA, CommitSHA: u.Request.Ref.CommitSHA, Actor: u.Request.Actor.Clone(), Run: u.Run})
-		if err != nil {
-			e := refusal("decision", err)
-			e.Ref = u.Request.Ref.Name
-			if err := a.problem(problems, u.Request, e, replay); err != nil {
+		d, problem := s.decidePush(ctx, r.ID, u)
+		if problem != nil {
+			problem.Ref = u.Request.Ref.Name
+			if err := a.problem(problems, u.Request, problem, replay); err != nil {
 				return a, err
 			}
 			continue
@@ -105,7 +105,7 @@ func (s *Submitter) preparePush(ctx context.Context, r Receive, replay bool) (ac
 		}
 		run, err := s.admit(ctx, request, r.Source, admitOptions{mode: admissioncontract.ModeSubmit})
 		var e *Refusal
-		if errors.As(err, &e) && e.Code == "missing" && !request.Release {
+		if errors.As(err, &e) && absentOptionalBuild(e, request) {
 			out.State, out.File = "absent", e.File
 			a.Result.Outcomes = append(a.Result.Outcomes, out)
 			continue
@@ -127,6 +127,33 @@ func (s *Submitter) preparePush(ctx context.Context, r Receive, replay bool) (ac
 		return a, problems
 	}
 	return a, nil
+}
+
+func (s *Submitter) decidePush(ctx context.Context, id string, u RefUpdate) (service.Decision, *Refusal) {
+	if err := s.manualPushFile(u); err != nil {
+		return service.Decision{}, err
+	}
+	d, err := s.d.Service.Decide(ctx, service.RefUpdate{ID: id, Repo: u.Request.Repository, Ref: u.Request.Ref.Name, PreviousSHA: u.PreviousSHA, ObjectSHA: u.Request.Ref.ObjectSHA, CommitSHA: u.Request.Ref.CommitSHA, Actor: u.Request.Actor.Clone(), Run: u.Run})
+	if err != nil {
+		return service.Decision{}, refusal("decision", err)
+	}
+	return d, nil
+}
+
+func (s *Submitter) manualPushFile(u RefUpdate) *Refusal {
+	if u.Request.File == "" {
+		return nil
+	}
+	if !u.Run || u.Deleted {
+		return refusal("workflow", nil)
+	}
+	_, _, err := workflowpolicy.Select(s.d.Routes, workflowpolicy.SelectionRequest{
+		Repository: u.Request.Repository, Ref: u.Request.Ref.Name, File: u.Request.File, Manual: true,
+	})
+	if err != nil {
+		return workflowSelectionError(err)
+	}
+	return nil
 }
 
 // releaseTag is the push's one admitted release tag, exactly as admitted, or
@@ -344,4 +371,8 @@ func (a *acceptance) acceptRun(run stateport.Acceptance, out Outcome, publicURL 
 	out.RunID, out.State = run.Prepared.View().RunID, "accepted"
 	out.WatchURL = strings.TrimRight(publicURL, "/") + "/runs/" + out.RunID
 	a.Result.Outcomes = append(a.Result.Outcomes, out)
+}
+
+func absentOptionalBuild(e *Refusal, r Request) bool {
+	return e.Code == "missing" && !r.Release && r.File == ""
 }

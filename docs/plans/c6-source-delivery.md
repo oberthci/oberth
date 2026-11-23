@@ -126,11 +126,11 @@ Errors are `gitport.AbsentError` (missing file/ref/commit), `gitport.AuthorRefus
 cancellation). Mixed joined causes remain unavailable; absence never conceals an I/O
 failure.
 
-Git push options accept only `oberth.assist=1|0` and `oberth.run=1|0`. `oberth.priority`
-is refused. Bare options, duplicate/conflicting options, `true`/`false` aliases and
-unknown options refuse with the accepted spellings. `oberth.run=0` expresses no explicit
-run request; the key push policy still governs (operator/installer always run, agents
-park). Assistance never requests CI.
+Git push options accept `oberth.assist=1|0`, `oberth.run=1|0` and `oberth.file=<path>`.
+The file requires `oberth.run=1` and a branch; default and routed release files refuse.
+Bare, duplicate, conflicting, unknown and retired options or boolean aliases refuse.
+Without an explicit run request, push policy still governs (operator/installer always
+run, agents park). Assistance never requests CI. File selection adds no automatic trigger.
 
 **Delta:** Receive outbox observation and repair belong to C6, exposed by the
 existing C1/C11 tools and commands. Abandon completes rollback of applied

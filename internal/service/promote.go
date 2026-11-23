@@ -126,7 +126,7 @@ func (s *Service) promotionSource(ctx context.Context, repo, sha string, allowUn
 	if selected.CommitSHA == nil {
 		return selected, refuse(promotionEvidence)
 	}
-	rows, err := s.c.Runs.Runs(ctx, stateport.RunFilter{Repositories: []string{repo}, CommitSHA: *selected.CommitSHA, Trigger: model.TriggerBranch, Limit: 1})
+	rows, err := s.latestBuild(ctx, repo, *selected.CommitSHA)
 	if err != nil {
 		return selected, err
 	}

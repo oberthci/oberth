@@ -115,7 +115,7 @@ func hookOptions() (PushOptions, error) {
 	if err != nil || count < 0 {
 		return PushOptions{}, refuseOptions()
 	}
-	if count > 2 {
+	if count > 3 {
 		return PushOptions{}, &RefusalError{reason: reasonOptionCount, remedy: remedyOptions}
 	}
 	options := make([]string, count)

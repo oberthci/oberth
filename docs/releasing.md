@@ -2,32 +2,22 @@
 
 ## Release your project
 
-As administrator, provision [pipeline grants](pipelines.md#secrets-and-identity) and commit
-your publisher in the tested `.oberth/release.yaml`. Promote a full commit ID from any directory:
+Put your publisher in `.oberth/release.yaml`; provision [grants](pipelines.md#secrets-and-identity).
+As administrator, promote a full commit ID from any directory with `--repo`.
+Promotion can create a different default commit without moving local `HEAD`; save local work first.
+Then fetch and check out the full resulting commit ID printed by promotion:
 ```sh
 oberth promote <tested-commit-sha> --repo <repository>
-```
-
-Promotion may create a different default-branch commit without moving local `HEAD`. Save local work,
-then fetch and check out the full resulting commit ID printed by promotion:
-
-```sh
 git fetch -- oberth refs/heads/<default-branch>
 git switch --detach <resulting-commit-sha>
-```
-
-Wait for its passing, unassisted CI. If default moved again, inspect its head and evidence first:
-
-```sh
+# Wait for passing, unassisted CI; if default moved, inspect its head and evidence first.
 oberth release v0.1.0
 ```
 
 Release checks eligibility and grants before creating/pushing a tag; refusals create none. Follow
 printed grant remedies and retry. Existing tags require the same commit. Confirm the run and
 [publication receipt](operations.md#retention-and-publication).
-
-`check --local` with a release filename selects no release run or release-tier grants. No release
-dry-run flag exists: use `release` when ready to create the tag.
+`check --local` selects no release run or release-tier grants; `release` tags without a dry run.
 
 ## Agent promotion
 
@@ -56,7 +46,6 @@ Signatures are checked only against the committed pinned key; no public log is u
 ## Release Oberth through Oberth
 
 Push green CI, promote, wait for the promotion to deliver, then release strictly above `latest`.
-
 The release pipeline prepares the base and signer, builds, signs, pushes both images to the
 registry, publishes the files as the tag's GitHub release, verifies them in a clean Pod and advances
 `latest`. The build checks its commit without rerunning tests. Only signing gets the long-lived key,
@@ -117,7 +106,7 @@ oberth secret put --repo '<repo>' --file .oberth/release.yaml --step latest-adva
 Missing grants print remedies; creating objects grants none. `secretstore exec` delivers granted
 files below `OBERTH_SECRETS_DIR` without exporting values. Check local YAML against live grants with
 [check](pipelines.md#start-with-a-complete-file). The VM install walk,
-[walk-vm.yaml](../hack/walk-vm.yaml), gates nothing: no run selects it. Its own objects are in
+[walk-vm.yaml](../hack/walk-vm.yaml), uses [file selection](pipelines.md). Its objects are in
 [walk-vm-resources.yaml](../hack/walk-vm-resources.yaml), with its VM capability line.
 
 ## First release by hand

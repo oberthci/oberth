@@ -16,6 +16,7 @@ type CIRequest struct {
 	Trigger       RunTrigger  `json:"trigger"`
 	ScheduleEntry string      `json:"schedule_entry"`
 	Assist        bool        `json:"assist"`
+	RequestedFile string      `json:"requested_file,omitempty"`
 }
 
 func (v CIRequest) Clone() CIRequest {

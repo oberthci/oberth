@@ -20,6 +20,7 @@ func (s *Service) peopleAction(a actor.Actor, kind, reason, repo string) statepo
 	}
 	return action
 }
+
 // ciIssueEvidence reports whether a finished run moves CI issues: a schedule
 // run, a push run of the repository's default branch, or a passing promotion
 // run, which is what the default branch becomes. A failed promotion leaves the
@@ -29,6 +30,9 @@ func (s *Service) peopleAction(a actor.Actor, kind, reason, repo string) statepo
 // Other branches and tags, releases included, create, update and close no CI
 // issue.
 func (s *Service) ciIssueEvidence(ctx context.Context, r stateport.Run, o FinishedRun) (bool, error) {
+	if optionalWorkflow(r) {
+		return false, nil
+	}
 	if !ciVerdict(r, o) {
 		return false, nil
 	}

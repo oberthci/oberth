@@ -18,11 +18,12 @@ func TestValidateInfersWorkflowKindOffline(t *testing.T) {
 	}{
 		{"build", ".oberth/build.yaml", false, 1},
 		{"release", ".oberth/release.yaml", false, 0},
-		{"custom-release", ".oberth/publish.yaml", false, 0},
+		{"custom-ci", ".oberth/publish.yaml", false, 1},
 		{"clean-build-path", "./.oberth/build.yaml", false, 1},
 		{"outside-build", "build.yaml", false, 0},
 		{"outside-release", "workflows/release.yaml", false, 0},
 		{"prefix-boundary", ".oberth-other/build.yaml", false, 0},
+		{"custom-ci-declared", ".oberth/walk.yaml", true, 0},
 		{"build-declared", ".oberth/build.yaml", true, 0},
 		{"release-declared", ".oberth/release.yaml", true, 1},
 		{"outside-declared", "workflow.yaml", true, 0},

@@ -74,6 +74,7 @@ type Request struct {
 	Ref               sourcecontract.Ref
 	Trigger           model.RunTrigger
 	ScheduleEntry     string
+	File              string // Explicit CI file selected by this push or retained rerun.
 	Release, Assist   bool
 	ReleaseHead       gitport.Ref
 	Original          *stateport.Run

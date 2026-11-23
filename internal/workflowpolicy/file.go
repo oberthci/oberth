@@ -31,6 +31,10 @@ func (e *InvalidError) Reason() string {
 
 func (e *InvalidError) Remedy() string {
 	switch e.Path {
+	case "manual_release":
+		return "Ask an administrator to release this workflow through its tag route."
+	case "manual_ref":
+		return "Push a branch with oberth.run=1 and oberth.file=<path>."
 	case "file":
 		return "Use an exact clean repository-relative workflow file."
 	case "ref":

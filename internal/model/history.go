@@ -21,9 +21,11 @@ type RunCause struct {
 // C7 persists assist opt-in and the monotonic Assisted flag separately from verdict.
 type RunOrigin struct {
 	RunCause
-	Assisted     bool   `json:"assisted"`
-	WorkflowName string `json:"workflow_name"`
-	WorkflowUID  string `json:"workflow_uid"`
+	// RequestedFile retains an explicit selector even when admission was refused.
+	RequestedFile string `json:"requested_file,omitempty"`
+	Assisted      bool   `json:"assisted"`
+	WorkflowName  string `json:"workflow_name"`
+	WorkflowUID   string `json:"workflow_uid"`
 }
 
 // ReleaseReceipt identifies a delivered release, never a merely passing run.

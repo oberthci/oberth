@@ -11,8 +11,8 @@ func TestSelectedWorkflowFileKind(t *testing.T) {
 		{"", false},
 		{BuildFile, false},
 		{ReleaseFile, true},
-		{".oberth/publish.yaml", true},
-		{"workflows/release.yaml", true},
+		{".oberth/publish.yaml", false},
+		{"workflows/release.yaml", false},
 	} {
 		_, got, err := Select(nil, SelectionRequest{Repository: "forge/org/repo", File: scenario.file})
 		if err != nil || got != scenario.release {

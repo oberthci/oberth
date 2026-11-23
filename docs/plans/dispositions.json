@@ -9394,14 +9394,14 @@
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
     "docs/plans/c11-cli-and-server-composition.md": "37dced5a793a5443ecbd12546051203460cda24ad552959de7b1bfad7471e131",
     "docs/plans/c12-agent-client.md": "6f9982b9d0dd25d4cff808ecaa40a5c9d0d56213034d5aadf801982a04c59ad6",
-    "docs/plans/c13-own-pipelines.md": "7de307baeadf531f8dcf45c1aedfe195324188be0083d1322a7034d3cad34ee9",
+    "docs/plans/c13-own-pipelines.md": "c54d6c8ebb10f4727b6d51c59be1fea167623140e61adcf4717a1624b07b9dba",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
-    "docs/plans/c2-service-actions-and-history.md": "fc9d4adfa87fd77a4f7c75e4b5e089372a7a72400a073164435ec6b2f126183e",
-    "docs/plans/c3-wiring-and-submission.md": "55f3b41b47272bb59ba18656873387f64c1ca7e3e689afc2efd704819a531931",
+    "docs/plans/c2-service-actions-and-history.md": "f52f203c94e1ade19021f9b25ad25c971a65406d59bc01f19f40bf3f2a2cab0a",
+    "docs/plans/c3-wiring-and-submission.md": "2bda8b25776d7f78706a4f57316c82e3ccb7434a42c67f96bcb762f2c8b36a47",
     "docs/plans/c4-admission-rules-and-plan.md": "9c29dfb7bdb5b34200f9abc83acb0fb666bff4939a8776dbd37ebeea9cab0327",
     "docs/plans/c5-native-execution.md": "155a113cdea2691fb03f7fcfebd7c740a718660f161fa0c1ad01b91a76a11ce0",
-    "docs/plans/c6-source-delivery.md": "df8d5ccd0bad9f23077e3e1d8b625f5d4acac35e2656dde2c2d9edf27ebb5424",
-    "docs/plans/c7-durable-state.md": "0fce03bf6385083ed86ecc5bc1afe7c9105aaea5154b9e83788911c3d6a07c9a",
+    "docs/plans/c6-source-delivery.md": "a3846f5f32189988bc2135ff72d4db6cce88d68ed675df116e508bb84f29e113",
+    "docs/plans/c7-durable-state.md": "62094b0475735bd2427ee573807cdc767a45befdaa86a0472f6587629d537361",
     "docs/plans/c8-logs.md": "d406f3a01f449719be4aa255d628b908e9a8a1e33230f3c21b9b50ce0e74a61d",
     "docs/plans/c9-install-and-upgrade.md": "b0fbfe1bd85e03906744883257e9d4a3fd3791e79da18b07879785360b8cb3dc"
   },
@@ -12654,14 +12654,14 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "| **Delta:** `Admit`, `Check`, `Submit` | Select build YAML for branch, promotion, schedule and ordinary tags; select release YAML or an approved administrator route only from release-tag authority. Read exact commit bytes, with tested commit separate from pushed object. Load current file/tier grants, account and config snapshots; call C4 Prepare once. Check uses inspect mode without writes, Keep, credentials or Create. |",
+      "basis": "| **Delta:** `Admit`, `Check`, `Submit` | Select build YAML for branch, promotion, schedule and ordinary tags unless an explicit branch push selects a non-release file; select release YAML or an approved administrator route only from release-tag authority. Read exact commit bytes, with tested commit separate from pushed object. Load current file/tier grants, account and config snapshots; call C4 Prepare once. Check uses inspect mode without writes, Keep, credentials or Create. |",
       "rows": [
         {
           "category": "Folded issues",
           "name": "#1655",
           "disposition": "CHANGE",
           "reason": "Empty/push trigger aliases and trusted-caller route exceptions are removed; explicit complete trigger/route facts are required.",
-          "basis": "| **Delta:** `Admit`, `Check`, `Submit` | Select build YAML for branch, promotion, schedule and ordinary tags; select release YAML or an approved administrator route only from release-tag authority. Read exact commit bytes, with tested commit separate from pushed object. Load current file/tier grants, account and config snapshots; call C4 Prepare once. Check uses inspect mode without writes, Keep, credentials or Create. |"
+          "basis": "| **Delta:** `Admit`, `Check`, `Submit` | Select build YAML for branch, promotion, schedule and ordinary tags unless an explicit branch push selects a non-release file; select release YAML or an approved administrator route only from release-tag authority. Read exact commit bytes, with tested commit separate from pushed object. Load current file/tier grants, account and config snapshots; call C4 Prepare once. Check uses inspect mode without writes, Keep, credentials or Create. |"
         }
       ]
     },
@@ -12671,14 +12671,14 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "| **Delta:** `Gate` | C6 invokes it with all updates and a quarantine-bound source before any ref moves. Collect every independently knowable finding with its ref/file and C4's exact grant command. One bad ref rejects the whole push. Tags always require admission, including uplink pushes without a run option. Parked/deleted updates skip preparation; absent optional build YAML starts nothing; missing release YAML refuses. A push carries at most one release tag: the commit or one tag object on it. Delivering it upstream is the gate's last step: a failed delivery refuses the push, a delivered tag is never refused, also on expiry. The gate has 30 seconds; a refusal already there when it expires is returned with its own remedy, and otherwise, an approval racing expiry included, it refuses saying admission did not finish in time. |",
+      "basis": "| **Delta:** `Gate` | C6 invokes it with all updates and a quarantine-bound source before any ref moves. Collect every independently knowable finding with its ref/file and C4's exact grant command. One bad ref rejects the whole push. Tags always require admission, including uplink pushes without a run option. Parked/deleted updates skip preparation; absent optional build YAML starts nothing; a missing explicit file or release YAML refuses. A push carries at most one release tag: the commit or one tag object on it. Delivering it upstream is the gate's last step: a failed delivery refuses the push, a delivered tag is never refused, also on expiry. The gate has 30 seconds; a refusal already there when it expires is returned with its own remedy, and otherwise, an approval racing expiry included, it refuses saying admission did not finish in time. |",
       "rows": [
         {
           "category": "Git push options",
           "name": "oberth.run",
           "disposition": "NEW",
           "reason": "Run-requested pushes are admitted in quarantine before any ref moves; one bad ref rejects the whole push with every finding.",
-          "basis": "| **Delta:** `Gate` | C6 invokes it with all updates and a quarantine-bound source before any ref moves. Collect every independently knowable finding with its ref/file and C4's exact grant command. One bad ref rejects the whole push. Tags always require admission, including uplink pushes without a run option. Parked/deleted updates skip preparation; absent optional build YAML starts nothing; missing release YAML refuses. A push carries at most one release tag: the commit or one tag object on it. Delivering it upstream is the gate's last step: a failed delivery refuses the push, a delivered tag is never refused, also on expiry. The gate has 30 seconds; a refusal already there when it expires is returned with its own remedy, and otherwise, an approval racing expiry included, it refuses saying admission did not finish in time. |",
+          "basis": "| **Delta:** `Gate` | C6 invokes it with all updates and a quarantine-bound source before any ref moves. Collect every independently knowable finding with its ref/file and C4's exact grant command. One bad ref rejects the whole push. Tags always require admission, including uplink pushes without a run option. Parked/deleted updates skip preparation; absent optional build YAML starts nothing; a missing explicit file or release YAML refuses. A push carries at most one release tag: the commit or one tag object on it. Delivering it upstream is the gate's last step: a failed delivery refuses the push, a delivered tag is never refused, also on expiry. The gate has 30 seconds; a refusal already there when it expires is returned with its own remedy, and otherwise, an approval racing expiry included, it refuses saying admission did not finish in time. |",
           "approval": "owner-approved D9",
           "owner": "C6",
           "behavior": "Run-requested pushes are admitted in quarantine before any ref moves; one bad ref rejects the whole push with every finding."

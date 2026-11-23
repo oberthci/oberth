@@ -153,6 +153,9 @@ func validatePreparedBinding(r model.CIRequest, view admissioncontract.PreparedV
 		view.CommitSHA != *r.CommitSHA || view.Trigger != r.Trigger || view.ScheduleEntry != r.ScheduleEntry {
 		return refuse(invalid, nil)
 	}
+	if r.RequestedFile != "" && r.RequestedFile != view.SelectedFile {
+		return refuse(invalid, nil)
+	}
 	return nil
 }
 
@@ -177,7 +180,7 @@ func (s *Store) admittedRun(input stateport.Acceptance, repoID int64) stateport.
 			ScheduleEntry:   r.ScheduleEntry,
 			AssistRequested: r.Assist,
 			RerunOf:         input.RerunOf,
-		}},
+		}, RequestedFile: r.RequestedFile},
 		Revision: 1,
 	}
 	applyAdmission(&result, input)

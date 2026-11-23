@@ -72,6 +72,7 @@ func RunSuite(t *testing.T, factory func(*testing.T) RunFixture) {
 		"acceptance_rollback":  checkAcceptanceRollbackResult,
 		"sealed_decision":      checkSealedDecision,
 		"rejected_rerun":       checkRejectedAndRerun,
+		"requested_workflow":   checkRequestedWorkflow,
 		"stale_verdict":        checkStaleVerdict,
 		"purge":                checkRunPurge,
 		"acceptance":           checkRunAcceptance,

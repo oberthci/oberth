@@ -66,7 +66,7 @@ func ownerFixture(t *testing.T) contracttest.RunFixture {
 
 func ownerAdmission(t *testing.T, id string, r model.CIRequest) *admissioncontract.PreparedAdmission {
 	t.Helper()
-	v := admissioncontract.PreparedView{RunID: id, Repository: r.Repo, Ref: r.Ref, ObjectSHA: r.ObjectSHA, CommitSHA: *r.CommitSHA, Trigger: r.Trigger, ScheduleEntry: r.ScheduleEntry, Workflow: &wfv1.Workflow{}, Plan: admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "build", Name: "build", HoldEligible: true, HoldArmed: r.Assist}}}}
+	v := admissioncontract.PreparedView{SelectedFile: ".oberth/build.yaml", RunID: id, Repository: r.Repo, Ref: r.Ref, ObjectSHA: r.ObjectSHA, CommitSHA: *r.CommitSHA, Trigger: r.Trigger, ScheduleEntry: r.ScheduleEntry, Workflow: &wfv1.Workflow{}, Plan: admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "build", Name: "build", HoldEligible: true, HoldArmed: r.Assist}}}}
 	p, err := admissioncontract.Seal(v)
 	if err != nil {
 		t.Fatal(err)

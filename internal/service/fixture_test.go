@@ -98,7 +98,7 @@ func (f *fixture) restart(t *testing.T) {
 }
 func (f *fixture) seed(status stepmodel.RunStatus) stateport.Run {
 	commit := head
-	r := stateport.Run{RunSummary: stepmodel.RunSummary{ID: runID, Repo: repository, Ref: "refs/heads/topic", ObjectSHA: head, CommitSHA: &commit, Status: status, CreatedAt: at()}, HasAdmission: true, Admission: admissioncontract.PreparedView{Plan: admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "build"}, {Path: "test"}}}}, Revision: 1, Origin: model.RunOrigin{RunCause: model.RunCause{Actor: caller().Identity, Trigger: model.TriggerBranch}}}
+	r := stateport.Run{RunSummary: stepmodel.RunSummary{ID: runID, Repo: repository, Ref: "refs/heads/topic", ObjectSHA: head, CommitSHA: &commit, Status: status, CreatedAt: at()}, HasAdmission: true, Admission: admissioncontract.PreparedView{SelectedFile: ".oberth/build.yaml", Plan: admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "build"}, {Path: "test"}}}}, Revision: 1, Origin: model.RunOrigin{RunCause: model.RunCause{Actor: caller().Identity, Trigger: model.TriggerBranch}}}
 	f.store.native.SeedRun(r)
 	f.store.native.SeedSteps(r.ID, []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepPending}, {Path: "test", Name: "test", Status: stepmodel.StepPending}})
 	return r
@@ -107,7 +107,7 @@ func batch(t *testing.T) stateport.BatchAcceptance {
 	t.Helper()
 	commit := head
 	request := model.CIRequest{ReceiveID: "receive-1", Repo: repository, Ref: "refs/heads/topic", ObjectSHA: head, CommitSHA: &commit, Actor: caller(), Trigger: model.TriggerBranch}
-	view := admissioncontract.PreparedView{Workflow: &wfv1.Workflow{}, Repository: repository, RunID: runID, Ref: request.Ref, ObjectSHA: head, CommitSHA: head, Trigger: model.TriggerBranch, Plan: admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "build", Name: "build"}}}}
+	view := admissioncontract.PreparedView{SelectedFile: ".oberth/build.yaml", Workflow: &wfv1.Workflow{}, Repository: repository, RunID: runID, Ref: request.Ref, ObjectSHA: head, CommitSHA: head, Trigger: model.TriggerBranch, Plan: admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "build", Name: "build"}}}}
 	// This fixture stands for C4 output; production service never seals an admission.
 	prepared, err := admissioncontract.Seal(view)
 	if err != nil {

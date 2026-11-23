@@ -7,6 +7,7 @@ import (
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
@@ -85,13 +86,16 @@ func (m *runMemory) acceptRun(b stateport.BatchAcceptance, a stateport.Acceptanc
 		return stateport.Run{}, err
 	}
 	r := a.Request
+	if r.RequestedFile != "" && sourcecontract.ValidateFilePath(r.RequestedFile) != nil {
+		return stateport.Run{}, runProblem(publicerr.InvalidInput)
+	}
 	if r.ReceiveID == "" {
 		r.ReceiveID = b.ReceiveID
 	}
 	if r.ReceiveID != b.ReceiveID || r.Repo != b.Repository || jsonValue(r.Actor) != jsonValue(b.Actor) {
 		return stateport.Run{}, runProblem(publicerr.InvalidInput)
 	}
-	result := stateport.Run{RunSummary: stepmodel.RunSummary{Repo: r.Repo, Ref: r.Ref, ObjectSHA: r.ObjectSHA, CommitSHA: r.CommitSHA, Status: stepmodel.RunQueued, CreatedAt: at.UTC()}, Origin: model.RunOrigin{RunCause: model.RunCause{Actor: r.Actor.Identity, Trigger: r.Trigger, ScheduleEntry: r.ScheduleEntry, AssistRequested: r.Assist, RerunOf: a.RerunOf}}, Revision: 1, Release: a.Release, RepositoryID: m.repos[r.Repo].ID}
+	result := stateport.Run{RunSummary: stepmodel.RunSummary{Repo: r.Repo, Ref: r.Ref, ObjectSHA: r.ObjectSHA, CommitSHA: r.CommitSHA, Status: stepmodel.RunQueued, CreatedAt: at.UTC()}, Origin: model.RunOrigin{RunCause: model.RunCause{Actor: r.Actor.Identity, Trigger: r.Trigger, ScheduleEntry: r.ScheduleEntry, AssistRequested: r.Assist, RerunOf: a.RerunOf}, RequestedFile: r.RequestedFile}, Revision: 1, Release: a.Release, RepositoryID: m.repos[r.Repo].ID}
 	if err := applyFakeAdmission(&result, a); err != nil {
 		return result, err
 	}
@@ -190,11 +194,20 @@ func fakePrepared(a stateport.Acceptance, v admissioncontract.PreparedView) erro
 	if a.Rejected != nil || v.RunID == "" || v.Digest == "" || a.Request.CommitSHA == nil {
 		return runProblem(publicerr.InvalidInput)
 	}
-	r := a.Request
+	if err := fakePreparedBinding(a.Request, v); err != nil {
+		return err
+	}
+	return fakePlan(v.Plan)
+}
+
+func fakePreparedBinding(r model.CIRequest, v admissioncontract.PreparedView) error {
 	if v.Trigger != r.Trigger || v.ScheduleEntry != r.ScheduleEntry || v.Repository != r.Repo || v.Ref != r.Ref || v.ObjectSHA != r.ObjectSHA || v.CommitSHA != *r.CommitSHA {
 		return runProblem(publicerr.InvalidInput)
 	}
-	return fakePlan(v.Plan)
+	if r.RequestedFile != "" && r.RequestedFile != v.SelectedFile {
+		return runProblem(publicerr.InvalidInput)
+	}
+	return nil
 }
 func fakePlan(plan admissioncontract.Plan) error {
 	if len(plan.Entries) > admissioncontract.MaxPlanEntries || len(jsonValue(plan)) > admissioncontract.MaxPlanBytes {

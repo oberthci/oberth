@@ -1609,7 +1609,8 @@
       "internal/publicerr"
     ],
     "internal/stateport": [
-      "internal/reponame"
+      "internal/reponame",
+      "internal/sourcecontract"
     ],
     "internal/store": [
       "pkg/argoworkflow"

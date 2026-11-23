@@ -13,7 +13,7 @@ func TestSelectSubmissionAndInspection(t *testing.T) {
 			t.Fatal("release route lost its service decision", file, selected, release, err)
 		}
 		selected, release, err = Select(nil, SelectionRequest{File: "./" + file})
-		if err != nil || selected != file || release != (file != BuildFile) {
+		if err != nil || selected != file || release != (file == ReleaseFile) {
 			t.Fatal("file inspection lost its role", file, selected, release, err)
 		}
 		selected, release, err = Select(routes, SelectionRequest{

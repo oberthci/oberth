@@ -7,6 +7,7 @@ import (
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/gitport"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/reponame"
 	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/internal/stateport"
@@ -30,11 +31,15 @@ func (s *Submitter) admit(ctx context.Context, r Request, source Source, opts ad
 	if err := validRequest(r, opts.mode); err != nil {
 		return stateport.Acceptance{}, err
 	}
+	file, manual := requestedFile(r, opts)
+	if manual {
+		r.File = file
+	}
 	selected, release, err := workflowpolicy.Select(s.d.Routes, workflowpolicy.SelectionRequest{
-		Repository: r.Repository, Ref: r.Ref.Name, Tag: r.Trigger == model.TriggerTag, Release: r.Release, File: opts.file,
+		Repository: r.Repository, Ref: r.Ref.Name, Tag: r.Trigger == model.TriggerTag, Release: r.Release, File: file, Manual: manual,
 	})
 	if err != nil {
-		return stateport.Acceptance{}, err
+		return stateport.Acceptance{}, workflowSelectionError(err)
 	}
 	if opts.file != "" {
 		if release {
@@ -70,6 +75,14 @@ func (s *Submitter) admit(ctx context.Context, r Request, source Source, opts ad
 		run.Actions = []model.AuditAction{audit(run, opts.reason)}
 	}
 	return run, nil
+}
+
+func workflowSelectionError(err error) *Refusal {
+	var invalid *workflowpolicy.InvalidError
+	if errors.As(err, &invalid) {
+		return refusal("workflow", publicerr.New(publicerr.InvalidInput, invalid.Reason(), invalid.Remedy(), nil))
+	}
+	return refusal("workflow", err)
 }
 func validRequest(r Request, mode admissioncontract.Mode) error {
 	_, err := reponame.ParseRepository(r.Repository)
@@ -137,7 +150,7 @@ func admissionFailure(err error, ref, file string) *Refusal {
 }
 
 func ciRequest(r Request) model.CIRequest {
-	return model.CIRequest{Repo: r.Repository, Ref: r.Ref.Name, ObjectSHA: r.Ref.ObjectSHA, CommitSHA: &r.Ref.CommitSHA, Actor: r.Actor.Clone(), Trigger: r.Trigger, ScheduleEntry: r.ScheduleEntry, Assist: r.Assist}
+	return model.CIRequest{Repo: r.Repository, Ref: r.Ref.Name, ObjectSHA: r.Ref.ObjectSHA, CommitSHA: &r.Ref.CommitSHA, Actor: r.Actor.Clone(), Trigger: r.Trigger, ScheduleEntry: r.ScheduleEntry, Assist: r.Assist, RequestedFile: r.File}
 }
 
 func (s *Submitter) DefaultBranch(ctx context.Context, repo string) (string, error) {
@@ -167,4 +180,18 @@ func (s *Submitter) admissionHooks(r Request, source Source, scope Scope) admiss
 		}
 	}
 	return hooks
+}
+
+func requestedFile(r Request, opts admitOptions) (string, bool) {
+	if r.Original != nil && !r.Original.Release {
+		r.File = r.Original.Origin.RequestedFile
+		if selected := r.Original.Admission.SelectedFile; selected != "" && selected != workflowpolicy.BuildFile {
+			r.File = selected
+		}
+	}
+	file := opts.file
+	if r.File != "" {
+		file = r.File
+	}
+	return file, r.File != ""
 }

@@ -37,7 +37,7 @@ func seedRedMainBase(f *fixture) stateport.Run {
 // ciRun is one running run of the given ref and trigger at commit.
 func ciRun(id, ref, commit string, trigger model.RunTrigger) stateport.Run {
 	return stateport.Run{RunSummary: stepmodel.RunSummary{ID: id, Repo: repository, Ref: ref, ObjectSHA: commit, CommitSHA: &commit, Status: stepmodel.RunRunning, CreatedAt: at()}, HasAdmission: true,
-		Admission: admissioncontract.PreparedView{Plan: admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "build"}}}}, Revision: 1,
+		Admission: admissioncontract.PreparedView{SelectedFile: ".oberth/build.yaml", Plan: admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "build"}}}}, Revision: 1,
 		Origin: model.RunOrigin{RunCause: model.RunCause{Actor: caller().Identity, Trigger: trigger}}}
 }
 

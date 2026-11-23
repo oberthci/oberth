@@ -26,12 +26,12 @@ those definitions; they do not define rival DTOs.
 
 - **Documents.** `build.yaml` and `release.yaml` are single native Workflow documents
   with `apiVersion`, `kind` and `spec`; ownership metadata and execution identities come
-  from admission. Branches, promotions and ordinary tags select the build document.
+  from admission. Branches, promotions and ordinary tags select the build document by default.
   Version tags and configured release routes select the release document under C2/C4
-  rules. There is exactly one build workflow for branch and promotion CI; the
+  rules. The build document alone supplies branch and promotion evidence; the
   product has no promotion-file selection. The build declares no resource
   template, so admitting it needs no capability; the VM install walk is the
-  separate `hack/walk-vm.yaml`, which no run selects. C13 introduces no route or
+  separate `hack/walk-vm.yaml`, selected only by explicit push option. There is no new route or
   special run class. `.oberth/issues.yaml` retains the
   opt-in `{close_from_trailers: true}` policy; C2 owns its interpretation.
 - **Visible work.** Build has three leaves: `make test`, `make static` and

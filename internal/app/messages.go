@@ -15,6 +15,7 @@ type message struct{ reason, remedy string }
 
 func messages() map[string]message {
 	return map[string]message{
+		"workflow":        {"workflow selection refused", "Push a branch with oberth.run=1 and a non-release oberth.file=<path>."},
 		"release_version": {"release tag is not a version", "Use a stable version tag such as v1.2.3."},
 		"release_head":    {"release default head is missing", "Push the tag again after the default branch is readable."},
 		"release_old":     {"release version is not newer", "Choose a higher version."},

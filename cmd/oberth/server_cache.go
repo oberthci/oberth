@@ -131,7 +131,7 @@ func (o *serverOwners) receive(ctx context.Context, e gitcache.ReceiveEvent, sou
 			}
 			ref = export.Ref
 		}
-		request := app.Request{RepositoryID: repo.ID, Repository: e.Repository, RunID: sourcecontract.Digest([]byte(e.ID + "\x00" + u.Ref))[:32], Ref: ref, Trigger: model.TriggerBranch, Actor: who, Assist: e.Options.Assist}
+		request := app.Request{RepositoryID: repo.ID, Repository: e.Repository, RunID: sourcecontract.Digest([]byte(e.ID + "\x00" + u.Ref))[:32], Ref: ref, Trigger: model.TriggerBranch, Actor: who, Assist: e.Options.Assist, File: e.Options.File}
 		r.Updates = append(r.Updates, app.RefUpdate{Request: request, PreviousSHA: u.OldSHA, Deleted: u.NewSHA == "", Run: e.Options.Run})
 	}
 	return r, nil

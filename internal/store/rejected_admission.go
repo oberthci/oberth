@@ -4,6 +4,7 @@ import (
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
@@ -24,6 +25,9 @@ func validateRejected(input stateport.Acceptance) error {
 }
 
 func validateRequest(r model.CIRequest) error {
+	if r.RequestedFile != "" && sourcecontract.ValidateFilePath(r.RequestedFile) != nil {
+		return refuse(invalid, nil)
+	}
 	if !validRef(r.Ref) || !validReceiveID(r.ReceiveID) || r.Actor.Identity == "" || r.Actor.AuthMethod == "" {
 		return refuse(invalid, nil)
 	}

@@ -14,8 +14,8 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-// walkFile is the VM install walk. It lives outside .oberth/, so no push,
-// promotion, tag or schedule selects it; validation reads it as CI.
+// walkFile is the VM install walk, selected only by an explicit push option.
+// Promotions, tags and schedules keep their existing files; the walk uses CI.
 const walkFile = "hack/walk-vm.yaml"
 
 func ownWorkflow(t *testing.T, name string) []byte {

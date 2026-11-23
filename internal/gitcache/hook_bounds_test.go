@@ -24,16 +24,17 @@ func TestReservedPatternAccepts255Refuses256(t *testing.T) {
 		}
 	}
 }
-func TestHookOptionsAcceptsTwoRefusesThree(t *testing.T) {
+func TestHookOptionsAcceptsThreeRefusesFour(t *testing.T) {
 	t.Setenv("GIT_PUSH_OPTION_0", "oberth.assist=1")
-	t.Setenv("GIT_PUSH_OPTION_1", "oberth.run=0")
-	t.Setenv("GIT_PUSH_OPTION_COUNT", "2")
+	t.Setenv("GIT_PUSH_OPTION_1", "oberth.run=1")
+	t.Setenv("GIT_PUSH_OPTION_2", "oberth.file=hack/walk-vm.yaml")
+	t.Setenv("GIT_PUSH_OPTION_COUNT", "3")
 	if _, err := hookOptions(); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GIT_PUSH_OPTION_COUNT", "3")
+	t.Setenv("GIT_PUSH_OPTION_COUNT", "4")
 	if _, err := hookOptions(); err == nil || !strings.Contains(err.Error(), reasonOptionCount) {
-		t.Fatal("third option accepted")
+		t.Fatal("fourth option accepted")
 	}
 }
 

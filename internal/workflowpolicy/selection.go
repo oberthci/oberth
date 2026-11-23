@@ -2,6 +2,7 @@ package workflowpolicy
 
 import (
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -10,7 +11,7 @@ import (
 // Tag reports the trigger kind independently of the run model.
 type SelectionRequest struct {
 	Repository, Ref, File string
-	Tag, Release          bool
+	Tag, Release, Manual  bool
 }
 
 // Select resolves the file and its role together. A verified tag release remains
@@ -19,6 +20,9 @@ type SelectionRequest struct {
 func Select(routes ReleaseRoutes, q SelectionRequest) (string, bool, error) {
 	release := q.Release && q.Tag && strings.HasPrefix(q.Ref, "refs/tags/")
 	file := q.File
+	if q.Manual {
+		return selectManual(routes, q)
+	}
 	if file == "" && q.Ref != "" {
 		file = BuildFile
 		if release {
@@ -35,5 +39,19 @@ func Select(routes ReleaseRoutes, q SelectionRequest) (string, bool, error) {
 			file = ""
 		}
 	}
-	return file, release || file != "" && file != BuildFile, nil
+	return file, release || file != BuildFile && slices.Contains(routes.Files(q.Repository), file), nil
+}
+
+func selectManual(routes ReleaseRoutes, q SelectionRequest) (string, bool, error) {
+	file := q.File
+	if err := ValidateFile(file); err != nil {
+		return "", false, &InvalidError{Path: "file", reason: "workflow file is invalid"}
+	}
+	if slices.Contains(routes.Files(q.Repository), file) {
+		return "", false, &InvalidError{Path: "manual_release", reason: "release files require an admin tag"}
+	}
+	if q.Tag || q.Release || !strings.HasPrefix(q.Ref, "refs/heads/") {
+		return "", false, &InvalidError{Path: "manual_ref", reason: "workflow selection requires a branch"}
+	}
+	return file, false, nil
 }
