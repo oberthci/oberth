@@ -30,7 +30,7 @@ func TestEndpointBodyTimeoutIsTransient(t *testing.T) {
 		var workers sync.WaitGroup
 		verifier := installer.EndpointVerifier{Now: config.Time, DialContext: func(context.Context, string, string) (net.Conn, error) {
 			client, remote := net.Pipe()
-			workers.Go(func() { serveStalledBody(ctx, remote, config) })
+			workers.Go(func() { serveStalledBody(ctx, remote, config, http.StatusOK) })
 			return client, nil
 		}}
 		timeline := clock.RealClock{}
@@ -48,7 +48,7 @@ func TestEndpointBodyTimeoutIsTransient(t *testing.T) {
 	})
 }
 
-func serveStalledBody(ctx context.Context, remote net.Conn, config *tls.Config) {
+func serveStalledBody(ctx context.Context, remote net.Conn, config *tls.Config, status int) {
 	stop := context.AfterFunc(ctx, func() { _ = remote.Close() })
 	defer stop()
 	pipe := bufferTLS(remote)
@@ -62,8 +62,42 @@ func serveStalledBody(ctx context.Context, remote net.Conn, config *tls.Config) 
 		return
 	}
 	_ = request.Body.Close()
-	_, _ = fmt.Fprint(server, "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n")
+	_, _ = fmt.Fprintf(server, "HTTP/1.1 %d Status\r\nContent-Length: 10\r\nConnection: close\r\n\r\n", status)
 	_, _ = io.Copy(io.Discard, server)
+}
+
+func TestStalledErrorBodyRefusesWithoutRetry(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		f := setup(t)
+		apply(t, f, prepare(t, f))
+		config := serverTLS(t, f)
+		ctx, cancel := context.WithCancel(t.Context())
+		var workers sync.WaitGroup
+		defer func() { cancel(); workers.Wait() }()
+		verifier := installer.EndpointVerifier{Now: config.Time, DialContext: func(context.Context, string, string) (net.Conn, error) {
+			client, remote := net.Pipe()
+			workers.Go(func() { serveStalledBody(ctx, remote, config, http.StatusInternalServerError) })
+			return client, nil
+		}}
+		checks := 0
+		f.engine.CheckEndpoint = func(ctx context.Context, profile installer.Profile) error {
+			checks++
+			profile.ServerURL = "https://server.oberth.ci"
+			return verifier.Verify(ctx, profile)
+		}
+		p := prepare(t, f)
+		timeline := clock.RealClock{}
+		started := timeline.Now()
+		_, err := f.engine.Apply(t.Context(), p, p.Digest(), nil)
+		var refusal *installer.Problem
+		if !errors.As(err, &refusal) || refusal.Code != "tls" || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal("stalled HTTP 500 body became transient", err)
+		}
+		if checks != 1 || timeline.Since(started) != 10*time.Second {
+			t.Fatal("HTTP 500 was retried", checks, timeline.Since(started))
+		}
+	})
 }
 
 func TestLateReadyReplyCannotPassDeadline(t *testing.T) {
