@@ -9,6 +9,23 @@ import unittest
 
 
 class LintRefusals(unittest.TestCase):
+    def test_check_pins_config_when_another_format_is_present(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory(dir=os.environ["GOTMPDIR"]) as directory:
+            fixture = Path(directory)
+            for name in (".golangci.yml", "hack/check.sh", "hack/steps.sh", "hack/lint-version"):
+                target = fixture / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(root / name, target)
+            (fixture / "go.mod").write_text("module lintprobe/config\n\ngo 1.26.0\n")
+            (fixture / "bad.go").write_text("package main\n// " + "TO" + "DO: unfinished\nfunc main() {}\n")
+            (fixture / ".golangci.json").write_text('{"version":"2","linters":{"default":"none","enable":["govet"]}}')
+            result = subprocess.run(["bash", "hack/check.sh", "lint"], cwd=fixture,
+                env={**os.environ, "GOLANGCI_LINT": os.environ.get("GOLANGCI_LINT", "golangci-lint")},
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False, timeout=60)
+            self.assertEqual(1, result.returncode, result.stdout)
+            self.assertIn("(godox)", result.stdout)
+
     def check_lint(self, linter, source, filename="bad.go", *, refused=True):
         root = Path(__file__).resolve().parents[1]
         scratch = Path(os.environ.get("GOTMPDIR", Path.home() / ".cache/go-tmp"))

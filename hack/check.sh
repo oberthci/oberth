@@ -27,7 +27,7 @@ lint() {
         printf 'FAIL: require linter %s; install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@%s\n' "$pin" "$pin" >&2
         exit 1
     fi
-    run "$tool" run ./...
+    run "$tool" run --config .golangci.yml ./...
 }
 guards() {
     python3 hack/guards/run.py || exit "$?"

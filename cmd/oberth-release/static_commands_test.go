@@ -15,7 +15,7 @@ func TestStaticEntrypointsRunTheSameThreeChecks(t *testing.T) {
 			writeFixtureCommand(t, filepath.Join(dir, "bin/git"), "exit 0\n")
 			writeFixtureCommand(t, filepath.Join(dir, "bin/go"), `case "$*" in
 *'version --short') cat hack/lint-version | sed 's/^v//';;
-*'run ./...') echo lint >> "$STATIC_LOG";;
+*'run '*./...) echo lint >> "$STATIC_LOG";;
 *) exit 98;; esac
 `)
 			writeFixtureCommand(t, filepath.Join(dir, "bin/python3"), `case "$*" in
