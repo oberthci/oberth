@@ -15,11 +15,13 @@ func (e *Engine) waitReady(ctx context.Context, p Profile) error {
 			return problem("timeout", err)
 		}
 		err := e.CheckEndpoint(ctx, p)
+		// A connection attempt can time out while the rollout still has time.
+		// Only the readiness context owns the command's deadline.
+		if ctx.Err() != nil {
+			return problem("timeout", ctx.Err())
+		}
 		if err == nil {
 			return nil
-		}
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return problem("timeout", err)
 		}
 		var refusal *Problem
 		if !errors.As(err, &refusal) || refusal.Code != "starting" && refusal.Code != "connect" {

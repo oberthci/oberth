@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/oberthci/oberth/internal/installer"
@@ -72,12 +73,17 @@ func TestChartDeadlineNamesChartPhase(t *testing.T) {
 }
 func TestServerDeadlineNamesServerPhase(t *testing.T) {
 	t.Parallel()
-	f := setup(t)
-	p := prepare(t, f)
-	f.engine.CheckEndpoint = func(context.Context, installer.Profile) error { return context.DeadlineExceeded }
-	_, err := f.engine.Apply(t.Context(), p, p.Digest(), nil)
-	var refusal *installer.Problem
-	if !errors.As(err, &refusal) || refusal.Code != "timeout" || !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal("server deadline mislabeled", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		f := setup(t)
+		p := prepare(t, f)
+		f.engine.CheckEndpoint = func(ctx context.Context, _ installer.Profile) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		_, err := f.engine.Apply(t.Context(), p, p.Digest(), nil)
+		var refusal *installer.Problem
+		if !errors.As(err, &refusal) || refusal.Code != "timeout" || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal("server deadline mislabeled", err)
+		}
+	})
 }

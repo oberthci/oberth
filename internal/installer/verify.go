@@ -66,6 +66,9 @@ func evaluateEndpoint(ctx context.Context, client *http.Client, address string) 
 		return nil, problem("starting", nil)
 	}
 	b, err := io.ReadAll(io.LimitReader(response.Body, 1<<20+1))
+	if response.StatusCode == http.StatusOK && errors.Is(err, context.DeadlineExceeded) {
+		return nil, problem("connect", err)
+	}
 	if err != nil || len(b) > 1<<20 || response.StatusCode != http.StatusOK {
 		return nil, described("tls", err, fmt.Sprintf("Endpoint %s returned HTTP %d; body limit is 1 MiB.", address, response.StatusCode))
 	}

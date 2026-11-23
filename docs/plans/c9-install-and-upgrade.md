@@ -173,9 +173,9 @@ no service, wiring, native executor, source implementation or concrete Store.
    plugin that enforces NetworkPolicy; it never claims enforcement without proof.
    There is no policy probe.
 8. **Delta:** **Bound calls.** Planning and verification have a two-minute total budget.
-   Every blocking command, read and status poll inherits cancellation and its
-   advertised deadline. Permanent authority or trust failures stop immediately;
-   classify transient retries, preserve causes and join owned work.
+   Every blocking command, read and status poll inherits cancellation and its advertised deadline.
+   Apply waits up to ten minutes for readiness, retrying connection-attempt timeouts within that bound.
+   Permanent authority or trust failures stop immediately; classify transient retries, preserve causes and join owned work.
 9. **Delta:** **Native configuration.** Keep server and pipeline namespaces and identities
    distinct. Managed controllers get reviewed settings; external controllers are
    verify-only with actionable corrections. Argo's global run cap defaults to 4;
