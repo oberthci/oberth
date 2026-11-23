@@ -10,8 +10,12 @@ func SetBackgroundBound(c *Cache, d time.Duration) { c.budgets.background = d }
 func SetRefreshWait(c *Cache, d time.Duration) { c.budgets.refreshWait = d }
 
 // SetHeadWait replaces headDeadline, a pin's wait for the forge's default
-// head, for one cache.
-func SetHeadWait(c *Cache, d time.Duration) { c.budgets.headWait = d }
+// head, for one cache, and returns a function that restores it between readers.
+func SetHeadWait(c *Cache, d time.Duration) func() {
+	before := c.budgets.headWait
+	c.budgets.headWait = d
+	return func() { c.budgets.headWait = before }
+}
 
 // CacheTrustWindow and the forge refusal reasons, for tests.
 const (

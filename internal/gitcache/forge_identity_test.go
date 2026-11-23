@@ -45,11 +45,14 @@ func TestHeadJobOfAnotherForgeNeverAnswers(t *testing.T) {
 	m.Git(t, m.Work, "push", "-q", m.Bare, "main")
 	x.start(t)
 	x.forge.arm(t, "pipeline")
-	gitcache.SetHeadWait(x.c, 300*time.Millisecond)
+	restoreHeadWait := gitcache.SetHeadWait(x.c, 300*time.Millisecond)
 	at := sourcecontract.Revision{Repository: pinnedPipeline, Commit: x.pipeline.Commit}
 	if _, reachable, err := x.c.Pin(t.Context(), at); err != nil || !reachable {
 		t.Fatal("the fresh cache did not decide while the forge was silent", reachable, err)
 	}
+	// Only the silent old forge needs the short wait. Read the healthy new
+	// forge under the normal budget while the old head job stays blocked.
+	restoreHeadWait()
 	x.move(pinnedPipeline, x.moved)
 	head, _, err := x.c.DefaultAncestor(t.Context(), at)
 	if err != nil || head.CommitSHA != movedHead {
