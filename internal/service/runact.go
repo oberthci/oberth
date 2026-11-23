@@ -52,7 +52,7 @@ func (s *Service) prepareCancel(ctx context.Context, a actor.Actor, q runAction)
 		effectErr := s.c.Exec.Cancel(ctx, r, o.Value == stateport.ObligationTerminate)
 		latest, readErr := s.c.Runs.Run(ctx, r.ID)
 		out := apicontract.Receipt{ID: r.ID, State: string(latest.Status)}
-		if o.Value == stateport.ObligationStop {
+		if o.Value == stateport.ObligationStop && latest.Status == stepmodel.RunRunning {
 			out.Warning = reasonEscalate
 		}
 		if releaseLike(r) {
