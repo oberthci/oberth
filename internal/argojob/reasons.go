@@ -56,6 +56,7 @@ type diagnosis struct {
 
 func diagnose(n wf.NodeStatus, p *core.Pod, stop bool, template *wf.Template) (d diagnosis) {
 	defer func() {
+		d = phaseDiagnosis(d, n.Phase)
 		// Only a node ended by shutdown loses its author-failure diagnosis.
 		if stop {
 			d.reason, d.class = reasonStopped, stepmodel.FailureCancelled
@@ -84,6 +85,22 @@ func diagnose(n wf.NodeStatus, p *core.Pod, stop bool, template *wf.Template) (d
 		return d
 	}
 	d.reason = observedNodeReason(n, p, template)
+	return d
+}
+
+// Pods and nodes arrive independently. Keep exit evidence and diagnostics, but
+// show a reason only when it belongs to the node phase that supplies the status.
+func phaseDiagnosis(d diagnosis, phase wf.NodePhase) diagnosis {
+	switch phase {
+	case wf.NodeFailed, wf.NodeError:
+		return d
+	case wf.NodePending, wf.NodeRunning:
+		switch d.reason {
+		case reasonWaiting, reasonRunning, reasonNode, reasonImage, reasonStarting, reasonUnknown:
+			return d
+		}
+	}
+	d.reason, d.class = nodeReason(phase), stepmodel.FailureUnknown
 	return d
 }
 

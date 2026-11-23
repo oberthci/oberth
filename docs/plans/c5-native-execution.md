@@ -206,6 +206,7 @@ rank the newest reason shows. Progress writes no event and no
 control revision.
 A Pending step whose own Pod container already runs says `starting containers`
 until its node reports Running.
+Step reasons follow the node phase; newer Pod exits cannot label queued or running steps as passed or failed.
 
 The never-started fallback requires native waiting states with no prior start or
 restart. Image, deadline, node and authored-init diagnoses retain their typed

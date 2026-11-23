@@ -152,8 +152,8 @@ func projectAttempt(row *projected, in projectionInput, n wf.NodeStatus) {
 	p := boundPod(in.w, n, in.pods)
 	d := diagnose(n, p, stoppedNode(in, n), nodeTemplate(in.w, n, admissioncontract.MaxNestingDepth))
 	row.step.Status, row.step.DisplayReason, row.step.Detail, row.step.FailureClass = nodeStatus(n.Phase), d.reason, d.detail, d.class
-	if n.SynchronizationStatus != nil && n.SynchronizationStatus.Waiting != "" {
-		row.step.DisplayReason = lockReason(n.SynchronizationStatus.Waiting)
+	if lock := waitingLock(n); lock != "" {
+		row.step.DisplayReason = lockReason(lock)
 		row.step.Detail = strings.TrimSpace(row.step.Detail + "\n" + detailLockStatus)
 	}
 	if row.step.StartedAt == nil {

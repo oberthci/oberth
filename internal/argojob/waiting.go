@@ -14,18 +14,26 @@ import (
 // Pending because the installation's run cap, Argo parallelism, is reached.
 const throttledMessage = "Workflow processing has been postponed because too many workflows are already running"
 
+func waitingLock(n wf.NodeStatus) string {
+	if n.Phase == wf.NodePending && n.SynchronizationStatus != nil {
+		return n.SynchronizationStatus.Waiting
+	}
+	return ""
+}
+
 // waitingLocks maps each logical path to the lock a node there waits for,
 // whatever the node's type: a lock on a retried or nested template is held by
 // a structural node before any Pod exists. A node that waits is Pending.
 func waitingLocks(w *wf.Workflow, paths nativePaths) map[string]string {
 	waits := map[string]string{}
 	for _, n := range w.Status.Nodes {
-		if n.Phase != wf.NodePending || n.SynchronizationStatus == nil || n.SynchronizationStatus.Waiting == "" {
+		lock := waitingLock(n)
+		if lock == "" {
 			continue
 		}
 		path := paths[n.ID].name
-		if old, ok := waits[path]; !ok || n.SynchronizationStatus.Waiting < old {
-			waits[path] = n.SynchronizationStatus.Waiting
+		if old, ok := waits[path]; !ok || lock < old {
+			waits[path] = lock
 		}
 	}
 	return waits
