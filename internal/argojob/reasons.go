@@ -79,8 +79,19 @@ func diagnose(n wf.NodeStatus, p *core.Pod, stop bool, template *wf.Template) (d
 		}
 		return d
 	}
-	d.reason = nodeReason(n.Phase)
+	d.reason = observedNodeReason(n, p, template)
 	return d
+}
+
+func observedNodeReason(n wf.NodeStatus, p *core.Pod, template *wf.Template) string {
+	if n.Phase == wf.NodePending && p != nil {
+		for _, c := range authoredContainerStatuses(template, p) {
+			if c.State.Running != nil {
+				return reasonStarting
+			}
+		}
+	}
+	return nodeReason(n.Phase)
 }
 
 // currentMessage drops the message Argo keeps from before the start, such as

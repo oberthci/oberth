@@ -158,15 +158,25 @@ func TestWorkflowLevelLockNamesTheMutex(t *testing.T) {
 // with no typed reason, which says nothing: the run is waiting to start.
 func TestQueuedRunGivesItsPodsWait(t *testing.T) {
 	t.Parallel()
-	for waiting, reason := range map[string]string{"ImagePullBackOff": "image pull failed", "ContainerCreating": "starting containers", "CreateContainerConfigError": "waiting to start"} {
+	for waiting, reason := range map[string]string{"ImagePullBackOff": "image pull failed", "ContainerCreating": "starting containers", "CreateContainerConfigError": "waiting to start", "running": "starting containers", "sidecar running": "waiting to start"} {
 		w := nativeWorkflow()
 		n := nativeNode("a", ".build", wf.NodePending, 1)
 		w.Status.Nodes[n.ID] = n
 		p := nativePod(w, n, 0)
 		p.Status.ContainerStatuses = []core.ContainerStatus{{Name: "main", State: core.ContainerState{Waiting: &core.ContainerStateWaiting{Reason: waiting}}}}
+		if waiting == "running" {
+			p.Status.ContainerStatuses[0].State = core.ContainerState{Running: &core.ContainerStateRunning{}}
+		}
+		if waiting == "sidecar running" {
+			p.Status.ContainerStatuses = []core.ContainerStatus{{Name: "wait", State: core.ContainerState{Running: &core.ContainerStateRunning{}}}}
+		}
 		out := project(t, argojob.Projection{Plan: queuedPlan(), Workflow: w, Pods: []*core.Pod{p}})
-		if out.Status != stepmodel.RunQueued || out.Reason != reason {
-			t.Fatalf("%s: %s %q, want queued %q", waiting, out.Status, out.Reason, reason)
+		stepReason := reason
+		if waiting == "CreateContainerConfigError" {
+			stepReason = "unknown"
+		}
+		if out.Status != stepmodel.RunQueued || out.Reason != reason || out.Steps[0].DisplayReason != stepReason {
+			t.Fatalf("%s: %s %q step %q, want queued %q step %q", waiting, out.Status, out.Reason, out.Steps[0].DisplayReason, reason, stepReason)
 		}
 	}
 }
