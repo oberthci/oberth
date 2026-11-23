@@ -3,9 +3,9 @@
 ## Release your project
 
 Put your publisher in the tested `.oberth/release.yaml`; later sections build Oberth itself.
-As administrator, provision [pipeline grants](pipelines.md#secrets-and-identity), then promote:
+Administrators promote full IDs from any directory with [grants](pipelines.md#secrets-and-identity):
 ```sh
-oberth promote <tested-commit-sha>
+oberth promote <tested-commit-sha> --repo <repository>
 ```
 
 Promotion may create a different default-branch commit without moving local `HEAD`. Save local work,

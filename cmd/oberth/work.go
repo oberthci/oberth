@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/gitoid"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/pushretry"
@@ -295,6 +296,9 @@ func (s *flowSession) commit(args []string) (string, error) {
 	ref := "HEAD"
 	if len(args) == 1 {
 		ref = args[0]
+	}
+	if gitoid.Valid(ref) {
+		return ref, nil
 	}
 	sha, err := s.git("rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
 	if err != nil {

@@ -268,7 +268,7 @@ wiring.
   `oberth secretstore exec` to C9's step wrapper with private memory scratch,
   owner-only directories/files and bounded fetches.
 
-`oberth promote <sha>` resolves the tested run through C2 without an input file and
+`oberth promote <sha> --repo <repository>` uses C2 and the server's retained tested commit without a local checkout and
 prints the tested run, resulting main commit and CI run at that commit. Client
 credential writes use an owned directory that other users cannot write, owner-only
 files, and cleanup of partial plaintext.
