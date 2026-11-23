@@ -205,10 +205,10 @@ class ReachabilityGuards(RepositoryFixture):
             with self.subTest(mode=mode):
                 self.fixture()
                 original = GUARDS.command
-                def command(args, data=None):
+                def command(args, data=None, **options):
                     if "-test="+mode in args:
                         return subprocess.CompletedProcess(args, 1, stdout="analyzer fixture failed\n")
-                    return original(args, data)
+                    return original(args, data, **options)
                 with patch.object(GUARDS, "command", side_effect=command):
                     _, rows = self.analyze()
                 self.assertEqual(1, sum("[GO]" in r for r in rows), rows)
@@ -219,10 +219,10 @@ class ReachabilityGuards(RepositoryFixture):
             with self.subTest(stage=stage):
                 self.fixture()
                 original = GUARDS.command
-                def command(args, data=None):
+                def command(args, data=None, **options):
                     if args[:2] == ["go", stage]:
                         return subprocess.CompletedProcess(args, 1, stdout="fixture command failed\n")
-                    return original(args, data)
+                    return original(args, data, **options)
                 with patch.object(GUARDS, "command", side_effect=command):
                     _, rows = self.analyze()
                 self.assertEqual(1, sum("[GO]" in r for r in rows), rows)

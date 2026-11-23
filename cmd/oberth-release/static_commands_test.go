@@ -20,6 +20,8 @@ func TestStaticEntrypointsRunTheSameThreeChecks(t *testing.T) {
 `)
 			writeFixtureCommand(t, filepath.Join(dir, "bin/python3"), `if [ "${1:-}" = -I ]; then shift; fi
 case "$*" in
+*'hack/tools/go_tool.py lint version --short') cat hack/lint-version | sed 's/^v//';;
+*'hack/tools/go_tool.py lint run --config .golangci.yml ./...') echo lint >> "$STATIC_LOG";;
 'hack/guards/run.py') echo guards >> "$STATIC_LOG";;
 'hack/plans/parity.py --check') echo parity >> "$STATIC_LOG";;
 *) exit 98;; esac

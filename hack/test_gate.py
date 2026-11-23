@@ -14,9 +14,10 @@ from unittest.mock import patch
 
 from tools.gate_fixture import GateFixture
 from tools.gate_go import GoGateTests
+from tools.gate_vendor import VendorGateTests
 
 
-class GateVerdicts(GoGateTests, GateFixture, unittest.TestCase):
+class GateVerdicts(VendorGateTests, GoGateTests, GateFixture, unittest.TestCase):
 
 
     def test_root_python_cannot_replace_trusted_entries(self):

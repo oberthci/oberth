@@ -24,8 +24,8 @@ def finding(rule, file=".", line=1, detail=""):
     reason, remedy = MESSAGES[rule.rstrip("0123456789")]
     return f"{file}:{line}: [{rule}] {reason} {remedy}" + (f" Detail: {detail}" if detail else "")
 
-def command(args, data=None, binary=False):
-    result = subprocess.run(args, input=data, text=not binary, capture_output=True, check=False, env=GO.environment() if args[0] == "go" else None)
+def command(args, data=None, binary=False, env=None):
+    result = subprocess.run(args, input=data, text=not binary, capture_output=True, check=False, env=GO.environment() if args[0] == "go" else env)
     if result.returncode: result.stdout += result.stderr
     return result
 
@@ -190,7 +190,7 @@ def analysis():
         return module, {"Lines": tool_output("GO", result), "Roots": [], "Product": ""}
 
 def analyzer(*args):
-    return command(["go", "tool", "-modfile="+str(ROOT/"hack/tools/deadcode.mod"), "deadcode", *args])
+    return GO.tool(ROOT/"hack/tools/deadcode.mod", "golang.org/x/tools/cmd/deadcode", command, *args)
 
 def unreachable(module, test, targets):
     result = analyzer("-json", "-test="+test, "-filter", "^"+re.escape(module)+"(/|$)", *targets)

@@ -250,11 +250,13 @@ class TextGuards(RepositoryFixture):
         self.assertEqual(report, actual)
 
     def test_deadcode_uses_its_own_module_from_a_fixture_directory(self):
-        with patch.object(GUARDS, "command", return_value=subprocess.CompletedProcess([], 0, stdout="null")) as tool:
+        with patch.object(GUARDS.GO, "binary", return_value="/reviewed/deadcode") as build, \
+                patch.object(GUARDS, "command", return_value=subprocess.CompletedProcess([], 0, stdout="null")) as tool:
             self.assertEqual([], GUARDS.unreachable("module", "true", ["./..."]))
-        tool.assert_called_once_with([
-            "go", "tool", "-modfile="+str(GUARDS.ROOT/"hack/tools/deadcode.mod"), "deadcode",
-            "-json", "-test=true", "-filter", "^module(/|$)", "./..."])
+        build.assert_called_once_with(GUARDS.ROOT/"hack/tools/deadcode.mod", "golang.org/x/tools/cmd/deadcode")
+        self.assertEqual(["/reviewed/deadcode", "-json", "-test=true", "-filter", "^module(/|$)", "./..."], tool.call_args.args[0])
+        self.assertEqual("off", tool.call_args.kwargs["env"]["GOWORK"])
+        self.assertNotIn("-modfile", tool.call_args.kwargs["env"]["GOFLAGS"])
 
     def test_analyzer_and_linter_have_separate_tool_declarations(self):
         for name, tool in (("go.mod", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint"),
@@ -268,16 +270,17 @@ class TextGuards(RepositoryFixture):
     def test_missing_deadcode_declaration_is_one_named_failure(self):
         self.write("go.mod", "module example.invalid/unit\n\ngo 1.26.0\n")
         self.write("hack/tools/deadcode.mod", "module example.invalid/tools\n\ngo 1.26.0\n")
+        self.write("hack/tools/deadcode.sum", "")
         with patch.object(GUARDS, "ROOT", self.root):
             rows = GUARDS.deadcode("example.invalid/unit", {
                 "Lines": [], "Product": "cmd/oberth", "Roots": ["example.invalid/unit/cmd/oberth"]})
         self.assertEqual(1, len(rows), rows)
         self.assertIn('[GO]', rows[0])
-        self.assertIn('no such tool "deadcode"', rows[0])
+        self.assertIn('cannot find module providing package golang.org/x/tools/cmd/deadcode', rows[0])
 
     def test_deadcode_uses_the_product_closure_without_reclassifying_paths(self):
         calls = []
-        def tool(args, data=None):
+        def tool(args, data=None, **options):
             calls.append(args)
             return subprocess.CompletedProcess(args, 0, stdout=json.dumps([
                 {"Path": "module/internal/runlog/latest", "Funcs": [

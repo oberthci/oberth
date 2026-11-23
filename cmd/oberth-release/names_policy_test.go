@@ -217,6 +217,10 @@ case "$*" in *'version --short') cat hack/lint-version | sed 's/^v//';;
 	writeFixtureCommand(t, filepath.Join(dir, "bin/python3"), `[ -z "${OBERTH_SECRETS_DIR:-}" ] || exit 97
 if [ "${1:-}" = -I ]; then shift; fi
 case "$*" in
+ *'hack/tools/go_tool.py lint version --short') [ -z "${OBERTH_GUARDS_NAMES_FILE:-}" ] && [ "$GIT_CONFIG_COUNT" = 1 ] || exit 97
+  cat hack/lint-version | sed 's/^v//';;
+ *'hack/tools/go_tool.py lint run --config .golangci.yml ./...') [ -z "${OBERTH_GUARDS_NAMES_FILE:-}" ] && [ "$GIT_CONFIG_COUNT" = 1 ] || exit 97
+  [ "$TMPDIR" = "$FIXTURE_ROOT/shared/tmp" ] && [ "$GOLANGCI_LINT_CACHE" = "$FIXTURE_ROOT/cache/golangci-lint" ] || exit 93; echo lint >> "$STATIC_LOG";;
  'hack/guards/run.py') [ "${OBERTH_GUARDS_NAMES_FILE:-}" = "$EXPECTED_NAMES" ] && [ -s "$OBERTH_GUARDS_NAMES_FILE" ] || exit 97
   [ "$GIT_CONFIG_COUNT" = 3 ] && `+git+`--get-all safe.directory | grep -qx /work/src || exit 95
   [ "$(`+git+`user.name) <$(`+git+`user.email)>" = '`+fixtureIdentity+`' ] || exit 94
