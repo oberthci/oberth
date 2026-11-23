@@ -267,16 +267,15 @@ a.repo-group .chevron { visibility: hidden; }
  .filters select { flex: 1; }
  .runs { display: block; }
  .runs .row.head { display: none; }
- /* A phone keeps the status, repository, ref and time on the first line; a
-    message, when there is one, takes the second. */
+ /* A phone keeps status, repository, ref and time on the first line and
+    reserves a second line for the message, even when it is empty. */
  .runs .row { grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr) auto; grid-template-areas: "state repo ref when" "message message message message"; gap: 0 6px; padding: 7px 8px; font-size: 12px; }
  .runs .row:first-of-type { border-radius: 8px 8px 0 0; }
  .runs .row > .state { grid-area: state; padding: 0 6px; gap: 5px; }
  .runs .row > .repo { grid-area: repo; }
  .runs .row > .ref { grid-area: ref; }
  .runs .row > .when { grid-area: when; }
- .runs .row > .message { grid-area: message; }
- .runs .message:empty { display: none; }
+ .runs .row > .message { grid-area: message; min-height: 1lh; }
  .runs .ref::before { content: "\00B7"; margin-right: 6px; color: var(--muted); }
  .server-name { display: none; }
  /* A phone header has no room for the version or a reload word: the light alone

@@ -27,10 +27,11 @@ const results=[];
     if(page==='runs'&&width===360){check(metrics.reason&&metrics.reason.height<=parseFloat(metrics.reason.lineHeight),'40-character reason wrapped '+JSON.stringify(metrics));}
     metrics.rowHeights=await evaluate(`Array.from(document.querySelectorAll('.runs a.row')).map(row=>{const style=getComputedStyle(row),height=row.getBoundingClientRect().height;const lineHeight=parseFloat(style.lineHeight);return {height,lineHeight,content:height-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)-parseFloat(style.borderBottomWidth)-parseFloat(style.borderTopWidth),when:Array.from(row.querySelector('.when').children).map(node=>node.textContent).join('|'),title:row.querySelector('.when').title,message:Boolean(row.querySelector('.message').textContent),cells:Array.from(row.children).filter(cell=>!cell.matches('.state')).map(cell=>{const walker=document.createTreeWalker(cell,NodeFilter.SHOW_TEXT,{acceptNode:node=>node.textContent.trim()&&node.parentElement.checkVisibility()?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_SKIP}),text=walker.nextNode(),range=document.createRange();if(text)range.selectNodeContents(text);const box=text?range.getBoundingClientRect():{bottom:0,height:0},all=document.createRange();all.selectNodeContents(cell);return {name:cell.className,size:getComputedStyle(cell).fontSize,bottom:box.bottom,height:all.getBoundingClientRect().height,cut:cell.scrollWidth>cell.clientWidth+0.5};})};})`);
     // One line per run on a wide screen, every cell at one size on one baseline and nothing cut in the
-    // example; a phone adds a second line only for a message.
+    // example; a phone reserves a second line even when the message is empty.
+    if(page==='runs')check(metrics.rowHeights.some(row=>row.message)&&metrics.rowHeights.some(row=>!row.message),'run-list fixture must mix empty and specific reasons');
     if(page==='runs')for(const row of metrics.rowHeights){
-     const lines=width===1280||!row.message?1:2;
-     check(row.content<=lines*row.lineHeight+0.5&&(width!==1280||Math.abs(row.height-metrics.rowHeights[0].height)<0.5),'run row is not '+lines+' line(s) or rows not uniform '+JSON.stringify({width,...row}));
+     const lines=width===1280?1:2;
+     check(Math.abs(row.content-lines*row.lineHeight)<0.5&&Math.abs(row.height-metrics.rowHeights[0].height)<0.5,'run row is not '+lines+' line(s) or rows not uniform '+JSON.stringify({width,...row}));
      const first=row.cells.filter(cell=>cell.height>0&&(width===1280||!cell.name.includes('message')));
      check(row.cells.every(cell=>cell.size===row.cells[0].size&&cell.height<=row.lineHeight+0.5)&&first.every(cell=>Math.abs(cell.bottom-first[0].bottom)<1),'run cells differ in size or baseline '+JSON.stringify({width,...row}));
      if(width===1280)check(row.cells.every(cell=>!cell.cut),'example run cell cut at 1280 '+JSON.stringify(row.cells));
