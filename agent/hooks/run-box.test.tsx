@@ -5,19 +5,20 @@ import type { On } from 'claude-code'
 import type { Run, Snapshot } from '../types'
 import { age, decodeRun, duration, progress, PROFILE_REASON, PROFILE_REMEDY, REFRESH_MS, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, span, table, visible, WINDOW_MS } from './model'
 import { SETUP } from './client'
-import { hostProps } from './host-elements'
+import { hostProps, hostValues } from './host-elements'
 
-// The current harness also validates values. Check names against the supported
-// host floor so a newer harness cannot silently accept an incompatible prop.
+// Check the floor contract even when the current harness accepts newer values.
 function validateTree(node: unknown): void {
   if (typeof node === 'string') return
-  const element = node as { type: keyof typeof hostProps; props: Record<string, unknown>; children: unknown[] }
+  const element = node as { type: keyof typeof hostProps; props?: Record<string, unknown>; children?: unknown[] }
   const allowed: readonly string[] | undefined = hostProps[element.type]
+  const values: Record<string, readonly unknown[]> = hostValues[element.type]
   if (!allowed) throw new Error(`Unknown element ${element.type}`)
-  for (const prop of Object.keys(element.props)) {
+  for (const [prop, value] of Object.entries(element.props ?? {})) {
     if (!allowed.includes(prop)) throw new Error(`${element.type} prop ${prop} is not allowed`)
+    if (values[prop] && !values[prop]!.includes(value)) throw new Error(`${element.type} ${prop} value is not allowed`)
   }
-  for (const child of element.children) validateTree(child)
+  for (const child of element.children ?? []) validateTree(child)
 }
 
 // The default run's row: id, short repository, short ref, then the status word beside its icon.
@@ -68,6 +69,10 @@ function bottom(on: On, resolved?: string, checkout = true, profileEnv?: string,
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.end', () => ({ sessionId: 'ended' }))
   on('session.root', () => ({ value: '/checkout' }))
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
   on('fs.stat', (_, e) => {
     if (e.path.endsWith('/.git') && !checkout || e.path === host.missing) throw new Error('not found')
     return { value: {
@@ -367,6 +372,11 @@ test('the supported host contract refuses unknown Box and Text props', () => {
     expect(() => validateTree({ type, props: { unknownProp: true }, children: [] })).toThrow('is not allowed')
   }
   expect(() => validateTree({ type: 'Text', props: { maxLines: 1 }, children: ['run'] })).toThrow('is not allowed')
+})
+
+test('the floor host contract refuses newer wrap values and invalid layout values', () => {
+  expect(() => validateTree({ type: 'Text', props: { wrap: 'clip' }, children: ['run'] })).toThrow('is not allowed')
+  expect(() => validateTree({ type: 'Box', props: { flexDirection: 'grid' }, children: [] })).toThrow('is not allowed')
 })
 
 const lintFailure = { failed_step: 'onExit[0].lint', failed_step_name: 'lint', node_id: 'generated-node-419' }
@@ -802,7 +812,7 @@ test('unreadable profiles are named in the box and table until recovery', { opti
     const ui = await $.ui.mount({ ...band, props: { ...band.props, bodyColumns: 24 }, surface })
     const failure = await ui.find({ type: 'Text', text: message })
     expect(failure?.props.wrap).toBe('wrap')
-    expect((await ui.find({ type: 'Box' }))?.props.width).toBe(24)
+    expect((await ui.findAll({ type: 'Box' })).some(box => box.props.width === 24)).toBe(true)
     await ui.unmount()
   }
   let output = (await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text!
@@ -1025,7 +1035,7 @@ test('box hugs its rows with short names and no native names', { options }, asyn
   await startSession($, on)
   for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...band, surface })
-    const box = await ui.find({ type: 'Box' })
+    const box = (await ui.findAll({ type: 'Box' })).find(box => box.props.borderStyle === 'round')
     expect(box?.props.alignSelf).toBe('flex-start')
     expect(box?.props.width).toBeUndefined()
     const lines = (await ui.findAll({ type: 'Text' })).map(line => line.text)

@@ -1,5 +1,5 @@
-// Property names from Claude Code 2.1.325 bundled plugin-authoring/types/claude-code.d.ts.
-// Keep this supported-host floor when a newer test runtime accepts more props.
+// The 2.1.311 runtime allow-list, also verified on 2.1.323.
+// key and hover are handled separately by the host. Keep the floor on newer runtimes.
 export const hostProps = {
   "Box": [
     "key",
@@ -61,4 +61,20 @@ export const hostProps = {
     "dir",
     "wrap"
   ]
+} as const
+
+// Floor enum values and the plugin's accepted style palette. Other values are
+// checked by the host harness; tests also run on the floor runtime itself.
+export const hostValues = {
+  Box: {
+    flexDirection: ['row', 'column', 'row-reverse', 'column-reverse'],
+    alignSelf: ['flex-start', 'center', 'flex-end', 'auto'],
+    borderStyle: ['round'],
+    borderColor: ['gray'],
+  },
+  Text: {
+    wrap: ['wrap', 'end', 'middle', 'truncate-end', 'truncate', 'truncate-middle', 'truncate-start'],
+    color: ['green', 'red', 'gray', 'yellow'],
+    dimColor: [true, false],
+  },
 } as const
