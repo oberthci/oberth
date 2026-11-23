@@ -22,6 +22,36 @@ import (
 )
 
 func TestEmptyForgeBindsAndPublishesFirstMainPush(t *testing.T) {
+	f, run := firstEmptyForgePush(t)
+	f.finishNative(t, run)
+	f.waitRun(t, func(r stateport.Run) bool { return r.Status == stepmodel.RunPassed })
+	f.waitPublication(t, "publication:"+run.ID)
+	if head := f.git.Git(t, f.git.Bare, "rev-parse", "refs/heads/main"); head != *run.CommitSHA {
+		t.Fatal("forge lacks first main commit", head)
+	}
+}
+
+func TestEmptyForgeFirstPublicationPreservesExternalMain(t *testing.T) {
+	f, run := firstEmptyForgePush(t)
+	tree := f.git.Git(t, f.git.Work, "rev-parse", "HEAD^{tree}")
+	external := f.git.Git(t, f.git.Work, "commit-tree", tree, "-m", "independent forge history")
+	f.git.Git(t, f.git.Work, "push", f.git.Bare, external+":refs/heads/main")
+	f.finishNative(t, run)
+	f.waitRun(t, func(r stateport.Run) bool { return r.Status == stepmodel.RunPassed })
+	publication := f.waitPublicationSettled(t, "publication:"+run.ID)
+	if head := f.git.Git(t, f.git.Bare, "rev-parse", "refs/heads/main"); head != external {
+		t.Fatal("first publication overwrote independent forge history", head, external)
+	}
+	if publication.Status != model.PublicationFailed && publication.Status != model.PublicationAbandoned {
+		t.Fatal("first publication did not refuse the new forge head", publication)
+	}
+	if publication.PreviousSHA == nil || *publication.PreviousSHA != external {
+		t.Fatal("first publication did not read the live forge head", publication)
+	}
+}
+
+func firstEmptyForgePush(t *testing.T) (*composedFixture, stateport.Run) {
+	t.Helper()
 	f := composeFixture(t, composeBinary(t))
 	freshRepoAddCache(f)
 	f.git.Bare = filepath.Join(t.TempDir(), "empty.git")
@@ -36,7 +66,7 @@ func TestEmptyForgeBindsAndPublishesFirstMainPush(t *testing.T) {
 	}
 	close(f.allowList)
 	cancel, done := f.run(t)
-	defer cancel()
+	t.Cleanup(cancel)
 	f.waitStarted(t, done)
 	command := newRepoAddCommand(t, f)
 	if code := command.run(t, "--upstream", "origin", "--expected-host-fingerprint", ssh.FingerprintSHA256(f.forge.key)); code != 0 {
@@ -61,12 +91,7 @@ func TestEmptyForgeBindsAndPublishesFirstMainPush(t *testing.T) {
 		t.Fatal("first push published before passing CI", refs)
 	}
 	f.sourcePod(t, run)
-	f.finishNative(t, run)
-	f.waitRun(t, func(r stateport.Run) bool { return r.Status == stepmodel.RunPassed })
-	f.waitPublication(t, "publication:"+run.ID)
-	if head := f.git.Git(t, f.git.Bare, "rev-parse", "refs/heads/main"); head != commit {
-		t.Fatal("forge lacks first main commit", head)
-	}
+	return f, run
 }
 
 func (f *composedFixture) checkEmptyForgeAuthority(t *testing.T) {
@@ -98,18 +123,25 @@ func (f *composedFixture) checkEmptyForgeAuthority(t *testing.T) {
 
 func (f *composedFixture) waitPublication(t *testing.T, id string) {
 	t.Helper()
+	if p := f.waitPublicationSettled(t, id); p.Status != model.PublicationDelivered {
+		t.Fatal("publication did not reach forge", p, f.trace.String())
+	}
+}
+
+func (f *composedFixture) waitPublicationSettled(t *testing.T, id string) model.Publication {
+	t.Helper()
 	deadline := time.NewTimer(10 * time.Second)
 	defer deadline.Stop()
 	for {
 		changes := f.owners.c.store.Changes()
 		p, err := f.owners.c.store.Publication(t.Context(), id)
-		if err == nil && p.Status == model.PublicationDelivered {
-			return
+		if err == nil && p.Status != model.PublicationPending {
+			return p
 		}
 		select {
 		case <-changes:
 		case <-deadline.C:
-			t.Fatal("publication did not reach forge", p, err, f.trace.String())
+			t.Fatal("publication did not settle", p, err, f.trace.String())
 		}
 	}
 }
