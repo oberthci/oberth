@@ -31,7 +31,7 @@ in memory, rebuilt from durable facts at startup. One server process is assumed.
 
 **Delta:** Promotion grants, reservations and consumption, trains, `prune_source`,
 `tag_after` and bulk branch/ref deletion are retired. Exact-tested-commit promotion,
-ordinary publication and single-ref deletion remain. Release/tag rerun requires
+ordinary publication and single-ref deletion remain. Publication lists use creation time newest first, then descending ID, with exclusive ID cursors in that order. Release/tag rerun requires
 admin authority and warns about repeated effects, without a `force` argument;
 retain its other credential and terminal-attempt evidence checks.
 

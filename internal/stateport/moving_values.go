@@ -25,6 +25,7 @@ type PublicationResult struct {
 
 // RecordFilter scopes records before their exclusive cursor and page limit.
 // After is ascending; Before is descending. They are mutually exclusive.
+// Publications use (CreatedAt, ID); promotions use ID. Cursors carry the ID.
 type RecordFilter struct {
 	Repositories                     []string
 	After, Before, Status, SourceSHA string

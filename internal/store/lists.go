@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/stateport"
@@ -21,12 +22,22 @@ func recordQuery(filter stateport.RecordFilter, table string) (string, []any, er
 		columns += ",p.caller"
 	}
 	query := "SELECT " + columns + " FROM " + table + " p JOIN repositories r ON r.id=p.repo_id WHERE " + scope
+	position, cursor := "p.id", "?"
+	columnsOrder := []string{"p.id"}
+	if table == "publications" {
+		// Stored times are UTC. Dropping Z orders fractional seconds exactly,
+		// including whole seconds, without SQLite's millisecond rounding.
+		stamp := "rtrim(json_extract(p.value,'$.created_at'),'Z')"
+		position = "(" + stamp + ",p.id)"
+		cursor = "(SELECT rtrim(json_extract(value,'$.created_at'),'Z'),id FROM publications WHERE id=?)"
+		columnsOrder = []string{stamp, "p.id"}
+	}
 	if filter.After != "" {
-		query += " AND p.id>?"
+		query += " AND " + position + ">" + cursor
 		args = append(args, filter.After)
 	}
 	if filter.Before != "" {
-		query += " AND p.id<?"
+		query += " AND " + position + "<" + cursor
 		args = append(args, filter.Before)
 	}
 	if filter.Status != "" {
@@ -41,7 +52,10 @@ func recordQuery(filter stateport.RecordFilter, table string) (string, []any, er
 	if filter.After != "" {
 		order = " ASC"
 	}
-	return query + " ORDER BY p.id" + order + " LIMIT ?", append(args, filter.Limit), nil
+	for i := range columnsOrder {
+		columnsOrder[i] += order
+	}
+	return query + " ORDER BY " + strings.Join(columnsOrder, ",") + " LIMIT ?", append(args, filter.Limit), nil
 }
 
 func readRecords[T any](ctx context.Context, db *sql.DB, query string, args []any) ([]T, error) {

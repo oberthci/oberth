@@ -1,6 +1,7 @@
 package fake
 
 import (
+	"cmp"
 	"context"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
@@ -161,20 +162,34 @@ func (f *Runs) Publications(ctx context.Context, q stateport.RecordFilter) ([]mo
 	}
 	out := []model.Publication{}
 	for _, p := range f.data.publications {
-		if visibleRun(q.Repositories, p.Repo) && (q.Before == "" || p.ID < q.Before) && (q.Status == "" || string(p.Status) == q.Status) {
+		if visibleRun(q.Repositories, p.Repo) && f.publicationCursor(p, q) && (q.Status == "" || string(p.Status) == q.Status) {
 			out = append(out, p.Clone())
 		}
 	}
 	slices.SortFunc(out, func(a, b model.Publication) int {
-		if a.ID > b.ID {
-			return -1
+		order := publicationOrder(a, b)
+		if q.After != "" {
+			return -order
 		}
-		if a.ID < b.ID {
-			return 1
-		}
-		return 0
+		return order
 	})
 	return out[:min(len(out), q.Limit)], nil
+}
+
+func publicationOrder(a, b model.Publication) int {
+	return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), cmp.Compare(b.ID, a.ID))
+}
+
+func (f *Runs) publicationCursor(p model.Publication, q stateport.RecordFilter) bool {
+	if q.Before != "" {
+		cursor, ok := f.data.publications[q.Before]
+		return ok && publicationOrder(p, cursor) > 0
+	}
+	if q.After != "" {
+		cursor, ok := f.data.publications[q.After]
+		return ok && publicationOrder(p, cursor) < 0
+	}
+	return true
 }
 func (f *Runs) PendingPublications(ctx context.Context, q stateport.RecordFilter) ([]model.Publication, error) {
 	q.Status = string(model.PublicationPending)

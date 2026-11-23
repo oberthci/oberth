@@ -9396,7 +9396,7 @@
     "docs/plans/c12-agent-client.md": "8c2728be2c366f6c8a89ed82b638d55dd3ab121b592281c1cc2cff940c0d70c2",
     "docs/plans/c13-own-pipelines.md": "7bf8d26daa7f51f8897f126f230345f41b683bd6a06adc771f0bb491a2149fb7",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
-    "docs/plans/c2-service-actions-and-history.md": "2f3f614567291d4530394d97659568b8eb5e6d80d5cd7ed30129f9be046b3dbd",
+    "docs/plans/c2-service-actions-and-history.md": "e42ccf0b83e2300c8e31447fa5bcec366341fbc68ffc9f5eaffd97cc4fac1e52",
     "docs/plans/c3-wiring-and-submission.md": "55f3b41b47272bb59ba18656873387f64c1ca7e3e689afc2efd704819a531931",
     "docs/plans/c4-admission-rules-and-plan.md": "bd96674c7787fe19912563afe3724fce1dc98f0ad17177e8a7f1604b48973210",
     "docs/plans/c5-native-execution.md": "e020811b5649df175e950698711046f5b00e0b1b9faccbd43647b56083bfd79a",
@@ -10946,7 +10946,7 @@
         "**Delta:**"
       ],
       "scope": "implementation",
-      "basis": "**Delta:** Promotion grants, reservations and consumption, trains, `prune_source`, `tag_after` and bulk branch/ref deletion are retired. Exact-tested-commit promotion, ordinary publication and single-ref deletion remain. Release/tag rerun requires admin authority and warns about repeated effects, without a `force` argument; retain its other credential and terminal-attempt evidence checks.",
+      "basis": "**Delta:** Promotion grants, reservations and consumption, trains, `prune_source`, `tag_after` and bulk branch/ref deletion are retired. Exact-tested-commit promotion, ordinary publication and single-ref deletion remain. Publication lists use creation time newest first, then descending ID, with exclusive ID cursors in that order. Release/tag rerun requires admin authority and warns about repeated effects, without a `force` argument; retain its other credential and terminal-attempt evidence checks.",
       "rows": []
     },
     {
