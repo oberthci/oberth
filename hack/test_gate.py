@@ -22,8 +22,15 @@ class GateVerdicts(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         manifest = re.search(r"tool_paths=\((.*?)\)", (root / "hack/gate.sh").read_text(), re.S)
         plans = [str(p.relative_to(root)) for p in (root / "docs/plans").rglob("*") if p.is_file()]
+        files = []
+        for name in shlex.split(manifest[1]):
+            source = root / name
+            if source.is_dir():
+                files.extend(str(p.relative_to(root)) for p in source.rglob("*") if p.is_file())
+            else:
+                files.append(name)
         # Contents only: a step receives the checkout with read-only files and the fixture edits its copies.
-        for name in [*shlex.split(manifest[1]), *plans]:
+        for name in [*files, *plans]:
             target = self.fixture / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(root / name, target)
@@ -290,6 +297,27 @@ esac
         self.assertEqual(1,result.returncode,result.stdout)
         self.assertIn("external names policy is required",result.stdout)
         self.assertFalse((self.fixture/"commands").exists())
+
+    def test_new_browser_module_uses_base_tooling_and_checks_branch(self):
+        name = "hack/webui/authentication.mjs"
+        self.git("checkout", "-q", "main")
+        self.git("rm", "-q", name)
+        self.git("commit", "-qm", "Keep the base browser harness")
+        self.git("checkout", "-qB", "w0/probe", "main")
+        (self.fixture / name).write_text("branch browser assertions\n")
+        self.git("add", name)
+        self.git("commit", "-qm", "Extend browser assertions")
+        result = self.run_gate()
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertIn(name, result.stdout)
+        with tarfile.open(self.fixture / "trusted.tar") as archive:
+            self.assertNotIn(name, archive.getnames())
+            self.assertEqual(self.git("show", "main:hack/webui/behavior.mjs"), archive.extractfile("hack/webui/behavior.mjs").read())
+        command = (self.fixture / "commands").read_text()
+        self.assertIn("timed branch-check make", command)
+        restore = command.split("        cd /src\n", 1)[1].split('git config user.name', 1)[0]
+        subprocess.run(["bash", "-ec", restore.replace("/tooling.tar", "trusted.tar")], cwd=self.fixture, check=True)
+        self.assertFalse((self.fixture / name).exists())
 
     def test_branch_policy_changes_use_target_and_request_branch_check(self):
         data=json.loads((self.fixture/"docs/plans/dependencies.json").read_text())
