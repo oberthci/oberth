@@ -45,7 +45,7 @@ Each run result from those tools ends with its display block; paste that block v
 Without those tools, use steps 7-8 and paste `oberth run get <run>` whole.
 During held-step assistance never print the environment or credential files.
 After inspection and an authored fix, use `oberth run hold release <run> --step <step>` to release the hold.
-Report only observed results; show complete reasons and keep native detail separate.
+Report only observed results; show complete reasons and keep native detail separate. Show timestamps with their UTC offset; convert to the person's local zone when known.
 
 After promotion consent, run `oberth promote <commit-sha>` and show the tested run, resulting main and its CI result.
 Join keeps the current administrator profile for this installation; promote and release need no profile override.

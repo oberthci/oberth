@@ -30,7 +30,7 @@ the server agent-instruction constant and its test; C12 supplies its wording.
 | Connect | `oberth join <invitation-file>` prints the absolute executable and `mcp --profile <uplink-profile>` registration argv. Register exactly that line. The host does not need the installation CA or credential paths. |
 | Repository | `oberth repo add <forge URL>` registers, verifies the forge's deploy key and binds the checkout. The person adds the printed deploy key at the forge. Use `oberth init` when needed, get approval for the commit and push the reviewed commit with `-o oberth.run=1`. |
 | Recovery | After reboot, run `oberth unseal` without arguments; the selected profile supplies the private recovery path. Never read or print its contents. |
-| Observation | Paste the bridge's display block or `oberth run list` / `oberth run get <run>` output verbatim. The web link supplies a live screen. |
+| Observation | Paste the bridge's display block or `oberth run list` / `oberth run get <run>` output verbatim. Show event timestamps with an explicit UTC offset. The web link supplies a live screen. |
 
 **Delta:** `oberth mcp` is the authenticated model-tool connection; optional
 display plugins read public CLI JSON. The bridge also advertises Codex's

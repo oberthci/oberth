@@ -115,6 +115,10 @@ def check_guidance(skill, instructions, commands=None):
 
 
 class GuidanceContract(unittest.TestCase):
+    def test_reported_times_keep_their_timezone(self):
+        skill = (ROOT / "agent/skills/oberth/SKILL.md").read_text()
+        self.assertIn("Show timestamps with their UTC offset; convert to the person's local zone when known.", skill)
+
     def test_install_summary_keeps_the_printed_web_signin_line(self):
         skill = (ROOT / "agent/skills/oberth/SKILL.md").read_text()
         apply = next(line for line in skill.splitlines() if "Apply after consent" in line)
