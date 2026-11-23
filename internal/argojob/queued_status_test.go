@@ -77,6 +77,9 @@ func TestQueuedRunNamesTheLockItWaitsFor(t *testing.T) {
 		"pod on a sync limit": {func(*wf.Workflow) []wf.NodeStatus {
 			return []wf.NodeStatus{waitingNode("a", ".build", "ci/ConfigMap/oberth-sync-limits/go")}
 		}, "waiting for sync limit go", 0},
+		"release publication sync limit": {func(*wf.Workflow) []wf.NodeStatus {
+			return []wf.NodeStatus{waitingNode("a", ".build", "ci/ConfigMap/oberth-sync-limits/release-publish")}
+		}, "waiting for sync limit release-publish", 0},
 		"retry node on a sync limit": {func(w *wf.Workflow) []wf.NodeStatus {
 			return []wf.NodeStatus{{ID: "r", Name: w.Name + ".test", Type: wf.NodeTypeRetry, Phase: wf.NodePending, SynchronizationStatus: &wf.NodeSynchronizationStatus{Waiting: "ci/ConfigMap/oberth-sync-limits/heavy-go"}}}
 		}, "waiting for sync limit heavy-go", 1},

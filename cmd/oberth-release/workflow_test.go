@@ -372,14 +372,14 @@ func TestReleasePublicationStepsShareOneSemaphore(t *testing.T) {
 		t.Fatal(err)
 	}
 	limits := pipelineResources(t, buildResourcesFile)["ConfigMap/oberth-sync-limits"]
-	if limits.Data["release-publication"] != "1" {
+	if limits.Data["release-publish"] != "1" {
 		t.Fatal("publication semaphore must have capacity one")
 	}
 	for _, template := range wf.Spec.Templates {
 		locked := false
 		if s := template.Synchronization; s != nil && len(s.Semaphores) == 1 {
 			sem := s.Semaphores[0]
-			locked = sem.Namespace == "" && sem.Database == nil && sem.ConfigMapKeyRef != nil && sem.ConfigMapKeyRef.Name == "oberth-sync-limits" && sem.ConfigMapKeyRef.Key == "release-publication"
+			locked = sem.Namespace == "" && sem.Database == nil && sem.ConfigMapKeyRef != nil && sem.ConfigMapKeyRef.Name == "oberth-sync-limits" && sem.ConfigMapKeyRef.Key == "release-publish"
 		}
 		if locked != (template.Name == "release-published-immutable" || template.Name == "latest-advanced-monotonic") {
 			t.Fatal("publication semaphore differs", template.Name)

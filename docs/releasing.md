@@ -73,7 +73,7 @@ release, before the run; that uses the version: rerun a failed run or release th
 
 As administrator: edit [pipeline-resources.yaml](../.oberth/pipeline-resources.yaml) and apply it
 in the pipeline namespace. Set storage class/sizes, positive `go` limit and HTTPS origin; keep
-`release-publication: "1"`. Caches need user/group 65534 access. Then grant:
+`release-publish: "1"`. Caches need user/group 65534 access. Then grant:
 
 ```sh
 oberth access allow --kind pvc --tier ci '<repo>' 'build-cache'
