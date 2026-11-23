@@ -74,7 +74,7 @@ func (f *Runs) SaveProgress(ctx context.Context, id string, p stateport.Progress
 		r.LogicalStepCounts = counts
 		r.StartedAt = stepmodel.RunStart(r.StartedAt, steps)
 		if !runTerminal(r) {
-			r.Status, r.DisplayReason = stepmodel.Progress(r.Status, steps, p.Waiting)
+			r.Status, r.DisplayReason = stepmodel.Progress(r.Status, r.DisplayReason, steps, p.Waiting)
 		}
 		r.Steps = append([]stepmodel.RunStep{}, steps...)
 		r = r.Clone()

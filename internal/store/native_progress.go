@@ -48,7 +48,7 @@ func recordProgress(ctx context.Context, tx *sql.Tx, id string, p stateport.Prog
 	next := r.RunSummary
 	next.StartedAt = stepmodel.RunStart(r.StartedAt, p.Steps)
 	if !terminal(r.Status) {
-		next.Status, next.DisplayReason = stepmodel.Progress(r.Status, p.Steps, p.Waiting)
+		next.Status, next.DisplayReason = stepmodel.Progress(r.Status, r.DisplayReason, p.Steps, p.Waiting)
 	}
 	if next.StartedAt == r.StartedAt && next.Status == r.Status && next.DisplayReason == r.DisplayReason {
 		return nil

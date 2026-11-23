@@ -237,7 +237,7 @@ func underPath(path, base string) bool {
 func finishProjection(out *Observation, w *wf.Workflow, rows []projected) {
 	out.Failure = primaryFailure(rows)
 	if !terminalWorkflow(w) {
-		out.Status, out.Reason = stepmodel.Progress(stepmodel.RunQueued, out.Steps, queuedReason(rows))
+		out.Status, out.Reason = stepmodel.Progress(stepmodel.RunQueued, "", out.Steps, queuedReason(rows))
 		return
 	}
 	out.Status, out.Reason = runVerdict(w)

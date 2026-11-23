@@ -65,6 +65,7 @@ func RunSuite(t *testing.T, factory func(*testing.T) RunFixture) {
 		"plan_step_shape":      checkPlanStepShape,
 		"native_step_shape":    checkNativeStepShape,
 		"run_start":            checkRunStart,
+		"queued_reason":        checkQueuedReason,
 		"malformed_acceptance": checkMalformedAcceptance,
 		"progress_finish":      checkProgressFinish,
 		"initial_events":       checkInitialEvents,

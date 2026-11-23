@@ -48,13 +48,30 @@ func (s StepStatus) started() bool { return s != StepPending && s != StepQueued 
 
 // Progress is the run-status rule for an unfinished run: it is queued until
 // one of its steps has started and running from then on, never queued again,
-// even while a retry waits. A queued run's reason is waiting, what it waits
-// for; a running run's reason is empty.
-func Progress(current RunStatus, steps []RunStep, waiting string) (RunStatus, string) {
+// even while a retry waits. A queued run keeps its most advanced waiting
+// reason; a running run's reason is empty.
+func Progress(current RunStatus, previous string, steps []RunStep, waiting string) (RunStatus, string) {
 	if current == RunRunning || slices.ContainsFunc(steps, RunStep.Started) {
 		return RunRunning, ""
 	}
+	if waitingRank(previous) > waitingRank(waiting) {
+		waiting = previous
+	}
 	return RunQueued, waiting
+}
+
+// Locks and run slots precede starting a Pod; its containers come last.
+func waitingRank(reason string) int {
+	switch reason {
+	case "starting containers", "image pull failed":
+		return 2
+	case "waiting to start", "waiting for a node":
+		return 1
+	case "":
+		return -1
+	default:
+		return 0
+	}
 }
 
 // RunStart is a run's start: the earliest of its recorded start and the starts
