@@ -15,7 +15,7 @@ import (
 
 func addTestArchive(t *testing.T, s *stagedArchives, key byte) sourcedelivery.Staged {
 	t.Helper()
-	if err := s.room(t.Context()); err != nil {
+	if _, err := s.room(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
@@ -37,8 +37,8 @@ func TestStagedArchivesBoundReadersAndEvictIdle(t *testing.T) {
 	t.Cleanup(func() { _ = first.Body.Close(); _ = second.Body.Close() })
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
-	if err := s.room(ctx); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal("active files exceeded scratch bound", err)
+	if waited, err := s.room(ctx); !waited || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("active files exceeded scratch bound", waited, err)
 	}
 	if err := first.Body.Close(); err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestStagedArchiveRoomWakesOnReaderClose(t *testing.T) {
 	first, second := addTestArchive(t, s, 1), addTestArchive(t, s, 2)
 	defer func() { _ = first.Body.Close(); _ = second.Body.Close() }()
 	done := make(chan error, 1)
-	go func() { done <- s.room(t.Context()) }()
+	go func() { _, err := s.room(t.Context()); done <- err }()
 	if err := first.Body.Close(); err != nil {
 		t.Fatal(err)
 	}

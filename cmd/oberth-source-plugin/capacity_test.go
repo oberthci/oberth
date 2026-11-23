@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/gitcache/gittest"
 	"github.com/oberthci/oberth/internal/sourcecontract"
@@ -116,7 +117,7 @@ func TestWireReceiptValidatesEveryRequiredField(t *testing.T) {
 	}
 }
 
-func TestActiveTransferCapacityAcceptsTwoRefusesThird(t *testing.T) {
+func TestActiveTransferCapacityAcceptsTwoWaitsForThird(t *testing.T) {
 	f := gittest.New(t)
 	b := f.Binding()
 	p := prepared(t, b)
@@ -132,7 +133,7 @@ func TestActiveTransferCapacityAcceptsTwoRefusesThird(t *testing.T) {
 		Stage: func(context.Context, sourcecontract.Binding) (sourcedelivery.Staged, error) {
 			entered <- struct{}{}
 			<-release
-			return sourcedelivery.Staged{}, &sourcedelivery.Failure{Code: "unavailable", Reason: "export-slot"}
+			return sourcedelivery.Staged{Body: io.NopCloser(strings.NewReader("source")), Bytes: 6}, nil
 		}})
 	request := sourcedelivery.LoadRequest{Locator: "run-1", Descriptor: b.Descriptor}
 	var wg sync.WaitGroup
@@ -142,7 +143,30 @@ func TestActiveTransferCapacityAcceptsTwoRefusesThird(t *testing.T) {
 	}
 	<-entered
 	<-entered
-	finishCapacityProbe(t, capacityProbe{server: server, request: request, entered: entered, release: release, workers: &wg})
+	finishWaitingTransfer(t, capacityProbe{server: server, request: request, entered: entered, release: release, workers: &wg})
+}
+
+func finishWaitingTransfer(t *testing.T, p capacityProbe) {
+	t.Helper()
+	response := make(chan *httptest.ResponseRecorder, 1)
+	go func() { response <- load(t, p.server, p.request, "Bearer valid") }()
+	select {
+	case w := <-response:
+		t.Errorf("transfer returned before capacity was released: %d", w.Code)
+	case <-p.entered:
+		t.Error("third transfer exceeded the two active slots")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(p.release)
+	p.workers.Wait()
+	select {
+	case w := <-response:
+		if w.Code != 200 {
+			t.Errorf("waiting transfer status %d", w.Code)
+		}
+	case <-time.After(time.Second):
+		t.Error("waiting transfer did not finish after capacity was released")
+	}
 }
 
 type capacityProbe struct {

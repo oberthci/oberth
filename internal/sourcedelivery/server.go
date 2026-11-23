@@ -30,6 +30,8 @@ type Run struct {
 type Staged struct {
 	Body  io.ReadCloser
 	Bytes int64
+	// Waited reports a capacity wait inside Stage, before any response bytes.
+	Waited bool
 }
 type Config struct {
 	Authenticate      func(context.Context, string) (Caller, error)
@@ -44,6 +46,7 @@ type Server struct {
 	auth, transfers chan struct{}
 	mu              sync.Mutex
 	workflows       map[Caller]int
+	waiters         map[Caller]int
 }
 
 // Failure contains only a protocol code and fixed capacity reason.
@@ -83,8 +86,10 @@ func (e *Failure) Remedy() string {
 	}
 }
 
+const maxWorkflowWaiters = 16
+
 func New(config Config) *Server {
-	return &Server{config: config, auth: make(chan struct{}, max(0, config.SourceClientBurst/3)), transfers: make(chan struct{}, 2), workflows: make(map[Caller]int)}
+	return &Server{config: config, auth: make(chan struct{}, max(0, config.SourceClientBurst/3)), transfers: make(chan struct{}, 2), workflows: make(map[Caller]int), waiters: make(map[Caller]int)}
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != LoadPath {
@@ -107,22 +112,84 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 400, "invalid_request", "")
 		return
 	}
+	s.load(ctx, w, r, request)
+}
+
+func (s *Server) load(ctx context.Context, w http.ResponseWriter, r *http.Request, request LoadRequest) {
 	run, binding, index, err := s.authorize(ctx, r.Header.Get("Authorization"), request)
 	if err != nil {
 		s.failure(w, err)
 		return
 	}
-	if !acquire(s.transfers) {
-		s.fail(w, 503, "unavailable", "transfer-slot")
+	waited, err := s.transferSlot(ctx, Caller{Namespace: run.Namespace, Workflow: run.Workflow, UID: run.UID})
+	if err != nil {
+		s.failure(w, err)
 		return
 	}
 	defer func() { <-s.transfers }()
+	if waited {
+		// A request waiting for capacity cannot use its old Pod/run decision.
+		run, binding, index, err = s.authorize(ctx, r.Header.Get("Authorization"), request)
+		if err != nil {
+			s.failure(w, err)
+			return
+		}
+	}
 	staged, err := s.config.Stage(ctx, binding)
 	if err != nil {
 		s.failure(w, err)
 		return
 	}
-	s.send(ctx, w, transfer{request: request, admission: run.Admission.Digest, index: index, stage: staged})
+	load := transfer{request: request, admission: run.Admission.Digest, index: index, stage: staged}
+	if err := s.checkStagedAuthorization(ctx, r.Header.Get("Authorization"), load); err != nil {
+		_ = staged.Body.Close()
+		s.failure(w, err)
+		return
+	}
+	s.send(ctx, w, load)
+}
+
+func (s *Server) transferSlot(ctx context.Context, caller Caller) (bool, error) {
+	if acquire(s.transfers) {
+		return false, nil
+	}
+	if !s.waiter(caller, 1) {
+		return false, &Failure{Code: "unavailable", Reason: "transfer-slot"}
+	}
+	defer s.waiter(caller, -1)
+	select {
+	case s.transfers <- struct{}{}:
+		return true, nil
+	case <-ctx.Done():
+		return true, context.Cause(ctx)
+	}
+}
+
+func (s *Server) checkStagedAuthorization(ctx context.Context, header string, load transfer) error {
+	if !load.stage.Waited {
+		return nil
+	}
+	fresh, _, _, err := s.authorize(ctx, header, load.request)
+	if err != nil {
+		return err
+	}
+	if fresh.Admission.Digest != load.admission {
+		return &Failure{Code: "forbidden"}
+	}
+	return nil
+}
+
+func (s *Server) waiter(c Caller, delta int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if delta > 0 && s.waiters[c] >= maxWorkflowWaiters {
+		return false
+	}
+	s.waiters[c] += delta
+	if s.waiters[c] == 0 {
+		delete(s.waiters, c)
+	}
+	return true
 }
 func (s *Server) authorize(ctx context.Context, header string, request LoadRequest) (Run, sourcecontract.Binding, int, error) {
 	empty := sourcecontract.Binding{}

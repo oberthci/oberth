@@ -36,16 +36,24 @@ func (c *Cache) Stage(ctx context.Context, b sourcecontract.Binding) (sourcedeli
 	if stage, found, err := c.staged.open(key); found {
 		return c.checkedStage(ctx, b, stage, err)
 	}
+	waited := false
 	select {
 	case c.export <- struct{}{}:
 	default:
-		return sourcedelivery.Staged{}, &sourcedelivery.Failure{Code: "unavailable", Reason: "export-slot"}
+		waited = true
+		select {
+		case c.export <- struct{}{}:
+		case <-ctx.Done():
+			return sourcedelivery.Staged{}, context.Cause(ctx)
+		}
 	}
 	defer func() { <-c.export }()
 	if stage, found, err := c.staged.open(key); found {
+		stage.Waited = waited
 		return c.checkedStage(ctx, b, stage, err)
 	}
-	if err := c.staged.room(ctx); err != nil {
+	roomWaited, err := c.staged.room(ctx)
+	if err != nil {
 		return sourcedelivery.Staged{}, err
 	}
 	dir, err := os.MkdirTemp(c.config.Scratch, "oberth-export-")
@@ -57,6 +65,7 @@ func (c *Cache) Stage(ctx context.Context, b sourcecontract.Binding) (sourcedeli
 		_ = os.RemoveAll(dir)
 		return stage, stageFailure(b, err)
 	}
+	stage.Waited = waited || roomWaited
 	return c.staged.put(key, dir, stage), nil
 }
 func (c *Cache) build(ctx context.Context, dir string, b sourcecontract.Binding) (sourcedelivery.Staged, error) {

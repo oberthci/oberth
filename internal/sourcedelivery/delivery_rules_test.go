@@ -90,7 +90,7 @@ func (r *failedSourceClose) Close() error {
 	return errors.New("source close failed")
 }
 
-func TestSourceTransferSlotsRefuseAThirdAndAreReleased(t *testing.T) {
+func TestSourceTransferSlotsWaitForAThirdAndAreReleased(t *testing.T) {
 	t.Parallel()
 	config := deliveryRulesConfig()
 	entered, release := make(chan struct{}, 2), make(chan struct{})
@@ -115,15 +115,23 @@ func TestSourceTransferSlotsRefuseAThirdAndAreReleased(t *testing.T) {
 	join := func() { unblock.Do(func() { close(release) }); workers.Wait() }
 	t.Cleanup(join)
 	awaitSourceStages(t, entered, responses)
-	response := requestRulesSource(t, server, descriptor)
-	assertSourceTransferRefusal(t, response, stages.Load())
+	third := make(chan *httptest.ResponseRecorder, 1)
+	workers.Go(func() { third <- requestRulesSource(t, server, descriptor) })
+	select {
+	case response := <-third:
+		t.Fatalf("third transfer returned before a slot was released: %d", response.Code)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if stages.Load() != 2 {
+		t.Fatal("transfer capacity exceeded", stages.Load())
+	}
 	join()
 	for range 2 {
 		if code := <-responses; code != http.StatusOK {
 			t.Fatalf("active transfer failed: %d", code)
 		}
 	}
-	if response = requestRulesSource(t, server, descriptor); response.Code != http.StatusOK || stages.Load() != 3 {
+	if response := <-third; response.Code != http.StatusOK || stages.Load() != 3 {
 		t.Fatalf("released slots unavailable: status %d, stages %d", response.Code, stages.Load())
 	}
 }
@@ -136,13 +144,6 @@ func awaitSourceStages(t *testing.T, entered <-chan struct{}, responses <-chan i
 		case code := <-responses:
 			t.Fatalf("active transfer returned before release: %d", code)
 		}
-	}
-}
-
-func assertSourceTransferRefusal(t *testing.T, response *httptest.ResponseRecorder, stages int32) {
-	t.Helper()
-	if response.Code != http.StatusServiceUnavailable || stages != 2 || response.Header().Get("Retry-After") != "1" || response.Body.String() != "{\"version\":1,\"code\":\"unavailable\"}\n" {
-		t.Fatalf("third transfer admitted: status %d, stages %d, body %s", response.Code, stages, response.Body.String())
 	}
 }
 

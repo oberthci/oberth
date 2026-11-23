@@ -1,15 +1,16 @@
 package gitcache
 
 import (
+	"context"
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/sourcecontract"
-	"github.com/oberthci/oberth/internal/sourcedelivery"
 )
 
-func TestBusyExportRefusesBeforeAnyGitOrRepositoryLock(t *testing.T) {
+func TestBusyExportWaitIsCancelableBeforeAnyGitOrRepositoryLock(t *testing.T) {
 	t.Parallel()
 	c, err := New(t.Context(), Config{Root: t.TempDir(), Scratch: t.TempDir(), Binary: "/uncontacted/git"})
 	if err != nil {
@@ -28,9 +29,10 @@ func TestBusyExportRefusesBeforeAnyGitOrRepositoryLock(t *testing.T) {
 	}
 	c.export <- struct{}{}
 	c.repositoryGate("blocked") <- struct{}{}
-	_, err = c.Stage(t.Context(), b)
-	var failure *sourcedelivery.Failure
-	if !errors.As(err, &failure) || failure.Code != "unavailable" || failure.Reason != "export-slot" {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	_, err = c.Stage(ctx, b)
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("busy export touched Git: %v", err)
 	}
 	if len(c.export) != 1 || len(c.repositoryGate("blocked")) != 1 {

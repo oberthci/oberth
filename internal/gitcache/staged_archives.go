@@ -57,26 +57,28 @@ func (s *stagedArchives) open(key [sha256.Size]byte) (sourcedelivery.Staged, boo
 	return sourcedelivery.Staged{Body: &stagedReader{File: f, cache: s, entry: e}, Bytes: e.bytes}, true, nil
 }
 
-func (s *stagedArchives) room(ctx context.Context) error {
+func (s *stagedArchives) room(ctx context.Context) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	waited := false
 	for len(s.entries) >= 2 {
 		if evicted, err := s.evictIdle(); err != nil {
-			return err
+			return waited, err
 		} else if evicted {
 			continue
 		}
 		changed := s.changed
+		waited = true
 		s.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			s.mu.Lock()
-			return context.Cause(ctx)
+			return waited, context.Cause(ctx)
 		case <-changed:
 			s.mu.Lock()
 		}
 	}
-	return ctx.Err()
+	return waited, ctx.Err()
 }
 
 // Caller holds mu and the compression slot, so only readers can free space.
