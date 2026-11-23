@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Run, Snapshot } from '../types'
-import { age, decodeRun, duration, progress, REFRESH_MS, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, span, table, visible, WINDOW_MS } from './model'
+import { age, decodeRun, duration, progress, PROFILE_REASON, PROFILE_REMEDY, REFRESH_MS, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, span, table, visible, WINDOW_MS } from './model'
 import { SETUP } from './client'
 import { hostProps } from './host-elements'
 
@@ -513,7 +513,7 @@ test('pin missing from list stays visible, finishes with one toast and stops det
   expect(toasts.length).toBe(1)
 })
 
-test('unreachable and truncated responses hide stale rows; the table returns plain failures', { options }, async ($, on) => {
+test('unreachable and truncated responses hide stale rows and name the unreadable profile', { options }, async ($, on) => {
   bottom(on)
   const clock = mock.clock(on)
   let exitCode = 0
@@ -529,13 +529,14 @@ test('unreachable and truncated responses hide stale rows; the table returns pla
   const ui = await $.ui.mount({ ...band, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /cad7d9ec/ })).toBeUndefined()
   await ui.unmount()
-  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toBe(stderr)
+  const message = `No runs.\nProfile "joined-uplink": ${PROFILE_REASON} ${PROFILE_REMEDY}`
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toBe(message)
   truncatedDiagnostic = true
-  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain('output limit')
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toBe(message)
   truncatedDiagnostic = false
   exitCode = 0
   truncated = true
-  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain('output limit')
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toBe(message)
 })
 
 test('table command shows the status word and no native names', { options }, async ($, on) => {
@@ -779,7 +780,66 @@ test('overlapping profiles deduplicate runs and an unavailable profile leaves he
   expect(await boxLines($)).toHaveLength(2)
   unavailable = true
   await clock.advance(REFRESH_MS)
-  expect(await boxLines($)).toHaveLength(2)
+  expect(await boxLines($)).toHaveLength(3)
+})
+
+test('unreadable profiles are named in the box and table until recovery', { options: multiple }, async ($, on) => {
+  bottom(on)
+  const clock = mock.clock(on)
+  let firstFails = false
+  let secondFails = true
+  on('process.run', (_, e) => {
+    const failed = e.init?.env?.OBERTH_PROFILE === 'first' ? firstFails : secondFails
+    return { value: { exitCode: failed ? 1 : 0, stdout: JSON.stringify({ runs: [run()] }),
+      stderr: failed ? 'The profile could not connect.' : '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  const message = 'Profile "second": Could not read runs. Check the joined profile and server connection.'
+  expect(PROFILE_REASON.length).toBeLessThanOrEqual(40)
+  expect(PROFILE_REMEDY.length).toBeLessThanOrEqual(120)
+  await startSession($, on)
+  for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...band, props: { ...band.props, bodyColumns: 24 }, surface })
+    const failure = await ui.find({ type: 'Text', text: message })
+    expect(failure?.props.wrap).toBe('wrap')
+    expect((await ui.find({ type: 'Box' }))?.props.width).toBe(24)
+    await ui.unmount()
+  }
+  let output = (await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text!
+  expect(output).toContain('cad7d9ec')
+  expect(output).toContain(message)
+  firstFails = true
+  await clock.advance(REFRESH_MS)
+  output = (await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text!
+  expect(output).toContain('Profile "first": Could not read runs.')
+  expect(output).toContain(message)
+  expect(output).not.toContain('cad7d9ec')
+  firstFails = secondFails = false
+  await clock.advance(REFRESH_MS)
+  expect((await boxLines($)).some(line => line.startsWith('Profile '))).toBe(false)
+})
+
+test('a watch detail cannot clear a failed profile list or invent its clock', { options: { ...options, runs: 1 } }, async ($, on) => {
+  bottom(on)
+  let server = Date.parse('2026-11-18T00:01:00Z')
+  const clock = mock.clock(on, { now: server + 11 * 60000 })
+  const watched = run('dddddddd000000000000000000000000')
+  let listFails = true
+  on('process.run', (_, e) => {
+    const detail = e.argv[2] === 'get'
+    return { value: { exitCode: !detail && listFails ? 1 : 0,
+      stdout: JSON.stringify(detail ? watched : { runs: [], server_time: new Date(server).toISOString() }),
+      stderr: listFails ? 'List unavailable.' : '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  const advance = async () => { server += REFRESH_MS; await clock.advance(REFRESH_MS) }
+  await startSession($, on)
+  await $.command.run({ ...commandInput, command: 'oberth-watch', args: watched.id })
+  await advance()
+  const unavailable = await boxLines($)
+  expect(unavailable.join('\n')).toContain('Profile "joined-uplink": Could not read runs.')
+  expect(unavailable.some(line => line.startsWith('dddddddd'))).toBe(false)
+  listFails = false
+  await advance()
+  expect((await boxLines($))[1]).toMatch(/^dddddddd .*▶ running +6\/11 +1m30s +1m +●$/)
 })
 
 test('a blank profile list keeps the single-profile selection', { options: { ...options, profiles: ' ' } }, async ($, on) => {

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Register, Timer } from 'claude-code'
 import type { Snapshot } from '../types'
 import { checkedExecutable, get, list, profiles, SETUP } from './client'
-import { active, boxRows, limit, outcome, REFRESH_MS, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
+import { active, boxRows, limit, outcome, profileProblems, REFRESH_MS, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
 
 const empty: Snapshot = { recent: [], pins: [], reachable: false, now: 0 }
 const snapshot = atom({ plugin: 'oberth', key: 'snapshot' } as const, empty, { shape: 'runs-1' })
@@ -36,10 +36,7 @@ async function refresh($: EngineInterface, options: PluginOptions, loop: Loop) {
     const unavailable = new Set(page.unavailable)
     details.forEach((detail, index) => {
       const source = missing[index]!.run.profile
-      if (source) {
-        if (detail.status === 'fulfilled') unavailable.delete(source)
-        else unavailable.add(source)
-      }
+      if (source && detail.status === 'rejected') unavailable.add(source)
     })
     const observed = [...recent, ...details.flatMap(detail => detail.status === 'fulfilled' ? [detail.value] : [])]
     const now = await $.clock.now()
@@ -88,7 +85,7 @@ function commands(on: On, options: PluginOptions) {
       const match = /^(?:--limit[= ](\d+))?$/.exec(arg)
       if (!match) throw new Error('Use /oberth-runs [--limit=N].')
       const page = await list($, options, limit(match[1]))
-      return { text: table(page.runs, await $.clock.now(), e.presentation.columns) }
+      return { text: [table(page.runs, await $.clock.now(), e.presentation.columns), ...profileProblems(page.unavailable)].join('\n') }
     } catch (error) { return { text: errorText(error) } }
   })
   on('command.run', { command: 'oberth-watch' }, async ($, e) => {
@@ -147,13 +144,17 @@ export const register: Register = (on, options) => {
     if (e.props.hasSurvey) return next(e)
     const state = await read($, snapshot)
     const rows = visible(state, loop.count)
-    if (!rows.length) return next(e)
+    const problems = loop.count ? profileProblems(state.unavailable ?? []) : []
+    if (!rows.length && !problems.length) return next(e)
+    const columns = e.props.bodyColumns
+    const problemWidth = Number.isFinite(columns) && columns > FRAME ? Math.floor(columns) : 84
     const [header, ...lines] = boxRows(state, loop.count, e.props.bodyColumns - FRAME)
     const { Box, Text } = $.ui.resolve(e)
     const color = (status: string) => status === 'passed' ? 'green' : status === 'failed' ? 'red' : status === 'cancelled' ? 'gray' : 'yellow'
-    return <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor="gray" paddingX={1}>
-      <Text wrap="truncate-end" dimColor>{header}</Text>
+    return <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor="gray" paddingX={1} width={problems.length ? problemWidth : undefined}>
+      {rows.length > 0 && <Text wrap="truncate-end" dimColor>{header}</Text>}
       {rows.map((run, index) => <Text wrap="truncate-end" color={color(run.status)}>{lines[index]}</Text>)}
+      {problems.map(problem => <Text wrap="wrap" color="yellow">{problem}</Text>)}
     </Box>
   })
 }

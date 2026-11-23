@@ -67,8 +67,9 @@ binding. A nonblank `profiles` option lists up to 32 comma-separated joined prof
 instead; reads merge newest first, deduplicate run IDs and apply one total row limit.
 Each profile list keeps its server-clock offset even without rows; unlisted watches
 use that offset and keep their source profile. Failed profile
-reads hide that profile's stale rows while healthy profiles remain visible. When every
-profile read fails, the box hides. Without a selection it explains setup once and stays hidden.
+reads hide that profile's stale rows while healthy profiles remain visible. The box and
+table name each unreadable profile with a whole reason and remedy, also when all fail;
+these notices wrap. Without a selection it explains setup once and stays hidden.
 It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.
 
 One timer refreshes every 15 seconds, active or idle, so short runs and terminal pushes

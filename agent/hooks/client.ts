@@ -78,7 +78,6 @@ export async function list($: EngineInterface, options: PluginOptions, count: nu
   const peers = await connections($, options)
   const pages = await Promise.allSettled(peers.map(peer => listProfile($, peer, count)))
   const successful = pages.flatMap(page => page.status === 'fulfilled' ? [page.value] : [])
-  if (!successful.length) throw (pages[0] as PromiseRejectedResult).reason
   const created = (run: ObservedRun) => Date.parse(run.created_at) + (run.clockOffset ?? 0)
   const runs = successful.flatMap(page => page.runs).sort((a, b) => created(b) - created(a))
   const unique = runs.filter((run, index) => runs.findIndex(row => row.id === run.id) === index)

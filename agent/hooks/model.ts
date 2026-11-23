@@ -62,6 +62,9 @@ export function shortID(id: string, runs: Run[]): string {
 
 export const SHOWN_REASON = 'Runs shown accepts 0 to 10.'
 export const SHOWN_REMEDY = 'Set runs to a whole number from 0 to 10; 3 is the default and 0 shows no run box.'
+export const PROFILE_REASON = 'Could not read runs.'
+export const PROFILE_REMEDY = 'Check the joined profile and server connection.'
+export const profileProblems = (names: string[]) => names.map(name => `Profile ${JSON.stringify(name)}: ${PROFILE_REASON} ${PROFILE_REMEDY}`)
 
 // The `runs` option: unset or blank is three; anything but a whole number from 0 to 10 is undefined.
 export function shown(value: unknown): number | undefined {
