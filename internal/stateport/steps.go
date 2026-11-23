@@ -86,12 +86,14 @@ func orderedSteps(plan admissioncontract.Plan, entries map[string]stepmodel.RunS
 	for _, entry := range plan.Entries {
 		if step, ok := entries[entry.Path]; ok {
 			step.CredentialIntent = entry.CredentialIntent
+			step.ParallelGroup = entry.ParallelGroup
 			result = append(result, step.Clone())
 		}
 		group := children[entry.Path]
 		sort.Slice(group, func(i, j int) bool { return expandedStepLess(entry.Path, group[i].Path, group[j].Path) })
 		for _, child := range group {
 			child.CredentialIntent = entry.CredentialIntent
+			child.ParallelGroup = 0
 			result = append(result, child.Clone())
 		}
 	}

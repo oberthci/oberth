@@ -131,6 +131,8 @@ a.row:focus-visible { outline-offset: -2px; }
 .run-layout { display: grid; grid-template-columns: 22rem minmax(0, 1fr); gap: 16px; margin-top: 14px; }
 .steps { padding: 6px 0 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .steps-head { margin: 0; padding: 7px 14px 8px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.parallel-steps { margin-left: 5px; border-left: 1px solid var(--line); }
+.steps .parallel-steps .row { padding-left: 5px; }
 /* Each step is one line as high as a run row; a name too long for its column
    ends in an ellipsis and keeps the whole name as its title. */
 .steps .row { grid-template-columns: 9ch minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 7px 14px 7px 11px; border-bottom: 1px solid transparent; border-left: 3px solid transparent; color: var(--muted); font-size: 12px; line-height: 22px; white-space: nowrap; }

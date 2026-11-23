@@ -167,7 +167,7 @@ func TestHoldPlannerRecordsOmittedInvocation(t *testing.T) {
 	invocation := &call{target: group, hooks: []*call{{target: leaf}, {target: leaf}}}
 	omitted := map[*call]bool{}
 	p := planner{omitted: omitted, active: map[*node]bool{}, plan: admissioncontract.Plan{Entries: make([]admissioncontract.PlanEntry, admissioncontract.MaxPlanEntries-1)}}
-	if !p.invoke(invocation, "hidden") || !omitted[invocation] {
+	if !p.invoke(invocation, "hidden", 0) || !omitted[invocation] {
 		t.Fatal("whole invocation placeholder did not fence hidden hooks", p.plan, omitted)
 	}
 	g := &graph{workflow: simpleWorkflow(), roots: []*call{{target: leaf}, invocation}}

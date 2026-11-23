@@ -51,6 +51,7 @@ tool_paths=(
     hack/webui/cdp.mjs
     hack/webui/behavior.mjs
     hack/webui/captures.mjs
+    hack/webui/parallel.mjs
     hack/webui/check.mjs
     hack/webui/repositories.mjs
     hack/test_ui.py

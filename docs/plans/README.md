@@ -188,7 +188,7 @@ Use `omitzero` for steps, attempts and logs: requested empty pages are non-nil
 empty arrays; absent pages are omitted. Lists omit step pages and use stored
 counts. Unknown evidence stays unknown. Run success and publication are distinct.
 `object_sha` is the accepted object; `commit_sha` is the tested checkout commit.
-Steps stay in plan order. Each step carries `credential_intent` from its plan entry;
+Steps stay in plan order. Each step carries `credential_intent` and optional positive `parallel_group` from its plan entry;
 views show one `secret` tag without exposing a secret name or value.
 
 Status reasons are complete phrases of at most 40 characters, most important

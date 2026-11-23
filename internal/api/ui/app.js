@@ -289,7 +289,7 @@ function runScreen(view, id) {
    h("p", {}, (run.steps_planned_exact ? "" : ">=") + run.step_count + " steps · " + run.passed + " passed · " + run.failed + " failed · " + run.pending + " pending")].filter(Boolean));
   header.append(runActions(view, run, repositories.repositories, holds.holds));
   if (holds.unknown) header.append(h("p", {class: "muted"}, "hold availability unknown"));
-  replace(steps, (run.steps || []).length ? [h("p", {class: "steps-head"}, "Steps · " + (run.steps_planned_exact ? "" : ">=") + run.step_count), ...run.steps.map(step => stepRow(view, step, path, pane))] : [empty(copy.emptySteps)]);
+  replace(steps, (run.steps || []).length ? [h("p", {class: "steps-head"}, "Steps · " + (run.steps_planned_exact ? "" : ">=") + run.step_count), ...stepRows(view, run.steps, path, pane)] : [empty(copy.emptySteps)]);
   if (run.next_step_offset !== undefined) steps.append(button("Next 100 steps", () => { view.offset = run.next_step_offset; refresh(view); }));
   if (view.offset) steps.append(button("First steps", () => { view.offset = 0; refresh(view); }));
   const selected = run.steps?.find(step => step.plan_path === view.selected);
@@ -298,6 +298,21 @@ function runScreen(view, id) {
   else if (!view.logBusy) view.logReload?.();
   else view.logDirty = true;
  };
+}
+function stepRows(view, steps, path, pane) {
+ const rows = [];
+ let group, box;
+ for (const step of steps) {
+  if (step.parallel_group && step.parallel_group !== group) {
+   box = h("div", {class: "parallel-steps", "data-group": step.parallel_group});
+   rows.push(box);
+  }
+  group = step.parallel_group;
+  const row = stepRow(view, step, path, pane);
+  if (group) box.append(row);
+  else rows.push(row);
+ }
+ return rows;
 }
 function stepRow(view, step, path, pane) {
  return h("a", {class: "row", href: "#log", "data-key": step.plan_path, "aria-current": view.selected === step.plan_path ? "step" : null, onclick: event => {

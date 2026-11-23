@@ -252,7 +252,7 @@ C2/C3/C4/C5/C7/C9/C10 import.
 **Delta:** C1 never writes a secret, token or private key to logs, events, diagnostics or command
 output. Server diagnostics use a fixed field list. The UI shows a new pushed run within
 five seconds and preserves the CLI's run, step and log identities. Steps stay in
-plan order; `credential_intent` shows one `secret` tag without secret names or
+plan order; consecutive rows with the same positive `parallel_group` share a thin border, keeping one line per row at one text level. The CLI and agent block use a leading bar on grouped steps. `credential_intent` shows one `secret` tag without secret names or
 values. Issue bodies are plain text. Imported issues show their original author,
 closer, ordered history and imported mark through the same issue view. The status
 screen shows one reason, its detail and run counts. Executor-noise lines appear

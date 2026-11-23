@@ -74,7 +74,7 @@ those definitions; they do not define rival DTOs.
   native invocation path without Workflow prefix or retry suffix; display names cannot establish
   identity. Display order is static run order: a DAG task after the tasks it depends on (ties in
   declaration order), steps groups in order, a called template in place; never observed runtime
-  order. Literal `withItems` expands statically; runtime-dependent fan-out and recursion retain
+  order. Leaf siblings at the same local DAG dependency level or steps group carry a positive `parallel_group`; serial leaves and hooks carry none. Literal `withItems` expands statically; runtime-dependent fan-out and recursion retain
   an expandable entry and make exactness false. Native observations expand that entry in the
   display projection and fold retry attempts into it. They never rewrite the immutable admitted
   plan. A leaf not reached remains pending in the display, without a new run status. Public

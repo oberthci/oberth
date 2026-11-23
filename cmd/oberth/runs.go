@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -109,6 +110,10 @@ func renderSteps(out io.Writer, steps []any, detail bool) error {
 			return fmt.Errorf("invalid step row")
 		}
 		name := stepName(step)
+		number, _ := step["parallel_group"].(json.Number)
+		if group, _ := number.Int64(); group > 0 {
+			name = "│ " + name
+		}
 		rows = append(rows, []string{name, publicText(step["status"]), publicText(step["display_reason"])})
 	}
 	if err := renderTable(out, rows); err != nil {

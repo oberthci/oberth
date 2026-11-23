@@ -10,6 +10,7 @@ type PlanEntry struct {
 	Name             string `json:"name"`
 	Template         string `json:"-"`
 	Dynamic          bool   `json:"dynamic"`
+	ParallelGroup    int    `json:"parallel_group,omitempty"`
 	CredentialIntent bool   `json:"credential_intent"`
 	HoldArmed        bool   `json:"hold_armed,omitempty"`
 	HoldEligible     bool   `json:"hold_eligible,omitempty"`

@@ -55,8 +55,8 @@ func uiExample(t *testing.T) *fixture {
 	steps := []stepmodel.RunStep{
 		{Path: "z-checkout", Name: "checkout", Status: stepmodel.StepPassed, StartedAt: &at, FinishedAt: &end},
 		{Path: "y-build", Name: "install-release-support-and-golangci-lint", Status: stepmodel.StepPassed, CredentialIntent: true, StartedAt: &at, FinishedAt: &end},
-		{Path: "x-test", Name: "test", Status: stepmodel.StepFailed, StartedAt: &at, FinishedAt: &end, AttemptCount: 2, DisplayReason: "test failed: exit 2", Detail: "The test command exited with code 2.", Attempts: []stepmodel.StepAttempt{{NodeID: "attempt-one", Status: stepmodel.StepFailed}, {NodeID: "attempt-two", Status: stepmodel.StepFailed}}, Logs: []stepmodel.LogSelector{{NodeID: "attempt-two", Container: "main"}}},
-		{Path: "w-publish", Name: "publish", Status: stepmodel.StepPending},
+		{Path: "x-test", Name: "test", ParallelGroup: 1, Status: stepmodel.StepFailed, StartedAt: &at, FinishedAt: &end, AttemptCount: 2, DisplayReason: "test failed: exit 2", Detail: "The test command exited with code 2.", Attempts: []stepmodel.StepAttempt{{NodeID: "attempt-one", Status: stepmodel.StepFailed}, {NodeID: "attempt-two", Status: stepmodel.StepFailed}}, Logs: []stepmodel.LogSelector{{NodeID: "attempt-two", Container: "main"}}},
+		{Path: "w-publish", Name: "publish", ParallelGroup: 1, Status: stepmodel.StepPassed, StartedAt: &at, FinishedAt: &end},
 	}
 	runs := []apicontract.RunRecord{
 		{RunSummary: stepmodel.RunSummary{ID: "11111111", Repo: "origin/team/api", Ref: "main", Status: stepmodel.RunPassed, CreatedAt: at, StartedAt: &at, FinishedAt: &end, CommitSHA: &sha, ObjectSHA: sha}, RunCause: model.RunCause{Actor: "owner", Trigger: model.TriggerPromotion}},
@@ -67,7 +67,7 @@ func uiExample(t *testing.T) *fixture {
 	for index := range runs {
 		runs[index].ID = strings.Repeat(runs[index].ID, 4)
 		runs[index].Steps = steps
-		runs[index].LogicalStepCounts = stepmodel.LogicalStepCounts{Total: 4, Exact: true, Passed: 2, Failed: 1, Pending: 1}
+		runs[index].LogicalStepCounts = stepmodel.LogicalStepCounts{Total: 4, Exact: true, Passed: 3, Failed: 1}
 	}
 	return setup(t, func(c *api.Config, b *apicontract.Bindings) {
 		c.Runtime.Now = testNow

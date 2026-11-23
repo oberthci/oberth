@@ -17,6 +17,7 @@ type LogSelector struct {
 type RunStep struct {
 	Path             string        `json:"plan_path"`
 	Name             string        `json:"name"`
+	ParallelGroup    int           `json:"parallel_group,omitempty"`
 	CredentialIntent bool          `json:"credential_intent"`
 	Status           StepStatus    `json:"status"`
 	DisplayReason    string        `json:"display_reason"`

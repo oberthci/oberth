@@ -13,7 +13,7 @@ import (
 func checkPlanStepShape(t *testing.T, f RunFixture) {
 	batch := batchFor(t, f, RunCase{ID: "plan-step-shape"})
 	view := batch.Runs[0].Prepared.View()
-	view.Plan.Entries = []admissioncontract.PlanEntry{{Path: "z-build", Name: "build", CredentialIntent: true}, {Path: "a-test", Name: "test"}}
+	view.Plan.Entries = []admissioncontract.PlanEntry{{Path: "z-build", Name: "build", CredentialIntent: true, ParallelGroup: 1}, {Path: "a-test", Name: "test", ParallelGroup: 1}}
 	prepared, err := admissioncontract.Seal(view)
 	mustRun(t, err)
 	batch.Runs[0].Prepared = prepared
@@ -21,7 +21,7 @@ func checkPlanStepShape(t *testing.T, f RunFixture) {
 	mustRun(t, err)
 	steps, err := f.Port.Steps(t.Context(), recorded.Runs[0].ID)
 	mustRun(t, err)
-	if len(steps) != 2 || steps[0].Path != "z-build" || steps[1].Path != "a-test" || !steps[0].CredentialIntent || steps[1].CredentialIntent {
+	if len(steps) != 2 || steps[0].Path != "z-build" || steps[1].Path != "a-test" || !steps[0].CredentialIntent || steps[1].CredentialIntent || steps[0].ParallelGroup != 1 || steps[1].ParallelGroup != 1 {
 		t.Fatal("steps lost plan order or credential intent", steps)
 	}
 	savedStepShape(t, f, recorded.Runs[0].ID, steps)
@@ -134,6 +134,7 @@ func savedStepShape(t *testing.T, f RunFixture, id string, want []stepmodel.RunS
 	input := make([]stepmodel.RunStep, len(want))
 	for i, s := range want {
 		s.CredentialIntent = !s.CredentialIntent
+		s.ParallelGroup = 99
 		input[len(want)-1-i] = s.Clone()
 	}
 	mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: input}))

@@ -16,6 +16,7 @@ type planner struct {
 	emptyBytes       int
 	plan             admissioncontract.Plan
 	visits, bytes    int
+	nextGroup        int
 	active           map[*node]bool
 	credentialIntent bool
 }
@@ -29,19 +30,19 @@ func (g *graph) planWithOmissions(omitted map[*call]bool) admissioncontract.Plan
 		p.credentialIntent = p.credentialIntent || p.credentials[n]
 	}
 	for _, c := range g.roots {
-		if !p.invoke(c, "") {
+		if !p.invoke(c, "", 0) {
 			p.plan.Entries = nil
 			for _, root := range g.roots {
 				p.omit(root)
 			}
 			p.bytes = 0
-			p.placeholder("", g.workflow.Spec.Entrypoint, g.roots[0].target)
+			p.placeholder("", g.workflow.Spec.Entrypoint, g.roots[0].target, 0)
 			break
 		}
 	}
 	return p.plan
 }
-func (p *planner) invoke(c *call, parent string) bool {
+func (p *planner) invoke(c *call, parent string, group int) bool {
 	if c.inspectionOnly {
 		return true
 	}
@@ -49,18 +50,22 @@ func (p *planner) invoke(c *call, parent string) bool {
 	start, size := len(p.plan.Entries), p.bytes
 	if c.dynamic || dynamicItems(c.items) {
 		p.omit(c)
-		return p.placeholder(base, c.name, c.target)
+		return p.placeholder(base, c.name, c.target, group)
 	}
 	success := true
+	if len(c.items) > 1 && group == 0 && parallelLeaf(c) {
+		p.nextGroup++
+		group = p.nextGroup
+	}
 	if len(c.items) > 0 {
 		for i, item := range c.items {
-			if !p.one(c, loopPath(base, i, item)) {
+			if !p.one(c, loopPath(base, i, item), group) {
 				success = false
 				break
 			}
 		}
 	} else {
-		success = p.one(c, base)
+		success = p.one(c, base, group)
 	}
 	if success && p.groupHooks(c, base) {
 		return true
@@ -68,20 +73,20 @@ func (p *planner) invoke(c *call, parent string) bool {
 	p.plan.Entries = p.plan.Entries[:start]
 	p.bytes = size
 	p.omit(c)
-	return p.placeholder(base, c.name, c.target)
+	return p.placeholder(base, c.name, c.target, group)
 }
-func (p *planner) one(c *call, path string) bool {
+func (p *planner) one(c *call, path string, group int) bool {
 	if c.target == nil || p.active[c.target] {
-		return p.placeholder(path, c.name, c.target)
+		return p.placeholder(path, c.name, c.target, group)
 	}
-	if !p.visit(c.target, path, c.name) {
+	if !p.visit(c.target, path, c.name, group) {
 		return false
 	}
 	for _, hook := range c.hooks {
 		if c.dag && hook.suffix != "onExit" {
 			continue
 		}
-		if !p.invoke(hook, path) {
+		if !p.invoke(hook, path, 0) {
 			return false
 		}
 	}
@@ -95,7 +100,7 @@ func (p *planner) groupHooks(c *call, base string) bool {
 		if h.suffix == "onExit" && len(c.items) == 0 {
 			continue
 		}
-		if !p.invoke(h, base) {
+		if !p.invoke(h, base, 0) {
 			return false
 		}
 	}
@@ -109,7 +114,7 @@ func dynamicItems(items []wfv1.Item) bool {
 	}
 	return false
 }
-func (p *planner) visit(n *node, path, name string) bool {
+func (p *planner) visit(n *node, path, name string, group int) bool {
 	if p.visits >= admissioncontract.MaxPlannerVisits {
 		return false
 	}
@@ -118,21 +123,23 @@ func (p *planner) visit(n *node, path, name string) bool {
 		if name == "" {
 			name = n.template.Name
 		}
-		return p.append(admissioncontract.PlanEntry{Path: path, Name: name, Template: n.key, CredentialIntent: p.credentials[n]})
+		return p.append(admissioncontract.PlanEntry{Path: path, Name: name, Template: n.key, ParallelGroup: group, CredentialIntent: p.credentials[n]})
 	}
 	start, size := len(p.plan.Entries), p.bytes
 	p.active[n] = true
 	defer delete(p.active, n)
-	for _, c := range executionOrder(n.calls) {
-		if !p.invoke(c, path) {
+	ordered := executionOrder(n.calls)
+	groups := p.parallelCalls(ordered)
+	for _, c := range ordered {
+		if !p.invoke(c, path, groups[c]) {
 			p.plan.Entries = p.plan.Entries[:start]
 			p.bytes = size
-			return p.placeholder(path, name, n)
+			return p.placeholder(path, name, n, 0)
 		}
 	}
 	return true
 }
-func (p *planner) placeholder(path, name string, n *node) bool {
+func (p *planner) placeholder(path, name string, n *node, group int) bool {
 	p.plan.Exact = false
 	template := ""
 	if n != nil {
@@ -141,7 +148,7 @@ func (p *planner) placeholder(path, name string, n *node) bool {
 			name = n.template.Name
 		}
 	}
-	return p.append(admissioncontract.PlanEntry{Path: path, Name: name, Template: template, Dynamic: true, CredentialIntent: p.credentialIntent})
+	return p.append(admissioncontract.PlanEntry{Path: path, Name: name, Template: template, Dynamic: true, ParallelGroup: group, CredentialIntent: p.credentialIntent})
 }
 func (p *planner) append(entry admissioncontract.PlanEntry) bool {
 	raw, err := json.Marshal(entry)
