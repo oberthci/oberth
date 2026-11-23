@@ -27,6 +27,7 @@ func (g *graph) synchronization(s *wfv1.Synchronization, where string) {
 	}
 	for i, sem := range s.Semaphores {
 		if sem == nil {
+			g.refuse(fmt.Sprintf("%s.semaphores[%d]", where, i), "sync_null")
 			continue
 		}
 		if sem.Database != nil || sem.Namespace != "" || sem.ConfigMapKeyRef == nil || sem.ConfigMapKeyRef.Name != "oberth-sync-limits" || !literal(sem.ConfigMapKeyRef.Key) {
@@ -36,7 +37,7 @@ func (g *graph) synchronization(s *wfv1.Synchronization, where string) {
 }
 func (g *graph) mutex(mutex *wfv1.Mutex, where string) {
 	if mutex == nil {
-		g.refuse(where, "mutex_scope")
+		g.refuse(where, "sync_null")
 		return
 	}
 	if !g.mutexName(mutex.Name) {

@@ -34,7 +34,7 @@ func TestMutexRepositoryAndNamespace(t *testing.T) {
 				{"parameter namespace", "mutex_namespace", ".namespace", &wfv1.Mutex{Name: "forge/org/repo/publish", Namespace: "{{workflow.namespace}}"}},
 				{"other database repository", "mutex_scope", ".name", &wfv1.Mutex{Name: "forge/org/other/publish", Database: true}},
 				{"other database namespace", "mutex_namespace", ".namespace", &wfv1.Mutex{Name: "forge/org/repo/publish", Namespace: "other", Database: true}},
-				{"null", "mutex_scope", "", nil},
+				{"null", "sync_null", "", nil},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					d := checkDocument{wf: simpleWorkflow(), request: requestFor(t, simpleWorkflow()), hooks: identityHooks()}
@@ -172,5 +172,28 @@ func TestOfflineMutexShapeAndRepositoryBinding(t *testing.T) {
 			d.wf.Spec.Synchronization = &wfv1.Synchronization{Mutexes: []*wfv1.Mutex{{Name: tc.lock}}}
 			assertMutexAdmission(t, &d, tc.code, "spec.synchronization.mutexes[0].name")
 		})
+	}
+}
+
+func TestNullSynchronizationEntriesAreRefused(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []admissioncontract.Mode{admissioncontract.ModeSubmit, admissioncontract.ModeInspect} {
+		for _, carrier := range mutexCarriers() {
+			for kind, synchronization := range map[string]*wfv1.Synchronization{
+				"mutexes":    {Mutexes: []*wfv1.Mutex{nil}},
+				"semaphores": {Semaphores: []*wfv1.SemaphoreRef{nil}},
+			} {
+				t.Run(string(mode)+"/"+carrier.name+"/"+kind, func(t *testing.T) {
+					d := checkDocument{wf: simpleWorkflow(), request: requestFor(t, simpleWorkflow()), hooks: identityHooks()}
+					d.request.Mode, d.request.IdentityRequest.Mode = mode, mode
+					d.hooks.OfflineValidation = mode == admissioncontract.ModeInspect
+					if d.hooks.OfflineValidation {
+						d.request.Repository = ""
+					}
+					carrier.set(t, &d, synchronization)
+					assertMutexAdmission(t, &d, "sync_null", carrier.path+".synchronization."+kind+"[0]")
+				})
+			}
+		}
 	}
 }
