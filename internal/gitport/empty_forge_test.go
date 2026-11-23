@@ -5,11 +5,9 @@ import (
 	"testing"
 )
 
-// An empty forge repository is seeded by the person, not with Oberth's deploy
-// key, which is only in the cluster.
-func TestEmptyForgeRemedyNamesThePersonsOwnForgeAccess(t *testing.T) {
+func TestEmptyForgeRemedyNamesAdministratorPushThroughOberth(t *testing.T) {
 	remedy := (&EmptyRepositoryError{}).Remedy()
-	for _, want := range []string{"with your own forge access", "deploy key is not on this machine", "then retry"} {
+	for _, want := range []string{"As administrator", "first commit", "default branch", "oberth remote"} {
 		if !strings.Contains(remedy, want) {
 			t.Fatal("remedy sends the person to the wrong credentials", remedy)
 		}

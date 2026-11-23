@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/gitport"
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/sourcedelivery"
@@ -73,8 +75,10 @@ func (o *serverOwners) gitSession(ctx context.Context, s sshserver.Session) erro
 		return err
 	}
 	head, err := o.cache.ResolveRef(ctx, s.Command.Repository, o.settings.DefaultBranch)
-	if err != nil {
+	var absent *gitport.AbsentError
+	if err != nil && !errors.As(err, &absent) {
 		return err
 	}
+	head.Name = o.settings.DefaultBranch
 	return o.cache.Receive(ctx, gitcache.ReceiveRequest{Repository: s.Command.Repository, Actor: who.Identity, Fingerprint: who.Fingerprint, AllowDefault: !policy.Agent, AlwaysRun: s.Identity.AlwaysRun, Admission: gitcache.ReleaseAdmission{DefaultBranch: head.Name, SHA: head.CommitSHA}, Input: s.Input, Output: s.Output, Diagnostics: s.Diagnostics, Begin: s.Begin, End: s.End, Deliver: o.deliver})
 }

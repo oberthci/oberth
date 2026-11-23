@@ -5,61 +5,111 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/gitcache/gittest"
 	"github.com/oberthci/oberth/internal/gitport"
-	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/gitssh"
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/stateport"
+	"github.com/oberthci/oberth/internal/stepmodel"
+	"golang.org/x/crypto/ssh"
 )
 
-func TestEmptyForgeRegistrationAndPushExplainFirstCommit(t *testing.T) {
+func TestEmptyForgeBindsAndPublishesFirstMainPush(t *testing.T) {
 	f := composeFixture(t, composeBinary(t))
+	freshRepoAddCache(f)
+	f.git.Bare = filepath.Join(t.TempDir(), "empty.git")
+	f.git.Git(t, f.git.Root, "init", "--bare", "--initial-branch=main", f.git.Bare)
+	f.git.Write(t, ".oberth/build.yaml", []byte(composedWorkflow))
+	commit := f.git.CommitFile(t, "first pipeline")
 	f.prepareAdministrator(t)
-	cancel, done := f.run(t)
-	defer cancel()
-	f.checkStarting(t, done)
-	f.waitStarted(t, done)
-	f.enrollJoined(t)
-	f.bindClient(t)
-	repo, err := f.owners.c.store.Repository(t.Context(), gittest.Repository, nil)
-	if err != nil {
+	identity, public := composeSSHKey(t, t.TempDir(), "administrator")
+	f.identity = identity
+	if err := os.WriteFile(f.config.Files.AdminPushKey, ssh.MarshalAuthorizedKey(public), 0600); err != nil {
 		t.Fatal(err)
 	}
-	f.git.Git(t, f.git.Bare, "update-ref", "-d", "refs/heads/main")
-	err = (serverAdministration{f.owners}).ProbeRepository(t.Context(), repo)
-	problem := publicerr.Classify(err)
-	if problem == nil || problem.Reason() != gitport.EmptyForgeReason || problem.Remedy() != gitport.EmptyForgeRemedy {
-		t.Fatal("registration probe hid empty forge", err)
+	close(f.allowList)
+	cancel, done := f.run(t)
+	defer cancel()
+	f.waitStarted(t, done)
+	command := newRepoAddCommand(t, f)
+	if code := command.run(t, "--upstream", "origin", "--expected-host-fingerprint", ssh.FingerprintSHA256(f.forge.key)); code != 0 {
+		t.Fatal("empty forge did not bind", code, command.diagnostic.String())
 	}
-	f.checkEmptyUpstream(t)
+	if _, err := f.owners.c.store.Repository(t.Context(), gittest.Repository, nil); err != nil {
+		t.Fatal("repository was not registered", err)
+	}
+	f.checkEmptyForgeAuthority(t)
+	f.identity = identity
+	f.bindClient(t)
 	store := filepath.Join(filepath.Dir(f.config.DatabaseFile), "git", "origin", "team", "widget.git")
-	for range 2 {
-		gittest.ExpireRefresh(t, store)
-		out, err := f.pushResult(t, "topic")
-		if err == nil || !strings.Contains(out, gitport.EmptyForgeReason) || !strings.Contains(out, gitport.EmptyForgeRemedy) {
-			t.Fatal("push hid empty forge", err, out)
-		}
-		if _, err = os.Stat(filepath.Join(store, "HEAD")); err == nil {
-			if err = f.owners.cache.Remove(t.Context(), gittest.Repository); err != nil {
-				t.Fatal(err)
-			}
-		}
+	gittest.ExpireRefresh(t, store)
+	if output, err := f.pushResult(t, "refs/heads/main"); err != nil {
+		t.Fatal("first main push refused", err, output)
+	}
+	run := f.waitRun(t, func(r stateport.Run) bool { return r.Origin.WorkflowUID != "" })
+	if run.CommitSHA == nil || *run.CommitSHA != commit || run.Ref != "refs/heads/main" {
+		t.Fatal("first push did not follow ordinary admission", run.RunSummary)
+	}
+	if refs := f.git.Git(t, f.git.Bare, "for-each-ref", "--format=%(refname)"); refs != "" {
+		t.Fatal("first push published before passing CI", refs)
+	}
+	f.sourcePod(t, run)
+	f.finishNative(t, run)
+	f.waitRun(t, func(r stateport.Run) bool { return r.Status == stepmodel.RunPassed })
+	f.waitPublication(t, "publication:"+run.ID)
+	if head := f.git.Git(t, f.git.Bare, "rev-parse", "refs/heads/main"); head != commit {
+		t.Fatal("forge lacks first main commit", head)
 	}
 }
 
-// repo add checks the repository through upstream add before binding it; the
-// caller gets the cause and remedy, the server log the full cause.
-func (f *composedFixture) checkEmptyUpstream(t *testing.T) {
+func (f *composedFixture) checkEmptyForgeAuthority(t *testing.T) {
 	t.Helper()
-	out, err := (serverAdministration{f.owners}).ProbeUpstream(t.Context(), "origin", "team/widget")
-	problem := publicerr.Classify(err)
-	if !out.Pending || out.DisplayReason != gitport.EmptyForgeReason || problem == nil || problem.Remedy() != gitport.EmptyForgeRemedy {
-		t.Fatal("upstream check hid empty forge", out, err)
+	a := serverAdministration{f.owners}
+	restoreHost := f.replaceForgeHost(t)
+	if _, err := a.ProbeUpstream(t.Context(), "origin", "team/widget"); !refusedWith(err, gitssh.HostKeyMismatchReason) {
+		t.Fatal("empty forge hid host pin refusal", err)
 	}
-	if log := f.trace.String(); !strings.Contains(log, `msg="repository check failed" repository=origin/team/widget reason="The forge repository has no commit."`) {
-		t.Fatal("server log lacks the check's cause", log)
+	restoreHost()
+	original := f.forge.config.Load()
+	denied := *original
+	denied.NoClientAuth = false
+	denied.PublicKeyCallback = func(ssh.ConnMetadata, ssh.PublicKey) (*ssh.Permissions, error) {
+		return nil, errors.New("forge access refused")
+	}
+	f.forge.config.Store(&denied)
+	_, err := a.ProbeUpstream(t.Context(), "origin", "team/widget")
+	f.forge.config.Store(original)
+	if !refusedWith(err, gitport.ForgeReason) {
+		t.Fatal("empty forge hid refused access", err)
+	}
+	f.enrollJoined(t)
+	f.bindClient(t)
+	if output, err := f.pushResult(t, "refs/heads/main"); err == nil || !strings.Contains(output, "default branch requires promotion") {
+		t.Fatal("agent could seed the default branch", output, err)
+	}
+}
+
+func (f *composedFixture) waitPublication(t *testing.T, id string) {
+	t.Helper()
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	for {
+		changes := f.owners.c.store.Changes()
+		p, err := f.owners.c.store.Publication(t.Context(), id)
+		if err == nil && p.Status == model.PublicationDelivered {
+			return
+		}
+		select {
+		case <-changes:
+		case <-deadline.C:
+			t.Fatal("publication did not reach forge", p, err, f.trace.String())
+		}
 	}
 }

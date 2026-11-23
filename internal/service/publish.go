@@ -198,7 +198,8 @@ func (s *Service) pushAttempt(ctx context.Context, p model.Publication) (string,
 func (s *Service) remoteRef(ctx context.Context, repo, ref string) (gitport.Ref, error) {
 	v, err := s.c.MovingGit.RemoteRef(ctx, repo, ref)
 	var absent *gitport.AbsentError
-	if errors.As(err, &absent) {
+	var empty *gitport.EmptyRepositoryError
+	if errors.As(err, &absent) || errors.As(err, &empty) {
 		return gitport.Ref{Name: ref}, nil
 	}
 	return v, err

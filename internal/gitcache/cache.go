@@ -264,7 +264,8 @@ func (c *Cache) clone(ctx context.Context, repository, p string) error {
 	if err = c.seedTracking(ctx, staging, repository); err != nil {
 		return err
 	}
-	if err = c.checkDefault(ctx, staging, repository, remote); err != nil {
+	var empty *gitport.EmptyRepositoryError
+	if err = c.checkDefault(ctx, staging, repository, remote); err != nil && !errors.As(err, &empty) {
 		return err
 	}
 	if err = c.recordRefresh(staging, remote); err != nil {

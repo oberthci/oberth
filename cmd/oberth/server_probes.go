@@ -47,11 +47,11 @@ func (a serverAdministration) ProbeRepository(ctx context.Context, r stateport.R
 	}
 	key := app.ProbeKey{Address: u.BaseURL, Fingerprint: fmt.Sprintf("%x", sha256.Sum256([]byte(identity.PublicKey))), PinsDigest: fmt.Sprintf("%x", sha256.Sum256(pins)), Repository: r.Canonical}
 	result := a.owner.checks.CheckRepository(ctx, key)
+	if result.Reason == gitport.EmptyForgeReason {
+		return nil
+	}
 	if result.Detail != "" {
 		a.logCheck(ctx, r.Canonical, result)
-	}
-	if result.Reason == gitport.EmptyForgeReason {
-		return publicerr.New(publicerr.InvalidInput, gitport.EmptyForgeReason, gitport.EmptyForgeRemedy, nil)
 	}
 	unfinished := map[string]string{gitport.CloneUnfinishedReason: gitport.CloneUnfinishedRemedy, gitport.FetchUnfinishedReason: gitport.FetchUnfinishedRemedy}
 	if remedy, ok := unfinished[result.Reason]; ok {

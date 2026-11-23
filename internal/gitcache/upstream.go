@@ -156,9 +156,6 @@ func (c *Cache) fetch(ctx context.Context, t fetchTarget) (updates []RefUpdate, 
 	if err != nil {
 		return nil, err
 	}
-	if len(after) == 0 {
-		return nil, &gitport.EmptyRepositoryError{}
-	}
 	if err := c.sameUpstream(ctx, repo, r); err != nil {
 		return nil, err
 	}
