@@ -74,11 +74,26 @@ func (o *serverOwners) gitSession(ctx context.Context, s sshserver.Session) erro
 	if err := o.cache.RefreshRead(ctx, s.Command.Repository, s.Diagnostics); err != nil {
 		return err
 	}
-	head, err := o.cache.ResolveRef(ctx, s.Command.Repository, o.settings.DefaultBranch)
-	var absent *gitport.AbsentError
-	if err != nil && !errors.As(err, &absent) {
+	head, err := o.receiveHead(ctx, s.Command.Repository)
+	if err != nil {
 		return err
 	}
-	head.Name = o.settings.DefaultBranch
 	return o.cache.Receive(ctx, gitcache.ReceiveRequest{Repository: s.Command.Repository, Actor: who.Identity, Fingerprint: who.Fingerprint, AllowDefault: !policy.Agent, AlwaysRun: s.Identity.AlwaysRun, Admission: gitcache.ReleaseAdmission{DefaultBranch: head.Name, SHA: head.CommitSHA}, Input: s.Input, Output: s.Output, Diagnostics: s.Diagnostics, Begin: s.Begin, End: s.End, Deliver: o.deliver})
+}
+
+func (o *serverOwners) receiveHead(ctx context.Context, repository string) (gitport.Ref, error) {
+	head, err := o.cache.ResolveRef(ctx, repository, o.settings.DefaultBranch)
+	var absent *gitport.AbsentError
+	if !errors.As(err, &absent) {
+		return head, err
+	}
+	liveErr := o.cache.DefaultHead(ctx, repository)
+	var empty *gitport.EmptyRepositoryError
+	if errors.As(liveErr, &empty) {
+		return gitport.Ref{Name: o.settings.DefaultBranch}, nil
+	}
+	if liveErr != nil {
+		return head, liveErr
+	}
+	return head, err
 }
