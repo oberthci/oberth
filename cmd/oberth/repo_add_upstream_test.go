@@ -92,7 +92,7 @@ func assertReusedUpstreamURLRefusals(t *testing.T, command repoAddCommand, regis
 		// the organization; another namespace on the same account is the
 		// registered address mistyped.
 		messages := [2]string{"Another upstream already has this organization name.", "Use a different directory name for this forge; each organization name has one upstream."}
-		if change == "base-path" {
+		if change == "scheme" || change == "base-path" {
 			messages = [2]string{"This organization uses release-source.", "Use its registered forge address; an organization has one upstream."}
 		}
 		t.Run(change, func(t *testing.T) {

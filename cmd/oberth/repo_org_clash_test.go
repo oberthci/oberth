@@ -55,3 +55,31 @@ func TestRepoAddSameAccountOtherNamespaceKeepsTheRegisteredAddressRemedy(t *test
 	}
 	assertNoRepositoryMutation(t, b)
 }
+
+func TestRepoAddOtherSchemeNamesTheRegisteredForgeAddress(t *testing.T) {
+	for _, tc := range []struct{ stored, supplied string }{
+		{"https://h.oberth.ci/team", "git@h.oberth.ci:team/widget.git"},
+		{"ssh://h.oberth.ci/team", "https://h.oberth.ci/team/widget.git"},
+	} {
+		for _, joined := range []bool{false, true} {
+			t.Run(tc.stored+strconv.FormatBool(joined), func(t *testing.T) {
+				b := fake.Bindings()
+				sources := []apicontract.Upstream{{Name: "h", Org: "team", BaseURL: tc.stored}}
+				b.UpstreamList.Handler = &fake.Handler[apicontract.UpstreamListArgs, apicontract.UpstreamPage]{Value: apicontract.UpstreamPage{Upstreams: sources}}
+				b.RepoList.Handler = &fake.Handler[apicontract.RepoListArgs, apicontract.RepoPage]{Value: apicontract.RepoPage{Upstreams: sources}}
+				command := urlCheckoutCommand(t, b, joined)
+				command.address = tc.supplied
+				if code := command.run(t); code != 1 {
+					t.Fatal("another scheme was accepted", code)
+				}
+				text := strings.Join(strings.Fields(command.diagnostic.String()), " ")
+				for _, want := range []string{"Use its registered forge address; an organization has one upstream.", tc.stored} {
+					if !strings.Contains(text, want) {
+						t.Fatal("registered forge address not explained", text)
+					}
+				}
+				assertNoRepositoryMutation(t, b)
+			})
+		}
+	}
+}

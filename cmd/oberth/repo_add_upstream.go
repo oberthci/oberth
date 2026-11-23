@@ -124,7 +124,7 @@ func requireUpstreamURL(source apicontract.Upstream, u *url.URL, joined bool) er
 // has the same name only clashes with the stored organization name.
 func sameForgeAccount(base string, supplied *url.URL) bool {
 	stored, err := url.Parse(base)
-	return err == nil && stored.Scheme == supplied.Scheme && stored.Host == supplied.Host && reponame.ForgeUser(stored) == reponame.ForgeUser(supplied)
+	return err == nil && stored.Host == supplied.Host && reponame.ForgeUser(stored) == reponame.ForgeUser(supplied)
 }
 
 func redactedForgeURL(address string) string {
