@@ -197,7 +197,7 @@ async function route() {
  screen?.controller.abort(); screen?.logs?.abort();
  const view = {controller: new AbortController(), filter: {}}; screen = view;
  main.replaceChildren(); notice.replaceChildren();
- header.hidden = !localStorage.getItem("oberth.token"); signin.hidden = true; main.hidden = false;
+ signin.hidden = true; main.hidden = false;
  const parts = location.pathname.split("/").filter(Boolean);
  document.querySelectorAll("nav a").forEach(link => { if (link.pathname === "/" + parts[0]) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current"); });
  try {

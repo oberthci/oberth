@@ -258,8 +258,8 @@ closer, ordered history and imported mark through the same issue view. The statu
 screen shows one reason, its detail and run counts. Executor-noise lines appear
 as returned by the log read;
 the script has no folding rule. Live updates use `events_wait` to trigger reads.
-Signed-out visitors see only the sign-in card; the header appears with an accepted
-sign-in, by bearer or browser certificate, and hides when authentication is refused.
+Signed-out visitors see only the sign-in card. The header starts hidden and appears
+only after an accepted bearer or browser certificate sign-in; a 401 hides it.
 
 ## Inspections
 

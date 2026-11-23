@@ -11,7 +11,16 @@ export async function signout(client){
  check(result.form&&result.mainHidden&&result.notice==='', 'first visit did not show a quiet sign-in form');
  const signedOut=await headerState();
  check(!signedOut.nav&&!signedOut.signout&&!signedOut.header,'signed-out page shows navigation or Sign out');
- await client.evaluate(`localStorage.setItem('oberth.token','invalid');route()`);
+ const checking=await client.evaluate(`(async()=>{
+  const original=fetch;let release;const answer=new Promise(resolve=>{release=resolve;});
+  window.fetch=async(...args)=>{await answer;return original(...args);};
+  localStorage.setItem('oberth.token','invalid');
+  try{
+   const pending=route(),shown=document.querySelector('header').getBoundingClientRect().height>0;
+   release();await pending;return shown;
+  }finally{release();window.fetch=original;}
+ })()`);
+ check(!checking,'stored but refused bearer flashed the header before its answer');
  await pause(100);
  check((await client.evaluate(`notice.textContent`)).includes('credentials'), 'invalid credentials did not show their refusal');
  const refused=await headerState();
@@ -24,7 +33,7 @@ export async function signout(client){
  });
  const restored=await headerState();
  check(restored.nav&&restored.signout&&restored.header,'sign-in did not restore navigation and Sign out');
- return {...result,signedIn,signedOut,refused,restored,certificate:await certificateSignin(client)};
+ return {...result,signedIn,signedOut,checking,refused,restored,certificate:await certificateSignin(client)};
 }
 
 // Model a server accepting a browser certificate without a stored bearer.
