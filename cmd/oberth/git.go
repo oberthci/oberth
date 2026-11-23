@@ -177,10 +177,11 @@ func (s *flowSession) pushCommand(dir, known string, endpoint *url.URL, key stri
 func checkHostFile(known string) error {
 	hostFile, err := os.OpenFile(known, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		key := "host_read"
 		if errors.Is(err, os.ErrNotExist) {
-			key = "host_missing"
-		} else if errors.Is(err, syscall.ELOOP) {
+			return &serverTrustError{hostFileFailure(known, "host_missing", err)}
+		}
+		key := "host_read"
+		if errors.Is(err, syscall.ELOOP) {
 			key = "host_link"
 		}
 		return hostFileFailure(known, key, err)
@@ -198,12 +199,9 @@ func checkHostFile(known string) error {
 	}
 	return nil
 }
-func hostFileFailure(path, key string, err error) error {
+func hostFileFailure(path, key string, err error) *publicerr.Error {
 	problem := flowError(key, err)
 	problem.Context = []string{"File: " + path}
-	if key == "host_missing" {
-		return &serverTrustError{problem}
-	}
 	return problem
 }
 func gitFailure(args []string, err error) error {
