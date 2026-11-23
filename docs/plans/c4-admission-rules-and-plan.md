@@ -136,7 +136,7 @@ containers keep separate log selectors within native attempt evidence.
   metadata, executor names/volumes/env and ungranted credentials in every carrier,
   including defaults, inline calls and hooks. Preserve native placement, resources,
   priority, retries and optional deadlines. Mutex names must be literal
-  `<upstream>/<organization>/<repository>/<lock>` for the run's repository, in the pipeline namespace; offline validation without a repository checks only the shape, with nonempty literal parts.
+  `<upstream>/<organization>/<repository>/<lock>` for the run's repository; mutex and semaphore namespaces must be omitted. Offline validation without a repository checks only the mutex shape, with nonempty literal parts.
   Semaphore reads stay in same-namespace `oberth-sync-limits`. No CPU math, capacity queue, numeric resource grant,
   release lock or C4 run cap; the sole run cap belongs to Argo globally.
 - Validate exact grant audiences and main-only read-only token mounts. Projections

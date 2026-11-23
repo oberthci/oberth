@@ -43,7 +43,7 @@ func (g *graph) mutex(mutex *wfv1.Mutex, where string) {
 	if !g.mutexName(mutex.Name) {
 		g.refuse(where+".name", "mutex_scope")
 	}
-	if mutex.Namespace != "" && mutex.Namespace != g.request.IdentityRequest.Namespace {
+	if mutex.Namespace != "" {
 		g.refuse(where+".namespace", "mutex_namespace")
 	}
 }

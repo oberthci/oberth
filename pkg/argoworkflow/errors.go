@@ -105,7 +105,7 @@ func literalMessages() map[string]message {
 		"patch":                 {"Pod patch can replace the assigned identity", "Remove podSpecPatch and declare native fields directly."},
 		"mutex_scope":           {"mutex is outside this repository", "Use a literal upstream/organization/repository/lock name for this repository, or an oberth-sync-limits semaphore."},
 		"sync_null":             {"synchronization entry is null", "Remove the null entry or replace it with a named mutex or an oberth-sync-limits semaphore."},
-		"mutex_namespace":       {"mutex is outside the pipeline namespace", "Omit the mutex namespace or set it to the pipeline namespace."},
+		"mutex_namespace":       {"mutex namespace must be omitted", "Omit the mutex namespace."},
 		"identity":              {"verified execution accounts are required", "Ask the operator to configure and verify the pipeline and resource accounts."},
 		"reference":             {"named namespaced template reference is required", "Use a literal namespaced templateRef and an existing named template."},
 		"cycle":                 {"shared template references contain a cycle", "Break the cycle containing a templateRef edge; local recursion is allowed."},

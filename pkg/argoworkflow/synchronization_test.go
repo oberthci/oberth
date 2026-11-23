@@ -20,7 +20,7 @@ func TestMutexRepositoryAndNamespace(t *testing.T) {
 				mutex             *wfv1.Mutex
 			}{
 				{"own", "", "", &wfv1.Mutex{Name: "forge/org/repo/publish"}},
-				{"own namespace", "", "", &wfv1.Mutex{Name: "forge/org/repo/publish", Namespace: "ci"}},
+				{"own namespace", "mutex_namespace", ".namespace", &wfv1.Mutex{Name: "forge/org/repo/publish", Namespace: "ci"}},
 				{"own database", "", "", &wfv1.Mutex{Name: "forge/org/repo/publish", Database: true}},
 				{"other repository", "mutex_scope", ".name", &wfv1.Mutex{Name: "forge/org/other/publish"}},
 				{"other upstream", "mutex_scope", ".name", &wfv1.Mutex{Name: "other/org/repo/publish"}},
@@ -134,7 +134,7 @@ func TestMutexAndSemaphoreNamesAreNotRewritten(t *testing.T) {
 	t.Parallel()
 	d := checkDocument{wf: simpleWorkflow(), request: requestFor(t, simpleWorkflow()), hooks: identityHooks()}
 	semaphoreDocument(&d)
-	d.wf.Spec.Synchronization.Mutexes = []*wfv1.Mutex{{Name: "forge/org/repo/publish", Namespace: "ci"}}
+	d.wf.Spec.Synchronization.Mutexes = []*wfv1.Mutex{{Name: "forge/org/repo/publish"}}
 	d.template().Synchronization = &wfv1.Synchronization{Mutexes: []*wfv1.Mutex{{Name: "forge/org/repo/build"}}}
 	d.sync(t)
 	prepared, err := Prepare(t.Context(), d.request, d.policy, d.hooks)
@@ -195,5 +195,22 @@ func TestNullSynchronizationEntriesAreRefused(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestOfflineMutexNamespaceMustBeOmitted(t *testing.T) {
+	t.Parallel()
+	for _, namespace := range []string{"", "ci", "other", "{{workflow.namespace}}"} {
+		t.Run(namespace, func(t *testing.T) {
+			d := checkDocument{wf: simpleWorkflow(), request: requestFor(t, simpleWorkflow()), hooks: admissioncontract.PrepareHooks{OfflineValidation: true}}
+			d.request.Mode, d.request.Repository = admissioncontract.ModeInspect, ""
+			d.request.IdentityRequest = admissioncontract.IdentityRequest{}
+			d.wf.Spec.Synchronization = &wfv1.Synchronization{Mutexes: []*wfv1.Mutex{{Name: "forge/team/app/publish", Namespace: namespace}}}
+			code := ""
+			if namespace != "" {
+				code = "mutex_namespace"
+			}
+			assertMutexAdmission(t, &d, code, "spec.synchronization.mutexes[0].namespace")
+		})
 	}
 }
