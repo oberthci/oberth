@@ -9,6 +9,7 @@ import (
 )
 
 const (
+	detailCancelledPromotion       = "Request a new promotion from the original passed run."
 	reasonPromotionUnavailable     = "promotion record unavailable"
 	reasonPromotionEvidenceInvalid = "promotion evidence invalid"
 	warningAuthorityIncomplete     = "Authority application incomplete."
@@ -40,7 +41,7 @@ const (
 	reasonPassed      = "run passed"
 	reasonFailed      = "run failed"
 	reasonCancelled   = "run cancelled"
-	detailCancelled   = "This run was cancelled. Push a new commit or request a rerun to run again."
+	detailCancelled   = "Push a new commit or request a rerun to run again."
 	reasonSkipped     = "step skipped"
 	reasonPending     = "step not reached"
 	reasonUnknown     = "execution evidence unavailable"

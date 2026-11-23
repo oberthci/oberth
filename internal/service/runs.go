@@ -82,7 +82,7 @@ type finishedRecord struct {
 
 func (s *Service) recordFinished(ctx context.Context, f finishedRecord) error {
 	r, o, intent, promotion := f.r, f.o, f.intent, f.promotion
-	if err := s.cancellationReason(ctx, &o); err != nil {
+	if err := s.cancellationReason(ctx, r, &o); err != nil {
 		return err
 	}
 	reason := o.Reason

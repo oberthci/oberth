@@ -4,12 +4,14 @@ import (
 	"context"
 	"strings"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
 // The durable cancellation names the caller, even after observation restarts.
-func (s *Service) cancellationReason(ctx context.Context, o *FinishedRun) error {
+func (s *Service) cancellationReason(ctx context.Context, r stateport.Run, o *FinishedRun) error {
 	if o.Status != stepmodel.RunCancelled {
 		return nil
 	}
@@ -27,6 +29,10 @@ func (s *Service) cancellationReason(ctx context.Context, o *FinishedRun) error 
 		}
 		o.Detail = strings.TrimSpace("Cancelled by " + obligation.Actor + ".\n" + o.Detail)
 	}
-	o.Detail = strings.TrimSpace(o.Detail + "\n" + detailCancelled)
+	detail := detailCancelled
+	if r.Origin.Trigger == model.TriggerPromotion {
+		detail = detailCancelledPromotion
+	}
+	o.Detail = strings.TrimSpace(o.Detail + "\n" + detail)
 	return nil
 }
