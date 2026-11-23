@@ -504,7 +504,7 @@ test('one render time bounds duration by age when native start predates creation
   // The same snapshot crosses the second boundary together in both columns.
   expect(boxRows({ ...state, now: now + 1 }, 3, 120)[1]).toMatch(/ +21s +21s$/)
   expect(duration({ ...item, started_at: '2026-11-18T00:00:10Z' }, now)).toBe('10s')
-  expect(duration({ ...item, status: 'queued', started_at: null }, now)).toBe('20s')
+  expect(duration({ ...item, status: 'queued', started_at: null }, now)).toBe('—')
   expect(duration({ ...item, status: 'passed', finished_at: '2026-11-18T00:00:21Z' }, now)).toBe('20s')
 })
 
@@ -520,6 +520,16 @@ for (const clockOffset of [-5000, 5000]) {
     expect(duration({ ...item, status: 'passed', finished_at: '2026-11-18T00:00:21Z' }, now)).toBe('20s')
   })
 }
+
+test('queued time stays unknown until execution starts', async () => {
+  const created = '2026-11-18T00:00:00Z'
+  const waiting = { ...run(undefined, 'queued'), created_at: created, started_at: null }
+  expect(duration(waiting, Date.parse('2026-11-18T00:01:00Z'))).toBe('—')
+  expect(age(waiting, Date.parse('2026-11-18T00:01:00Z'))).toBe('1m')
+  const running = { ...waiting, status: 'running' as const, started_at: '2026-11-18T00:01:00Z' }
+  expect(duration(running, Date.parse('2026-11-18T00:01:18Z'))).toBe('18s')
+})
+
 
 test('idle reads and refused change waits share one coalesced timer', { options }, async ($, on) => {
   bottom(on)

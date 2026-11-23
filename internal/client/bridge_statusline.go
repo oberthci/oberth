@@ -129,9 +129,13 @@ func footerRun(run apicontract.RunRecord, runs []apicontract.RunRecord, now time
 	}
 	age := max(0, now.Sub(run.CreatedAt))
 	duration := min(age, max(0, end.Sub(start)))
+	elapsed := "—"
+	if run.Status != "queued" {
+		elapsed = span(duration, 2)
+	}
 	cells := []string{footerID(run.ID, runs), run.Repo[strings.LastIndex(run.Repo, "/")+1:],
 		strings.TrimPrefix(strings.TrimPrefix(run.Ref, "refs/heads/"), "refs/tags/"),
-		status, steps, span(duration, 2), span(age, 1)}
+		status, steps, elapsed, span(age, 1)}
 	if run.SelectedFile != "" {
 		cells = append(cells, run.SelectedFile)
 	}

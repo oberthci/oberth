@@ -184,7 +184,7 @@ func TestBridgeFooterDurationNeverExceedsAge(t *testing.T) {
 		run  stepmodel.RunSummary
 		want string
 	}{
-		{"queued", stepmodel.RunSummary{Status: stepmodel.RunQueued, CreatedAt: created}, "20s 20s"},
+		{"queued", stepmodel.RunSummary{Status: stepmodel.RunQueued, CreatedAt: created}, "— 20s"},
 		{"running", stepmodel.RunSummary{Status: stepmodel.RunRunning, CreatedAt: created, StartedAt: &nativeStart}, "20s 20s"},
 		{"finished", stepmodel.RunSummary{Status: stepmodel.RunPassed, CreatedAt: created, StartedAt: &nativeStart, FinishedAt: &futureEnd}, "20s 20s"},
 		{"future-created", stepmodel.RunSummary{Status: stepmodel.RunRunning, CreatedAt: futureEnd, StartedAt: &nativeStart}, "0s 0s"},
@@ -290,5 +290,22 @@ func TestBridgeFooterLeavesRunResources(t *testing.T) {
 	p.send("run", "resources/read", map[string]any{"uri": "run://run1"})
 	if data := p.frame(); !strings.Contains(string(data), `run://run1`) || strings.Contains(string(data), "Oberth:") {
 		t.Fatalf("run resource: %s", data)
+	}
+}
+
+func TestBridgeFooterQueuedTime(t *testing.T) {
+	now := fake.NewClock().Now()
+	page := footerPage(now)
+	page.Runs = page.Runs[:1]
+	run := &page.Runs[0]
+	run.Status = stepmodel.RunQueued
+	run.CreatedAt = now.Add(-time.Minute)
+	if text := string(footerRows(page, nil, now)); !strings.Contains(text, "… queued 0/≥3 — 1m") {
+		t.Fatalf("queued footer counts waiting as execution: %s", text)
+	}
+	started := now.Add(-18 * time.Second)
+	run.Status, run.StartedAt = stepmodel.RunRunning, &started
+	if text := string(footerRows(page, nil, now)); !strings.Contains(text, "▶ running 0/≥3 18s 1m") {
+		t.Fatalf("running footer lost execution time: %s", text)
 	}
 }
