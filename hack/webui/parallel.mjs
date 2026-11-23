@@ -6,6 +6,14 @@ export async function parallel(client){
  for(const width of [1024,760,360]){
   await client.cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
   await client.loaded('/runs/88888888','.steps a.row');
+  const split=await client.evaluate(`(()=>{
+   const probe=h('div',{class:'steps'});
+   probe.append(...stepRows({},[1,2,2,0,1].map((parallel_group,index)=>({parallel_group,plan_path:'probe-'+index,name:'Probe '+index,status:'passed'})),'',null));
+   document.body.append(probe);
+   const result={rails:probe.querySelectorAll('.parallel-rail').length,grouped:Array.from(probe.querySelectorAll('.row')).map(row=>Boolean(row.closest('.parallel-steps')))};
+   probe.remove();return result;
+  })()`);
+  check(split.rails===1&&JSON.stringify(split.grouped)==='[false,true,true,false,false]','single-row fragments carry a rail '+JSON.stringify({width,split}));
   for(const theme of ['light','dark','mono','color']){
    await client.evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)};document.getAnimations().forEach(animation=>animation.cancel());`);
    const metrics=await client.evaluate(`(()=>{
