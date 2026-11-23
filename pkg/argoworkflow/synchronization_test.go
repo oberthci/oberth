@@ -151,22 +151,24 @@ func TestOfflineMutexShapeAndRepositoryBinding(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, repository, lock, code string
+		offline                      bool
 	}{
-		{"documented example", "", "forge/team/app/publish", ""},
-		{"nested lock", "", "forge/team/app/publish/latest", ""},
-		{"missing scope", "", "publish", "mutex_scope"},
-		{"empty upstream", "", "/team/app/publish", "mutex_scope"},
-		{"empty organization", "", "forge//app/publish", "mutex_scope"},
-		{"empty repository", "", "forge/team//publish", "mutex_scope"},
-		{"empty lock", "", "forge/team/app/", "mutex_scope"},
-		{"no lock", "", "forge/team/app", "mutex_scope"},
-		{"dynamic scope", "", "{{workflow.parameters.forge}}/team/app/publish", "mutex_scope"},
-		{"dynamic lock", "", "forge/team/app/{{workflow.name}}", "mutex_scope"},
-		{"known repository", "forge/team/app", "forge/team/app/publish", ""},
-		{"foreign repository", "forge/other/app", "forge/team/app/publish", "mutex_scope"},
+		{"documented example", "", "forge/team/app/publish", "", true},
+		{"nested lock", "", "forge/team/app/publish/latest", "", true},
+		{"missing scope", "", "publish", "mutex_scope", true},
+		{"empty upstream", "", "/team/app/publish", "mutex_scope", true},
+		{"empty organization", "", "forge//app/publish", "mutex_scope", true},
+		{"empty repository", "", "forge/team//publish", "mutex_scope", true},
+		{"empty lock", "", "forge/team/app/", "mutex_scope", true},
+		{"no lock", "", "forge/team/app", "mutex_scope", true},
+		{"dynamic scope", "", "{{workflow.parameters.forge}}/team/app/publish", "mutex_scope", true},
+		{"dynamic lock", "", "forge/team/app/{{workflow.name}}", "mutex_scope", true},
+		{"known repository", "forge/team/app", "forge/team/app/publish", "", true},
+		{"foreign repository", "forge/other/app", "forge/team/app/publish", "mutex_scope", true},
+		{"server inspection without repository", "", "forge/team/app/publish", "mutex_scope", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d := checkDocument{wf: simpleWorkflow(), request: requestFor(t, simpleWorkflow()), hooks: admissioncontract.PrepareHooks{OfflineValidation: true}}
+			d := checkDocument{wf: simpleWorkflow(), request: requestFor(t, simpleWorkflow()), hooks: admissioncontract.PrepareHooks{OfflineValidation: tc.offline}}
 			d.request.Mode, d.request.Repository = admissioncontract.ModeInspect, tc.repository
 			d.request.IdentityRequest = admissioncontract.IdentityRequest{}
 			d.wf.Spec.Synchronization = &wfv1.Synchronization{Mutexes: []*wfv1.Mutex{{Name: tc.lock}}}
