@@ -38,9 +38,7 @@ func TestEmptiedEstablishedForgeRefusesRecentAndExpiredPushes(t *testing.T) {
 		if refresh == "expired" {
 			gittest.ExpireRefresh(t, store)
 		}
-		if output, err := f.pushResult(t, "refs/heads/main"); err == nil || !strings.Contains(output, gitport.ForgeHistoryLostReason) {
-			t.Fatal("emptied established forge accepted main with "+refresh+" refresh", err, output)
-		}
+		f.checkEmptiedForgePush(t, refresh)
 		if after := f.git.Git(t, store, "for-each-ref", "--format=%(refname) %(objectname)"); after != before {
 			t.Fatal("refused push changed cached heads or tags", refresh, before, after)
 		}
@@ -51,5 +49,16 @@ func TestEmptiedEstablishedForgeRefusesRecentAndExpiredPushes(t *testing.T) {
 	runs, err := f.owners.c.store.Runs(t.Context(), stateport.RunFilter{Limit: 20})
 	if err != nil || len(runs) != 1 {
 		t.Fatal("refused push started CI", len(runs), err)
+	}
+}
+
+func (f *composedFixture) checkEmptiedForgePush(t *testing.T, refresh string) {
+	t.Helper()
+	output, err := f.pushResult(t, "refs/heads/main")
+	if err == nil || !strings.Contains(output, gitport.ForgeHistoryLostReason) {
+		t.Fatal("emptied established forge accepted main with "+refresh+" refresh", err, output)
+	}
+	if !strings.Contains(output, gitport.ForgeHistoryLostRemedy) || strings.Contains(output, gitport.EmptyForgeRemedy) {
+		t.Fatal("lost-history refusal did not explain forge restoration", output)
 	}
 }

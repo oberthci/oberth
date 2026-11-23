@@ -58,7 +58,7 @@ func (f *composedFixture) checkPublishedForgeHistory(t *testing.T, commit string
 	f.git.Write(t, "later.txt", []byte("later change\n"))
 	f.git.CommitFile(t, "change after forge was emptied")
 	gittest.ExpireRefresh(t, store)
-	if output, err := f.pushResult(t, "refs/heads/main"); err == nil || !strings.Contains(output, gitport.EmptyForgeReason) {
+	if output, err := f.pushResult(t, "refs/heads/main"); err == nil || !strings.Contains(output, gitport.ForgeHistoryLostReason) {
 		t.Fatal("published history was treated as bootstrap", err, output)
 	}
 	if head := f.git.Git(t, store, "rev-parse", "refs/heads/main"); head != commit {

@@ -3,8 +3,8 @@ package gitport
 import "github.com/oberthci/oberth/internal/publicerr"
 
 const (
-	ForgeHistoryLostReason = EmptyForgeReason
-	ForgeHistoryLostRemedy = EmptyForgeRemedy
+	ForgeHistoryLostReason = "The forge repository is now empty."
+	ForgeHistoryLostRemedy = "Restore the repository and its refs on the forge before pushing again."
 )
 
 // ForgeHistoryLostError refuses an emptied forge once its history was tracked.

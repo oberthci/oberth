@@ -31,6 +31,10 @@ func (c *Checks) CheckRepository(ctx context.Context, key ProbeKey) ProbeResult 
 		if errors.As(err, &empty) {
 			result.Reason = empty.Reason()
 		}
+		var lost *gitport.ForgeHistoryLostError
+		if errors.As(err, &lost) {
+			result.Reason = lost.Reason()
+		}
 		var unfinished *gitport.CloneUnfinishedError
 		if errors.As(err, &unfinished) {
 			result.Reason = unfinished.Reason()

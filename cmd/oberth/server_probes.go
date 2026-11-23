@@ -50,6 +50,11 @@ func (a serverAdministration) ProbeRepository(ctx context.Context, r stateport.R
 	if result.Reason == gitport.EmptyForgeReason {
 		return nil
 	}
+	if result.Reason == gitport.ForgeHistoryLostReason {
+		problem := publicerr.Classify(&gitport.ForgeHistoryLostError{})
+		problem.Context = []string{"Repository: " + r.Canonical}
+		return problem
+	}
 	if result.Detail != "" {
 		a.logCheck(ctx, r.Canonical, result)
 	}
@@ -60,23 +65,28 @@ func (a serverAdministration) ProbeRepository(ctx context.Context, r stateport.R
 		return problem
 	}
 	if result.Detail != "" {
-		reason := repositoryProbeFailureReason
-		remedy := "Check the upstream address, identity and host pins, then retry."
-		if result.Reason == gitport.ForgeReason {
-			reason, remedy = gitport.ForgeReason, gitport.ForgeOperatorRemedy
-		}
-		// Only a complete public shim headline crosses the child diagnostic boundary.
-		// Native Git diagnostics can contain private staging paths and remote output.
-		for _, line := range strings.Split(result.Detail, "\n") {
-			if strings.TrimSpace(line) == gitssh.HostKeyMismatchReason {
-				reason = gitssh.HostKeyMismatchReason
-			}
-		}
+		reason, remedy := probeFailureMessage(result)
 		problem := publicerr.New(publicerr.Unavailable, reason, remedy, nil)
 		problem.Context = []string{"Repository: " + r.Canonical}
 		return problem
 	}
 	return nil
+}
+
+func probeFailureMessage(result app.ProbeResult) (string, string) {
+	reason := repositoryProbeFailureReason
+	remedy := "Check the upstream address, identity and host pins, then retry."
+	if result.Reason == gitport.ForgeReason {
+		reason, remedy = gitport.ForgeReason, gitport.ForgeOperatorRemedy
+	}
+	// Only a complete public shim headline crosses the child diagnostic boundary.
+	// Native Git diagnostics can contain private staging paths and remote output.
+	for _, line := range strings.Split(result.Detail, "\n") {
+		if strings.TrimSpace(line) == gitssh.HostKeyMismatchReason {
+			reason = gitssh.HostKeyMismatchReason
+		}
+	}
+	return reason, remedy
 }
 
 // logCheck puts a failed check's full cause in the server log; the caller's
@@ -142,6 +152,8 @@ func upstreamProbeStatusReason(err error) string {
 		return repositoryArchivedReason
 	case gitport.EmptyForgeReason:
 		return gitport.EmptyForgeReason
+	case gitport.ForgeHistoryLostReason:
+		return gitport.ForgeHistoryLostReason
 	case gitport.CloneUnfinishedReason:
 		return gitport.CloneUnfinishedReason
 	case gitport.FetchUnfinishedReason:

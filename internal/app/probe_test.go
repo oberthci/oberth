@@ -55,6 +55,17 @@ func TestProbeOfUnfinishedFirstCloneSaysSo(t *testing.T) {
 	}
 }
 
+func TestProbeNamesLostForgeHistory(t *testing.T) {
+	git := fake.Git{Remote: func(context.Context, string, string) (gitport.Ref, error) {
+		return gitport.Ref{}, &gitport.ForgeHistoryLostError{}
+	}}
+	c := app.Checks{Git: git, Deadline: context.WithTimeout}
+	result := c.CheckRepository(t.Context(), app.ProbeKey{Repository: request().Repository})
+	if result.Reason != gitport.ForgeHistoryLostReason || result.Detail != (&gitport.ForgeHistoryLostError{}).Error() {
+		t.Fatal("lost history did not retain its restoration remedy", result)
+	}
+}
+
 func TestProbeDeadlineActuallyCancelsTransportAtFifteenSeconds(t *testing.T) {
 	t.Parallel()
 	clock := newDeadlineClock()
