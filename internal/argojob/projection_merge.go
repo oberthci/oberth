@@ -29,7 +29,11 @@ func primaryFailure(rows []projected) *stepmodel.FailureRecord {
 		class, retry = stepmodel.FailureInfrastructure, stepmodel.RetryRerun
 	}
 	id := latestNode(first.step.Attempts)
-	return &stepmodel.FailureRecord{Class: class, Step: first.step.Path, Name: first.step.Name, NodeID: id, Retry: stepmodel.RetryHint{Action: retry}}
+	hint := stepmodel.RetryHint{Action: retry}
+	if class == stepmodel.FailureAuthor {
+		hint.Detail = "Oberth cannot tell whether rerunning unchanged is safe. Inspect the failure and logs; workflow YAML governs retries."
+	}
+	return &stepmodel.FailureRecord{Class: class, Step: first.step.Path, Name: first.step.Name, NodeID: id, Retry: hint}
 }
 func failedProjection(r projected) bool {
 	return r.step.Status == stepmodel.StepFailed || r.step.Status == stepmodel.StepUnknown && r.step.AttemptCount > 0

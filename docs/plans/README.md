@@ -180,7 +180,7 @@ the same declarations, C7 stores them atomically, and the agent client displays 
 Publication retry advice is separate and never starts an automatic run retry.
 
 Run JSON's `failure` record contains `failure_class`, `failed_step` (the plan path),
-`failed_step_name` (the plan step's name), `node_id` and `retry_hint`.
+`failed_step_name` (the plan step's name), `node_id` and `retry_hint`. Retry hints carry optional `detail`: a command failure keeps `none` because Oberth cannot tell whether rerunning unchanged is safe; workflow YAML governs retries.
 For example, an exit hook keeps `"failed_step":"onExit[0].cleanup"` beside
 `"failed_step_name":"cleanup"`; a failure without a plan step has an empty name.
 

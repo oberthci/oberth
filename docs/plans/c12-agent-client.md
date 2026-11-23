@@ -78,7 +78,7 @@ notifications are an extra. A parked push has no run; request CI with a real ref
 update and `oberth.run=1`.
 
 Read a finished run and use its typed retry hint. A rerun hint permits unchanged
-retry; otherwise read the failed step's logs, fix, commit and push. Assist remains
+retry. For none, read the failed step's logs and retry_hint.detail; fix a shown code fault and commit/push with consent, or show the reason, detail and log lines to the person and stop. Assist remains
 off pending review and real-cluster checks. On run.held, list, inspect with exec,
 push the authored fix and release. There is no continue or file tool. Commands
 run with the step identity and mounts and may change files and downstream

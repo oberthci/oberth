@@ -29,6 +29,7 @@ type FailureClass string
 type RetryHint struct {
 	Action     RetryAction `json:"action"`
 	ReasonCode string      `json:"reason_code"`
+	Detail     string      `json:"detail,omitempty"`
 	After      *time.Time  `json:"after,omitempty"`
 }
 

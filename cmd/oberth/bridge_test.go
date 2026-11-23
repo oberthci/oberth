@@ -20,7 +20,7 @@ import (
 
 func TestBridgeDisplayBlock(t *testing.T) {
 	reason := strings.Repeat("r", 40)
-	run := map[string]any{"id": "run1", "repo": "org/app", "ref": "refs/heads/topic", "status": "failed", "display_reason": reason, "detail": "native diagnostic", "steps": []any{map[string]any{"name": "test", "status": "failed", "display_reason": "test failed", "detail": "native step detail"}}, "failure": map[string]any{"failed_step": "test", "retry_hint": map[string]any{"action": "none", "reason_code": "author"}}}
+	run := map[string]any{"id": "run1", "repo": "org/app", "ref": "refs/heads/topic", "status": "failed", "display_reason": reason, "detail": "native diagnostic", "steps": []any{map[string]any{"name": "test", "status": "failed", "display_reason": "test failed", "detail": "native step detail"}}, "failure": map[string]any{"failed_step": "test", "retry_hint": map[string]any{"action": "none", "reason_code": "author", "detail": "Command retry safety is unknown."}}}
 	for _, tool := range []string{"run_get", "run_wait", "wait"} {
 		t.Run(tool, func(t *testing.T) { assertToolDisplay(t, tool, run) })
 	}
@@ -50,7 +50,7 @@ func assertToolDisplay(t *testing.T, tool string, run map[string]any) {
 	if !ok || !strings.Contains(text, strings.Repeat("r", 40)) || !strings.Contains(text, "native diagnostic") {
 		t.Fatalf("incomplete %s display: %s", tool, text)
 	}
-	if !strings.Contains(text, "retry hint / action: none") || !strings.Contains(text, "oberth log run1 test") {
+	if !strings.Contains(text, "retry hint / action: none") || !strings.Contains(text, "Command retry safety is unknown.") || !strings.Contains(text, "oberth log run1 test") {
 		t.Fatalf("missing retry/log instruction: %s", text)
 	}
 	var cli bytes.Buffer

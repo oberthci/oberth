@@ -14,7 +14,7 @@ func TestWireTags(t *testing.T) {
 	}{
 		{StepAttempt{}, "NodeID:node_id PodName:pod_name Status:status"},
 		{LogicalStepCounts{}, "Total:step_count Exact:steps_planned_exact Pending:pending Queued:queued Running:running Passed:passed Failed:failed Skipped:skipped Unknown:unknown"},
-		{RetryHint{}, "Action:action ReasonCode:reason_code After:after,omitempty"},
+		{RetryHint{}, "Action:action ReasonCode:reason_code Detail:detail,omitempty After:after,omitempty"},
 		{FailureRecord{}, "Class:failure_class Step:failed_step Name:failed_step_name NodeID:node_id Retry:retry_hint"},
 		{LogSelector{}, "NodeID:node_id PodName:pod_name Container:container"},
 		{RunStep{}, "Path:plan_path Name:name ParallelGroup:parallel_group,omitempty CredentialIntent:credential_intent Status:status DisplayReason:display_reason Detail:detail,omitempty StartedAt:started_at FinishedAt:finished_at AttemptCount:attempt_count Attempts:attempts,omitzero Logs:logs,omitzero"},
