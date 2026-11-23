@@ -154,7 +154,7 @@ container=$("${docker[@]}" create --cpus 6 --memory 7681m --pids-limit 512 --cap
         if [[ -L hack/base-image || ! -d hack/base-image ]]; then
             if [[ -e hack/base-image || -L hack/base-image ]]; then find hack/base-image -depth -delete; fi
         else
-            find hack/base-image -depth \( -type l -o -name "*.py" -o -name "*.pyc" -o -name "*.sh" -o -name "Dockerfile*" \) -delete
+            find hack/base-image -depth -type l -delete
         fi
         tar -xf /tooling.tar
         git config user.name "$3"

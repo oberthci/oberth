@@ -248,6 +248,16 @@ fi
                                   "hack/base-image/build.py", "hack/base-image/layout.py", "hack/base-image/check.sh",
                                   "hack/base-image/compile.sh", "hack/base-image/Dockerfile", "hack/base-image/Dockerfile.layout"),
                                  "hack/base-image/test_branch.py")
+        recipe = self.fixture / "hack/base-image/build.py"
+        recipe.unlink()
+        recipe.mkdir()
+        (recipe / "input").write_text("branch directory\n")
+        self.git("add", "hack/base-image/build.py")
+        self.git("commit", "-qm", "Replace a recipe with a directory")
+        self.assertEqual(0, self.run_gate().returncode)
+        result, vm = self.run_vm_script()
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertEqual(self.git("show", "main:hack/base-image/build.py"), (vm / "src/hack/base-image/build.py").read_bytes())
 
     def test_base_image_patch_and_pin_update_pass_main_checks(self):
         patch_file = self.fixture / "hack/base-image/git-no-shell.patch"
