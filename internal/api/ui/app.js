@@ -125,10 +125,8 @@ async function redraw(view) {
  const signal = view.controller.signal;
  try {
   while (view.dirty && !signal.aborted) {
-   const delay = (view.lastRead ?? -Infinity) + readSpacing - performance.now();
-   if (delay > 0) await waitRetry(Math.ceil(delay), signal);
    if (signal.aborted || document.hidden) return false;
-   view.dirty = false; view.lastRead = performance.now();
+   view.dirty = false;
    await view.read();
    view.readError?.remove(); view.liveError?.remove();
   }
@@ -156,8 +154,9 @@ async function live(view) {
     const page = await call("events_wait", {...view.filter, after_id: view.cursor, timeout_s: 25, limit: 200}, signal);
     view.cursor = page.next_after_id; view.liveError?.remove(); view.readError?.remove();
     if (page.events.length || page.gap) {
-     await waitRetry(readSpacing, signal);
      if (!signal.aborted) await refresh(view);
+     // Read the leading event now; the cursor batches its burst before the next wait.
+     await waitRetry(readSpacing, signal);
     }
    } catch (error) {
     if (signal.aborted) break;
