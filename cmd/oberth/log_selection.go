@@ -23,12 +23,29 @@ func defaultLogContainer(steps []stepmodel.RunStep, selector logcontract.Selecto
 		if !matches {
 			continue
 		}
+		if entry := runningLogContainer(step, selector.NodeID, entries); entry != nil {
+			selector.NodeID, selector.Container = entry.NodeID, entry.Container
+			return selector, []apicontract.Container{{NodeID: entry.NodeID, PodName: entry.PodName, Container: entry.Container}}
+		}
 		if failed := failedLogContainer(step, selector.NodeID, entries); failed != nil {
 			selector.NodeID, selector.Container = failed.NodeID, failed.Container
 			return selector, []apicontract.Container{{NodeID: failed.NodeID, PodName: failed.PodName, Container: failed.Container}}
 		}
 	}
 	return selector, nil
+}
+
+func runningLogContainer(step stepmodel.RunStep, node string, entries []runlog.ContainerLog) *runlog.ContainerLog {
+	if step.Status != stepmodel.StepRunning {
+		return nil
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := &entries[i]
+		if entry.Step == step.Path && entry.Main && entry.State == runlog.Following && (node == "" || node == entry.NodeID) {
+			return entry
+		}
+	}
+	return nil
 }
 
 func failedLogContainer(step stepmodel.RunStep, node string, entries []runlog.ContainerLog) *stepmodel.LogSelector {

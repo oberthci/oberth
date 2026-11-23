@@ -92,7 +92,7 @@ func TestPendingStepCaptureRetainsAllRetryContainers(t *testing.T) {
 	e := New(Config{Logs: logs})
 	defer e.queue.ShutDown()
 	w := &wf.Workflow{ObjectMeta: meta.ObjectMeta{Name: "w", Namespace: "ci", UID: "workflow"}, Status: wf.WorkflowStatus{Nodes: wf.Nodes{}}}
-	b := nativebinding.RunBinding{Workflow: nativebinding.Object{Name: w.Name}}
+	b := nativebinding.RunBinding{RunID: "run", Workflow: nativebinding.Object{Name: w.Name}}
 	tr := &tracking{binding: b, captures: map[string]bool{}}
 	e.tracked[w.Name] = tr
 	parent := wf.NodeStatus{ID: "retry", Name: "w.step", Type: wf.NodeTypeRetry}
@@ -105,8 +105,8 @@ func TestPendingStepCaptureRetainsAllRetryContainers(t *testing.T) {
 		pods = append(pods, &core.Pod{ObjectMeta: meta.ObjectMeta{Name: "pod-" + id, Namespace: "ci", UID: types.UID("uid-" + id), Labels: map[string]string{"workflows.argoproj.io/workflow": "w"}, Annotations: map[string]string{"workflows.argoproj.io/node-id": id, "workflows.argoproj.io/node-name": name}, OwnerReferences: []meta.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: "w", UID: "workflow", Controller: new(true)}}}, Status: core.PodStatus{ContainerStatuses: []core.ContainerStatus{{Name: "main", State: core.ContainerState{Terminated: &core.ContainerStateTerminated{}}}}}})
 	}
 	w.Status.Nodes[parent.ID] = parent
-	e.capture(tr, w, pods)
-	e.capture(tr, w, pods)
+	e.capture(t.Context(), tr, w, pods)
+	e.capture(t.Context(), tr, w, pods)
 	if len(tr.pending) != 1 || len(tr.pending["step"].entries) != 3 {
 		t.Fatal("retry logs discarded during coalescing", tr.pending)
 	}

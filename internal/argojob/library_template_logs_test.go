@@ -44,7 +44,7 @@ func checkLibraryOutput(t *testing.T, kind string, code int32) {
 	defer e.queue.ShutDown()
 	tr := &tracking{binding: nativebinding.RunBinding{RunID: "run", Workflow: nativebinding.Object{Name: w.Name}}, captures: map[string]bool{}}
 	e.tracked[w.Name] = tr
-	e.capture(tr, w, []*core.Pod{p})
+	e.capture(t.Context(), tr, w, []*core.Pod{p})
 	path := nodePath(w, w.Status.Nodes["n"])
 	entries := tr.pending[path].entries
 	if len(entries) != 4 {

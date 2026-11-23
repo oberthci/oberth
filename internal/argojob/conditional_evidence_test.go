@@ -14,6 +14,7 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	nativefake "github.com/oberthci/oberth/internal/argojob/fake"
 	"github.com/oberthci/oberth/internal/identityname"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/sourcecontract"
@@ -193,8 +194,27 @@ func assertConditionalFinish(t *testing.T, s *store.Store, id string, excluded b
 	}
 	events, err := s.Events(t.Context(), stateport.EventFilter{Limit: 10})
 	compositionOK(t, err)
-	if len(events.Events) != 1 || events.Events[0].Kind != "run.finished" {
-		t.Fatal("finish changed event kinds or count", events)
+	assertProgressAndFinishEvents(t, events.Events, id)
+}
+
+func assertProgressAndFinishEvents(t *testing.T, events []model.AgentEvent, id string) {
+	t.Helper()
+	finished, updated := 0, 0
+	for _, event := range events {
+		if event.RunID != id {
+			t.Fatal("event belongs to another run", event)
+		}
+		switch event.Kind {
+		case "run.finished":
+			finished++
+		case "run.updated":
+			updated++
+		default:
+			t.Fatal("unexpected run event", event)
+		}
+	}
+	if finished != 1 || updated == 0 {
+		t.Fatal("expected progress and exactly one finish", events)
 	}
 }
 

@@ -47,7 +47,13 @@ func TestComposedScheduledChildRecordedOnceFromRealPreparation(t *testing.T) {
 	}
 	count := 0
 	for _, event := range events.Events {
-		if event.RunID == run.ID {
+		if event.RunID != run.ID {
+			continue
+		}
+		if event.Kind != "run.updated" {
+			t.Fatal("unexpected scheduled child event", event)
+		}
+		if event.Summary == "scheduled run observed" {
 			count++
 		}
 	}

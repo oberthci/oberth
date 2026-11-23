@@ -32,7 +32,7 @@ func TestContainerSetWithMainKeepsAllAuthoredOutput(t *testing.T) {
 	defer e.queue.ShutDown()
 	tr := &tracking{binding: nativebinding.RunBinding{RunID: "run", Workflow: nativebinding.Object{Name: "w"}}, captures: map[string]bool{}}
 	e.tracked[w.Name] = tr
-	e.capture(tr, w, []*core.Pod{p})
+	e.capture(t.Context(), tr, w, []*core.Pod{p})
 	entries := tr.pending["build"].entries
 	if len(entries) != 4 {
 		t.Fatal("missing native containers", entries)

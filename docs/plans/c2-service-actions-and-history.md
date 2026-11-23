@@ -124,7 +124,7 @@ C5 records native progress directly; committed changes wake C2 waiters. Each cha
 run.updated with the fact in one transaction, with no coalescing or dirty-revision
 replay. Payload is `{run_id,repo,ref,object_sha,commit_sha,data?}`; unknown commit
 is null. Optional step_count/steps_planned_exact appear together inside Data.
-A monotonic per-run revision gives `run.updated:<run_id>:<revision>` deduplication.
+The existing event sequence supplies a monotonic projection revision and `run.updated:<run_id>:<revision>` deduplication, independently of run-control revisions.
 Finish commits verdict, run.finished, pending publication and CI-issue changes
 atomically; no crash window can lose their events or publication intent.
 Native progress is observation, never an authority audit record.

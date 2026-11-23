@@ -36,6 +36,14 @@ var _ argojob.Cache = (*Cache)(nil)
 // Logs supplies reservation outcomes; retained-store tests supply real receipts.
 type Logs struct {
 	ReserveFunc func(context.Context, string, runlog.ContainerLog) (*runlog.Reservation, error)
+	TrackFunc   func(context.Context, string, []runlog.ContainerLog) error
+}
+
+func (f Logs) Track(ctx context.Context, id string, entries []runlog.ContainerLog) error {
+	if f.TrackFunc != nil {
+		return f.TrackFunc(ctx, id, entries)
+	}
+	return ctx.Err()
 }
 
 func (f Logs) Reserve(ctx context.Context, id string, entry runlog.ContainerLog) (*runlog.Reservation, error) {

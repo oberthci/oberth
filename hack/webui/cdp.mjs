@@ -20,11 +20,11 @@ export async function deadline(label, task, milliseconds=5000) {
 }
 
 export async function launch(options = {}) {
- const artifacts = process.env.OBERTH_UI_ARTIFACTS;
+ const artifacts = options.artifacts || process.env.OBERTH_UI_ARTIFACTS;
  await mkdir(artifacts, {recursive:true});
  const token = options.token || 'ui-example-credential';
  const server = spawn(process.env.OBERTH_UI_BINARY, ['-test.run=^TestUIExampleServer$', '-test.v'], {
-  env:{...process.env,OBERTH_UI_EXAMPLE:'127.0.0.1:0',OBERTH_UI_TOKEN:token},stdio:['ignore','pipe','pipe'],
+  env:{...process.env,...options.env,OBERTH_UI_EXAMPLE:'127.0.0.1:0',OBERTH_UI_TOKEN:token},stdio:['ignore','pipe','pipe'],
  });
  const serverExit = once(server,'exit');
  let closing = false, browser, ws;
@@ -70,10 +70,13 @@ export async function launch(options = {}) {
   await cdp('Emulation.setTimezoneOverride',{timezoneId:'Europe/Amsterdam'});
   const injection=await cdp('Page.addScriptToEvaluateOnNewDocument',{source:`if(!sessionStorage.getItem('ui-example-initialized')){localStorage.setItem('oberth.token',${JSON.stringify(token)});sessionStorage.setItem('ui-example-initialized','1');}Date.now=()=>Date.parse('2026-11-16T20:22:00Z');window.uiFetches=[];const nativeFetch=window.fetch;window.fetch=(path,options={})=>{window.uiFetches.push({path:new URL(path,location.href).pathname,credentials:options.credentials,redirect:options.redirect,authorization:Boolean(options.headers?.Authorization)});return nativeFetch(path,options);};`});
   async function loaded(path,selector){
-   await deadline('load '+path,async()=>{
+   try { await deadline('load '+path,async()=>{
     const ready=nextEvent('Page.loadEventFired');await cdp('Page.navigate',{url:origin+path});await ready;
     await evaluate(`new Promise(resolve=>{const test=()=>{if(!document.querySelector(${JSON.stringify(selector)}))return;observer.disconnect();resolve();};const observer=new MutationObserver(test);observer.observe(document,{subtree:true,childList:true});test();})`);
-   });
+   }); } catch(error) {
+    const page=await evaluate(`({notice:document.querySelector('#notice')?.textContent,main:document.querySelector('main')?.textContent,signin:document.querySelector('#signin')?.checkVisibility()})`);
+    throw new Error(error.message+' '+JSON.stringify(page));
+   }
   }
   async function close(){
    if(closing)return;closing=true;

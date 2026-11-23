@@ -274,7 +274,7 @@ func (e *Executor) observe(ctx context.Context, t *tracking) error {
 		terminalError = errors.Join(e.saveProgress(ctx, t, o), e.publish(ctx, t, o))
 	}
 	w = o.workflow
-	e.capture(t, w, pods)
+	e.capture(ctx, t, w, pods)
 	settled := e.evidenceSettled(t, o, pods)
 	progressError := e.saveObservation(ctx, t, o, terminalWorkflow(w))
 	e.reportHolds(ctx, t, w, pods)

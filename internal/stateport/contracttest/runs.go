@@ -68,6 +68,7 @@ func RunSuite(t *testing.T, factory func(*testing.T) RunFixture) {
 		"queued_reason":        checkQueuedReason,
 		"malformed_acceptance": checkMalformedAcceptance,
 		"progress_finish":      checkProgressFinish,
+		"progress_events":      checkProgressEvents,
 		"initial_events":       checkInitialEvents,
 		"acceptance_rollback":  checkAcceptanceRollbackResult,
 		"sealed_decision":      checkSealedDecision,

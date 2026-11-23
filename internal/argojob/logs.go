@@ -81,14 +81,16 @@ func logBinding(w *wf.Workflow, n wf.NodeStatus, p *core.Pod, entry runlog.Conta
 // LogStore reserves a durable receipt before opening native output.
 type LogStore interface {
 	Reserve(context.Context, string, runlog.ContainerLog) (*runlog.Reservation, error)
+	Track(context.Context, string, []runlog.ContainerLog) error
 }
 
-func (e *Executor) capture(t *tracking, w *wf.Workflow, pods []*core.Pod) {
+func (e *Executor) capture(ctx context.Context, t *tracking, w *wf.Workflow, pods []*core.Pod) {
 	if e.config.Logs == nil {
 		return
 	}
 	paths := indexPaths(w)
 	jobs := map[string][]runlog.ContainerLog{}
+	live := []runlog.ContainerLog{}
 	nodes := slices.Collect(maps.Values(w.Status.Nodes))
 	sort.Slice(nodes, func(i, j int) bool { return paths.less(nodes[i], nodes[j]) })
 	for _, n := range nodes {
@@ -98,9 +100,19 @@ func (e *Executor) capture(t *tracking, w *wf.Workflow, pods []*core.Pod) {
 		}
 		own := authoredContainerStatuses(nodeTemplate(w, n, admissioncontract.MaxNestingDepth), p)
 		for _, c := range append(append([]core.ContainerStatus{}, p.Status.InitContainerStatuses...), p.Status.ContainerStatuses...) {
-			if c.State.Terminated != nil {
-				jobs[paths[n.ID].name] = append(jobs[paths[n.ID].name], runlog.ContainerLog{NodeID: n.ID, Step: paths[n.ID].name, PodUID: string(p.UID), PodName: p.Name, Namespace: p.Namespace, Container: c.Name, Main: slices.ContainsFunc(own, func(status core.ContainerStatus) bool { return status.Name == c.Name })})
+			entry := runlog.ContainerLog{NodeID: n.ID, Step: paths[n.ID].name, PodUID: string(p.UID), PodName: p.Name, Namespace: p.Namespace, Container: c.Name, Main: slices.ContainsFunc(own, func(status core.ContainerStatus) bool { return status.Name == c.Name })}
+			if c.State.Running != nil {
+				entry.State = runlog.Following
 			}
+			live = append(live, entry)
+			if c.State.Terminated != nil {
+				jobs[paths[n.ID].name] = append(jobs[paths[n.ID].name], entry)
+			}
+		}
+	}
+	if len(live) > 0 {
+		if err := e.config.Logs.Track(ctx, t.binding.RunID, live); err != nil {
+			e.logError(ctx, t.binding.RunID, err)
 		}
 	}
 	for _, entries := range jobs {

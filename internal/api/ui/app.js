@@ -280,6 +280,7 @@ function runScreen(view, id) {
   if (run.next_step_offset !== undefined) steps.append(button("Next 100 steps", () => { view.offset = run.next_step_offset; refresh(view); }));
   if (view.offset) steps.append(button("First steps", () => { view.offset = 0; refresh(view); }));
   const selected = run.steps?.find(step => step.plan_path === view.selected);
+  view.logStep = selected;
   if (selected && view.logHeader) view.logHeader.replaceChildren(...[h("h2", {}, selected.name + " · " + selected.status), h("p", {}, selected.display_reason), detail(selected.detail)].filter(Boolean));
   if (view.selected === undefined && run.steps?.length) chooseStep(view, run.steps.find(step => step.status === "failed") || run.steps[0], path, pane, false);
   else if (!view.logBusy) view.logReload?.();
@@ -305,6 +306,7 @@ function stepRow(view, step, path, pane) {
  }}, state(step.status), h("span", {class: "mono step-name", title: step.name}, step.name), step.credential_intent ? h("span", {class: "secret"}, "secret") : h("span"), clock(step));
 }
 function chooseStep(view, step, path, pane, scroll) {
+ view.logStep = step;
  view.selected = step.plan_path; view.logs?.abort(); view.logs = new AbortController();
  const stop = () => view.logs?.abort();
  view.controller.signal.addEventListener("abort", stop, {once: true});

@@ -15,6 +15,10 @@ import (
 func (s *Store) SaveProgress(ctx context.Context, id string, p stateport.Progress) error {
 	steps := p.Steps
 	return s.observe(ctx, func(tx *sql.Tx) error {
+		before, err := readProgress(ctx, tx, id)
+		if err != nil {
+			return err
+		}
 		plan, err := readPlan(ctx, tx, id)
 		if err != nil {
 			return err
@@ -30,21 +34,20 @@ func (s *Store) SaveProgress(ctx context.Context, id string, p stateport.Progres
 		if _, err = tx.ExecContext(ctx, `INSERT INTO native_steps VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET value=excluded.value`, id, encode(steps)); err != nil {
 			return databaseError(err)
 		}
-		if err = recordProgress(ctx, tx, id, stateport.Progress{Steps: steps, Waiting: p.Waiting}); err != nil {
+		if err = recordProgress(ctx, tx, before.run, stateport.Progress{Steps: steps, Waiting: p.Waiting}); err != nil {
 			return err
 		}
-		return saveCounts(ctx, tx, id, counts)
+		if err = saveCounts(ctx, tx, id, counts); err != nil {
+			return err
+		}
+		return s.progressEvent(ctx, tx, before)
 	})
 }
 
 // recordProgress sets the run's start from its earliest started step and, while
 // the run is unfinished, its queued or running status and reason by the rule
 // of stepmodel.Progress. A finished run keeps its status and reason.
-func recordProgress(ctx context.Context, tx *sql.Tx, id string, p stateport.Progress) error {
-	r, err := loadRun(ctx, tx, id)
-	if err != nil {
-		return err
-	}
+func recordProgress(ctx context.Context, tx *sql.Tx, r stateport.Run, p stateport.Progress) error {
 	next := r.RunSummary
 	next.StartedAt = stepmodel.RunStart(r.StartedAt, p.Steps)
 	if !terminal(r.Status) {
@@ -53,7 +56,7 @@ func recordProgress(ctx context.Context, tx *sql.Tx, id string, p stateport.Prog
 	if next.StartedAt == r.StartedAt && next.Status == r.Status && next.DisplayReason == r.DisplayReason {
 		return nil
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE runs SET status=?,summary=? WHERE id=?`, next.Status, encode(next), id)
+	_, err := tx.ExecContext(ctx, `UPDATE runs SET status=?,summary=? WHERE id=?`, next.Status, encode(next), r.ID)
 	return databaseError(err)
 }
 

@@ -144,3 +144,5 @@ func TestAcknowledgedObservationUsesOnlyRemainingWindow(t *testing.T) {
 		t.Fatal("observation exceeded evidence deadline", ctx.Err(), progress.err)
 	}
 }
+
+func (*boundedCapture) Track(context.Context, string, []runlog.ContainerLog) error { return nil }

@@ -2,6 +2,7 @@ package fake
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/nativebinding"
@@ -63,6 +64,7 @@ func (f *Runs) SaveProgress(ctx context.Context, id string, p stateport.Progress
 		if !r.HasAdmission {
 			return runProblem(publicerr.InvalidTransition)
 		}
+		before := r.Clone()
 		if !stateport.ValidNativeSteps(r.Admission.Plan, steps) || publicerr.CheckMessage(p.Waiting, 40) != nil {
 			return runProblem(publicerr.InvalidInput)
 		}
@@ -79,7 +81,10 @@ func (f *Runs) SaveProgress(ctx context.Context, id string, p stateport.Progress
 		r.Steps = append([]stepmodel.RunStep{}, steps...)
 		r = r.Clone()
 		m.runs[id] = r
-		return nil
+		if reflect.DeepEqual(before.RunSummary, r.RunSummary) {
+			return noRunChange{}
+		}
+		return m.appendEvents([]stateport.EventWrite{stateport.ProgressEvent(r, m.eventID+1, m.now)})
 	})
 }
 func (f *Runs) BeginEvidence(ctx context.Context, a stateport.Action, in stateport.EvidenceStart) (int64, error) {

@@ -7,6 +7,8 @@ async function loadLog(view, path, args, regions, restart) {
  try {
   while (!signal.aborted) {
    try {
+    const step = view.logStep;
+    if (args.step !== undefined && step?.status === "queued" && !step.attempts?.length && !step.logs?.length) return;
     const native = args.node_id !== undefined;
     const result = await get(path + (native ? "/containerlog?" : "/logs?") + params({tail: true, limit: 500, ...args}), signal);
     if (signal.aborted) return;
@@ -20,7 +22,7 @@ async function loadLog(view, path, args, regions, restart) {
     await streamLog(path, target, {regions, signal});
    } catch (error) {
     if (signal.aborted) return;
-    if (!trouble(error)) showError(error);
+    if (!trouble(error) && !(args.step !== undefined && error.code === "not_found")) showError(error, regions.status);
     await waitRetry(error.retry || 5000, signal);
    }
   }

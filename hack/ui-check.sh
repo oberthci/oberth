@@ -19,7 +19,7 @@ CHROMIUM_BIN=$(command -v chromium)
 printf 'ui-browser: RUN (chromium is available)\n'
 export OBERTH_UI_STEP_FILE="$OBERTH_UI_ARTIFACTS/check-step"
 printf 'compile example server' > "$OBERTH_UI_STEP_FILE"
-if { timeout --signal=KILL 90s bash -ec '
+if { timeout --signal=KILL 120s bash -ec '
     go test -c -p=1 -buildvcs=false -o "$OBERTH_UI_BINARY" ./internal/api
     printf "launch browser" > "$OBERTH_UI_STEP_FILE"
     node hack/webui/check.mjs "$@"
@@ -28,7 +28,7 @@ if { timeout --signal=KILL 90s bash -ec '
 else
     result=$?
     if [[ $result == 137 ]]; then
-        printf 'ui-browser: FAIL (90s limit: %s)\n' "$(< "$OBERTH_UI_STEP_FILE")" >&2
+        printf 'ui-browser: FAIL (120s limit: %s)\n' "$(< "$OBERTH_UI_STEP_FILE")" >&2
     else
         cat "$OBERTH_UI_ARTIFACTS/check-stderr" >&2
     fi

@@ -33,6 +33,11 @@ func exampleSummaryRuns(t *testing.T, base apicontract.RunRecord) apicontract.Ha
 			store.SeedSteps(run.ID, base.Steps)
 		}
 	}
+	return exampleRunService(t, store).Bindings().RunGet.Handler
+}
+
+func exampleRunService(t *testing.T, store *statefake.MovingRuns) *service.Service {
+	t.Helper()
 	c := service.Config{Runs: store, Catalog: store, Events: store, Publications: store, Promotions: store, HoldStore: store,
 		Authority: contracttest.AuthorityFuncs{CurrentFunc: func(_ context.Context, a actor.Actor) (actor.Actor, error) { return a, nil }},
 		Git:       contracttest.GitFuncs{}, MovingGit: contracttest.MovingGitFuncs{}, Exec: contracttest.ExecFuncs{}, Logs: contracttest.LogsFuncs{}, Holds: contracttest.HoldExecFuncs{},
@@ -43,5 +48,5 @@ func exampleSummaryRuns(t *testing.T, base apicontract.RunRecord) apicontract.Ha
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
-	return s.Bindings().RunGet.Handler
+	return s
 }

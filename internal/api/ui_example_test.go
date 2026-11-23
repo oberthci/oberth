@@ -37,7 +37,11 @@ func TestUIExampleServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := uiExample(t)
-	server := &http.Server{Handler: f.server.Handler(), ReadHeaderTimeout: 5 * time.Second}
+	handler := f.server.Handler()
+	if os.Getenv("OBERTH_UI_PROGRESS") != "" {
+		handler = progressExample(t)
+	}
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	ctx, stop := signal.NotifyContext(t.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() { <-ctx.Done(); _ = server.Close() }()

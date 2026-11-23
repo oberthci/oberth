@@ -50,7 +50,7 @@ func TestReviewR1CaptureBacklogResources(t *testing.T) {
 		e.mu.Lock()
 		e.tracked[name] = tr
 		e.mu.Unlock()
-		e.capture(tr, w, []*core.Pod{p})
+		e.capture(t.Context(), tr, w, []*core.Pod{p})
 		if i < 2 {
 			<-logs.entered
 		}
@@ -76,3 +76,5 @@ func pendingCaptures(e *Executor) int {
 	}
 	return count
 }
+
+func (*reviewBlockedLogStore) Track(context.Context, string, []runlog.ContainerLog) error { return nil }
