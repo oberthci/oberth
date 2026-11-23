@@ -6,6 +6,7 @@ import (
 	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
 	"slices"
+	"strings"
 )
 
 func mergeRows(rows []projected, previous []stepmodel.RunStep, plan admissioncontract.Plan, raw []stateport.Node) []projected {
@@ -21,7 +22,7 @@ func mergeRows(rows []projected, previous []stepmodel.RunStep, plan admissioncon
 		if i, ok := byPath[old.Path]; ok {
 			rows[i] = mergeStep(rows[i], old, nodes)
 		} else if !expandedPlaceholder(old, plan, rows) {
-			rows = append(rows, projected{step: old.Clone(), class: stepmodel.FailureUnknown})
+			rows = append(rows, projected{step: old.Clone()})
 		}
 	}
 	return rows
@@ -43,7 +44,6 @@ func mergeStep(row projected, old stepmodel.RunStep, raw map[string]stateport.No
 	latest := latestNode(attempts)
 	if latest != latestNode(current.Attempts) || len(attempts) == 0 && terminalStep(old.Status) {
 		row.step = old
-		row.class = stepmodel.FailureUnknown
 	} else if latest == latestNode(old.Attempts) {
 		row = mergeDiagnosis(row, old)
 	}
@@ -60,8 +60,8 @@ func mergeStep(row projected, old stepmodel.RunStep, raw map[string]stateport.No
 	return row
 }
 func mergeDiagnosis(row projected, old stepmodel.RunStep) projected {
-	if row.class != stepmodel.FailureCancelled && terminalStep(old.Status) && (mergeStatus(old.Status, row.step.Status) != row.step.Status || row.step.DisplayReason == reasonFailed || row.step.DisplayReason == reasonUnknown) {
-		row.step.DisplayReason, row.step.Detail, row.class = old.DisplayReason, old.Detail, stepmodel.FailureUnknown
+	if keepDiagnosis(old, row.step) {
+		row.step.DisplayReason, row.step.FailureClass = old.DisplayReason, old.FailureClass
 	}
 	// A step that passed since an unfinished observation keeps none of that
 	// observation's waiting detail, such as PodInitializing. A step without an
@@ -72,4 +72,13 @@ func mergeDiagnosis(row projected, old stepmodel.RunStep) projected {
 	row.step.Name = cmp.Or(row.step.Name, old.Name)
 	row.step.FinishedAt = cmp.Or(row.step.FinishedAt, old.FinishedAt)
 	return row
+}
+
+func keepDiagnosis(old, current stepmodel.RunStep) bool {
+	if !terminalStep(old.Status) {
+		return false
+	}
+	return mergeStatus(old.Status, current.Status) != current.Status ||
+		current.DisplayReason == reasonFailed || current.DisplayReason == reasonUnknown || current.DisplayReason == reasonStopped ||
+		old.FailureClass != "" && old.FailureClass != stepmodel.FailureUnknown && strings.HasPrefix(current.DisplayReason, "exited with code ")
 }

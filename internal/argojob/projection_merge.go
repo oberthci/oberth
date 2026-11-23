@@ -10,7 +10,7 @@ func primaryFailure(rows []projected) *stepmodel.FailureRecord {
 		if !failedProjection(*r) {
 			continue
 		}
-		if r.class != stepmodel.FailureInfrastructure {
+		if r.step.FailureClass != stepmodel.FailureInfrastructure {
 			allInfrastructure = false
 		}
 		if first == nil || finishedEarlier(r, *first) {
@@ -20,7 +20,7 @@ func primaryFailure(rows []projected) *stepmodel.FailureRecord {
 	if first == nil {
 		return nil
 	}
-	class := first.class
+	class := first.step.FailureClass
 	if class == "" || class == stepmodel.FailureInfrastructure && !allInfrastructure {
 		class = stepmodel.FailureUnknown
 	}

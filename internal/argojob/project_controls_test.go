@@ -209,7 +209,7 @@ func TestKnownFailureSurvivesStoppedReplayOfSameFailedNode(t *testing.T) {
 	w.Status.Phase = wf.WorkflowFailed
 	w.Spec.Shutdown = wf.ShutdownStrategyStop
 	after := project(t, argojob.Projection{Workflow: w, Plan: plan, Previous: before.Steps, PreviousNodes: before.Nodes})
-	if after.Status != stepmodel.RunCancelled || after.Steps[0].DisplayReason != "stopped" || after.Nodes[0].Exit == nil || *after.Nodes[0].Exit != 7 || after.Nodes[0].Status != stepmodel.StepFailed {
-		t.Fatal("stop lost the cancelled verdict or native failure evidence", after)
+	if after.Status != stepmodel.RunCancelled || after.Steps[0].DisplayReason != "exited with code 7" || after.Nodes[0].Exit == nil || *after.Nodes[0].Exit != 7 {
+		t.Fatal("stop erased an observed failure", after)
 	}
 }

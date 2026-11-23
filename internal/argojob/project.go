@@ -27,8 +27,7 @@ type Observation struct {
 	workflow       *wf.Workflow
 }
 type projected struct {
-	step  stepmodel.RunStep
-	class stepmodel.FailureClass
+	step stepmodel.RunStep
 }
 
 // Project reads copies and folds retry nodes into the admitted logical paths.
@@ -151,8 +150,8 @@ func projectAttempt(row *projected, in projectionInput, n wf.NodeStatus) {
 		}
 	}
 	p := boundPod(in.w, n, in.pods)
-	d := diagnose(n, p, in.w.Spec.Shutdown != "", nodeTemplate(in.w, n, admissioncontract.MaxNestingDepth))
-	row.step.Status, row.step.DisplayReason, row.step.Detail, row.class = nodeStatus(n.Phase), d.reason, d.detail, d.class
+	d := diagnose(n, p, stoppedNode(in, n), nodeTemplate(in.w, n, admissioncontract.MaxNestingDepth))
+	row.step.Status, row.step.DisplayReason, row.step.Detail, row.step.FailureClass = nodeStatus(n.Phase), d.reason, d.detail, d.class
 	if n.SynchronizationStatus != nil && n.SynchronizationStatus.Waiting != "" {
 		row.step.DisplayReason = lockReason(n.SynchronizationStatus.Waiting)
 		row.step.Detail = strings.TrimSpace(row.step.Detail + "\n" + detailLockStatus)
@@ -240,7 +239,9 @@ func finishProjection(out *Observation, w *wf.Workflow, rows []projected) {
 		if out.Failure == nil {
 			out.Failure = &stepmodel.FailureRecord{}
 		}
-		out.Failure.Class = stepmodel.FailureCancelled
+		if out.Failure.Class == "" {
+			out.Failure.Class = stepmodel.FailureCancelled
+		}
 		out.Failure.Retry = stepmodel.RetryHint{Action: stepmodel.RetryNone, ReasonCode: "cancelled"}
 	}
 	if out.Status == stepmodel.RunPassed {

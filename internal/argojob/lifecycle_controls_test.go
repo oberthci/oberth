@@ -61,7 +61,7 @@ func TestRestartRestoresStoredFailureBeforeShutdown(t *testing.T) {
 	reports := 0
 	c.Reporter = &reportSpy{FinishedFunc: func(_ context.Context, _ string, o argojob.Observation) error {
 		reports++
-		if o.Status != stepmodel.RunCancelled || o.Steps[0].Status != stepmodel.StepFailed || o.Reason != "stopped" || o.Steps[0].DisplayReason != "exited with code 7" || o.Nodes[0].Exit == nil {
+		if o.Status != stepmodel.RunCancelled || o.Steps[0].Status != stepmodel.StepFailed || o.Reason != "stopped" || o.Steps[0].DisplayReason != "exited with code 7" || o.Steps[0].FailureClass != stepmodel.FailureAuthor || o.Nodes[0].Exit == nil {
 			t.Error("restart lost failure", o)
 		}
 		cancel()

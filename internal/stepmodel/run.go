@@ -21,6 +21,7 @@ type RunStep struct {
 	CredentialIntent bool          `json:"credential_intent"`
 	Status           StepStatus    `json:"status"`
 	DisplayReason    string        `json:"display_reason"`
+	FailureClass     FailureClass  `json:"failure_class,omitempty"`
 	Detail           string        `json:"detail,omitempty"`
 	StartedAt        *time.Time    `json:"started_at"`
 	FinishedAt       *time.Time    `json:"finished_at"`

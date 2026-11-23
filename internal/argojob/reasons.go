@@ -56,9 +56,11 @@ type diagnosis struct {
 
 func diagnose(n wf.NodeStatus, p *core.Pod, stop bool, template *wf.Template) (d diagnosis) {
 	defer func() {
-		// Shutdown owns the verdict; retain the native exit only as evidence.
-		if stop && terminalNode(n) {
+		// Only a node ended by shutdown loses its author-failure diagnosis.
+		if stop {
 			d.reason, d.class = reasonStopped, stepmodel.FailureCancelled
+		} else if !terminalNode(n) {
+			d.class = ""
 		}
 		d.detail = holdDiagnosticDetail(d.detail, p)
 	}()

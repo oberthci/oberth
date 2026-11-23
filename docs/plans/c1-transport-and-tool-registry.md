@@ -139,7 +139,7 @@ logs. Literal loops expand in the plan; dynamic loops and recursion expand their
 placeholder in place and show `≥N` until exact. Structural nodes are not steps. The
 affected tools are `run_get`, `run_list`, `status`, `wait` and `run_wait`; the UI run
 list and run detail use the same projection. One step has one UI log part with its
-attempts. C1 does not compute a second plan. Public run fields are `object_sha`
+attempts. Failed steps retain their typed `failure_class` with their reason. C1 does not compute a second plan. Public run fields are `object_sha`
 (accepted object) and `commit_sha` (tested checkout), without a `sha` output alias.
 `publish_retry` descriptions refer to passed logical steps and complete bound attempt
 evidence, with no grouping vocabulary.

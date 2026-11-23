@@ -19,15 +19,17 @@ func TestCancelledExitIsNotAnAuthorFailure(t *testing.T) {
 		for _, podPresent := range []bool{false, true} {
 			t.Run(string(mode)+"/pod="+strconv.FormatBool(podPresent), func(t *testing.T) {
 				w := nativeWorkflow()
-				n := nativeNode("one", ".build", wf.NodeFailed, 1)
-				n.Outputs = &wf.Outputs{ExitCode: new("143")}
+				n := nativeNode("one", ".build", wf.NodeRunning, 1)
 				w.Status.Nodes[n.ID] = n
 				in := argojob.Projection{Plan: admissioncontract.Plan{Entries: []admissioncontract.PlanEntry{{Path: "build", Name: "build"}}}, Workflow: w}
+				before := project(t, in)
+				in.Previous, in.PreviousNodes = before.Steps, before.Nodes
+				n.Phase = wf.NodeFailed
+				n.Outputs = &wf.Outputs{ExitCode: new("143")}
+				w.Status.Nodes[n.ID] = n
 				if podPresent {
 					in.Pods = []*core.Pod{nativePod(w, n, 143)}
 				}
-				before := project(t, in)
-				in.Previous, in.PreviousNodes = before.Steps, before.Nodes
 				w.Spec.Shutdown = mode
 				w.Status.Phase = wf.WorkflowFailed
 				out := project(t, in)
