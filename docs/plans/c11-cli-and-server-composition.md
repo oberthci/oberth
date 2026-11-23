@@ -133,7 +133,7 @@ The user and every path part are letters, digits and `._-`, start alphanumeric a
 Existing upstream addresses retain their stored scheme, user, host, port and namespace and
 match only an address with the same user. Discovery is a live scoped read: a joined caller
 binds exactly one visible registered match without an admin call, names ambiguous candidates
-and prints a usable administrator command when the repository is unavailable. `--upstream` selects among visible matching addresses; it never turns the supplied address into only a path selector. An empty readable forge repository binds normally; an administrator seeds its default branch through the Oberth remote, using ordinary admission, CI and publication checks. Receiving without a cached default head requires a live empty-forge result; a non-empty forge does not excuse that missing head.
+and prints a usable administrator command when the repository is unavailable. `--upstream` selects among visible matching addresses; it never turns the supplied address into only a path selector. An empty readable forge repository binds normally; an administrator seeds its default branch through the Oberth remote, using ordinary admission, CI and publication checks. Before the first publication, an administrator may advance the accepted default head through the same fast-forward and CI checks, including to fix a failed first run. Receiving without a cached default head requires a live empty-forge result; a non-empty forge does not excuse that missing head.
 
 **Delta:** Binding uses a per-remote `file:///` address and pack commands on the
 dedicated `oberth` remote. Its pack commands use the server SSH endpoint saved

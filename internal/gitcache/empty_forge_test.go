@@ -50,9 +50,6 @@ func TestEmptyForgeRefreshPreservesCachedHistory(t *testing.T) {
 func checkEmptyForgeCachedHistory(t *testing.T, state string) {
 	t.Helper()
 	f := gittest.New(t)
-	if state != "tracked" {
-		f.Git(t, f.Bare, "update-ref", "-d", "refs/heads/main")
-	}
 	var notices atomic.Int32
 	cfg := reviewConfig(t, f)
 	cfg.RefChanged = func(context.Context, string, []gitcache.RefUpdate) { notices.Add(1) }
@@ -65,6 +62,8 @@ func checkEmptyForgeCachedHistory(t *testing.T, state string) {
 		ref = "refs/oberth/keep/retained"
 	}
 	if state != "tracked" {
+		f.Write(t, "local.txt", []byte("unpublished change\n"))
+		f.CommitFile(t, "unpublished change")
 		f.Git(t, f.Store(), "fetch", f.Work, "HEAD:"+ref)
 	}
 	f.Git(t, f.Bare, "update-ref", "-d", "refs/heads/main")
@@ -80,5 +79,29 @@ func checkEmptyForgeCachedHistory(t *testing.T, state string) {
 	}
 	if notices.Load() != 0 {
 		t.Fatal("refused empty refresh sent deletion notices")
+	}
+}
+
+func TestEmptyForgeRefreshKeepsUnpublishedRefs(t *testing.T) {
+	f := gittest.New(t)
+	f.Git(t, f.Bare, "update-ref", "-d", "refs/heads/main")
+	var notices atomic.Int32
+	cfg := reviewConfig(t, f)
+	cfg.RefChanged = func(context.Context, string, []gitcache.RefUpdate) { notices.Add(1) }
+	c := reviewNew(t, cfg)
+	if err := c.Init(t.Context(), gittest.Repository); err != nil {
+		t.Fatal(err)
+	}
+	f.Git(t, f.Store(), "fetch", f.Work, "HEAD:refs/heads/main", "HEAD:refs/oberth/keep/unpublished")
+	before := f.Git(t, f.Store(), "for-each-ref", "--format=%(refname) %(objectname)")
+	gittest.ExpireRefresh(t, f.Store())
+	if err := c.Fetch(t.Context(), gittest.Repository); err != nil {
+		t.Fatal("local refs blocked empty-forge bootstrap", err)
+	}
+	if after := f.Git(t, f.Store(), "for-each-ref", "--format=%(refname) %(objectname)"); after != before {
+		t.Fatal("empty refresh changed unpublished refs", before, after)
+	}
+	if notices.Load() != 0 {
+		t.Fatal("empty refresh announced changes to unpublished refs")
 	}
 }

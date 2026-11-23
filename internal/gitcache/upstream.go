@@ -166,36 +166,26 @@ func (c *Cache) fetch(ctx context.Context, t fetchTarget) (updates []RefUpdate, 
 	if receivePending(p) {
 		return nil, refuse("pending receive")
 	}
-	if len(after) == 0 {
-		return nil, c.emptyRefresh(ctx, p)
-	}
 	before, err := c.tracking(ctx, p)
 	if err != nil {
 		return nil, err
+	}
+	if len(after) == 0 {
+		// Local pushes do not establish forge history. Until the forge has
+		// advertised refs, an empty refresh preserves them without a change.
+		if len(before) != 0 {
+			return nil, &gitport.EmptyRepositoryError{}
+		}
+		return nil, nil
 	}
 	args := []string{"fetch", "--no-auto-maintenance", "--no-write-fetch-head", "--no-tags", "--", dir}
 	for _, oid := range after {
 		args = append(args, oid)
 	}
-	if len(after) > 0 {
-		if err = c.run(ctx, command{dir: p, args: args}); err != nil {
-			return nil, err
-		}
+	if err = c.run(ctx, command{dir: p, args: args}); err != nil {
+		return nil, err
 	}
 	return c.mirror(ctx, p, mirrorChange{before: before, after: after, repository: repo})
-}
-
-// An empty forge is a bootstrap snapshot only while the cache has no refs.
-// Tracked, accepted and retained history must survive a forge that goes empty.
-func (c *Cache) emptyRefresh(ctx context.Context, p string) error {
-	refs, err := c.capture(ctx, command{dir: p, args: []string{"for-each-ref", "--count=1", "--format=%(refname)"}}, 1<<20)
-	if err != nil {
-		return err
-	}
-	if len(refs) != 0 {
-		return &gitport.EmptyRepositoryError{}
-	}
-	return nil
 }
 
 // sameUpstream refuses to import a fetch that outlived its upstream removed

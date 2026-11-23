@@ -141,7 +141,7 @@ func (o *serverOwners) gate(ctx context.Context, e gitcache.ReceiveEvent, s *git
 		if update.Ref == o.settings.DefaultBranch || strings.HasPrefix(update.Ref, "refs/tags/") {
 			if err := o.cache.DefaultHead(ctx, e.Repository); err != nil {
 				var empty *gitport.EmptyRepositoryError
-				if errors.As(err, &empty) && update.Ref == o.settings.DefaultBranch && update.OldSHA == "" && update.NewSHA != "" {
+				if errors.As(err, &empty) && update.Ref == o.settings.DefaultBranch && update.NewSHA != "" {
 					continue
 				}
 				return err

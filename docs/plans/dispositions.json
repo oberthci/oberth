@@ -9392,7 +9392,7 @@
   "spec_sha256": {
     "docs/plans/c1-transport-and-tool-registry.md": "5659221f8d8ac6a3cb99a77d91911ef0e4bd7bda289d047cc0a5beec24b8d17b",
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
-    "docs/plans/c11-cli-and-server-composition.md": "4904ecfba9e6e1e6bc60655c3929b90f4bd656e3f28f8a24da5fa915a9c5817a",
+    "docs/plans/c11-cli-and-server-composition.md": "376a2a34a0d74dc8dd9b5988ff363bbaec3e96e16037d3d72aed52c430cae1e8",
     "docs/plans/c12-agent-client.md": "c2218549424cffc1da9275211090ae7425b089abdbfc1cd941d9479124459bba",
     "docs/plans/c13-own-pipelines.md": "7bf8d26daa7f51f8897f126f230345f41b683bd6a06adc771f0bb491a2149fb7",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
@@ -9400,7 +9400,7 @@
     "docs/plans/c3-wiring-and-submission.md": "55f3b41b47272bb59ba18656873387f64c1ca7e3e689afc2efd704819a531931",
     "docs/plans/c4-admission-rules-and-plan.md": "bd96674c7787fe19912563afe3724fce1dc98f0ad17177e8a7f1604b48973210",
     "docs/plans/c5-native-execution.md": "593f1e5072e0bff83af9a198c0685b6c7471f827f960cb32efb8fdd5bf5dba4a",
-    "docs/plans/c6-source-delivery.md": "ab4f2abc399e402d74e6cdb2b62f0f84202d7452b5cf120e72baf08cec9649e1",
+    "docs/plans/c6-source-delivery.md": "904d13549b4337441c64e7eee4ef0c8a4098f283ef93a7ae896858334e60741f",
     "docs/plans/c7-durable-state.md": "0fce03bf6385083ed86ecc5bc1afe7c9105aaea5154b9e83788911c3d6a07c9a",
     "docs/plans/c8-logs.md": "d406f3a01f449719be4aa255d628b908e9a8a1e33230f3c21b9b50ce0e74a61d",
     "docs/plans/c9-install-and-upgrade.md": "d0a8b5b381ba5f608d9160f144fa282ed9195456783996f0dcda498b1849f3e8"
