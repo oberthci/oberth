@@ -21,6 +21,7 @@ try {
  if(!only||only==='starting-run'){result.startingRun=[];for(const path of ['prepare',''])result.startingRun.push(await startingRun(client,path));}
  if(!only||only==='progress')result.progress=await progress();
  if(!only||only==='liveness')result.liveness=await liveness(client);
+ if(only==='run-header')result.runHeader=await runHeader(client);
  if(!only)result.behavior=await behavior(client);
  if(!only){step('selected workflow views');result.selectedWorkflow=await selectedWorkflow(client);}
  if(!process.argv.includes('--behavior-only')&&!only){step('effective settings');result.settings=await statusSettings(client);step('compact run header');result.runHeader=await runHeader(client);step('parallel step groups');result.parallel=await parallel(client);step('browser captures and assertions');result.captures=await captures(client);step('repository strips');result.repositories=await repositories(client);}

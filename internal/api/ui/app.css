@@ -118,10 +118,11 @@ a.row:focus-visible { outline-offset: -2px; }
 .back { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font-size: 11px; }
 .back:hover { color: var(--fg); border-color: var(--edge); text-decoration: none; }
 .run-head { padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; line-height: 22px; }
-.run-summary { margin: 0; font-size: inherit; font-weight: 400; line-height: inherit; display: grid; grid-template-columns: max-content max-content minmax(0, 1fr) auto; align-items: center; gap: 0 10px; white-space: nowrap; }
+.run-summary { margin: 0; font-size: inherit; font-weight: 400; line-height: inherit; display: grid; grid-template-columns: max-content minmax(0, 1fr) auto; align-items: center; gap: 0 10px; white-space: nowrap; }
+.run-summary:has(> .duration) { grid-template-columns: max-content max-content minmax(0, 1fr) auto; }
 .run-summary > h1 { margin: 0; font: inherit; }
 .run-summary .state { padding: 0; border: 0; background: none; font-size: inherit; line-height: inherit; }
-.run-summary button { grid-column: 4; grid-row: 1; height: 22px; padding: 0 8px; }
+.run-summary button { grid-column: -2; grid-row: 1; height: 22px; padding: 0 8px; }
 .run-counts { min-width: 0; display: flex; flex-wrap: wrap; column-gap: 6px; }
 .run-counts > span { white-space: nowrap; }
 .wrap-counts .run-counts { grid-column: 1 / -1; grid-row: 2; }
@@ -134,7 +135,7 @@ a.row:focus-visible { outline-offset: -2px; }
 .run-metadata { min-width: 0; column-gap: 6px; }
 .run-metadata > * { flex-shrink: 0; }
 .run-metadata > .identity::before { content: "·"; }
-.run-metadata.only-ref .run-ref { flex-shrink: 1; white-space: normal; overflow-wrap: anywhere; }
+.run-metadata.compact .run-ref { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .identity { gap: 6px; margin: 0; font-size: inherit; color: var(--muted); }
 .run-meta details { display: contents; }
 .run-meta summary { grid-column: 2; font-size: inherit; line-height: inherit; }

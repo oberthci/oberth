@@ -281,7 +281,7 @@ function runScreen(view, id) {
   if (view.offset) steps.append(button("First steps", () => { view.offset = 0; refresh(view); }));
   const selected = run.steps?.find(step => step.plan_path === view.selected);
   view.logStep = selected;
-  if (selected && view.logHeader) view.logHeader.replaceChildren(...[h("h2", {}, selected.name + " · " + selected.status), h("p", {}, selected.display_reason), detail(selected.detail)].filter(Boolean));
+  if (selected && view.logHeader) view.logHeader.replaceChildren(...stepHeader(selected));
   if (view.selected === undefined && run.steps?.length) chooseStep(view, run.steps.find(step => step.status === "failed") || run.steps[0], path, pane, false);
   else if (!view.logBusy) view.logReload?.();
   else view.logDirty = true;
@@ -311,7 +311,7 @@ function chooseStep(view, step, path, pane, scroll) {
  const stop = () => view.logs?.abort();
  view.controller.signal.addEventListener("abort", stop, {once: true});
  view.logs.signal.addEventListener("abort", () => view.controller.signal.removeEventListener("abort", stop), {once: true});
- view.logHeader = h("div", {}, h("h2", {}, step.name + " · " + step.status), h("p", {}, step.display_reason), detail(step.detail));
+ view.logHeader = h("div", {}, stepHeader(step));
  pane.replaceChildren(view.logHeader);
  const controls = h("div", {class: "toolbar"}), status = h("div"), output = h("pre", {tabindex: "0"}), gutter = h("div", {class: "gutter", "aria-hidden": "true"}, "");
  pane.append(controls, status, h("div", {class: "terminal"}, gutter, output));

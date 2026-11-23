@@ -1,7 +1,7 @@
 "use strict";
 function runMessage(run) { return [run.selected_file ? run.selected_file + " selected" : "", run.display_reason].filter(Boolean).join(" · "); }
 function runIdentity(run) {
- return h("p", {class: "identity", "aria-label": "Run and commit"}, h("span", {title: "Run ID"}, "run " + run.id.slice(0, 8)), " · ", h("span", {title: "Commit ID"}, "commit " + (run.commit_sha ? run.commit_sha.slice(0, 12) : "unknown")));
+ return h("p", {class: "identity", "aria-label": "Run and commit"}, h("span", {title: "Run ID"}, "run " + run.id.slice(0, 8)), h("span", {class: "commit"}, " · ", h("span", {title: "Commit ID"}, "commit " + (run.commit_sha ? run.commit_sha.slice(0, 12) : "unknown"))));
 }
 function runOrigin(run) {
  const parts = [run.trigger && run.trigger + (run.schedule_entry ? " " + run.schedule_entry : ""), run.rerun_of && "rerun of " + run.rerun_of.slice(0, 8), run.actor && "by " + run.actor, run.assist_requested && "assist requested"].filter(Boolean);
@@ -16,29 +16,34 @@ function runHeader(run, actions, open) {
  const counts = [run.passed + "/" + (run.steps_planned_exact ? "" : ">=") + run.step_count + " passed", run.failed && run.failed + " failed", run.pending && run.pending + " pending"].filter(Boolean).map((text, index) => h("span", {}, (index ? " · " : "") + text));
  const origin = runOrigin(run);
  const cancel = ["queued", "running"].includes(run.status) ? actions.querySelector("button") : null;
- const row = h("div", {class: "run-summary"}, h("h1", {title: run.repo + " · " + run.ref}, state(run.status)), clock(run), h("span", {class: "run-counts"}, counts), cancel);
+ const row = h("div", {class: "run-summary"}, h("h1", {title: run.repo + " · " + run.ref}, state(run.status)), run.started_at ? clock(run) : null, h("span", {class: "run-counts"}, counts), cancel);
  new ResizeObserver((_, observer) => { if (row.isConnected) fitRunHeader(row); else observer.disconnect(); }).observe(row);
  return [row,
   run.selected_file ? h("p", {class: "run-file"}, "Workflow: " + run.selected_file) : null,
   run.display_reason ? h("p", {class: "run-reason"}, run.failure ? h("b", {class: "failed-step"}, run.failure.failed_step_name || run.failure.failed_step) : null, run.display_reason) : null,
-  h("div", {class: "run-meta muted"}, h("div", {class: "run-metadata"}, h("span", {class: "run-ref"}, run.repo + " · " + refName(run.ref)), runIdentity(run), origin ? h("span", {class: "meta-extra", "aria-label": "Started by"}, " · " + origin) : null,
+  h("div", {class: "run-meta muted"}, h("div", {class: "run-metadata"}, h("span", {class: "run-ref", title: run.repo + " · " + refName(run.ref)}, run.repo + " · " + refName(run.ref)), runIdentity(run), origin ? h("span", {class: "meta-extra", "aria-label": "Started by"}, " · " + origin) : null,
    h("span", {class: "meta-extra"}, " · ", run.started_at ? "Started " : "Created ", h("time", {datetime: run.started_at || run.created_at, title: fullTimes(run)}, time(run.started_at || run.created_at)))), runDetail(run, open, origin))].filter(Boolean);
 }
 function fitRunHeader(row) {
  const counts = row.querySelector(".run-counts"), gap = parseFloat(getComputedStyle(row).columnGap), countGap = parseFloat(getComputedStyle(counts).columnGap);
  const items = row.querySelectorAll(":scope > :not(.run-counts), .run-counts > span");
- const width = Array.from(items).reduce((total, node) => total + node.getBoundingClientRect().width, 0) + 3 * gap + (counts.children.length - 1) * countGap;
+ const width = Array.from(items).reduce((total, node) => total + node.getBoundingClientRect().width, 0) + (row.children.length - 1) * gap + (counts.children.length - 1) * countGap;
  row.classList.toggle("wrap-counts", width > row.clientWidth);
  fitRunMetadata(row.parentElement.querySelector(".run-metadata"));
 }
 function fitRunMetadata(region) {
  const parts = Array.from(region.children), gap = parseFloat(getComputedStyle(region).columnGap);
- region.classList.remove("only-ref");
+ region.classList.remove("compact");
  for (const node of parts) node.hidden = false;
- let width = parts.reduce((total, node) => total + node.getBoundingClientRect().width, 0) + (parts.length - 1) * gap;
- for (const node of [region.querySelector(".identity"), ...region.querySelectorAll(".meta-extra")].filter(Boolean)) {
+ const commit = region.querySelector(".commit"); commit.hidden = false;
+ for (const node of [commit, ...region.querySelectorAll(".meta-extra")]) {
+  const visible = parts.filter(part => !part.hidden);
+  const width = visible.reduce((total, part) => total + part.getBoundingClientRect().width, 0) + (visible.length - 1) * gap;
   if (width <= region.clientWidth) break;
-  width -= node.getBoundingClientRect().width + gap; node.hidden = true;
+  node.hidden = true;
  }
- region.classList.toggle("only-ref", parts.filter(node => !node.hidden).length === 1);
+ region.classList.add("compact");
+}
+function stepHeader(step) {
+ return [h("h2", {}, step.name + " · " + step.status), step.display_reason && step.display_reason !== step.status ? h("p", {}, step.display_reason) : null, detail(step.detail)].filter(Boolean);
 }

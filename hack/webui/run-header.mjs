@@ -3,11 +3,12 @@ import {headerNits} from './run-header-nits.mjs';
 import {metadata} from './run-header-metadata.mjs';
 import {headerActions} from './run-header-actions.mjs';
 import {wideCounts} from './run-header-wide.mjs';
+import {stepReasons} from './step-reasons.mjs';
 import {check} from './cdp.mjs';
 
 export async function runHeader(client) {
  const results=[];
- for(const width of [1024,760,360]) {
+ for(const width of [1024,760,400,360]) {
   await client.cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
   await client.loaded('/runs/33333333','.steps a.row');
   await client.evaluate(`(async()=>{screen.controller.abort();window.headerRun=await get('/api/runs/33333333');window.headerRuns=await Promise.all(['a','b'].flatMap(prefix=>[0,1,2,3,4].map(index=>get('/api/runs/'+prefix+index.toString(16).padStart(30,'0')+'0'))));})()`);
@@ -25,6 +26,7 @@ export async function runHeader(client) {
     return {height:rect.height-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)-parseFloat(style.borderTopWidth)-parseFloat(style.borderBottomWidth),lineHeight:parseFloat(style.lineHeight),summary:summary.textContent,counts:header.querySelector('.run-counts').textContent,
      reason:header.querySelector('.run-reason')?.textContent||'',reasonHeight:header.querySelector('.run-reason')?line(header.querySelector('.run-reason')):0,
      wrapped:summary.classList.contains('wrap-counts'),summaryHeight:summary.getBoundingClientRect().height,metaHeight:meta.getBoundingClientRect().height,
+     duration:summary.querySelector('.duration')?.textContent,queuedGap:header.querySelector('.run-counts').getBoundingClientRect().left-summary.querySelector('h1').getBoundingClientRect().right,gap:parseFloat(getComputedStyle(summary).columnGap),
      sizes:[summary,meta,...summary.children].map(node=>[node.className,node.clientWidth,node.scrollWidth,getComputedStyle(node).fontSize]),overflow:document.documentElement.scrollWidth>innerWidth||summary.scrollWidth>summary.clientWidth||meta.scrollWidth>meta.clientWidth,
      cancel:Array.from(summary.querySelectorAll('button')).map(node=>({text:node.textContent,disabled:node.disabled,right:node.getBoundingClientRect().right})),right:rect.right};
    })()`);
@@ -32,11 +34,12 @@ export async function runHeader(client) {
    check(!metrics.overflow&&metrics.summaryHeight<=metrics.lineHeight*(metrics.wrapped?2:1)&&metrics.metaHeight<=metrics.lineHeight&&metrics.height<=metrics.lineHeight*(2+Number(Boolean(metrics.reason))+Number(metrics.wrapped)),'header wraps or overflows '+JSON.stringify({width,theme,status,...metrics}));
    check(metrics.reason===(specific?'waiting for a node':'')&&metrics.reasonHeight<=metrics.lineHeight&&(!metrics.reason||metrics.reason==='waiting for a node'),'reason cut or missing '+JSON.stringify(metrics));
    check(metrics.counts===(status==='queued'?'0/14 passed · 14 pending':status==='failed'?'12/14 passed · 1 failed · 1 pending':'13/14 passed'),'step counts changed '+JSON.stringify(metrics));
+   if(status==='queued')check(metrics.duration===undefined&&(metrics.wrapped||Math.abs(metrics.queuedGap-metrics.gap)<0.5),'queued header reserves an empty duration gap '+JSON.stringify({width,theme,metrics}));
    check(['queued','running'].includes(status)?metrics.cancel.length===1&&!metrics.cancel[0].disabled&&metrics.cancel[0].right<=metrics.right:metrics.cancel.length===0,'Cancel visibility wrong '+JSON.stringify(metrics));
    const detail=await client.evaluate(`(()=>{const node=document.querySelector('.run-meta details');node.querySelector('summary').click();return {open:node.open,text:node.textContent,height:node.querySelector('pre').getBoundingClientRect().height,link:node.querySelector('a').getBoundingClientRect().height};})()`);
    check(detail.open&&detail.height>0&&(width>=1000||detail.link>0)&&detail.text.includes('Run ID:')&&detail.text.includes('feature/search')&&detail.text.includes('Other runs of this ref'),'Detail lost metadata or does not expand '+JSON.stringify(detail));
    await client.evaluate(`document.querySelector('.run-meta summary').click()`);
-   if(!specific&&status==='running'&&((width===1024&&theme==='light')||(width===360&&theme==='dark'))) {
+   if(!specific&&status==='running'&&((width===1024&&theme==='light')||(width===400&&theme==='dark'))) {
     const height=await client.evaluate(`Math.ceil(document.querySelector('.run-head').getBoundingClientRect().bottom)`);
     const shot=await client.cdp('Page.captureScreenshot',{format:'png',clip:{x:0,y:0,width,height,scale:1}});
     await writeFile(`${client.artifacts}/run-header-${width}-${theme}.png`,Buffer.from(shot.data,'base64'));
@@ -48,5 +51,6 @@ export async function runHeader(client) {
  results.push(...await metadata(client));
  results.push(...await headerNits(client));
  await headerActions(client);
+ results.push(...await stepReasons(client));
  return results;
 }
