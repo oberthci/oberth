@@ -122,6 +122,7 @@ func problems() map[string]Problem {
 		"starting":               {Reason: "The server is not ready yet.", Remedy: "Wait for server recovery to finish; installation retries within its deadline."},
 		"connect":                {Reason: "The server cannot be reached yet.", Remedy: "Check --url, port mappings and server startup; installation retries within its deadline."},
 		"timeout":                {Reason: "The server did not become ready before the deadline.", Remedy: "Check the server's diagnostics and public address, then rerun oberth install."},
+		"version-timeout":        {Reason: "Server still serves another version.", Remedy: "Run oberth system status and inspect the server rollout; keep this profile for recovery."},
 		"review":                 {Reason: "Installation requires review approval.", Remedy: "Review the prepared installation and explicitly approve Apply."},
 		"terminal":               {Reason: "Installation needs explicit noninteractive approval.", Remedy: "Review --dry-run, then rerun with --yes."},
 		"pending":                {Reason: "A chart operation started outside Oberth is still pending.", Remedy: "Finish or undo that operation with the tool that started it, then prepare again."},

@@ -10,15 +10,17 @@ import (
 const ReadinessTimeout = 10 * time.Minute
 
 func (e *Engine) waitReady(ctx context.Context, p Profile) error {
+	var last error
 	for {
 		if err := ctx.Err(); err != nil {
-			return problem("timeout", err)
+			return readinessFailure(err, last)
 		}
 		err := e.probeReady(ctx, p)
+		last = err
 		// A connection attempt can time out while the rollout still has time.
 		// Only the readiness context owns the command's deadline.
 		if ctx.Err() != nil {
-			return problem("timeout", ctx.Err())
+			return readinessFailure(ctx.Err(), last)
 		}
 		if err == nil {
 			return nil
@@ -33,9 +35,17 @@ func (e *Engine) waitReady(ctx context.Context, p Profile) error {
 			return err
 		}
 		if err = e.pause(ctx); err != nil {
-			return problem("timeout", err)
+			return readinessFailure(err, last)
 		}
 	}
+}
+
+func readinessFailure(cause, last error) error {
+	var refusal *Problem
+	if errors.Is(cause, context.DeadlineExceeded) && errors.As(last, &refusal) && refusal.Code == "ready-version" {
+		return described("version-timeout", cause, refusal.Detail)
+	}
+	return problem("timeout", cause)
 }
 
 func (e *Engine) probeReady(ctx context.Context, p Profile) error {

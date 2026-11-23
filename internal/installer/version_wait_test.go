@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -73,6 +74,9 @@ func TestWrongReadyVersionCannotCompleteUpgrade(t *testing.T) {
 		_, err = m.Upgrade(t.Context(), plan, plan.Plan.Digest(), nil)
 		if !errors.Is(err, context.DeadlineExceeded) || timeline.Since(started) != installer.ReadinessTimeout || checks < 2 {
 			t.Fatal("wrong ready version bypassed the wait or its bound", checks, err, timeline.Since(started))
+		}
+		if !strings.Contains(err.Error(), "Server still serves another version.") || !strings.Contains(err.Error(), "Server version: v0.0.9") {
+			t.Fatal("upgrade lost the last version mismatch", err)
 		}
 		if readUpgradeRecord(t, f).State != "pending" {
 			t.Fatal("wrong version completed the recovery record")

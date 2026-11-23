@@ -125,6 +125,9 @@ func upgradeCause(err error) string {
 	if strings.HasPrefix(refusal.Code, "store-") {
 		return refusal.Reason + "\n" + refusal.Remedy
 	}
+	if refusal.Code == "version-timeout" && refusal.Detail != "" {
+		return refusal.Reason + "\n" + refusal.Detail
+	}
 	return refusal.Reason
 }
 
