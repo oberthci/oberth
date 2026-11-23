@@ -43,6 +43,34 @@ func TestOberthShutdownMessageCanBeReplacedByPodAssessment(t *testing.T) {
 	}
 }
 
+func TestOberthStopAllowsSuccessfulExitHandlerToFinish(t *testing.T) {
+	ctx := logging.TestContext(t.Context())
+	cancel, controller := newController(ctx, defaultServiceAccount)
+	defer cancel()
+	w := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "stop-after-entry", Namespace: "default"}, Spec: wfv1.WorkflowSpec{
+		Entrypoint: "build", OnExit: "cleanup",
+		Templates: []wfv1.Template{
+			{Name: "build", Container: &apiv1.Container{Image: "busybox", Command: []string{"true"}}},
+			{Name: "cleanup", Container: &apiv1.Container{Image: "busybox", Command: []string{"true"}}},
+		},
+	}}
+	w = lockRun(ctx, t, controller, w)
+	makePodsPhase(ctx, newWorkflowOperationCtx(ctx, w, controller), apiv1.PodSucceeded)
+	w = lockRun(ctx, t, controller, w)
+	if w.Status.Phase != wfv1.WorkflowRunning || w.Status.Nodes[w.Name].Phase != wfv1.NodeSucceeded {
+		t.Fatal("entry did not succeed while the exit handler remained active", w.Status)
+	}
+	w.Spec.Shutdown = wfv1.ShutdownStrategyStop
+	if _, err := controller.wfclientset.ArgoprojV1alpha1().Workflows("default").Update(ctx, w, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	makePodsPhase(ctx, newWorkflowOperationCtx(ctx, w, controller), apiv1.PodSucceeded)
+	w = lockRun(ctx, t, controller, w)
+	if w.Status.Phase != wfv1.WorkflowSucceeded || w.Status.Nodes[w.Name].Phase != wfv1.NodeSucceeded {
+		t.Fatal("Stop replaced a successful entry and exit handler", w.Status)
+	}
+}
+
 // A queued cancellation must use Terminate: Stop permits an exit handler
 // even when the entrypoint has never created a Pod.
 func TestOberthQueuedCancellationNeverStartsWork(t *testing.T) {

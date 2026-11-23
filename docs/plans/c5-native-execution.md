@@ -161,7 +161,7 @@ source runtime, concrete Store, service, transport or installer imports.
 1. Audit, retained roots and Create use one sealed admission. C5 returns native
    name/UID for a write-once C2/C7 binding at acknowledgement or adoption. Until
    binding, source Load returns retryable 503. Recovery never posts replacement work.
-2. Without shutdown, Argo Succeeded stays passed even with tolerated failed nodes. A shutdown verdict is cancelled; killed steps keep native exits as evidence, not author failures. Missing exit
+2. Argo Succeeded stays passed even with tolerated failed nodes; under shutdown its root must have succeeded. Other shutdown verdicts are cancelled; killed steps keep native exits as evidence, not author failures. Missing exit
    evidence is unknown. Run failure is infrastructure only if every failed step
    has typed infrastructure evidence. No message parsing or reboot inference
    grants retry authority; retry hints are advice only.

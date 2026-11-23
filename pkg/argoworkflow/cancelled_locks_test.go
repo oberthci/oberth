@@ -12,7 +12,7 @@ import (
 const cancelledLocksFixture = "../../internal/argojob/testdata/cancelled-locks.json"
 
 func TestQueuedCancellationUsesPinnedShutdownSemantics(t *testing.T) {
-	command := controllerFixture.Command(controllerContext(t), t, "-test.count=1", "-test.timeout=180s", "-test.run=^TestOberth(QueuedCancellationNeverStartsWork|ShutdownMessageCanBeReplacedByPodAssessment)$", "-test.v")
+	command := controllerFixture.Command(controllerContext(t), t, "-test.count=1", "-test.timeout=180s", "-test.run=^TestOberth(QueuedCancellationNeverStartsWork|ShutdownMessageCanBeReplacedByPodAssessment|StopAllowsSuccessfulExitHandlerToFinish)$", "-test.v")
 	command.Env = append(os.Environ(), "TMPDIR="+os.Getenv("GOTMPDIR"))
 	if raw, err := controllerOutput(command); err != nil {
 		t.Fatalf("queued cancellation: %v\n%s", err, raw)

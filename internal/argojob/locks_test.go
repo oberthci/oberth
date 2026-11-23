@@ -217,7 +217,7 @@ func TestTerminatedLockWaiterIsCancelledNotPassed(t *testing.T) {
 	i := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == "mutex-pending-terminate" })
 	rows[i].Status.Nodes = wf.Nodes{rows[i].Name: {ID: rows[i].Name, Name: rows[i].Name, Type: wf.NodeTypePod, Phase: wf.NodeSucceeded}}
 	rows[i].Status.Phase = wf.WorkflowSucceeded
-	if out := project(t, argojob.Projection{Plan: plan, Workflow: &rows[i]}); out.Status != stepmodel.RunCancelled || out.Steps[0].Status != stepmodel.StepPassed {
-		t.Fatal("cancel lost the run verdict or successful step", out)
+	if out := project(t, argojob.Projection{Plan: plan, Workflow: &rows[i]}); out.Status != stepmodel.RunPassed || out.Steps[0].Status != stepmodel.StepPassed {
+		t.Fatal("work that succeeded before the cancel is not passed", out)
 	}
 }

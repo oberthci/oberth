@@ -186,11 +186,14 @@ func runDetail(w *wf.Workflow) string {
 // runVerdict is the verdict of a finished Workflow. An unfinished one has
 // none: its queued or running status comes from stepmodel.Progress alone.
 func runVerdict(w *wf.Workflow) (stepmodel.RunStatus, string) {
+	if w.Status.Phase == wf.WorkflowSucceeded {
+		if root, ok := w.Status.Nodes[w.Name]; w.Spec.Shutdown.Enabled() && (!ok || root.Phase != wf.NodeSucceeded) {
+			return stepmodel.RunCancelled, reasonStopped
+		}
+		return stepmodel.RunPassed, reasonPassed
+	}
 	if w.Spec.Shutdown.Enabled() {
 		return stepmodel.RunCancelled, reasonStopped
-	}
-	if w.Status.Phase == wf.WorkflowSucceeded {
-		return stepmodel.RunPassed, reasonPassed
 	}
 	return stepmodel.RunFailed, reasonRunFailed
 }
