@@ -41,12 +41,16 @@ VM worktree capped at six CPUs and 7681 MiB. It lists tooling changes on one
 verdict line for review, and runs `make lint-selftest` only when tooling changed.
 When tooling or plans change, a second detached worktree also runs the branch's
 own check and parity. The external names policy is required, existing parity
-cannot be removed, and the container has a 80-minute deadline plus kill grace.
+cannot be removed, and the container has an 80-minute deadline plus kill grace.
 Main must contain the tooling first; its initial installation needs review.
 Base-image scripts, Python tests and Dockerfile logic come from main. Input locks,
 patches and their pins stay from the branch and are checked by main's tests.
 Every added path under `hack/`, including renamed files, is listed and removed
 from the trusted checkout. The branch check receives those additions.
+Added root Python files are listed too. Trusted Python entries and their child
+commands use isolated mode, so branch-root modules and Python environment paths
+cannot replace the interpreter's runner or imports. Plan helpers load by their
+restored file paths; discovery adds the restored test directories.
 The Go image pinned in `hack/devloop/Dockerfile` must already be present in the
 development VM. Python, Git and SSH are included in that image. Missing tools
 belong in the VM image bootstrap, rather than an interactive container change.

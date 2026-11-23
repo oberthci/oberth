@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 from unittest.mock import patch
 
-from hack.guards.test_run import GUARDS, RepositoryFixture
+from test_run import GUARDS, RepositoryFixture
 
 
 class ReachabilityGuards(RepositoryFixture):

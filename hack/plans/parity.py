@@ -1372,7 +1372,7 @@ def main():
         os.environ["OBERTH_PARITY_SOURCE_MAP"] = str(options.source_map.resolve())
     if options.reference is None:
         assert options.check, "regeneration requires --reference <old checkout> and --rewrite <REWRITE.md>"
-        from portable import check
+        check = runpy.run_path(str(ROOT / "hack/plans/portable.py"))["check"]
         print(json.dumps(check(globals()), indent=2))
         return
     assert options.rewrite, "reference regeneration requires --rewrite"

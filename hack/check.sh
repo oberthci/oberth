@@ -11,13 +11,13 @@ tests() {
     run go test -race -count=1 -timeout=20m ./...
     run env GOOS=darwin GOARCH=arm64 go vet -p=2 -buildvcs=false ./cmd/oberth/... ./internal/client/... ./internal/installer/... ./agent/...
     run go vet -p=2 -buildvcs=false -tags base_image_qualification ./internal/sshserver ./cmd/oberth-release
-    run python3 -m unittest discover -s hack -p 'test_history.py'
-    run python3 -m unittest discover -s hack -p 'test_gate.py'
-    run python3 -m unittest discover -s hack -p 'test_ui.py'
-    run python3 -m unittest discover -s hack -p 'test_docs.py'
-    run python3 -m unittest discover -s hack/guards -p 'test_*.py'
-    run python3 -m unittest discover -s hack/plans -p 'test_*.py'
-    run python3 -m unittest discover -s hack/base-image -p 'test_*.py'
+    run python3 -I -m unittest discover -s hack -p 'test_history.py'
+    run python3 -I -m unittest discover -s hack -p 'test_gate.py'
+    run python3 -I -m unittest discover -s hack -p 'test_ui.py'
+    run python3 -I -m unittest discover -s hack -p 'test_docs.py'
+    run python3 -I -m unittest discover -s hack/guards -p 'test_*.py'
+    run python3 -I -m unittest discover -s hack/plans -p 'test_*.py'
+    run python3 -I -m unittest discover -s hack/base-image -p 'test_*.py'
 }
 lint() {
     local pin tool
@@ -30,13 +30,13 @@ lint() {
     run "$tool" run --config .golangci.yml ./...
 }
 guards() {
-    python3 hack/guards/run.py || exit "$?"
+    python3 -I hack/guards/run.py || exit "$?"
 }
 case ${1:-check} in
     test) tests ;;
     lint) lint ;;
-    lint-selftest) run python3 hack/test_lint.py ;;
+    lint-selftest) run python3 -I hack/test_lint.py ;;
     guards) guards ;;
-    check) run python3 hack/plans/parity.py --check; tests; lint; guards; run bash hack/ui-check.sh ;;
+    check) run python3 -I hack/plans/parity.py --check; tests; lint; guards; run bash hack/ui-check.sh ;;
     *) printf 'usage: %s test|lint|lint-selftest|guards|check\n' "$0" >&2; exit 2 ;;
 esac

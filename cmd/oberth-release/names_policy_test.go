@@ -215,6 +215,7 @@ case "$*" in *'version --short') cat hack/lint-version | sed 's/^v//';;
 `)
 	git := "'" + fixtureExecutable(t, "git") + "' config "
 	writeFixtureCommand(t, filepath.Join(dir, "bin/python3"), `[ -z "${OBERTH_SECRETS_DIR:-}" ] || exit 97
+if [ "${1:-}" = -I ]; then shift; fi
 case "$*" in
  'hack/guards/run.py') [ "${OBERTH_GUARDS_NAMES_FILE:-}" = "$EXPECTED_NAMES" ] && [ -s "$OBERTH_GUARDS_NAMES_FILE" ] || exit 97
   [ "$GIT_CONFIG_COUNT" = 3 ] && `+git+`--get-all safe.directory | grep -qx /work/src || exit 95

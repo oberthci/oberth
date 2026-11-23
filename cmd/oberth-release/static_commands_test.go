@@ -18,7 +18,8 @@ func TestStaticEntrypointsRunTheSameThreeChecks(t *testing.T) {
 *'run '*./...) echo lint >> "$STATIC_LOG";;
 *) exit 98;; esac
 `)
-			writeFixtureCommand(t, filepath.Join(dir, "bin/python3"), `case "$*" in
+			writeFixtureCommand(t, filepath.Join(dir, "bin/python3"), `if [ "${1:-}" = -I ]; then shift; fi
+case "$*" in
 'hack/guards/run.py') echo guards >> "$STATIC_LOG";;
 'hack/plans/parity.py --check') echo parity >> "$STATIC_LOG";;
 *) exit 98;; esac

@@ -16,4 +16,4 @@ unset OBERTH_SECRETS_DIR OBERTH_GUARDS_NAMES_FILE
 git diff --name-only "$BUILD_DEFAULT_REF" HEAD -- Makefile hack .oberth
 GOLANGCI_LINT="$PWD/hack/lint-tool.sh" make lint
 env "${author[@]}" OBERTH_GUARDS_NAMES_FILE="$names" make guards
-python3 hack/plans/parity.py --check
+python3 -I hack/plans/parity.py --check

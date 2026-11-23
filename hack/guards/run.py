@@ -220,17 +220,17 @@ def deadcode(module, report):
     return list(dict.fromkeys(rows + unreachable(module, "false", report["Roots"])))
 
 def pins(ref="HEAD"):
-    return tool_output("PIN-POLICY", command(["python3", "hack/plans/policy.py", ref]))
+    return tool_output("PIN-POLICY", command(["python3", "-I", "hack/plans/policy.py", ref]))
 
 def checks():
-    policy = command(["python3", "hack/plans/parity.py", "--check"])
+    policy = command(["python3", "-I", "hack/plans/parity.py", "--check"])
     if policy.returncode: return tool_output("POLICY", policy)
     module, report = analysis()
     rows = pins() + vocabulary() + names()
     markers = "|".join(s.strip() for s in KEYWORDS.search(Path(".golangci.yml").read_text())[1].split(","))
     rows.extend(hits(["-nIwE", markers, "--", *text_paths("leftovers"), ":!*.go", ":!.golangci.yml"], "LEFTOVER"))
     rows.extend(hits(["-nIE", SKIPS, "--", "*_test.go", *text_paths("leftovers")[1:]], "SKIP"))
-    return rows + tool_output("HISTORY", command(["python3", "hack/history.py", "HEAD"])) + deadcode(module, report)
+    return rows + tool_output("HISTORY", command(["python3", "-I", "hack/history.py", "HEAD"])) + deadcode(module, report)
 
 if __name__ == "__main__":
     try:

@@ -97,7 +97,7 @@ tool_paths=(
 )
 changed=$({
     git diff --name-only main "$head" -- "${tool_paths[@]}" docs/plans hack/guards hack/plans hack/devloop hack/base-image
-    git diff --no-renames --diff-filter=A --name-only main "$head" -- hack
+    git diff --no-renames --diff-filter=A --name-only main "$head" -- hack ':(top,glob)*.py'
 } | LC_ALL=C sort -u | paste -sd ' ' -)
 for file in "${tool_paths[@]}"; do
     git cat-file -e "main:$file" 2>/dev/null || { printf 'FAIL: main lacks %s; review and bootstrap main tooling first\n' "$file" >&2; exit 1; }
@@ -106,13 +106,13 @@ scratch=$(mktemp -d "$GOTMPDIR/gate.XXXXXX")
 run git archive --output="$scratch/tooling.tar" main -- "${tool_paths[@]}" docs/plans hack/guards hack/plans
 run tar -xf "$scratch/tooling.tar" -C "$scratch"
 next_phase history
-run python3 "$scratch/hack/history.py" "$head"
+run python3 -I "$scratch/hack/history.py" "$head"
 next_phase names
 [[ -n ${OBERTH_GUARDS_NAMES_FILE:-} ]] || { printf 'FAIL: external names policy is required; set OBERTH_GUARDS_NAMES_FILE\n' >&2; exit 1; }
 if git cat-file -e main:test/parity 2>/dev/null && ! git cat-file -e "$head:test/parity" 2>/dev/null; then
     printf 'FAIL: parity harness was removed; restore test/parity\n' >&2; exit 1
 fi
-run python3 "$scratch/hack/guards/run.py" names "$head"
+run python3 -I "$scratch/hack/guards/run.py" names "$head"
 next_phase prepare
 linter=$(command -v "${GOLANGCI_LINT:-golangci-lint}")
 test_git=$(command -v "${OBERTH_TEST_GIT:-git}")

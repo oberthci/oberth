@@ -9,7 +9,7 @@ import shutil
 import unittest
 from unittest.mock import patch
 
-from hack.guards.test_binary import compiled_guard
+from test_binary import compiled_guard
 
 SPEC = importlib.util.spec_from_file_location("guards", Path(__file__).with_name("run.py"))
 GUARDS = importlib.util.module_from_spec(SPEC)
@@ -188,7 +188,7 @@ class TextGuards(RepositoryFixture):
         self.git("commit", "-qm", "Remove a pinned contract")
         with tempfile.NamedTemporaryFile(mode="w", dir=Path(self.directory.name).parent) as external:
             external.write("unmatched-policy-fixture\n"); external.flush()
-            result = subprocess.run(["python3", str(GUARDS.ROOT/"hack/guards/run.py"), "names", "HEAD"],
+            result = subprocess.run(["python3", "-I", str(GUARDS.ROOT/"hack/guards/run.py"), "names", "HEAD"],
                                     text=True, capture_output=True,
                                     env={**os.environ, "OBERTH_GUARDS_NAMES_FILE": external.name})
         self.assertEqual(0, result.returncode, result.stdout+result.stderr)
@@ -214,7 +214,7 @@ class TextGuards(RepositoryFixture):
                     shutil.copytree(checkout/name, self.root/name, dirs_exist_ok=True, copy_function=shutil.copyfile)
                 path = self.root/"docs/plans/dependencies.json"
                 data = json.loads(path.read_text()); mutation(data); path.write_text(json.dumps(data))
-                result = subprocess.run(["python3", "hack/plans/parity.py", "--check"], text=True, capture_output=True)
+                result = subprocess.run(["python3", "-I", "hack/plans/parity.py", "--check"], text=True, capture_output=True)
                 self.assertNotEqual(0, result.returncode)
                 self.assertEqual(1, len((result.stdout+result.stderr).splitlines()))
                 self.assertIn(key, result.stderr)
@@ -338,11 +338,11 @@ class TextGuards(RepositoryFixture):
 
     def test_tool_diagnostics_do_not_corrupt_successful_json(self):
         script = 'import sys; print("null"); print("module download", file=sys.stderr)'
-        result = GUARDS.command(["python3", "-c", script])
+        result = GUARDS.command(["python3", "-I", "-c", script])
         self.assertEqual(0, result.returncode)
         self.assertIsNone(json.loads(result.stdout))
         self.assertEqual("module download\n", result.stderr)
-        failed = GUARDS.command(["python3", "-c", script+"; sys.exit(1)"])
+        failed = GUARDS.command(["python3", "-I", "-c", script+"; sys.exit(1)"])
         self.assertNotEqual(0, failed.returncode)
         self.assertIn("module download", GUARDS.tool_output("GO", failed)[0])
 
@@ -366,7 +366,7 @@ class TextGuards(RepositoryFixture):
     def test_non_names_tool_errors_keep_their_detail(self):
         self.write("hack/plans/parity.py", "")
         self.write("test/walk/walklib.py", "STEPS = generate_steps()\n")
-        result = subprocess.run(["python3", str(GUARDS.ROOT/"hack/guards/run.py")],
+        result = subprocess.run(["python3", "-I", str(GUARDS.ROOT/"hack/guards/run.py")],
                                 capture_output=True, text=True, timeout=30)
         self.assertEqual(1, result.returncode)
         self.assertEqual("", result.stdout)
@@ -391,7 +391,7 @@ class TextGuards(RepositoryFixture):
 
     def test_real_retired_register_agrees_with_portable_plans_check(self):
         root = Path(__file__).resolve().parents[2]
-        subprocess.run(["python3", "hack/plans/parity.py", "--check"], cwd=root,
+        subprocess.run(["python3", "-I", "hack/plans/parity.py", "--check"], cwd=root,
                        check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         os.chdir(root)
         try:

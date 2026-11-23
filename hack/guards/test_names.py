@@ -185,7 +185,7 @@ class NameTests(unittest.TestCase):
             for policy in (internal, link):
                 with self.subTest(symlink=policy == link):
                     env = {**os.environ, "OBERTH_GUARDS_NAMES_FILE": str(policy)}
-                    result = subprocess.run(["python3", str(test_run.GUARDS.ROOT/"hack/guards/run.py"), "names", "HEAD"],
+                    result = subprocess.run(["python3", "-I", str(test_run.GUARDS.ROOT/"hack/guards/run.py"), "names", "HEAD"],
                                             env=env, capture_output=True, text=True, timeout=30)
                     self.assertEqual(1, result.returncode)
                     self.assertEqual(test_run.GUARDS.finding("NAME-POLICY", detail="Names file must resolve outside the repository.")+"\n", result.stdout)
@@ -212,7 +212,7 @@ class NameTests(unittest.TestCase):
         self.write("hack/plans/policy.py", "")
         self.git("commit", "-qm", "Message mentions "+term)
         sha = self.git("rev-parse", "HEAD").strip()
-        result = subprocess.run(["bash", "-x", "-c", 'source "$1/hack/steps.sh"; run python3 "$1/hack/guards/run.py" names HEAD', "guard-trace",
+        result = subprocess.run(["bash", "-x", "-c", 'source "$1/hack/steps.sh"; run python3 -I "$1/hack/guards/run.py" names HEAD', "guard-trace",
                                  str(test_run.GUARDS.ROOT)],
                                 capture_output=True, text=True, timeout=30)
         self.assertEqual(1, result.returncode)
@@ -234,7 +234,7 @@ class NameTests(unittest.TestCase):
             with self.subTest(stage=stage):
                 binary.write_text('#!/bin/sh\nif [ "$1" = '+stage+' ]; then\n  printf "%s\\n" '+term+'\n  printf "%s\\n" '+term+' >&2\n  exit 2\nfi\nexec '+real_git+' "$@"\n')
                 binary.chmod(0o700)
-                result = subprocess.run(["bash", "-x", "-c", 'source "$1/hack/steps.sh"; run python3 "$1/hack/guards/run.py" names HEAD', "guard-trace",
+                result = subprocess.run(["bash", "-x", "-c", 'source "$1/hack/steps.sh"; run python3 -I "$1/hack/guards/run.py" names HEAD', "guard-trace",
                                          str(test_run.GUARDS.ROOT)],
                                         env=env, capture_output=True, text=True, timeout=30)
                 self.assertNotEqual(0, result.returncode)
@@ -245,7 +245,7 @@ class NameTests(unittest.TestCase):
     def test_names_policy_errors_do_not_echo_private_paths(self):
         term = "fixture-confidential-selector"
         env = {**os.environ, "OBERTH_GUARDS_NAMES_FILE": str(self.root.parent/(term+self.root.name))}
-        result = subprocess.run(["bash", "-x", "-c", 'source "$1/hack/steps.sh"; run python3 "$1/hack/guards/run.py" names HEAD', "guard-trace",
+        result = subprocess.run(["bash", "-x", "-c", 'source "$1/hack/steps.sh"; run python3 -I "$1/hack/guards/run.py" names HEAD', "guard-trace",
                                  str(test_run.GUARDS.ROOT)], env=env, capture_output=True, text=True, timeout=30)
         self.assertNotEqual(0, result.returncode)
         self.assertNotIn(term, result.stdout+result.stderr)
@@ -257,7 +257,7 @@ class NameTests(unittest.TestCase):
             policy.write(b"fixture-confidential-selector\xff")
             policy.flush()
             env = {**os.environ, "OBERTH_GUARDS_NAMES_FILE": policy.name}
-            result = subprocess.run(["python3", str(test_run.GUARDS.ROOT/"hack/guards/run.py"), "names", "HEAD"],
+            result = subprocess.run(["python3", "-I", str(test_run.GUARDS.ROOT/"hack/guards/run.py"), "names", "HEAD"],
                                     env=env, capture_output=True, text=True, timeout=30)
         self.assertEqual(1, result.returncode)
         self.assertEqual("", result.stdout)

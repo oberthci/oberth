@@ -103,7 +103,7 @@ class HistoryTests(unittest.TestCase):
             git("commit", "--allow-empty", "-qm", "Generated with fixture tooling")
             git("checkout", "-qb", "clean-descendant")
             git("commit", "--allow-empty", "-qm", "Add a clean change")
-            result = subprocess.run([sys.executable, HISTORY.__file__, "HEAD"],
+            result = subprocess.run([sys.executable, "-I", HISTORY.__file__, "HEAD"],
                                     cwd=directory, text=True, capture_output=True, check=False)
             self.assertNotEqual(0, result.returncode)
             self.assertIn("attribution line", result.stderr)
