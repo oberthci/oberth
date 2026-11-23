@@ -36,7 +36,7 @@ func replayPhaseReasons(t *testing.T, fromPod bool) {
 	for _, paths := range [][]string{{"prepare"}, {"test-a", "test-b"}} {
 		for _, poll := range []phaseReasonPoll{
 			{wf.NodePending, false, stepmodel.StepQueued, "starting containers"},
-			{wf.NodePending, true, stepmodel.StepQueued, "waiting to start"},
+			{wf.NodePending, true, stepmodel.StepQueued, "starting containers"},
 			{wf.NodeRunning, true, stepmodel.StepRunning, "running"},
 			{wf.NodeRunning, true, stepmodel.StepRunning, "running"},
 			{wf.NodeSucceeded, true, stepmodel.StepPassed, "passed"},
@@ -46,6 +46,50 @@ func replayPhaseReasons(t *testing.T, fromPod bool) {
 			assertPhaseReasonPoll(t, out, paths, poll)
 			in.Previous, in.PreviousNodes, in.Pods = out.Steps, out.Nodes, nil
 		}
+	}
+}
+
+func TestPendingTerminationKeepsStartingReason(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"exit", "oom", "init"} {
+		t.Run(kind, func(t *testing.T) {
+			w := nativeWorkflow()
+			n := nativeNode("one", ".build", wf.NodePending, 1)
+			w.Status.Nodes[n.ID] = n
+			p := nativePod(w, n, 7)
+			if kind == "oom" {
+				p.Status.ContainerStatuses[0].State.Terminated.Reason = "OOMKilled"
+			}
+			if kind == "init" {
+				p.Status.InitContainerStatuses = []core.ContainerStatus{{Name: "authored-init", State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 7}}}}
+			}
+			out := project(t, argojob.Projection{Workflow: w, Plan: admissioncontract.Plan{Entries: []admissioncontract.PlanEntry{{Path: "build"}}}, Pods: []*core.Pod{p}})
+			if out.Steps[0].Status != stepmodel.StepQueued || out.Steps[0].DisplayReason != "starting containers" || out.Reason != "starting containers" {
+				t.Fatal("termination regressed the waiting reason", out)
+			}
+			if out.Nodes[0].Exit == nil || *out.Nodes[0].Exit != 7 {
+				t.Fatal("termination evidence was lost", out.Nodes)
+			}
+		})
+	}
+}
+
+func TestDisplayedReasonFollowsMergedStatus(t *testing.T) {
+	t.Parallel()
+	in := argojob.Projection{Workflow: nativeWorkflow(), Plan: admissioncontract.Plan{Entries: []admissioncontract.PlanEntry{{Path: "build"}}}}
+	setPhaseReasonPoll(&in, []string{"build"}, phaseReasonPoll{phase: wf.NodeRunning}, true)
+	first := project(t, in)
+	in.Previous, in.PreviousNodes, in.Pods = first.Steps, first.Nodes, nil
+	setPhaseReasonPoll(&in, []string{"build"}, phaseReasonPoll{phase: wf.NodePending}, true)
+	stale := project(t, in)
+	if stale.Steps[0].Status != stepmodel.StepRunning || stale.Steps[0].DisplayReason != "running" {
+		t.Fatal("stale Pending reason survived the status merge", stale.Steps)
+	}
+	in.Previous, in.PreviousNodes, in.Pods = nil, nil, nil
+	setPhaseReasonPoll(&in, []string{"build"}, phaseReasonPoll{}, true)
+	unknown := project(t, in)
+	if unknown.Steps[0].Status != stepmodel.StepUnknown || unknown.Steps[0].DisplayReason != "unknown" {
+		t.Fatal("an empty phase claimed a wait", unknown.Steps)
 	}
 }
 

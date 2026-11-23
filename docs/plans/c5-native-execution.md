@@ -204,9 +204,9 @@ a node, `image pull failed`, `starting containers`), else `waiting to start`;
 every waiting reason < starting containers or image pull failed; within either
 rank the newest reason shows. Progress writes no event and no
 control revision.
-A Pending step whose own Pod container already runs says `starting containers`
+A Pending step whose own Pod container has run, even if it already exited, says `starting containers`
 until its node reports Running.
-Step reasons follow the node phase; newer Pod exits cannot label queued or running steps as passed or failed.
+Step reasons follow the displayed status after evidence merges; newer Pod exits cannot label queued or running steps as passed or failed.
 
 The never-started fallback requires native waiting states with no prior start or
 restart. Image, deadline, node and authored-init diagnoses retain their typed

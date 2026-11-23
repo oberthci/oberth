@@ -72,8 +72,9 @@ func Project(ctx context.Context, in Projection) (Observation, error) {
 	}
 	mergeEvidence(&out, in.PreviousNodes)
 	rows = mergeRows(rows, prev, plan, out.Nodes)
-	for _, r := range rows {
-		out.Steps = append(out.Steps, r.step)
+	for i := range rows {
+		alignStepReason(&rows[i].step)
+		out.Steps = append(out.Steps, rows[i].step)
 	}
 	out.Steps = stateport.PlanSteps(plan, out.Steps)
 	finishProjection(&out, w, rows)

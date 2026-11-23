@@ -9,6 +9,14 @@ import (
 	"strings"
 )
 
+func alignStepReason(step *stepmodel.RunStep) {
+	if step.Status == stepmodel.StepUnknown {
+		step.DisplayReason = reasonUnknown
+	} else if step.Status == stepmodel.StepRunning && (step.DisplayReason == reasonStarting || step.DisplayReason == reasonWaiting) {
+		step.DisplayReason = reasonRunning
+	}
+}
+
 func mergeRows(rows []projected, previous []stepmodel.RunStep, plan admissioncontract.Plan, raw []stateport.Node) []projected {
 	byPath := map[string]int{}
 	nodes := map[string]stateport.Node{}
