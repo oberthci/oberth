@@ -78,6 +78,7 @@ func RunSuite(t *testing.T, factory func(*testing.T) RunFixture) {
 		"queries":              checkRunQueries,
 		"latest_cursor":        checkLatestCursor,
 		"latest_repository":    checkLatestRepository,
+		"latest_filtered":      checkLatestFiltered,
 		"recent_runs":          checkRecentRuns,
 		"commit_prefix":        checkCommitPrefix,
 		"scope_catalog":        checkScopeCatalog,

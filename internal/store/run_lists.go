@@ -58,28 +58,44 @@ WHERE `+predicate+` AND runs.id=?`, append(args, filter.Cursor)...).Scan(&sequen
 }
 
 func runListQuery(f stateport.RunFilter, before int64) (string, []any) {
-	predicate, args := runPredicate(f)
-	rank := ""
 	if f.Latest || f.LatestRepository {
-		partition := "runs.repo_id,runs.ref"
-		if f.LatestRepository {
-			partition = "runs.repo_id"
-		}
-		rank = `,row_number() OVER(PARTITION BY ` + partition + ` ORDER BY runs.sequence DESC) AS rank`
+		return latestRunQuery(f, before)
 	}
+	predicate, args := runPredicate(f)
 	query := `WITH filtered AS(SELECT runs.repo_id,runs.sequence,runs.revision,runs.summary,runs.origin,runs.release,runs.step_count,
 runs.steps_planned_exact,runs.steps_pending,runs.steps_queued,runs.steps_running,runs.steps_passed,runs.steps_failed,
-runs.steps_skipped,runs.steps_unknown,runs.admission IS NOT NULL AS has_admission` + rank + `
+runs.steps_skipped,runs.steps_unknown,runs.admission IS NOT NULL AS has_admission
 FROM runs JOIN repositories ON repositories.id=runs.repo_id WHERE ` + predicate + `) SELECT ` + historyColumns + ` FROM filtered WHERE 1`
-	if rank != "" {
-		query += ` AND rank=1`
-	}
 	if before > 0 {
 		query += ` AND sequence<?`
 		args = append(args, before)
 	}
 	query += ` ORDER BY sequence DESC LIMIT ?`
 	return query, append(args, f.Limit)
+}
+
+// Seek one matching sequence per repository or ref before loading any payload.
+// Filters belong inside the seek; the cursor belongs outside so an older run
+// cannot replace a group's latest run on the next page.
+func latestRunQuery(f stateport.RunFilter, before int64) (string, []any) {
+	predicate, args := runPredicate(f)
+	groups, ref := "", ""
+	if !f.LatestRepository {
+		scope, scopeArgs := scopePredicate("repositories.canonical", f.Repositories)
+		groups = ` JOIN (SELECT DISTINCT runs.repo_id,runs.ref FROM runs JOIN repositories ON repositories.id=runs.repo_id WHERE ` + scope + `) AS groups ON groups.repo_id=repositories.id`
+		ref = ` AND candidate.ref=groups.ref`
+		args = append(scopeArgs, args...)
+	}
+	query := `SELECT runs.repo_id,runs.sequence,runs.revision,runs.summary,runs.origin,runs.release,runs.step_count,
+runs.steps_planned_exact,runs.steps_pending,runs.steps_queued,runs.steps_running,runs.steps_passed,runs.steps_failed,
+runs.steps_skipped,runs.steps_unknown,runs.admission IS NOT NULL
+FROM repositories` + groups + ` JOIN runs ON runs.sequence=(SELECT candidate.sequence FROM runs AS candidate
+WHERE candidate.repo_id=repositories.id` + ref + ` AND ` + strings.ReplaceAll(predicate, "runs.", "candidate.") + ` ORDER BY candidate.sequence DESC LIMIT 1) WHERE 1`
+	if before > 0 {
+		query += ` AND runs.sequence<?`
+		args = append(args, before)
+	}
+	return query + ` ORDER BY runs.sequence DESC LIMIT ?`, append(args, f.Limit)
 }
 
 func runPredicate(f stateport.RunFilter) (string, []any) {

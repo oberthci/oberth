@@ -128,13 +128,7 @@ func (f *Runs) Runs(ctx context.Context, q stateport.RunFilter) ([]stateport.Run
 	if err != nil {
 		return nil, err
 	}
-	out := make([]stateport.Run, 0)
-	for _, r := range f.data.runs {
-
-		if selectedRun(r, q) {
-			out = append(out, r.Clone())
-		}
-	}
+	out := f.data.selectedRuns(q)
 	slices.SortFunc(out, func(a, b stateport.Run) int {
 		if a.Sequence > b.Sequence {
 			return -1
@@ -148,8 +142,36 @@ func (f *Runs) Runs(ctx context.Context, q stateport.RunFilter) ([]stateport.Run
 	for i := range out {
 		out[i].Admission = stateport.Run{}.Admission
 		out[i].Findings = nil
+		out[i] = out[i].Clone()
 	}
 	return out, nil
+}
+
+// The caller holds the store lock. Keep raw values until the page is selected;
+// discarded histories must not clone admissions or findings.
+func (m *runMemory) selectedRuns(q stateport.RunFilter) []stateport.Run {
+	out := make([]stateport.Run, 0)
+	latest := make(map[string]stateport.Run)
+	for _, r := range m.runs {
+		if !selectedRun(r, q) {
+			continue
+		}
+		if !q.Latest && !q.LatestRepository {
+			out = append(out, r)
+			continue
+		}
+		key := r.Repo
+		if !q.LatestRepository {
+			key += "\x00" + r.Ref
+		}
+		if r.Sequence > latest[key].Sequence {
+			latest[key] = r
+		}
+	}
+	for _, r := range latest {
+		out = append(out, r)
+	}
+	return out
 }
 
 func selectedRun(r stateport.Run, q stateport.RunFilter) bool {
