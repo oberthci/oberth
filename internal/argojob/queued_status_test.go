@@ -161,3 +161,20 @@ func TestQueuedRunGivesItsPodsWait(t *testing.T) {
 		}
 	}
 }
+
+// Every unfinished phase, an unseen or unknown one too, takes its status from
+// the steps alone.
+func TestUnfinishedPhasesTakeTheStatusFromTheSteps(t *testing.T) {
+	t.Parallel()
+	for _, phase := range []wf.WorkflowPhase{"", wf.WorkflowPending, wf.WorkflowRunning, "Unknown"} {
+		for node, want := range map[wf.NodePhase]stepmodel.RunStatus{wf.NodePending: stepmodel.RunQueued, wf.NodeRunning: stepmodel.RunRunning} {
+			w := nativeWorkflow()
+			w.Status.Phase = phase
+			n := nativeNode("a", ".build", node, 1)
+			w.Status.Nodes[n.ID] = n
+			if out := project(t, argojob.Projection{Plan: queuedPlan(), Workflow: w}); out.Status != want {
+				t.Fatalf("phase %q node %s: %s, want %s", phase, node, out.Status, want)
+			}
+		}
+	}
+}

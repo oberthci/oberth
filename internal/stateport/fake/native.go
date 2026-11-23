@@ -63,7 +63,7 @@ func (f *Runs) SaveProgress(ctx context.Context, id string, p stateport.Progress
 		if !r.HasAdmission {
 			return runProblem(publicerr.InvalidTransition)
 		}
-		if !stateport.ValidNativeSteps(r.Admission.Plan, steps) || p.Waiting != "" && publicerr.CheckMessage(p.Waiting, 40) != nil {
+		if !stateport.ValidNativeSteps(r.Admission.Plan, steps) || publicerr.CheckMessage(p.Waiting, 40) != nil {
 			return runProblem(publicerr.InvalidInput)
 		}
 		steps = stateport.PlanSteps(r.Admission.Plan, steps)

@@ -19,7 +19,7 @@ func (s *Store) SaveProgress(ctx context.Context, id string, p stateport.Progres
 		if err != nil {
 			return err
 		}
-		if !stateport.ValidNativeSteps(plan, steps) || p.Waiting != "" && publicerr.CheckMessage(p.Waiting, 40) != nil {
+		if !stateport.ValidNativeSteps(plan, steps) || publicerr.CheckMessage(p.Waiting, 40) != nil {
 			return refuse(invalid, nil)
 		}
 		steps = stateport.PlanSteps(plan, steps)

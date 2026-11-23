@@ -49,7 +49,6 @@ func Project(ctx context.Context, in Projection) (Observation, error) {
 		return Observation{}, err
 	}
 	out := Observation{workflow: w, Phase: stepmodel.NativePhase(w.Status.Phase), Detail: runDetail(w), Complete: len(w.Status.Nodes) > 0 && w.Status.OffloadNodeStatusVersion == ""}
-	out.Status, out.Reason = runStatus(w)
 	if !out.Phase.Valid() {
 		out.Phase = stepmodel.NativeUnknown
 	}
@@ -78,10 +77,7 @@ func Project(ctx context.Context, in Projection) (Observation, error) {
 		out.Steps = append(out.Steps, r.step)
 	}
 	out.Steps = stateport.PlanSteps(plan, out.Steps)
-	finishProjection(&out, rows)
-	if !terminalWorkflow(w) {
-		out.Status, out.Reason = stepmodel.Progress(stepmodel.RunQueued, out.Steps, queuedReason(rows))
-	}
+	finishProjection(&out, w, rows)
 	return out, nil
 }
 
@@ -188,27 +184,21 @@ func runDetail(w *wf.Workflow) string {
 	return strings.TrimSpace(w.Status.Message + "\n" + detailLockStatus)
 }
 
-func runStatus(w *wf.Workflow) (stepmodel.RunStatus, string) {
-	switch w.Status.Phase {
-	case "", wf.WorkflowPending:
-		return stepmodel.RunQueued, reasonWaiting
-	case wf.WorkflowRunning:
-		return stepmodel.RunRunning, reasonRunning
-	case wf.WorkflowSucceeded:
+// runVerdict is the verdict of a finished Workflow. An unfinished one has
+// none: its queued or running status comes from stepmodel.Progress alone.
+func runVerdict(w *wf.Workflow) (stepmodel.RunStatus, string) {
+	if w.Status.Phase == wf.WorkflowSucceeded {
 		// Terminate releases a Workflow still pending on a workflow-level lock
 		// by marking it Succeeded; its entry node never succeeded.
 		if root, ok := w.Status.Nodes[w.Name]; w.Spec.Shutdown != "" && (!ok || root.Phase != wf.NodeSucceeded) {
 			return stepmodel.RunCancelled, reasonStopped
 		}
 		return stepmodel.RunPassed, reasonPassed
-	case wf.WorkflowFailed, wf.WorkflowError:
-		if w.Spec.Shutdown != "" {
-			return stepmodel.RunCancelled, reasonStopped
-		}
-		return stepmodel.RunFailed, reasonRunFailed
-	default:
-		return stepmodel.RunRunning, reasonUnknown
 	}
+	if w.Spec.Shutdown != "" {
+		return stepmodel.RunCancelled, reasonStopped
+	}
+	return stepmodel.RunFailed, reasonRunFailed
 }
 func nodeStatus(p wf.NodePhase) stepmodel.StepStatus {
 	switch p {
@@ -242,8 +232,15 @@ func underPath(path, base string) bool {
 	return base == "" || path == base || strings.HasPrefix(path, base+".") || strings.HasPrefix(path, base+"(") || strings.HasPrefix(path, base+"[")
 }
 
-func finishProjection(out *Observation, rows []projected) {
+// finishProjection gives an unfinished Workflow its status by the run-status
+// rule and a finished one its verdict.
+func finishProjection(out *Observation, w *wf.Workflow, rows []projected) {
 	out.Failure = primaryFailure(rows)
+	if !terminalWorkflow(w) {
+		out.Status, out.Reason = stepmodel.Progress(stepmodel.RunQueued, out.Steps, queuedReason(rows))
+		return
+	}
+	out.Status, out.Reason = runVerdict(w)
 	if out.Status == stepmodel.RunCancelled && out.Failure != nil && out.Failure.Class != stepmodel.FailureCancelled {
 		out.Status = stepmodel.RunFailed
 	}
