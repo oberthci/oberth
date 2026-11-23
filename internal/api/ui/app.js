@@ -210,6 +210,7 @@ async function route() {
  } catch (error) {
   if (view.controller.signal.aborted) return;
   if (!trouble(error)) { showError(error); return; }
+  if (topbar.hidden && signin.hidden) notice.replaceChildren(empty(copy.reconnecting));
   await waitRetry(error.retry ?? 5000, view.controller.signal);
   if (!view.controller.signal.aborted) route();
  }

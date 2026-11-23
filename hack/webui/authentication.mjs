@@ -34,7 +34,28 @@ export async function signout(client){
  });
  const restored=await headerState();
  check(restored.nav&&restored.signout&&restored.header,'sign-in did not restore navigation and Sign out');
- return {...result,signedIn,signedOut,checking,refused,restored,certificate:await certificateSignin(client)};
+ return {...result,signedIn,signedOut,checking,refused,restored,certificate:await certificateSignin(client),reconnecting:await initialReconnect(client)};
+}
+
+async function initialReconnect(client){
+ const result=await client.evaluate(`(async()=>{
+  const original=fetch,retry=waitRetry;let waiting;
+  const asleep=new Promise(resolve=>{waiting=resolve;});
+  screen.controller.abort();topbar.hidden=true;signin.hidden=true;main.hidden=false;
+  history.replaceState(null,'','/runs');
+  window.fetch=()=>Promise.resolve(new Response(JSON.stringify({reason:'Server unavailable.',remedy:'Try again.'}),{status:503,headers:{'Retry-After':'1'}}));
+  waitRetry=(milliseconds,signal)=>{waiting(milliseconds);return retry(milliseconds,signal);};
+  try{
+   const pending=route(),delay=await asleep;
+   const state={delay,header:!topbar.hidden,card:!signin.hidden,notice:notice.textContent,reconnecting:copy.reconnecting.every(word=>notice.textContent.includes(word))};
+   screen.controller.abort();await pending;return state;
+  }finally{screen.controller.abort();window.fetch=original;waitRetry=retry;}
+ })()`);
+ check(result.delay===1000&&!result.header&&!result.card&&result.reconnecting,'first 503 answer left the page without a reconnecting notice');
+ await client.evaluate(`route()`);
+ result.recovered=await client.evaluate(`!topbar.hidden&&signin.hidden&&!main.hidden&&notice.textContent===''`);
+ check(result.recovered,'accepted answer retained the initial reconnecting notice');
+ return result;
 }
 
 // Model a server accepting a browser certificate without a stored bearer.
