@@ -73,3 +73,15 @@ func TestDocumentationRequiresReleaseLimitBeforeUpgradeRelease(t *testing.T) {
 		t.Fatal("release guide omits the semaphore upgrade prerequisite")
 	}
 }
+
+func TestDocumentationStatesSynchronizationScope(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile("../../docs/pipelines.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(strings.Fields(string(raw)), " ")
+	if !strings.Contains(text, "`oberth-sync-limits` keys are installation-wide and shared by all repositories.") {
+		t.Fatal("pipeline guide omits the shared synchronization scope")
+	}
+}

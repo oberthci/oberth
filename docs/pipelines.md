@@ -69,12 +69,12 @@ branch-name parameter and never becomes shell source.
 ## Ordering, retries and deadlines
 
 Use Argo steps, DAG dependencies, retries, synchronization and `activeDeadlineSeconds`.
-Semaphore keys belong in `oberth-sync-limits`. Mutex names must be literal `upstream/org/repo/lock`
-for the exact repository, e.g. `forge/team/app/publish`. Omit the namespace or use the pipeline
-namespace. Defaults and shared/inline templates follow this rule; lock names are never rewritten.
+`oberth-sync-limits` keys are installation-wide and shared by all repositories.
+Mutex names must be literal, e.g. `forge/team/app/publish`, for the exact repository. Omit or use the
+pipeline namespace. Defaults and shared/inline templates follow this rule; names are never rewritten.
 Oberth adds no queue or cap. Retries are attempts of one step; reruns are new runs. Memory limits
-are bounds; inspect detail for OOM or eviction. `oberth lock status` shows holders, waiters
-and `stale` ended runs. Argo `parallelism` is installation `runs.parallel` (default 4; 0 unlimited).
+are bounds; inspect detail for OOM or eviction. `oberth lock status` shows holders, waiters and `stale`
+ended runs. Argo `parallelism` is installation `runs.parallel` (default 4; 0 unlimited).
 
 ## Cache and outputs
 
