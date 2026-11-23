@@ -17,7 +17,7 @@ func (g *graph) templateCalls(t *wfv1.Template, where string) []*call {
 				return calls
 			}
 			calls = append(calls, &call{
-				suffix: fmt.Sprintf("[%d].%s", group, s.Name), name: s.Name, path: path,
+				stepGroup: group, suffix: fmt.Sprintf("[%d].%s", group, s.Name), name: s.Name, path: path,
 				template: s.Template, ref: s.TemplateRef, inline: s.Inline, arguments: s.Arguments,
 				items: s.WithItems, dynamic: s.WithParam != "" || s.WithSequence != nil,
 				hooks: g.selectedHooks(s.Hooks, s.GetExitHook(wfv1.Arguments{}), s.OnExit, path),

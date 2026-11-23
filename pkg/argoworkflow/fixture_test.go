@@ -52,7 +52,7 @@ func (p Policy) admit(ctx context.Context, wf *wfv1.Workflow, r admissioncontrac
 	return fileError(r.SelectedFile, g.err())
 }
 
-// plannedSteps walks native invocations in declaration order. Unresolved work
+// plannedSteps builds display facts without runtime observations. Unresolved work
 // stays visible as an expandable entry; representation bounds never limit Pods.
 func plannedSteps(ctx context.Context, wf *wfv1.Workflow, r admissioncontract.PrepareRequest, p Policy) (admissioncontract.Plan, error) {
 	if wf == nil {

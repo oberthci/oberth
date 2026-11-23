@@ -25,6 +25,7 @@ type node struct {
 type call struct {
 	readFailed         bool
 	inspectionOnly     bool
+	stepGroup          int
 	serial             bool
 	dag                bool
 	candidates         []*node

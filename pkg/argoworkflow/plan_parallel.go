@@ -1,27 +1,22 @@
 package argoworkflow
 
-import (
-	"strconv"
-	"strings"
-)
-
-// parallelCalls assigns a scope-local group to leaf siblings at the same DAG
-// dependency level, or in the same steps group. Nested templates compute their
+// parallelCalls assigns plan-global IDs to leaf siblings at the same local DAG
+// dependency level, or in the same structured steps group. Nested templates compute their
 // own groups so serial descendants and exit hooks never share a parallel border.
 func (p *planner) parallelCalls(ordered []*call, levels map[*call]int) map[*call]int {
-	keys := map[*call]string{}
-	counts := map[string]int{}
+	keys := map[*call]int{}
+	counts := map[int]int{}
 	for _, c := range ordered {
-		key, _, _ := strings.Cut(c.suffix, "]")
+		key := c.stepGroup
 		if c.dag {
-			key = strconv.Itoa(levels[c])
+			key = levels[c]
 		}
 		if parallelLeaf(c) && !c.serial {
 			keys[c] = key
 			counts[key]++
 		}
 	}
-	groups := map[string]int{}
+	groups := map[int]int{}
 	out := map[*call]int{}
 	for _, c := range ordered {
 		key, ok := keys[c]
