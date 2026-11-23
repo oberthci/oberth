@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,7 +52,7 @@ func footerPage(now time.Time) apicontract.RunPage {
 	failed := stepmodel.RunSummary{ID: "47c0aa006d128a0325afe873e65cde30", Repo: "github/oberthci/oberth", Ref: "refs/heads/own-v0.30.10",
 		Status: stepmodel.RunFailed, CreatedAt: started.Add(-time.Minute), StartedAt: &started, FinishedAt: &finished,
 		LogicalStepCounts: stepmodel.LogicalStepCounts{Total: 4, Exact: true, Passed: 2, Failed: 1},
-		Failure:           &stepmodel.FailureRecord{Step: "lint", Name: "lint​"}}
+		Failure:           &stepmodel.FailureRecord{Step: "lint", Name: "lint\u200b"}}
 	running := stepmodel.RunSummary{ID: "47c0aa00ffffffffffffffffffffffff", Repo: "github/oberthci/oberth", Ref: "refs/tags/v1",
 		Status: stepmodel.RunRunning, CreatedAt: now.Add(-42 * time.Second), LogicalStepCounts: stepmodel.LogicalStepCounts{Total: 3}}
 	return apicontract.RunPage{Runs: []apicontract.RunRecord{{RunSummary: running}, {RunSummary: failed}}, ServerTime: now}
@@ -77,7 +79,7 @@ func footerReply(t *testing.T, p *bridgePeer, id string) string {
 
 // Codex picks a statusline provider from a tool's entrypoint and reads its resource about
 // once a second; the bridge serves that from a run list refreshed every 15 seconds.
-func TestBridgeCodexFooter(t *testing.T) {
+func TestBridgeCodexFooterEntrypoint(t *testing.T) {
 	b := fake.Bindings()
 	clock := fake.NewClock()
 	list := &fake.Handler[apicontract.RunListArgs, apicontract.RunPage]{Value: footerPage(clock.Now())}
@@ -110,29 +112,75 @@ func TestBridgeCodexFooter(t *testing.T) {
 	if advertised != 1 {
 		t.Fatalf("statusline entrypoints advertised: %d", advertised)
 	}
-	text := footerReply(t, p, "r1")
+}
+
+func TestBridgeCodexFooterRows(t *testing.T) {
+	now := fake.NewClock().Now()
+	// The server clock, rather than the bridge clock, owns duration and age.
+	text := string(footerRows(footerPage(now), nil, now.Add(time.Hour)))
 	for _, want := range []string{`"type":"row"`, `"gap":2`, `47c0aa006`, `oberth own-v0.30.10 ✗ failed 3/4 45m00s 51m lint"`, `"color":"red"`,
 		`47c0aa00f oberth v1 ▶ running 0/≥3 42s 42s"`, `"color":"yellow"`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("footer lacks %s: %s", want, text)
 		}
 	}
-	if strings.Contains(text, "​") {
+	if strings.Contains(text, "\u200b") {
 		t.Fatalf("footer kept a format character: %s", text)
 	}
-	footerReply(t, p, "r2")
+}
+
+func TestBridgeCodexFooterCacheBound(t *testing.T) {
+	for _, refused := range []bool{false, true} {
+		t.Run(fmt.Sprint(refused), func(t *testing.T) {
+			bindings := fake.Bindings()
+			clock := fake.NewClock()
+			list := &fake.Handler[apicontract.RunListArgs, apicontract.RunPage]{Value: footerPage(clock.Now())}
+			if refused {
+				list.Error = publicerr.New(publicerr.Forbidden, "Run history is not visible.", "Check this uplink's scope.", nil)
+			}
+			bindings.RunList.Handler = list
+			cfg := bridgeProfile(t, streamingTransport(server(t, bindings)))
+			cfg.Config.Now = clock.Now
+			remote, err := bridgeClient(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(remote.Close)
+			b := &bridge{ctx: t.Context(), eventCtx: t.Context(), client: remote}
+			b.footerTree(t.Context())
+			b.workers.Wait()
+			assertFooterCalls(t, list, 1)
+			for interval := 0; interval < 3; interval++ {
+				for read := 0; read < 29; read++ {
+					clock.Advance(500 * time.Millisecond)
+					b.footerTree(t.Context())
+					// Join every refresh before counting; a reply alone is not a barrier.
+					b.workers.Wait()
+					assertFooterCalls(t, list, interval+1)
+				}
+				clock.Advance(500 * time.Millisecond)
+				var readers sync.WaitGroup
+				for range 40 {
+					readers.Go(func() { b.footerTree(t.Context()) })
+				}
+				readers.Wait()
+				b.workers.Wait()
+				assertFooterCalls(t, list, interval+2)
+			}
+		})
+	}
+}
+
+func assertFooterCalls(t *testing.T, list *fake.Handler[apicontract.RunListArgs, apicontract.RunPage], want int) {
+	t.Helper()
 	inputs, _, calls := list.Observed()
-	if calls != 1 || inputs[0].Limit != footerRuns {
-		t.Fatalf("a fresh footer read the server again: %d %+v", calls, inputs)
+	if calls != want || len(inputs) != want {
+		t.Fatalf("footer cache/rate bound: got %d calls and %d inputs, want %d", calls, len(inputs), want)
 	}
-	clock.Advance(footerRefresh)
-	footerReply(t, p, "r3")
-	deadline := time.Now().Add(2 * time.Second)
-	for _, _, calls = list.Observed(); calls != 2 && time.Now().Before(deadline); _, _, calls = list.Observed() {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if calls != 2 {
-		t.Fatalf("a stale footer was not refreshed: %d", calls)
+	for _, input := range inputs {
+		if input.Limit != footerRuns {
+			t.Fatalf("footer list limit: got %d, want %d", input.Limit, footerRuns)
+		}
 	}
 }
 
