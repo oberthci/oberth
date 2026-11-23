@@ -58,6 +58,9 @@ type Publication struct {
 	// before the ref can move: a delivered fast-forward's CI result is ordered
 	// right after it. The stores keep it; no view shows it.
 	CIAfter int64 `json:"-"`
+	// ReadBack marks a resumed invocation of an interrupted attempt. It does
+	// not advance the durable attempt count and is never stored or sent.
+	ReadBack bool `json:"-"`
 }
 
 func (v Publication) Clone() Publication {

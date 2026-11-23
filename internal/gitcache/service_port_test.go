@@ -35,14 +35,16 @@ func TestPublishExactCreateRetryAndRunlessDeletion(t *testing.T) {
 	ref := "refs/heads/topic"
 	f.Git(t, f.Store(), "update-ref", ref, f.Commit)
 	r := publicationFor(f, ref, f.Commit, "")
-	for range 2 {
+	for attempt := 1; attempt <= 2; attempt++ {
+		r.Attempts = attempt
 		if receipt, err := c.Publish(t.Context(), r); err != nil || receipt.ActionReceipt != r.ID {
 			t.Fatal(receipt, err)
 		}
 	}
 	f.Git(t, f.Store(), "update-ref", "-d", ref)
 	r = publicationFor(f, ref, "", f.Commit)
-	for range 2 {
+	for attempt := 1; attempt <= 2; attempt++ {
+		r.Attempts = attempt
 		if _, err := c.Publish(t.Context(), r); err != nil {
 			t.Fatal("deletion/retry", err)
 		}
@@ -74,6 +76,8 @@ func TestPublishDistinguishesLocalUpstreamUnknownAndOutage(t *testing.T) {
 	if _, err = c.Publish(t.Context(), r); err == nil {
 		t.Fatal("unknown predecessor accepted")
 	}
+	// Isolate the forge outage from the preceding local-head refusal.
+	f.Git(t, f.Store(), "update-ref", ref, next)
 	if err = os.Rename(f.Bare, f.Bare+".offline"); err != nil {
 		t.Fatal(err)
 	}

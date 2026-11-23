@@ -91,14 +91,16 @@ func (c *Cache) publishIntent(ctx context.Context, p string, remote Remote, r mo
 	if err := c.publicationDefault(ctx, remote, r); err != nil {
 		return err
 	}
-	held, err := c.forgeHolds(ctx, p, remote, r)
-	if err != nil || held {
+	if r.Attempts > 1 || r.ReadBack {
+		held, err := c.forgeHolds(ctx, p, remote, r)
+		if err != nil || held {
+			return err
+		}
+	}
+	if err := c.lock(ctx, p); err != nil {
 		return err
 	}
-	if err = c.lock(ctx, p); err != nil {
-		return err
-	}
-	err = c.checkIntent(ctx, p, r, remote.DefaultBranch)
+	err := c.checkIntent(ctx, p, r, remote.DefaultBranch)
 	c.unlock(p)
 	if err != nil {
 		return err

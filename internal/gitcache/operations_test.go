@@ -81,10 +81,13 @@ func TestPromotionRetainsExactResultAndRejectsChangedTarget(t *testing.T) {
 	if !strings.Contains(kept, "/promotion-") {
 		t.Fatal("unretained promotion")
 	}
-	if _, err = c.Publish(t.Context(), promotionPublication(f, result)); err != nil {
+	intent := promotionPublication(f, result)
+	intent.Attempts = 1
+	if _, err = c.Publish(t.Context(), intent); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.Publish(t.Context(), promotionPublication(f, result)); err != nil {
+	intent.Attempts = 2
+	if _, err = c.Publish(t.Context(), intent); err != nil {
 		t.Fatal(err)
 	}
 	f.Git(t, f.Work, "checkout", "main")
@@ -94,7 +97,8 @@ func TestPromotionRetainsExactResultAndRejectsChangedTarget(t *testing.T) {
 	if changed == result.Result.CommitSHA {
 		t.Fatal("no target change")
 	}
-	if _, err = c.Publish(t.Context(), promotionPublication(f, result)); err == nil {
+	intent.Attempts = 3
+	if _, err = c.Publish(t.Context(), intent); err == nil {
 		t.Fatal("changed target accepted")
 	}
 }

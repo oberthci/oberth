@@ -165,6 +165,7 @@ func (s *Service) alreadyReleased(ctx context.Context, p model.Publication) (boo
 }
 func (s *Service) pushAttempt(ctx context.Context, p model.Publication) (string, error) {
 	var err error
+	readBack := p.ReadBack
 	if p.PreviousSHA == nil {
 		previous := ""
 		if !strings.HasPrefix(p.Ref, "refs/tags/") {
@@ -179,6 +180,8 @@ func (s *Service) pushAttempt(ctx context.Context, p model.Publication) (string,
 			return "", err
 		}
 	}
+	// Binding reloads durable facts; keep this invocation's recovery mode.
+	p.ReadBack = readBack
 	receipt, err := s.c.MovingGit.Publish(ctx, p)
 	var moved *gitport.RefMovedError
 	if errors.As(err, &moved) {

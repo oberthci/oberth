@@ -162,7 +162,7 @@ func publicationBranchCases() []publicationCase {
 	return []publicationCase{
 		{name: "create", class: "ok"},
 		{name: "identical retry", class: "ok",
-			noPush: true, change: func(t *testing.T, p *publishFixture) { p.upstream(t, p.next) }},
+			noPush: true, change: func(t *testing.T, p *publishFixture) { p.intent.Attempts = 2; p.upstream(t, p.next) }},
 		{name: "upstream moved", class: "moved(upstream)", change: func(t *testing.T, p *publishFixture) {
 			p.upstream(t, p.f.Commit)
 			p.predecessor(p.unrelated)
@@ -201,7 +201,7 @@ func publicationTagCases() []publicationCase {
 	return []publicationCase{
 		{name: "annotated tag create", class: "ok", change: func(_ *testing.T, p *publishFixture) { p.releaseTag() }},
 		{name: "tag already exists before push", class: "already-exists", noPush: true,
-			change: func(t *testing.T, p *publishFixture) { p.releaseTag(); p.upstream(t, p.oldTag) }},
+			change: func(t *testing.T, p *publishFixture) { p.intent.Attempts = 2; p.releaseTag(); p.upstream(t, p.oldTag) }},
 		{name: "tag move", class: "refused",
 			noPush: true, change: func(t *testing.T, p *publishFixture) {
 				p.releaseTag()

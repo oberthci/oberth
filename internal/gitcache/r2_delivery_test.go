@@ -135,7 +135,8 @@ func TestPromotionResultPublishesAfterRestartAndRetries(t *testing.T) {
 	c = reviewNew(t, cfg)
 	r := publicationFor(f, p.Result.Name, p.Result.ObjectSHA, f.Commit)
 	r.PromotionID = p.Request.ActionReceipt
-	for range 2 {
+	for attempt := 1; attempt <= 2; attempt++ {
+		r.Attempts = attempt
 		if _, err = c.Publish(t.Context(), r); err != nil {
 			t.Fatal("prepared result/retry lost", err)
 		}

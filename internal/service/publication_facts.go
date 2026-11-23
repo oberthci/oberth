@@ -156,6 +156,7 @@ func (s *Service) recoverPublication(ctx context.Context, p model.Publication) e
 	}
 	remote, err := s.remoteRef(ctx, p.Repo, p.Ref)
 	if err == nil && remote.ObjectSHA == p.ObjectSHA {
+		p.ReadBack = true
 		if p.PreviousSHA == nil {
 			_, err = s.pushAttempt(ctx, p)
 			return err

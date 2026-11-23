@@ -113,7 +113,9 @@ func TestPublicationCacheWaitsForPendingReceive(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := f.Git(t, f.Store(), "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/", "refs/tags/")
-	_, err = c.Publish(t.Context(), promotionPublication(f, p))
+	intent := promotionPublication(f, p)
+	intent.Attempts = 1
+	_, err = c.Publish(t.Context(), intent)
 	requireBehindReceive(t, err)
 	if after := f.Git(t, f.Store(), "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/", "refs/tags/"); after != before {
 		t.Fatal("publication changed the pending receive inventory", before, after)
@@ -124,7 +126,8 @@ func TestPublicationCacheWaitsForPendingReceive(t *testing.T) {
 	if err = c.ReplayPending(t.Context(), func(context.Context, gitcache.ReceiveEvent) ([]string, error) { return nil, nil }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.Publish(t.Context(), promotionPublication(f, p)); err != nil {
+	intent.Attempts = 2
+	if _, err = c.Publish(t.Context(), intent); err != nil {
 		t.Fatal(err)
 	}
 	assertAdvertisement(t, c, p.Result.CommitSHA)
