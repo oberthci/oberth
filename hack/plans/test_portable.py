@@ -1,5 +1,6 @@
 """Negative controls for a reference-free plan bundle."""
 import json
+import os
 from pathlib import Path
 import runpy
 import tempfile
@@ -13,6 +14,17 @@ PARITY = runpy.run_path(str(Path(__file__).with_name("parity.py")))
 
 
 class PortableTests(unittest.TestCase):
+    def test_go_runner_uses_tool_modfile_without_changing_product_environment(self):
+        with mock.patch.dict(os.environ, {"OBERTH_TOOLS_MODFILE": "/reviewed/main.mod",
+                                        "GOFLAGS": "-mod=vendor", "GOWORK": "/branch/go.work"}):
+            with mock.patch.object(PARITY["subprocess"], "check_output", return_value="[]") as run:
+                PARITY["run"]("go", "run", "-p=1", "scan.go")
+            args, options = run.call_args
+            self.assertEqual(["go", "run", "-modfile=/reviewed/main.mod", "-p=1", "scan.go"], args[0])
+            self.assertEqual("off", options["env"]["GOWORK"])
+            self.assertEqual("-mod=readonly -p=2 -buildvcs=false", options["env"]["GOFLAGS"])
+            self.assertEqual("-mod=vendor", os.environ["GOFLAGS"])
+
     def test_standalone_check_never_invokes_git_or_go(self):
         with mock.patch.object(PARITY["subprocess"], "check_output", side_effect=AssertionError("external command")):
             result = portable.check(PARITY)

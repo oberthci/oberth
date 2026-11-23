@@ -60,6 +60,8 @@ create) printf '%s\\n' "$@" > "$GATE_COMMANDS"; printf 'gate-test-container\\n' 
 cp) case $2 in
     */tooling.tar) cp "$2" "$GATE_ARCHIVE" ;;
     */source.bundle) cp "$2" "$GATE_BUNDLE" ;;
+    */go.mod) cp "$2" "$GATE_MAIN_MOD" ;;
+    */go.sum) cp "$2" "$GATE_MAIN_SUM" ;;
     esac ;;
 start) exit "${GATE_FAKE_START_STATUS:-0}" ;;
 esac
@@ -78,28 +80,34 @@ esac
                  "OBERTH_GUARDS_NAMES_FILE": os.environ.get("OBERTH_GUARDS_NAMES_FILE", str(self.names)),
                  "GATE_ARCHIVE": str(self.fixture / "trusted.tar"),
                  "GATE_BUNDLE": str(self.fixture / "source.bundle"),
+                 "GATE_MAIN_MOD": str(self.fixture / "trusted.mod"),
+                 "GATE_MAIN_SUM": str(self.fixture / "trusted.sum"),
                  "GATE_COMMANDS": str(self.fixture / "commands")},
             text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         self.assertEqual(list(self.fixture.glob("gate.*")), [])
         return result
 
-    def run_vm_script(self, status=0, make_body=""):
+    def run_vm_script(self, status=0, make_body="", real_make=False, timeout=30):
         make = self.bin_path / "make"
-        make.write_text('#!/usr/bin/env bash\nprintf "%s %s\\n" "$PWD" "$*" >> "$GATE_CHECKS"\n'
-                        + make_body + 'exit "${GATE_MAKE_STATUS:-0}"\n')
-        make.chmod(0o755)
+        if not real_make:
+            make.write_text('#!/usr/bin/env bash\nprintf "%s %s\\n" "$PWD" "$*" >> "$GATE_CHECKS"\n'
+                            + make_body + 'exit "${GATE_MAKE_STATUS:-0}"\n')
+            make.chmod(0o755)
         vm = Path(self.enterContext(tempfile.TemporaryDirectory(dir=self.fixture.parent)))
+        for suffix in ("mod", "sum"):
+            shutil.copyfile(self.fixture / ("trusted." + suffix), vm / ("trusted." + suffix))
         command = (self.fixture / "commands").read_text()
         script = command.split("bash\n-ec\n", 1)[1].rsplit("\ngate\n", 1)[0]
         paths = {"/source.bundle": self.fixture / "source.bundle", "/tooling.tar": self.fixture / "trusted.tar",
                  "/repo.git": vm / "repo.git", "/src": vm / "src", "/branch": vm / "branch",
-                 "/go/tmp": vm / "tmp", "/guard-names.txt": self.names}
+                 "/go/tmp": vm / "tmp", "/guard-names.txt": self.names,
+                 "/trusted.mod": vm / "trusted.mod", "/trusted.sum": vm / "trusted.sum"}
         script = re.sub("|".join(map(re.escape, paths)), lambda match: shlex.quote(str(paths[match[0]])), script)
         result = subprocess.run(["bash", "-ec", script, "gate", self.git("rev-parse", "HEAD").decode().strip(),
                                  command.splitlines()[-3], self.fixture.name, self.fixture.name],
             cwd=self.fixture, env={**os.environ, "PATH": f"{self.bin_path}:{os.environ['PATH']}",
                 "GATE_CHECKS": str(vm / "checks"), "GATE_MAKE_STATUS": str(status), "OBERTH_PARITY_TARGET_FILE": ""},
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False, timeout=30)
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False, timeout=timeout)
         return result, vm
 
     def check_trusted_tools(self, files, addition=None):

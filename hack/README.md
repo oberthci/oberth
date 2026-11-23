@@ -51,10 +51,13 @@ Added root Python files are listed too. Trusted Python entries and their child
 commands use isolated mode, so branch-root modules and Python environment paths
 cannot replace the interpreter's runner or imports. Plan helpers load by their
 restored file paths; discovery adds the restored test directories.
-Main's `go.mod` and `go.sum` supply trusted tool dependencies. Those commands
-set `GOWORK=off` and `GOFLAGS=-mod=readonly`. Module and workspace changes are
-listed, including `go.work.sum`. The separate branch check uses its own module
-files and workspace.
+The product keeps the branch's module files for tests, vet, lint and UI builds.
+The gate copies main's module pair outside that checkout and passes it through
+`OBERTH_TOOLS_MODFILE`. Guard, names, plan and self-test tool builds use that
+explicit `-modfile`, with `GOWORK=off` and readonly dependencies. Standalone
+tools use the current checkout's module pair. Lint and deadcode retain their
+own tool modules. Module and workspace changes are listed, including
+`go.work.sum`. The separate branch check uses its own module files and workspace.
 The Go image pinned in `hack/devloop/Dockerfile` must already be present in the
 development VM. Python, Git and SSH are included in that image. Missing tools
 belong in the VM image bootstrap, rather than an interactive container change.

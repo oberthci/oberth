@@ -10,6 +10,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/"hack"))
 import history
+from tools import go_tool as GO
 MESSAGES = json.loads(Path(__file__).with_name("messages.json").read_text())
 RULE = re.compile(r"^.+:\d+: \[([A-Z][A-Z0-9-]*)\](?: |$)")
 KEYWORDS = re.compile(r"keywords: \[([A-Z, ]+)\]")
@@ -24,7 +25,7 @@ def finding(rule, file=".", line=1, detail=""):
     return f"{file}:{line}: [{rule}] {reason} {remedy}" + (f" Detail: {detail}" if detail else "")
 
 def command(args, data=None, binary=False):
-    result = subprocess.run(args, input=data, text=not binary, capture_output=True, check=False)
+    result = subprocess.run(args, input=data, text=not binary, capture_output=True, check=False, env=GO.environment() if args[0] == "go" else None)
     if result.returncode: result.stdout += result.stderr
     return result
 
@@ -73,8 +74,7 @@ def names(ref=""):
         raise NamesError from None
 
 def name_rows(ref):
-    external = os.environ.get("OBERTH_GUARDS_NAMES_FILE")
-    if not external: return [finding("NAME-POLICY")]
+    if not (external := os.environ.get("OBERTH_GUARDS_NAMES_FILE")): return [finding("NAME-POLICY")]
     file = Path(external).resolve(strict=True)
     root = Path(checked_bytes(["git", "rev-parse", "--show-toplevel"]).decode().strip()).resolve()
     if file.is_relative_to(root): return [finding("NAME-POLICY", detail="Names file must resolve outside the repository.")]
@@ -101,7 +101,7 @@ def name_rows(ref):
         elif allowed(name) and name.endswith((".json", ".yaml", ".yml")) and (metadata.startswith("100") if ref else (root/name).is_file()):
             raw = checked_bytes(["git","cat-file","blob",metadata.split()[2]]) if ref else (root/name).read_bytes()
             if name.endswith((".yaml", ".yml")):
-                raw = checked_bytes(["go", "-C", str(ROOT), "run", "-p=2", "-buildvcs=false", "./hack/guards", "--yaml"], raw)
+                raw = checked_bytes(["go", "-C", str(ROOT), *GO.args(ROOT, "run", "-p=2", "-buildvcs=false", "./hack/guards", "--yaml")[1:]], raw)
             if history.structured_credit(raw,host): rows.append(finding("CREDIT",place))
     document, depth, fence, seen = "", 0, "", False
     for name, line, text in name_matches(head,ref,terms):
@@ -182,7 +182,7 @@ def analysis():
     passed, notes = walk_result(steps)
     os.environ.update(OBERTH_GUARDS_WALK_STEPS=steps, OBERTH_GUARDS_WALK_PASSED=passed)
     module = command(["go", "list", "-m"]).stdout.strip()
-    result = command(["go", "run", "-p=2", "-buildvcs=false", "./hack/guards", module], tracked)
+    result = command(GO.args(ROOT, "run", "-p=2", "-buildvcs=false", "./hack/guards", module), tracked)
     try:
         report = json.loads(result.stdout.partition("\n")[0])
         return module, dict(report, Lines=notes + report["Lines"])

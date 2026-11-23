@@ -44,8 +44,6 @@ fi
 next_phase tooling
 tool_paths=(
     Makefile
-    go.mod
-    go.sum
     .golangci.yml
     hack/README.md
     hack/check.sh
@@ -98,7 +96,7 @@ tool_paths=(
     hack/guards/test_run.py
 )
 changed=$({
-    git diff --name-only main "$head" -- "${tool_paths[@]}" docs/plans hack/guards hack/plans hack/devloop hack/base-image go.work go.work.sum
+    git diff --name-only main "$head" -- "${tool_paths[@]}" docs/plans hack/guards hack/plans hack/devloop hack/base-image go.mod go.sum go.work go.work.sum
     git diff --no-renames --diff-filter=A --name-only main "$head" -- hack ':(top,glob)*.py'
 } | LC_ALL=C sort -u | paste -sd ' ' -)
 for file in "${tool_paths[@]}"; do
@@ -107,6 +105,8 @@ done
 scratch=$(mktemp -d "$GOTMPDIR/gate.XXXXXX")
 run git archive --output="$scratch/tooling.tar" main -- "${tool_paths[@]}" docs/plans hack/guards hack/plans
 run tar -xf "$scratch/tooling.tar" -C "$scratch"
+git show main:go.mod > "$scratch/go.mod"
+git show main:go.sum > "$scratch/go.sum"
 next_phase history
 run python3 -I "$scratch/hack/history.py" "$head"
 next_phase names
@@ -114,7 +114,7 @@ next_phase names
 if git cat-file -e main:test/parity 2>/dev/null && ! git cat-file -e "$head:test/parity" 2>/dev/null; then
     printf 'FAIL: parity harness was removed; restore test/parity\n' >&2; exit 1
 fi
-run env GOWORK=off GOFLAGS=-mod=readonly python3 -I "$scratch/hack/guards/run.py" names "$head"
+run env OBERTH_TOOLS_MODFILE="$scratch/go.mod" python3 -I "$scratch/hack/guards/run.py" names "$head"
 next_phase prepare
 linter=$(command -v "${GOLANGCI_LINT:-golangci-lint}")
 test_git=$(command -v "${OBERTH_TEST_GIT:-git}")
@@ -140,7 +140,7 @@ container=$("${docker[@]}" create --cpus 6 --memory 7681m --pids-limit 512 --cap
     -e GOCACHE=/go/cache -e GOTMPDIR=/go/tmp -e GOMAXPROCS=6 -e OBERTH_GUARDS_NAMES_FILE=/guard-names.txt \
     -e OBERTH_TEST_GIT=/usr/local/bin/oberth-test-git "$image" \
     bash -ec 'mkdir -p /go/tmp
-        chown "$(id -u):$(id -g)" /guard-names.txt
+        chown "$(id -u):$(id -g)" /guard-names.txt /trusted.mod /trusted.sum
         git -c init.defaultBranch=main clone -q --bare /source.bundle /repo.git
         git --git-dir=/repo.git worktree add -q --detach /src "$1"
         cd /src
@@ -166,9 +166,9 @@ container=$("${docker[@]}" create --cpus 6 --memory 7681m --pids-limit 512 --cap
             printf "gate: phase=%s seconds=%s status=%s\n" "$phase" "$((SECONDS-started))" "$status"
             return "$status"
         }
-        timed check env GOWORK=off GOFLAGS=-mod=readonly make -f Makefile check
-        if [[ -n $2 ]]; then timed lint-selftest env GOWORK=off GOFLAGS=-mod=readonly make -f Makefile lint-selftest; fi
-        timed parity env GOWORK=off GOFLAGS=-mod=readonly bash hack/parity.sh
+        timed check env OBERTH_TOOLS_MODFILE=/trusted.mod make -f Makefile check
+        if [[ -n $2 ]]; then timed lint-selftest env OBERTH_TOOLS_MODFILE=/trusted.mod make -f Makefile lint-selftest; fi
+        timed parity env OBERTH_TOOLS_MODFILE=/trusted.mod bash hack/parity.sh
         if [[ -n $2 ]]; then
             git --git-dir=/repo.git worktree add -q --detach /branch "$1"
             cd /branch
@@ -179,6 +179,8 @@ container=$("${docker[@]}" create --cpus 6 --memory 7681m --pids-limit 512 --cap
     gate "$head" "$changed" "$(git config user.name)" "$(git config user.email)")
 run "${docker[@]}" cp "$scratch/source.bundle" "$container:/source.bundle"
 run "${docker[@]}" cp "$scratch/tooling.tar" "$container:/tooling.tar"
+run "${docker[@]}" cp "$scratch/go.mod" "$container:/trusted.mod"
+run "${docker[@]}" cp "$scratch/go.sum" "$container:/trusted.sum"
 run "${docker[@]}" cp "$linter" "$container:/usr/local/bin/golangci-lint"
 run "${docker[@]}" cp "$test_git" "$container:/usr/local/bin/oberth-test-git"
 run "${docker[@]}" cp -L "$OBERTH_GUARDS_NAMES_FILE" "$container:/guard-names.txt"

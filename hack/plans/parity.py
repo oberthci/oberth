@@ -21,6 +21,7 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
+GO = runpy.run_path(str(ROOT / "hack/tools/go_tool.py"))
 BASE = "5e1200a2"
 REFERENCE = ROOT
 ROWS = collections.defaultdict(dict)
@@ -68,6 +69,9 @@ def guard_names(value):
 
 
 def run(*args):
+    if args[:2] == ("go", "run"):
+        return subprocess.check_output(GO["args"](ROOT, *args[1:]), cwd=REFERENCE,
+            env={**GO["environment"](), "GOMAXPROCS": "1"}, text=True)
     return subprocess.check_output(args, cwd=REFERENCE, env={**os.environ, "GOMAXPROCS": "1"}, text=True)
 
 

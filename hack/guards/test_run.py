@@ -200,7 +200,7 @@ class TextGuards(RepositoryFixture):
     def test_policy_error_fixture_edits_its_copies_of_a_read_only_checkout(self):
         # A pipeline step receives the checkout with read-only files.
         checkout = Path(self.enterContext(tempfile.TemporaryDirectory(dir=self.root.parent)))
-        for name in ("docs/plans", "hack/plans"):
+        for name in ("docs/plans", "hack/plans", "hack/tools"):
             shutil.copytree(GUARDS.ROOT/name, checkout/name, ignore=shutil.ignore_patterns("__pycache__"))
         for path in [*checkout.rglob("*"), checkout]:
             path.chmod(path.stat().st_mode & ~0o222)
@@ -210,7 +210,7 @@ class TextGuards(RepositoryFixture):
         for key, mutation in (("deny_packages", lambda d: d.update(deny_packages=[])),
                               ("rules.4.effect", lambda d: d["rules"][3].update(effect="typo"))):
             with self.subTest(key=key):
-                for name in ("docs/plans", "hack/plans"):
+                for name in ("docs/plans", "hack/plans", "hack/tools"):
                     shutil.copytree(checkout/name, self.root/name, dirs_exist_ok=True, copy_function=shutil.copyfile)
                 path = self.root/"docs/plans/dependencies.json"
                 data = json.loads(path.read_text()); mutation(data); path.write_text(json.dumps(data))
