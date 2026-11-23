@@ -30,6 +30,7 @@ func (s *flowSession) validateDocument(path string, document []byte) error {
 		return err
 	}
 	r := admissioncontract.PrepareRequest{Mode: admissioncontract.ModeInspect, SelectedFile: selected, Document: document, Trigger: model.TriggerBranch}
+	r.Repository, _ = s.git("config", "--local", "--get", "oberth.repository")
 	if release {
 		r.Trigger = model.TriggerTag
 	}
@@ -47,12 +48,6 @@ func (s *flowSession) validateDocument(path string, document []byte) error {
 		view := prepared.View()
 		result.Plan = &view.Plan
 		result.Needs = append(result.Needs, view.Findings...)
-	}
-	for i := range result.Needs {
-		if result.Needs[i].Code == "live" {
-			result.Needs[i].Reason = "not checked offline"
-			result.Needs[i].Remedy = "Run oberth check to verify live identity, templates and grants."
-		}
 	}
 	if outputErr := s.validationOutput(result); outputErr != nil {
 		return outputErr

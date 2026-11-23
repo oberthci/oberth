@@ -9392,13 +9392,13 @@
   "spec_sha256": {
     "docs/plans/c1-transport-and-tool-registry.md": "5659221f8d8ac6a3cb99a77d91911ef0e4bd7bda289d047cc0a5beec24b8d17b",
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
-    "docs/plans/c11-cli-and-server-composition.md": "10389ddb770d112412b31c2968478402d82504406b6bfbf8998fa364d38d631f",
+    "docs/plans/c11-cli-and-server-composition.md": "44c6e7415544c0e51dbf1b49b99a13522fe74cbafa05fb5cfd3326637d4ed077",
     "docs/plans/c12-agent-client.md": "6f9982b9d0dd25d4cff808ecaa40a5c9d0d56213034d5aadf801982a04c59ad6",
     "docs/plans/c13-own-pipelines.md": "755b357ff582a3d9ab48d1afd1847c55c2ff0620870ee4bcc502fbc424480900",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
     "docs/plans/c2-service-actions-and-history.md": "fc9d4adfa87fd77a4f7c75e4b5e089372a7a72400a073164435ec6b2f126183e",
     "docs/plans/c3-wiring-and-submission.md": "55f3b41b47272bb59ba18656873387f64c1ca7e3e689afc2efd704819a531931",
-    "docs/plans/c4-admission-rules-and-plan.md": "bd96674c7787fe19912563afe3724fce1dc98f0ad17177e8a7f1604b48973210",
+    "docs/plans/c4-admission-rules-and-plan.md": "9c29dfb7bdb5b34200f9abc83acb0fb666bff4939a8776dbd37ebeea9cab0327",
     "docs/plans/c5-native-execution.md": "428c4f0a86159289933cc982fae94311e0d56fb1e4a21c085ba7684fadba6d1c",
     "docs/plans/c6-source-delivery.md": "df8d5ccd0bad9f23077e3e1d8b625f5d4acac35e2656dde2c2d9edf27ebb5424",
     "docs/plans/c7-durable-state.md": "0fce03bf6385083ed86ecc5bc1afe7c9105aaea5154b9e83788911c3d6a07c9a",
@@ -10382,7 +10382,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "`validate [file]` reports its offline scope even in a bound checkout; deferred template references and live facts point to `oberth check`, without claiming missing authorization. **Delta:** add `check [ref] [--repo <canonical-repository>] [--local <path>] [-o json]`, calling `run_check`; it creates no run, Workflow, token or grant declaration. It shares C3/C4's routing and prepared admission path, reports identity, grants, source, authored storage/deadlines and enabled optional policy, and preserves unknown observations. It makes no scheduling or resource prediction. Use the same shared plan model for offline and live checks. `init` authors source input and Pod-local scratch and writes the portable source-trust setting explicitly, commented as redundant with C5’s automatic hook. Examples and the migration guide show the same setting explicitly.",
+      "basis": "`validate [file]` reports its offline scope and fills the bound repository in its commands; deferred template references and live facts point to `oberth check`, without claiming missing authorization. **Delta:** add `check [ref] [--repo <canonical-repository>] [--local <path>] [-o json]`, calling `run_check`; it creates no run, Workflow, token or grant declaration. It shares C3/C4's routing and prepared admission path, reports identity, grants, source, authored storage/deadlines and enabled optional policy, and preserves unknown observations. It makes no scheduling or resource prediction. Use the same shared plan model for offline and live checks. `init` authors source input and Pod-local scratch and writes the portable source-trust setting explicitly, commented as redundant with C5’s automatic hook. Examples and the migration guide show the same setting explicitly.",
       "rows": [
         {
           "category": "CLI commands",
@@ -10392,7 +10392,7 @@
           "approval": "owner-approved D7",
           "owner": "C11",
           "behavior": "check [ref] --repo <repository> [--local <path>] [--json] calls run_check; C4 is the sole validator",
-          "basis": "`validate [file]` reports its offline scope even in a bound checkout; deferred template references and live facts point to `oberth check`, without claiming missing authorization. **Delta:** add `check [ref] [--repo <canonical-repository>] [--local <path>] [-o json]`, calling `run_check`; it creates no run, Workflow, token or grant declaration. It shares C3/C4's routing and prepared admission path, reports identity, grants, source, authored storage/deadlines and enabled optional policy, and preserves unknown observations. It makes no scheduling or resource prediction. Use the same shared plan model for offline and live checks. `init` authors source input and Pod-local scratch and writes the portable source-trust setting explicitly, commented as redundant with C5’s automatic hook. Examples and the migration guide show the same setting explicitly."
+          "basis": "`validate [file]` reports its offline scope and fills the bound repository in its commands; deferred template references and live facts point to `oberth check`, without claiming missing authorization. **Delta:** add `check [ref] [--repo <canonical-repository>] [--local <path>] [-o json]`, calling `run_check`; it creates no run, Workflow, token or grant declaration. It shares C3/C4's routing and prepared admission path, reports identity, grants, source, authored storage/deadlines and enabled optional policy, and preserves unknown observations. It makes no scheduling or resource prediction. Use the same shared plan model for offline and live checks. `init` authors source input and Pod-local scratch and writes the portable source-trust setting explicitly, commented as redundant with C5’s automatic hook. Examples and the migration guide show the same setting explicitly."
         },
         {
           "category": "CLI flags",
@@ -10402,7 +10402,7 @@
           "approval": "owner-approved D7",
           "owner": "C11",
           "behavior": "machine-readable run_check result",
-          "basis": "`validate [file]` reports its offline scope even in a bound checkout; deferred template references and live facts point to `oberth check`, without claiming missing authorization. **Delta:** add `check [ref] [--repo <canonical-repository>] [--local <path>] [-o json]`, calling `run_check`; it creates no run, Workflow, token or grant declaration. It shares C3/C4's routing and prepared admission path, reports identity, grants, source, authored storage/deadlines and enabled optional policy, and preserves unknown observations. It makes no scheduling or resource prediction. Use the same shared plan model for offline and live checks. `init` authors source input and Pod-local scratch and writes the portable source-trust setting explicitly, commented as redundant with C5’s automatic hook. Examples and the migration guide show the same setting explicitly."
+          "basis": "`validate [file]` reports its offline scope and fills the bound repository in its commands; deferred template references and live facts point to `oberth check`, without claiming missing authorization. **Delta:** add `check [ref] [--repo <canonical-repository>] [--local <path>] [-o json]`, calling `run_check`; it creates no run, Workflow, token or grant declaration. It shares C3/C4's routing and prepared admission path, reports identity, grants, source, authored storage/deadlines and enabled optional policy, and preserves unknown observations. It makes no scheduling or resource prediction. Use the same shared plan model for offline and live checks. `init` authors source input and Pod-local scratch and writes the portable source-trust setting explicitly, commented as redundant with C5’s automatic hook. Examples and the migration guide show the same setting explicitly."
         },
         {
           "category": "CLI flags",
@@ -10412,7 +10412,7 @@
           "approval": "owner-approved D7",
           "owner": "C11",
           "behavior": "optional local regular-file overlays",
-          "basis": "`validate [file]` reports its offline scope even in a bound checkout; deferred template references and live facts point to `oberth check`, without claiming missing authorization. **Delta:** add `check [ref] [--repo <canonical-repository>] [--local <path>] [-o json]`, calling `run_check`; it creates no run, Workflow, token or grant declaration. It shares C3/C4's routing and prepared admission path, reports identity, grants, source, authored storage/deadlines and enabled optional policy, and preserves unknown observations. It makes no scheduling or resource prediction. Use the same shared plan model for offline and live checks. `init` authors source input and Pod-local scratch and writes the portable source-trust setting explicitly, commented as redundant with C5’s automatic hook. Examples and the migration guide show the same setting explicitly."
+          "basis": "`validate [file]` reports its offline scope and fills the bound repository in its commands; deferred template references and live facts point to `oberth check`, without claiming missing authorization. **Delta:** add `check [ref] [--repo <canonical-repository>] [--local <path>] [-o json]`, calling `run_check`; it creates no run, Workflow, token or grant declaration. It shares C3/C4's routing and prepared admission path, reports identity, grants, source, authored storage/deadlines and enabled optional policy, and preserves unknown observations. It makes no scheduling or resource prediction. Use the same shared plan model for offline and live checks. `init` authors source input and Pod-local scratch and writes the portable source-trust setting explicitly, commented as redundant with C5’s automatic hook. Examples and the migration guide show the same setting explicitly."
         },
         {
           "category": "CLI flags",
@@ -10422,7 +10422,7 @@
           "approval": "owner-approved D7",
           "owner": "C11",
           "behavior": "canonical repository, required",
-          "basis": "`validate [file]` reports its offline scope even in a bound checkout; deferred template references and live facts point to `oberth check`, without claiming missing authorization. **Delta:** add `check [ref] [--repo <canonical-repository>] [--local <path>] [-o json]`, calling `run_check`; it creates no run, Workflow, token or grant declaration. It shares C3/C4's routing and prepared admission path, reports identity, grants, source, authored storage/deadlines and enabled optional policy, and preserves unknown observations. It makes no scheduling or resource prediction. Use the same shared plan model for offline and live checks. `init` authors source input and Pod-local scratch and writes the portable source-trust setting explicitly, commented as redundant with C5’s automatic hook. Examples and the migration guide show the same setting explicitly."
+          "basis": "`validate [file]` reports its offline scope and fills the bound repository in its commands; deferred template references and live facts point to `oberth check`, without claiming missing authorization. **Delta:** add `check [ref] [--repo <canonical-repository>] [--local <path>] [-o json]`, calling `run_check`; it creates no run, Workflow, token or grant declaration. It shares C3/C4's routing and prepared admission path, reports identity, grants, source, authored storage/deadlines and enabled optional policy, and preserves unknown observations. It makes no scheduling or resource prediction. Use the same shared plan model for offline and live checks. `init` authors source input and Pod-local scratch and writes the portable source-trust setting explicitly, commented as redundant with C5’s automatic hook. Examples and the migration guide show the same setting explicitly."
         }
       ]
     },

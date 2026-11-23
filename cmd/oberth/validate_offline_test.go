@@ -15,12 +15,23 @@ import (
 func TestValidateBoundRepositoryExplainsOfflineEvidence(t *testing.T) {
 	for _, jsonOutput := range []bool{false, true} {
 		t.Run(map[bool]string{false: "text", true: "json"}[jsonOutput], func(t *testing.T) {
-			validateBoundRepository(t, jsonOutput)
+			validateBoundRepository(t, jsonOutput, []byte(starterWorkflow()))
 		})
 	}
 }
 
-func validateBoundRepository(t *testing.T, jsonOutput bool) {
+func TestValidateSecretBoundRepositoryExplainsOfflineEvidence(t *testing.T) {
+	for _, jsonOutput := range []bool{false, true} {
+		t.Run(map[bool]string{false: "text", true: "json"}[jsonOutput], func(t *testing.T) {
+			output := validateBoundRepository(t, jsonOutput, validationGrantDocument(t))
+			if !strings.Contains(output, "credential grant is unverified") {
+				t.Fatal("secret grant was not identified as unchecked", output)
+			}
+		})
+	}
+}
+
+func validateBoundRepository(t *testing.T, jsonOutput bool, document []byte) string {
 	t.Helper()
 	bindings := fake.Bindings()
 	live := &fake.Handler[apicontract.RunCheckArgs, apicontract.RunCheckResult]{Value: apicontract.RunCheckResult{
@@ -38,7 +49,7 @@ func validateBoundRepository(t *testing.T, jsonOutput bool) {
 	if err := os.Mkdir(filepath.Join(app.directory, ".oberth"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(app.directory, path), []byte(starterWorkflow()), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(app.directory, path), document, 0600); err != nil {
 		t.Fatal(err)
 	}
 	args := []string{"validate", path}
@@ -52,35 +63,45 @@ func validateBoundRepository(t *testing.T, jsonOutput bool) {
 		t.Fatal("offline validation made live checks", calls)
 	}
 	assertOfflineValidationOutput(t, out.String(), jsonOutput)
+	validation := out.String()
 	out.Reset()
 	if code := app.run(t.Context(), []string{"check", "--local", path, "--json"}); code != 0 || !strings.Contains(out.String(), `"state":"verified"`) {
 		t.Fatal("bound live check lost verification", code, out.String(), diagnostic.String())
 	}
+	return validation
 }
 
 func assertOfflineValidationOutput(t *testing.T, output string, jsonOutput bool) {
 	t.Helper()
 	if jsonOutput {
-		var result validationResult
-		if err := json.Unmarshal([]byte(output), &result); err != nil || !result.OK || len(result.Needs) == 0 {
-			t.Fatal(result, err)
-		}
-		for _, need := range result.Needs {
-			if need.Code == "live" {
-				assertOfflineLiveNeed(t, need.Reason, need.Remedy)
-			}
-		}
-	} else if !strings.Contains(output, "valid offline") || !strings.Contains(output, "oberth check --repo '<repo>' --local '.oberth/build.yaml'") {
+		assertOfflineValidationJSON(t, output)
+	} else if !strings.Contains(output, "valid offline") || !strings.Contains(output, "oberth check --repo 'source/team/widget' --local '.oberth/build.yaml'") {
 		t.Fatal("offline scope or live command missing", output)
 	}
-	if strings.Contains(output, "ask the operator") || strings.Contains(output, "before the first run") {
+	if strings.Contains(strings.ToLower(output), "ask the operator") || strings.Contains(output, "before the first run") {
 		t.Fatal("offline validation claimed missing authorization", output)
+	}
+}
+
+func assertOfflineValidationJSON(t *testing.T, output string) {
+	t.Helper()
+	var result validationResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil || !result.OK || len(result.Needs) == 0 {
+		t.Fatal(result, err)
+	}
+	for _, need := range result.Needs {
+		if need.Code == "live" || need.Code == "grant" {
+			assertOfflineLiveNeed(t, need.Reason, need.Remedy)
+		}
+		if strings.Contains(need.Command, "<repo>") {
+			t.Fatal("bound repository missing from command", need)
+		}
 	}
 }
 
 func assertOfflineLiveNeed(t *testing.T, reason, remedy string) {
 	t.Helper()
-	if !strings.Contains(reason, "offline") || !strings.Contains(remedy, "oberth check") || publicerr.CheckMessage(reason, 40) != nil || publicerr.CheckMessage(remedy, 120) != nil {
+	if !strings.Contains(reason, "offline") && !strings.Contains(reason, "unverified") || !strings.Contains(remedy, "oberth check") || publicerr.CheckMessage(reason, 40) != nil || publicerr.CheckMessage(remedy, 120) != nil {
 		t.Fatal("misleading live requirement", reason, remedy)
 	}
 }

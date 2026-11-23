@@ -17,9 +17,9 @@ The starter only prints a success message: it neither fetches source nor tests y
 it with your tests. `init` refuses overwrites without `--force`; `--release` changes only the
 destination to `.oberth/release.yaml`, adding no signing or publication. `validate` connects to no
 server. It runs push admission with placeholder server parameters and reports all refusals in
-file/field order. “Needs before the first run:” lists installation requirements and exact commands;
+file/field order. “Not checked offline:” lists unverified live facts and requirement commands;
 needs alone exit 0, refusals exit 1. `-o json` returns `refusals` and `needs`. Never define reserved
-parameters yourself. After [connecting](../README.md#first-green-build), check local build YAML:
+parameters. After [connecting](../README.md#first-green-build), use `check` for live verification:
 
 ```sh
 oberth check --local .oberth/build.yaml

@@ -41,8 +41,9 @@ func TestOfflineNeedsUseTheExactPushCommands(t *testing.T) {
 
 func offlineNeedMatchesPush(need, push admissioncontract.Finding) bool {
 	if push.Code == "store_config" {
-		return need.Code == "store_unverified" && need.Path == push.Path && need.Command == push.Command
+		push.Code = "store_unverified"
 	}
+	push.Reason, push.Remedy = need.Reason, need.Remedy
 	return need == push
 }
 

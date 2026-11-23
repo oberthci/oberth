@@ -32,6 +32,9 @@ func (g *graph) dedupeFindings() {
 	seen := map[admissioncontract.Finding]bool{}
 	unique := g.findings[:0]
 	for _, f := range g.findings {
+		if g.offlineValidation && g.offline() && f.Installation {
+			f = unverifiedFinding(f)
+		}
 		if !seen[f] {
 			unique = append(unique, f)
 			seen[f] = true

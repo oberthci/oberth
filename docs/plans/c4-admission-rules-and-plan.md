@@ -88,8 +88,8 @@ those definitions; they do not define rival DTOs.
   shared plan. the plan check and C1/C2 run views share the prepared result and the one
   step model. Explanation includes selected file/route, identities, required
   grants/audiences, source/cache destinations, authored resources and deadlines, helper
-  configuration and enabled optional hardening. Mark offline, snapshot-checked,
-  live-required and unknown facts explicitly; unknown is no pass. Public records use
+  configuration and enabled optional hardening. Mark offline, snapshot-checked, live-required and unknown facts explicitly;
+  offline grants, audiences, capabilities and live facts stay unverified until a live check. Unknown is no pass. Public records use
   snake_case. Use the Go names and JSON tags in [Shared
   contracts](README.md#shared-contracts), including nonserialized `Template`.
   `AdmissionError` preserves deterministic refusal causes; `TemplateReadError`

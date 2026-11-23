@@ -52,14 +52,19 @@ func nativeMessages() map[string]message {
 // grantMessages are the refusals of a field that needs an administrator grant.
 func grantMessages() map[string]message {
 	return map[string]message{
-		"shared_grant":      {"shared templates inherit no consumer grants", "Remove the selector or put this step in the repository file before granting it."},
-		"read":              {"field reads unapproved cluster data", "Remove the field, or ask the operator to grant this cluster object to this step."},
-		"grant":             {"credential declaration has no exact operator grant", "Ask the operator to approve this repository, file, step, path and exact audience."},
-		"pvc":               {"PVC has no repository grant", "Use an allowed repository PVC, or ask the operator for its exact CI or release grant."},
-		"device":            {"device resource has no step grant", "Remove the request, or ask the operator to grant this resource to this step."},
-		"device_inline":     {"inline step cannot hold a device grant", "Move this step to a named template, then ask the operator for its device grant."},
-		"resource_name":     {"resource name exceeds 317 bytes", "Use a qualified resource name of at most 317 bytes."},
-		"device_annotation": {"device annotations bypass device grants", "Remove the annotation; request the device under resources and ask for its device grant."},
+		"shared_grant":          {"shared templates inherit no consumer grants", "Remove the selector or put this step in the repository file before granting it."},
+		"read":                  {"field reads unapproved cluster data", "Remove the field, or ask the operator to grant this cluster object to this step."},
+		"grant":                 {"credential declaration has no exact operator grant", "Ask the operator to approve this repository, file, step, path and exact audience."},
+		"grant_unverified":      {"credential grant is unverified", "Verify this step's credential grant and exact audience with oberth check."},
+		"read_unverified":       {"cluster access grant is unverified", "Verify this step's cluster access grant with oberth check."},
+		"pvc_unverified":        {"PVC grant is unverified", "Verify this repository's PVC grant with oberth check."},
+		"device_unverified":     {"device grant is unverified", "Verify this step's device grant with oberth check."},
+		"capability_unverified": {"workflow capability is unverified", "Verify this workflow's resource capability with oberth check."},
+		"pvc":                   {"PVC has no repository grant", "Use an allowed repository PVC, or ask the operator for its exact CI or release grant."},
+		"device":                {"device resource has no step grant", "Remove the request, or ask the operator to grant this resource to this step."},
+		"device_inline":         {"inline step cannot hold a device grant", "Move this step to a named template, then ask the operator for its device grant."},
+		"resource_name":         {"resource name exceeds 317 bytes", "Use a qualified resource name of at most 317 bytes."},
+		"device_annotation":     {"device annotations bypass device grants", "Remove the annotation; request the device under resources and ask for its device grant."},
 	}
 }
 
@@ -110,6 +115,7 @@ func literalMessages() map[string]message {
 		"reference":             {"named namespaced template reference is required", "Use a literal namespaced templateRef and an existing named template."},
 		"cycle":                 {"shared template references contain a cycle", "Break the cycle containing a templateRef edge; local recursion is allowed."},
 		"live":                  {"live authorization evidence is required", "Run oberth check --repo <repo> <ref>; ask the operator to supply the reported account, template or grant."},
+		"live_unverified":       {"not checked offline", "Run oberth check to verify live identity, templates and grants."},
 		"binding":               {"run or source binding does not match the admitted input", "Prepare the exact repository, file, commit and source declarations again."},
 		"source":                {"source input declaration is invalid", "Use plugin oberth, the reserved key, an exact descriptor, mode 0755 and pin names of at most 128 bytes."},
 		"source_usage":          {"working directory requires the main source input", "Declare or forward the main source input, or cover the working directory with your own volume."},
@@ -128,6 +134,15 @@ func literalMessages() map[string]message {
 func finding(path, code string) admissioncontract.Finding {
 	m := messages()[code]
 	return admissioncontract.Finding{Path: path, Code: code, Reason: m.reason, Remedy: m.remedy}
+}
+
+// Offline validation has no live authority snapshot. Preserve the finding's code,
+// path and command, but use the catalogue's unchecked wording for live facts.
+func unverifiedFinding(f admissioncontract.Finding) admissioncontract.Finding {
+	if m, ok := messages()[f.Code+"_unverified"]; ok {
+		f.Reason, f.Remedy = m.reason, m.remedy
+	}
+	return f
 }
 
 // AdmissionError lists every independently diagnosable refusal in traversal order.
