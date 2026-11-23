@@ -17,6 +17,7 @@ func TestDocumentationStorageAndPlanContract(t *testing.T) {
 	}
 	text := strings.Join(strings.Fields(strings.ReplaceAll(string(raw), ",", "")), " ")
 	for _, fact := range []string{
+		"The single run cap is Argo `parallelism`",
 		"`volumeClaimTemplates`",
 		"The admitted plan is immutable",
 		"Pending entries exist before Pods start",
