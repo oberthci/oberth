@@ -22,7 +22,6 @@ func TestAdmissionTimeoutReleasesReceiveWithoutCallerDeadline(t *testing.T) {
 	t.Parallel()
 	f := gittest.New(t)
 	cfg := reviewConfig(t, f)
-	cfg.AdmissionTimeout = 150 * time.Millisecond
 	release, exited := make(chan struct{}), make(chan struct{})
 	source := make(chan *gitcache.ReceiveSource, 1)
 	var once sync.Once
@@ -49,6 +48,7 @@ func TestAdmissionTimeoutReleasesReceiveWithoutCallerDeadline(t *testing.T) {
 	if err := c.Init(t.Context(), gittest.Repository); err != nil {
 		t.Fatal(err)
 	}
+	restore := gitcache.SetAdmissionTimeout(c, 150*time.Millisecond)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	request := gateReceive(f)
@@ -69,6 +69,9 @@ func TestAdmissionTimeoutReleasesReceiveWithoutCallerDeadline(t *testing.T) {
 		t.Fatal("admission was not reached")
 	}
 	expectAdmissionCutoff(t, done, &diagnostics, cancel)
+	// Only the abandoned admission needs the short deadline. The follow-up
+	// checks that the same cache released the receive slot under its normal budget.
+	restore()
 	checkTimedOutAdmission(t, c, scoped, f)
 	observed := []int32{metrics.Load(), logs.Load(), aborts.Load()}
 	if ctx.Err() != nil || !slices.Equal(observed, []int32{1, 1, 1}) {
@@ -91,6 +94,9 @@ func checkTimedOutAdmission(t *testing.T, c *gitcache.Cache, scoped *gitcache.Re
 	request.Deliver = func(context.Context, gitcache.ReceiveEvent) ([]string, error) { return nil, nil }
 	if err := c.Receive(t.Context(), request); err != nil {
 		t.Fatal("next push was blocked by abandoned callback", err)
+	}
+	if got := f.Git(t, f.Store(), "rev-parse", "refs/heads/next"); got != f.Commit {
+		t.Fatal("next push did not move its ref", got)
 	}
 }
 
