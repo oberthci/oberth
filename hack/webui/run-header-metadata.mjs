@@ -9,7 +9,7 @@ export async function metadata(client) {
     document.documentElement.dataset.theme=${JSON.stringify(theme)};
     const run={...headerRuns[1],ref:${JSON.stringify(ref)}},header=document.querySelector('.run-head');
     header.replaceChildren(...runHeader(run,runActions(screen,run,[],[]),false));
-    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    fitRunHeader(header.firstElementChild);
     const region=header.querySelector('.run-metadata'),refNode=region.firstElementChild,rect=refNode.getBoundingClientRect(),meta=header.querySelector('.run-meta');
     return {text:refNode.innerText,first:refNode.className,width:rect.width,left:rect.left,right:rect.right,metaRight:meta.getBoundingClientRect().right,
      identity:!region.querySelector('.identity').hidden,origin:!region.querySelector('[aria-label="Started by"]').hidden,time:!region.querySelector('time').parentElement.hidden,

@@ -10,7 +10,7 @@ export async function wideCounts(client) {
     document.documentElement.dataset.theme=${JSON.stringify(theme)};
     const run={...headerRuns[1],step_count:140,passed:112,failed:3,pending:25,steps_planned_exact:false,started_at:new Date(Date.now()-(23*60+53)*60000).toISOString()};
     const header=document.querySelector('.run-head');header.replaceChildren(...runHeader(run,runActions(screen,run,[],[]),false));
-    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    fitRunHeader(header.firstElementChild);
     const summary=header.querySelector('.run-summary'),counts=header.querySelector('.run-counts'),button=summary.querySelector('button'),box=button.getBoundingClientRect(),bounds=summary.getBoundingClientRect();
     const parts=Array.from(counts.children).map(node=>{const range=document.createRange();range.selectNodeContents(node);const rect=range.getBoundingClientRect();return {left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,height:rect.height};});
     return {text:counts.textContent,duration:summary.querySelector('.duration').textContent,height:bounds.height,lineHeight:parseFloat(getComputedStyle(summary).lineHeight),button:{left:box.left,right:box.right,top:box.top,bottom:box.bottom,visible:document.elementFromPoint(box.x+box.width/2,box.y+box.height/2)===button},right:bounds.right,parts,

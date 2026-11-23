@@ -6,20 +6,21 @@ function runOrigin(run) {
  const parts = [run.trigger && run.trigger + (run.schedule_entry ? " " + run.schedule_entry : ""), run.rerun_of && "rerun of " + run.rerun_of.slice(0, 8), run.actor && "by " + run.actor, run.assist_requested && "assist requested"].filter(Boolean);
  return parts.join(" · ");
 }
-function runDetail(run, open) {
+function runDetail(run, open, origin) {
  return h("details", {open: open ? "" : null}, h("summary", {}, "Detail"), run.detail ? h("pre", {}, run.detail) : null,
-  h("pre", {class: "mono"}, ["Run ID: " + run.id, "Object ID: " + run.object_sha, "Commit ID: " + (run.commit_sha || "unknown"), run.repo + " · " + run.ref, runOrigin(run), fullTimes(run)].filter(Boolean).join("\n")), otherRuns(run));
+  h("pre", {class: "mono"}, ["Run ID: " + run.id, "Object ID: " + run.object_sha, "Commit ID: " + (run.commit_sha || "unknown"), run.repo + " · " + run.ref, origin, fullTimes(run)].filter(Boolean).join("\n")), otherRuns(run));
 }
 function otherRuns(run) { return h("a", {href: "/runs?" + params({repo: run.repo, ref: run.ref})}, "Other runs of this ref"); }
 function runHeader(run, actions, open) {
  const counts = [run.passed + "/" + (run.steps_planned_exact ? "" : ">=") + run.step_count + " passed", run.failed && run.failed + " failed", run.pending && run.pending + " pending"].filter(Boolean).map((text, index) => h("span", {}, (index ? " · " : "") + text));
+ const origin = runOrigin(run);
  const cancel = ["queued", "running"].includes(run.status) ? actions.querySelector("button") : null;
- const row = h("h1", {class: "run-summary", title: run.repo + " · " + run.ref}, state(run.status), clock(run), h("span", {class: "run-counts"}, counts), cancel);
+ const row = h("div", {class: "run-summary"}, h("h1", {title: run.repo + " · " + run.ref}, state(run.status)), clock(run), h("span", {class: "run-counts"}, counts), cancel);
  new ResizeObserver((_, observer) => { if (row.isConnected) fitRunHeader(row); else observer.disconnect(); }).observe(row);
  return [row,
   run.display_reason ? h("p", {class: "run-reason"}, run.failure ? h("b", {class: "failed-step"}, run.failure.failed_step_name || run.failure.failed_step) : null, run.display_reason) : null,
-  h("div", {class: "run-meta muted"}, h("div", {class: "run-metadata"}, h("span", {class: "run-ref"}, run.repo + " · " + refName(run.ref)), runIdentity(run), runOrigin(run) ? h("span", {class: "meta-extra", "aria-label": "Started by"}, " · " + runOrigin(run)) : null,
-   h("span", {class: "meta-extra"}, " · ", run.started_at ? "Started " : "Created ", h("time", {datetime: run.started_at || run.created_at, title: fullTimes(run)}, time(run.started_at || run.created_at)))), runDetail(run, open))].filter(Boolean);
+  h("div", {class: "run-meta muted"}, h("div", {class: "run-metadata"}, h("span", {class: "run-ref"}, run.repo + " · " + refName(run.ref)), runIdentity(run), origin ? h("span", {class: "meta-extra", "aria-label": "Started by"}, " · " + origin) : null,
+   h("span", {class: "meta-extra"}, " · ", run.started_at ? "Started " : "Created ", h("time", {datetime: run.started_at || run.created_at, title: fullTimes(run)}, time(run.started_at || run.created_at)))), runDetail(run, open, origin))].filter(Boolean);
 }
 function fitRunHeader(row) {
  const counts = row.querySelector(".run-counts"), gap = parseFloat(getComputedStyle(row).columnGap), countGap = parseFloat(getComputedStyle(counts).columnGap);

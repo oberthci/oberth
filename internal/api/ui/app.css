@@ -119,6 +119,7 @@ a.row:focus-visible { outline-offset: -2px; }
 .back:hover { color: var(--fg); border-color: var(--edge); text-decoration: none; }
 .run-head { padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; line-height: 22px; }
 .run-summary { margin: 0; font-size: inherit; font-weight: 400; line-height: inherit; display: grid; grid-template-columns: max-content max-content minmax(0, 1fr) auto; align-items: center; gap: 0 10px; white-space: nowrap; }
+.run-summary > h1 { margin: 0; font: inherit; }
 .run-summary .state { padding: 0; border: 0; background: none; font-size: inherit; line-height: inherit; }
 .run-summary button { grid-column: 4; grid-row: 1; height: 22px; padding: 0 8px; }
 .run-counts { min-width: 0; display: flex; flex-wrap: wrap; column-gap: 6px; }
@@ -138,6 +139,7 @@ a.row:focus-visible { outline-offset: -2px; }
 .run-meta details { display: contents; }
 .run-meta summary { grid-column: 2; font-size: inherit; line-height: inherit; }
 .run-meta details > :not(summary) { grid-column: 1 / -1; white-space: pre-wrap; overflow-wrap: anywhere; }
+.run-head + .toolbar { margin-top: 8px; gap: 8px; font-size: 12px; line-height: 22px; }
 .run-head + .toolbar:empty { display: none; }
 .run-layout { display: grid; grid-template-columns: 22rem minmax(0, 1fr); gap: 16px; margin-top: 14px; }
 .steps { padding: 6px 0 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }

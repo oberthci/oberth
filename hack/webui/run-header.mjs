@@ -1,4 +1,5 @@
 import {writeFile} from 'node:fs/promises';
+import {headerNits} from './run-header-nits.mjs';
 import {metadata} from './run-header-metadata.mjs';
 import {headerActions} from './run-header-actions.mjs';
 import {wideCounts} from './run-header-wide.mjs';
@@ -18,7 +19,7 @@ export async function runHeader(client) {
     if(run.status==='failed'){run.passed=12;run.failed=1;run.pending=1;}
     const header=document.querySelector('.run-head'),actions=runActions(screen,run,[],[]);
     header.replaceChildren(...runHeader(run,actions,false));
-    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    fitRunHeader(header.firstElementChild);
     const rect=header.getBoundingClientRect(),style=getComputedStyle(header),summary=header.querySelector('.run-summary'),meta=header.querySelector('.run-meta');
     const line=node=>{const range=document.createRange();range.selectNodeContents(node);return range.getBoundingClientRect().height;};
     return {height:rect.height-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)-parseFloat(style.borderTopWidth)-parseFloat(style.borderBottomWidth),lineHeight:parseFloat(style.lineHeight),summary:summary.textContent,counts:header.querySelector('.run-counts').textContent,
@@ -45,6 +46,7 @@ export async function runHeader(client) {
  }
  results.push(...await wideCounts(client));
  results.push(...await metadata(client));
+ results.push(...await headerNits(client));
  await headerActions(client);
  return results;
 }
