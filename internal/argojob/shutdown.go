@@ -46,5 +46,6 @@ func exitHandler(n wf.NodeStatus, nodes wf.Nodes) bool {
 
 func nativeShutdown(message string) bool {
 	return message == "workflow shutdown with strategy:  Stop" || message == "workflow shutdown with strategy:  Terminate" ||
+		message == "workflow shutdown with strategy: Stop" || message == "workflow shutdown with strategy: Terminate" ||
 		message == "Stopped with strategy 'Stop'" || message == "Stopped with strategy 'Terminate'"
 }

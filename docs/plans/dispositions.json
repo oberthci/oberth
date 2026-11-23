@@ -9399,7 +9399,7 @@
     "docs/plans/c2-service-actions-and-history.md": "85182ac1009095b2e1a324fbbab18c4d6103c9a068280850da5e79c0e244a4a9",
     "docs/plans/c3-wiring-and-submission.md": "55f3b41b47272bb59ba18656873387f64c1ca7e3e689afc2efd704819a531931",
     "docs/plans/c4-admission-rules-and-plan.md": "bd96674c7787fe19912563afe3724fce1dc98f0ad17177e8a7f1604b48973210",
-    "docs/plans/c5-native-execution.md": "f3917bab597e65934d49cdb89025665558917f45ecefcb0c75fd49a7111ece10",
+    "docs/plans/c5-native-execution.md": "593f1e5072e0bff83af9a198c0685b6c7471f827f960cb32efb8fdd5bf5dba4a",
     "docs/plans/c6-source-delivery.md": "77f8bd64c0aa17b66092cc692efcdc17cc2fbfd152c901fdbe8771ea40acefc5",
     "docs/plans/c7-durable-state.md": "0fce03bf6385083ed86ecc5bc1afe7c9105aaea5154b9e83788911c3d6a07c9a",
     "docs/plans/c8-logs.md": "d406f3a01f449719be4aa255d628b908e9a8a1e33230f3c21b9b50ce0e74a61d",
@@ -12888,14 +12888,14 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "| **Delta:** `Project`, observation | Map native node boundary paths onto the immutable plan, stripping Workflow prefix and retry-child suffixes. Latest attempt decides; retain attempts and native Pod/container identities. Use plan order, with numeric loop indexes. Dynamic entries expand in place; terminal remainder becomes unknown. Persist each failed step's reason and failure class so earlier failures survive shutdown and restart. Only native shutdown evidence or a previously active node permits a stopped diagnosis; Stop preserves exit-handler diagnoses. Decode compressed nodes with Argo's packer; offloaded/missing nodes mean incomplete evidence. |",
+      "basis": "| **Delta:** `Project`, observation | Map native node boundary paths onto the immutable plan, stripping Workflow prefix and retry-child suffixes. Latest attempt decides; retain attempts and native Pod/container identities. Use plan order, with numeric loop indexes. Dynamic entries expand in place; terminal remainder becomes unknown. Persist each failed step's reason and failure class so earlier failures survive shutdown and restart. Only native shutdown evidence or a previously active node permits a stopped diagnosis; Stop preserves exit-handler diagnoses. Shutdown messages written before Pod creation also identify stopped steps without a previous observation. Decode compressed nodes with Argo's packer; offloaded/missing nodes mean incomplete evidence. |",
       "rows": [
         {
           "category": "Folded issues",
           "name": "#1637",
           "disposition": "CHANGE",
           "reason": "Admitted roots/hooks/loops/containerSet/resource/suspend leaves define logical steps; structural nodes and retries do not inflate counts.",
-          "basis": "| **Delta:** `Project`, observation | Map native node boundary paths onto the immutable plan, stripping Workflow prefix and retry-child suffixes. Latest attempt decides; retain attempts and native Pod/container identities. Use plan order, with numeric loop indexes. Dynamic entries expand in place; terminal remainder becomes unknown. Persist each failed step's reason and failure class so earlier failures survive shutdown and restart. Only native shutdown evidence or a previously active node permits a stopped diagnosis; Stop preserves exit-handler diagnoses. Decode compressed nodes with Argo's packer; offloaded/missing nodes mean incomplete evidence. |"
+          "basis": "| **Delta:** `Project`, observation | Map native node boundary paths onto the immutable plan, stripping Workflow prefix and retry-child suffixes. Latest attempt decides; retain attempts and native Pod/container identities. Use plan order, with numeric loop indexes. Dynamic entries expand in place; terminal remainder becomes unknown. Persist each failed step's reason and failure class so earlier failures survive shutdown and restart. Only native shutdown evidence or a previously active node permits a stopped diagnosis; Stop preserves exit-handler diagnoses. Shutdown messages written before Pod creation also identify stopped steps without a previous observation. Decode compressed nodes with Argo's packer; offloaded/missing nodes mean incomplete evidence. |"
         }
       ]
     },

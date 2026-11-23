@@ -98,6 +98,13 @@ func TestOberthQueuedCancellationNeverStartsWork(t *testing.T) {
 			} else if len(pods.Items) != 0 || !w.Status.Fulfilled() {
 				t.Fatal("Terminate created work or did not finish", w.Status, pods.Items)
 			}
+			node := w.Status.Nodes[w.Name]
+			if node.Type != wfv1.NodeTypePod || node.Phase != wfv1.NodeFailed || node.Message != "workflow shutdown with strategy: "+string(mode) || node.StartedAt.IsZero() {
+				t.Fatal("shutdown before Pod creation changed its native evidence", node)
+			}
+			if node.Outputs != nil && node.Outputs.ExitCode != nil {
+				t.Fatal("unstarted shutdown recorded an exit code", node)
+			}
 		})
 	}
 }
