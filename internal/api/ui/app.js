@@ -15,7 +15,7 @@ const copy = {
  logBound: ["Earlier live output is outside this view.", "Use Earlier output to read the retained log."],
 };
 const main = document.querySelector("#main"), notice = document.querySelector("#notice");
-const signin = document.querySelector("#signin"), header = document.querySelector("header");
+const signin = document.querySelector("#signin"), topbar = document.querySelector("header");
 let screen, serial = 0;
 const readSpacing = 1000;
 function h(tag, attrs = {}, ...children) {
@@ -49,11 +49,11 @@ async function exchange(path, options = {}) {
  if (!response.ok) {
   if (response.status === 401) {
    value.signin = !localStorage.getItem("oberth.token");
-   header.hidden = true; signin.hidden = false; main.hidden = true; showError(value); screen?.controller.abort(); screen?.logs?.abort();
+   topbar.hidden = true; signin.hidden = false; main.hidden = true; showError(value); screen?.controller.abort(); screen?.logs?.abort();
   }
   throw Object.assign(new Error(), value, {refused: true, status: response.status, retry: retryAfter(response.headers.get("Retry-After"))});
  }
- header.hidden = false; signin.hidden = true; main.hidden = false;
+ topbar.hidden = false; signin.hidden = true; main.hidden = false;
  return response;
 }
 // Connection trouble (no answer, a non-JSON answer, or a gateway or drain status)

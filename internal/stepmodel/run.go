@@ -50,12 +50,12 @@ func (s StepStatus) started() bool { return s != StepPending && s != StepQueued 
 // one of its steps has started and running from then on, never queued again,
 // even while a retry waits. A queued run keeps its most advanced waiting
 // reason; a running run's reason is empty.
-func Progress(current RunStatus, previous string, steps []RunStep, waiting string) (RunStatus, string) {
+func Progress(current RunStatus, previousReason string, steps []RunStep, waiting string) (RunStatus, string) {
 	if current == RunRunning || slices.ContainsFunc(steps, RunStep.Started) {
 		return RunRunning, ""
 	}
-	if waitingRank(previous) > waitingRank(waiting) {
-		waiting = previous
+	if waitingRank(previousReason) > waitingRank(waiting) {
+		waiting = previousReason
 	}
 	return RunQueued, waiting
 }
