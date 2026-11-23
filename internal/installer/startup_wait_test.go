@@ -67,8 +67,8 @@ func TestUnreadyStartupStopsAtReadinessBound(t *testing.T) {
 	}
 }
 
-// Two minutes without a route model replacement of the sole ready Pod. After
-// that, 503 responses model recovery; zero means the address remains unreachable.
+// The fake stalls dials for two minutes, then serves 503 until readyAfter.
+// Zero keeps every dial stalled; no production cause is inferred from this fake.
 func useStartingEndpoint(t *testing.T, f fixture, readyAfter time.Duration) {
 	t.Helper()
 	config := serverTLS(t, f)
@@ -78,14 +78,7 @@ func useStartingEndpoint(t *testing.T, f fixture, readyAfter time.Duration) {
 	t.Cleanup(workers.Wait)
 	verifier := installer.EndpointVerifier{Now: config.Time, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		if timeline.Since(started) < 2*time.Minute || readyAfter == 0 {
-			timer := time.NewTimer(2 * time.Minute)
-			defer timer.Stop()
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-timer.C:
-				return nil, context.DeadlineExceeded
-			}
+			return stalledStartupDial(ctx)
 		}
 		client, remote := net.Pipe()
 		status := http.StatusServiceUnavailable
@@ -101,4 +94,23 @@ func useStartingEndpoint(t *testing.T, f fixture, readyAfter time.Duration) {
 		profile.ServerURL = "https://server.oberth.ci"
 		return verifier.Verify(ctx, profile)
 	}
+}
+
+func stalledStartupDial(ctx context.Context) (net.Conn, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestStartupDialWaitsForCancellation(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		timeline := clock.RealClock{}
+		started := timeline.Now()
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+		defer cancel()
+		conn, err := stalledStartupDial(ctx)
+		if conn != nil || !errors.Is(err, ctx.Err()) || timeline.Since(started) != 3*time.Minute {
+			t.Fatal("fake dial ended before caller cancellation", err, timeline.Since(started))
+		}
+	})
 }
