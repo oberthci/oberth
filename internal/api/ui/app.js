@@ -56,8 +56,8 @@ async function exchange(path, options = {}) {
  topbar.hidden = false; signin.hidden = true; main.hidden = false;
  return response;
 }
-// Connection trouble (no answer, a non-JSON answer, or a gateway or drain status)
-// shows only in the header light; background reads retry it quietly.
+// Connection trouble shows in the header light, or a startup notice before
+// sign-in is accepted; background reads retry it quietly.
 const unavailable = status => [502, 503, 504].includes(status);
 const trouble = error => !error.reason || unavailable(error.status);
 function retryAfter(value) { return /^\d+$/.test(value || "") ? Number(value) * 1000 : 5000; }
@@ -210,7 +210,6 @@ async function route() {
  } catch (error) {
   if (view.controller.signal.aborted) return;
   if (!trouble(error)) { showError(error); return; }
-  if (topbar.hidden && signin.hidden) notice.replaceChildren(empty(copy.reconnecting));
   await waitRetry(error.retry ?? 5000, view.controller.signal);
   if (!view.controller.signal.aborted) route();
  }
@@ -464,6 +463,10 @@ function reached(ok) {
  if (ok) connection.failures = 0;
  else if (!connection.failures++) connection.since = performance.now();
  server.dataset.state = ok ? "normal" : performance.now() - connection.since >= unreachableAfter ? "unreachable" : connection.failures > 1 ? "reconnecting" : "normal";
+ if (ok) { connection.notice?.remove(); connection.notice = null; }
+ else if (topbar.hidden && signin.hidden && !connection.notice?.isConnected) {
+  connection.notice = empty(copy.reconnecting); notice.append(connection.notice);
+ }
  paintServer();
  if (ok && was !== "normal") readStatus();
 }

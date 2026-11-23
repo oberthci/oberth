@@ -263,6 +263,7 @@ only after an accepted bearer or browser certificate sign-in; a 401 hides it.
 Navigation keeps the sign-in card until the server answers.
 First-load connection trouble shows a reconnecting notice while the header and
 sign-in card are both hidden.
+An available answer clears this notice on every route.
 
 ## Inspections
 

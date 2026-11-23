@@ -38,24 +38,38 @@ export async function signout(client){
 }
 
 async function initialReconnect(client){
- const result=await client.evaluate(`(async()=>{
-  const original=fetch,retry=waitRetry;let waiting;
-  const asleep=new Promise(resolve=>{waiting=resolve;});
-  screen.controller.abort();topbar.hidden=true;signin.hidden=true;main.hidden=false;
-  history.replaceState(null,'','/runs');
-  window.fetch=()=>Promise.resolve(new Response(JSON.stringify({reason:'Server unavailable.',remedy:'Try again.'}),{status:503,headers:{'Retry-After':'1'}}));
-  waitRetry=(milliseconds,signal)=>{waiting(milliseconds);return retry(milliseconds,signal);};
+ const results=await deadline('initial connection on five routes',()=>client.evaluate(`(async()=>{
+  const original=fetch,retry=waitRetry,statusRead=readStatus,observed=reached,results=[];
+  screen.controller.abort();readStatus=()=>{};
   try{
-   const pending=route(),delay=await asleep;
-   const state={delay,header:!topbar.hidden,card:!signin.hidden,notice:notice.textContent,reconnecting:copy.reconnecting.every(word=>notice.textContent.includes(word))};
-   screen.controller.abort();await pending;return state;
-  }finally{screen.controller.abort();window.fetch=original;waitRetry=retry;}
- })()`);
- check(result.delay===1000&&!result.header&&!result.card&&result.reconnecting,'first 503 answer left the page without a reconnecting notice');
- await client.evaluate(`route()`);
- result.recovered=await client.evaluate(`!topbar.hidden&&signin.hidden&&!main.hidden&&notice.textContent===''`);
- check(result.recovered,'accepted answer retained the initial reconnecting notice');
- return result;
+   for(const path of ['/runs','/runs/22222222','/repos','/issues','/status']){
+    for(const failure of ['503','network']){
+     let failed;const failureSeen=new Promise(resolve=>{failed=resolve;});
+     topbar.hidden=true;signin.hidden=true;main.hidden=false;
+     history.replaceState(null,'',path);
+     window.fetch=()=>failure==='network'?Promise.reject(new TypeError('offline')):Promise.resolve(new Response(JSON.stringify({reason:'Server unavailable.',remedy:'Try again.'}),{status:503,headers:{'Retry-After':'1'}}));
+     waitRetry=(_,signal)=>retry(60000,signal);
+     reached=ok=>{observed(ok);if(!ok)failed();};
+     const pending=route();await failureSeen;const message=notice.firstElementChild;
+     await get('/api/status').catch(()=>{});
+     const state={path,failure,header:!topbar.hidden,card:!signin.hidden,reconnecting:copy.reconnecting.every(word=>notice.textContent.includes(word)),sameNotice:message===notice.firstElementChild&&notice.childElementCount===1};
+     window.fetch=original;
+     await get('/api/status');
+     state.recovered=!topbar.hidden&&signin.hidden&&!main.hidden&&notice.textContent==='';
+     screen.controller.abort();await pending;results.push(state);
+    }
+   }
+   return results;
+  }finally{screen.controller.abort();window.fetch=original;waitRetry=retry;readStatus=statusRead;reached=observed;}
+ })()`));
+ check(results.length===10,'initial connection check missed a route or failure kind');
+ for(const result of results){
+  const label=result.path+' '+result.failure;
+  check(!result.header&&!result.card&&result.reconnecting,'initial connection trouble had no notice: '+label);
+  check(result.sameNotice,'repeated failure replaced or duplicated the reconnecting notice: '+label);
+  check(result.recovered,'accepted answer retained the initial reconnecting notice: '+label);
+ }
+ return results;
 }
 
 // Model a server accepting a browser certificate without a stored bearer.
