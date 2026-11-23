@@ -216,12 +216,11 @@ func stepReason(status stepmodel.StepStatus) string {
 	return reasonUnknown
 }
 
-// summary fills only absent catalogue reasons; native detail remains separate.
+// summary keeps reasons that add information beyond the status; detail stays whole.
 func summary(r stepmodel.RunSummary) stepmodel.RunSummary {
 	v := r.Clone()
-	reason := runReason(v.Status)
-	if v.DisplayReason == "" {
-		v.DisplayReason = reason
+	if v.DisplayReason == string(v.Status) || (v.Status != stepmodel.RunQueued && v.DisplayReason == runReason(v.Status)) {
+		v.DisplayReason = ""
 	}
 	return v
 }

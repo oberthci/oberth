@@ -70,13 +70,14 @@ func uiExample(t *testing.T) *fixture {
 		runs[index].LogicalStepCounts = stepmodel.LogicalStepCounts{Total: 4, Exact: true, Passed: 3, Failed: 1}
 	}
 	parallel := parallelExample(t, runs[1])
+	summaries := exampleSummaryRuns(t, runs[2])
 	return setup(t, func(c *api.Config, b *apicontract.Bindings) {
 		c.Runtime.Now = testNow
 		if token := os.Getenv("OBERTH_UI_TOKEN"); token != "" {
 			c.Auth = exampleAuth{Authenticator: c.Auth, token: token}
 		}
 		b.RunList.Handler = exampleRunList(runs)
-		b.RunGet.Handler = exampleRunGet(runs, parallel)
+		b.RunGet.Handler = exampleRunGet(runs, parallel, summaries)
 		b.RepoList.Handler = &fake.Handler[apicontract.RepoListArgs, apicontract.RepoPage]{Value: apicontract.RepoPage{Repositories: exampleRepositories(runs, at)}}
 		b.RunLogs.Handler = &fake.Handler[apicontract.RunLogsArgs, apicontract.LogResult]{Value: apicontract.LogResult{Content: "Running the authored test command\nFAIL pkg/check 0.40s\nexpected status 200, received 500\n<script>this is log text</script>\n", Meta: logcontract.Meta{ScanComplete: true, BytesExact: true}}}
 		b.RunRerun.Handler = &fake.Handler[apicontract.RunRerunArgs, apicontract.Receipt]{Value: apicontract.Receipt{ID: "55555555"}}

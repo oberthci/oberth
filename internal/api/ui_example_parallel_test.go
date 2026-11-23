@@ -43,8 +43,11 @@ func TestParallelExampleUsesAdmittedTaskGraph(t *testing.T) {
 	}
 }
 
-func exampleRunGet(runs []apicontract.RunRecord, parallel apicontract.RunRecord) apicontract.HandlerFunc[apicontract.RunGetArgs, apicontract.RunRecord] {
-	return apicontract.HandlerFunc[apicontract.RunGetArgs, apicontract.RunRecord](func(_ context.Context, _ apicontract.Caller, args apicontract.RunGetArgs) (apicontract.Call[apicontract.RunRecord], error) {
+func exampleRunGet(runs []apicontract.RunRecord, parallel apicontract.RunRecord, summaries apicontract.Handler[apicontract.RunGetArgs, apicontract.RunRecord]) apicontract.HandlerFunc[apicontract.RunGetArgs, apicontract.RunRecord] {
+	return apicontract.HandlerFunc[apicontract.RunGetArgs, apicontract.RunRecord](func(ctx context.Context, caller apicontract.Caller, args apicontract.RunGetArgs) (apicontract.Call[apicontract.RunRecord], error) {
+		if len(args.ID) == 32 && (args.ID[0] == 'a' || args.ID[0] == 'b') {
+			return summaries.Prepare(ctx, caller, args)
+		}
 		return func(context.Context) (apicontract.RunRecord, error) {
 			if strings.HasPrefix(parallel.ID, args.ID) {
 				return parallel, nil

@@ -9396,7 +9396,7 @@
     "docs/plans/c12-agent-client.md": "42e5d73621e6fdc5b4f149e21079fb7ca57bfe0b3fb75abbee23b84b07a3b6bb",
     "docs/plans/c13-own-pipelines.md": "7bf8d26daa7f51f8897f126f230345f41b683bd6a06adc771f0bb491a2149fb7",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
-    "docs/plans/c2-service-actions-and-history.md": "18fee281cfa9b3400424cd8e93fefab178eb0bea93a62f9ca7b634a0e573bc56",
+    "docs/plans/c2-service-actions-and-history.md": "2f3f614567291d4530394d97659568b8eb5e6d80d5cd7ed30129f9be046b3dbd",
     "docs/plans/c3-wiring-and-submission.md": "55f3b41b47272bb59ba18656873387f64c1ca7e3e689afc2efd704819a531931",
     "docs/plans/c4-admission-rules-and-plan.md": "bd96674c7787fe19912563afe3724fce1dc98f0ad17177e8a7f1604b48973210",
     "docs/plans/c5-native-execution.md": "e020811b5649df175e950698711046f5b00e0b1b9faccbd43647b56083bfd79a",
@@ -11134,35 +11134,35 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** Run status is queued/running/passed/failed/cancelled; native phase remains separate evidence. display_reason is at most 40 characters and Detail preserves full native text. Public records use snake_case and collection envelopes with empty arrays. object_sha is accepted pushed identity; commit_sha is tested checkout identity. No alternate verdict or SHA aliases. Publication has its own pending/delivered/failed/abandoned state. Lost action replies never imply no work.",
+      "basis": "**Delta:** Run status is queued/running/passed/failed/cancelled; native phase remains separate evidence. display_reason is empty without a specific cause, otherwise at most 40 characters; Detail preserves full native text. Public records use snake_case and collection envelopes with empty arrays. object_sha is accepted pushed identity; commit_sha is tested checkout identity. No alternate verdict or SHA aliases. Publication has its own pending/delivered/failed/abandoned state. Lost action replies never imply no work.",
       "rows": [
         {
           "category": "MCP tools",
           "name": "run_get",
           "disposition": "CHANGE",
           "reason": "run_get: canonical five-state status; remove delivered/waiting run aliases while retaining publication status separately.",
-          "basis": "**Delta:** Run status is queued/running/passed/failed/cancelled; native phase remains separate evidence. display_reason is at most 40 characters and Detail preserves full native text. Public records use snake_case and collection envelopes with empty arrays. object_sha is accepted pushed identity; commit_sha is tested checkout identity. No alternate verdict or SHA aliases. Publication has its own pending/delivered/failed/abandoned state. Lost action replies never imply no work."
+          "basis": "**Delta:** Run status is queued/running/passed/failed/cancelled; native phase remains separate evidence. display_reason is empty without a specific cause, otherwise at most 40 characters; Detail preserves full native text. Public records use snake_case and collection envelopes with empty arrays. object_sha is accepted pushed identity; commit_sha is tested checkout identity. No alternate verdict or SHA aliases. Publication has its own pending/delivered/failed/abandoned state. Lost action replies never imply no work."
         },
         {
           "category": "MCP tools",
           "name": "run_list",
           "disposition": "CHANGE",
           "reason": "run_list: canonical five-state status; remove delivered/waiting run aliases while retaining publication status separately.",
-          "basis": "**Delta:** Run status is queued/running/passed/failed/cancelled; native phase remains separate evidence. display_reason is at most 40 characters and Detail preserves full native text. Public records use snake_case and collection envelopes with empty arrays. object_sha is accepted pushed identity; commit_sha is tested checkout identity. No alternate verdict or SHA aliases. Publication has its own pending/delivered/failed/abandoned state. Lost action replies never imply no work."
+          "basis": "**Delta:** Run status is queued/running/passed/failed/cancelled; native phase remains separate evidence. display_reason is empty without a specific cause, otherwise at most 40 characters; Detail preserves full native text. Public records use snake_case and collection envelopes with empty arrays. object_sha is accepted pushed identity; commit_sha is tested checkout identity. No alternate verdict or SHA aliases. Publication has its own pending/delivered/failed/abandoned state. Lost action replies never imply no work."
         },
         {
           "category": "MCP tools",
           "name": "run_wait",
           "disposition": "CHANGE",
           "reason": "run_wait: canonical five-state status; remove delivered/waiting run aliases while retaining publication status separately.",
-          "basis": "**Delta:** Run status is queued/running/passed/failed/cancelled; native phase remains separate evidence. display_reason is at most 40 characters and Detail preserves full native text. Public records use snake_case and collection envelopes with empty arrays. object_sha is accepted pushed identity; commit_sha is tested checkout identity. No alternate verdict or SHA aliases. Publication has its own pending/delivered/failed/abandoned state. Lost action replies never imply no work."
+          "basis": "**Delta:** Run status is queued/running/passed/failed/cancelled; native phase remains separate evidence. display_reason is empty without a specific cause, otherwise at most 40 characters; Detail preserves full native text. Public records use snake_case and collection envelopes with empty arrays. object_sha is accepted pushed identity; commit_sha is tested checkout identity. No alternate verdict or SHA aliases. Publication has its own pending/delivered/failed/abandoned state. Lost action replies never imply no work."
         },
         {
           "category": "MCP tools",
           "name": "status",
           "disposition": "CHANGE",
           "reason": "status: canonical five-state status; remove delivered/waiting run aliases while retaining publication status separately.",
-          "basis": "**Delta:** Run status is queued/running/passed/failed/cancelled; native phase remains separate evidence. display_reason is at most 40 characters and Detail preserves full native text. Public records use snake_case and collection envelopes with empty arrays. object_sha is accepted pushed identity; commit_sha is tested checkout identity. No alternate verdict or SHA aliases. Publication has its own pending/delivered/failed/abandoned state. Lost action replies never imply no work."
+          "basis": "**Delta:** Run status is queued/running/passed/failed/cancelled; native phase remains separate evidence. display_reason is empty without a specific cause, otherwise at most 40 characters; Detail preserves full native text. Public records use snake_case and collection envelopes with empty arrays. object_sha is accepted pushed identity; commit_sha is tested checkout identity. No alternate verdict or SHA aliases. Publication has its own pending/delivered/failed/abandoned state. Lost action replies never imply no work."
         }
       ]
     },

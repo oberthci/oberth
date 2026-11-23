@@ -11,7 +11,7 @@ import (
 // A run whose steps only wait reads queued with what it waits for in
 // run_get, run_list, status and the web view (which read the same records),
 // without a start; once a step starts it reads running, started, with the
-// running reason, and a later wait does not queue it again.
+// no redundant reason, and a later wait does not queue it again.
 func TestQueuedRunReadsQueuedWithItsWaitUntilAStepStarts(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
@@ -28,10 +28,10 @@ func TestQueuedRunReadsQueuedWithItsWaitUntilAStepStarts(t *testing.T) {
 	requireRunReads(t, f, runRead{stepmodel.RunQueued, "waiting for sync limit go", false})
 	steps[0].Status = stepmodel.StepRunning
 	save("")
-	requireRunReads(t, f, runRead{stepmodel.RunRunning, "run is running", true})
+	requireRunReads(t, f, runRead{stepmodel.RunRunning, "", true})
 	steps[0].Status = stepmodel.StepQueued
 	save("waiting for a node")
-	requireRunReads(t, f, runRead{stepmodel.RunRunning, "run is running", true})
+	requireRunReads(t, f, runRead{stepmodel.RunRunning, "", true})
 }
 
 type runRead struct {

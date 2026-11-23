@@ -107,7 +107,7 @@ stay pending; dynamic placeholders expand in place and terminal remainder is
 unknown. Counts cover the full projection independently of paging.
 
 **Delta:** Run status is queued/running/passed/failed/cancelled; native phase remains
-separate evidence. display_reason is at most 40 characters and Detail preserves
+separate evidence. display_reason is empty without a specific cause, otherwise at most 40 characters; Detail preserves
 full native text. Public records use snake_case and collection envelopes with
 empty arrays. object_sha is accepted pushed identity; commit_sha is tested
 checkout identity. No alternate verdict or SHA aliases. Publication has its own

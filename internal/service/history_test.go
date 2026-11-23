@@ -244,21 +244,6 @@ func TestPreparedReadCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestEveryRunStateHasCompleteReason(t *testing.T) {
-	t.Parallel()
-	for _, status := range []stepmodel.RunStatus{stepmodel.RunQueued, stepmodel.RunRunning, stepmodel.RunPassed, stepmodel.RunFailed, stepmodel.RunCancelled} {
-		f := setup(t)
-		f.seed(status)
-		v, err := f.s.Status(t.Context(), caller(), viewQuery{ID: runID})
-		if err != nil || v.DisplayReason == "" {
-			t.Fatalf("state %+v %v", v, err)
-		}
-		p, err := f.s.RunList(t.Context(), caller(), viewQuery{})
-		if err != nil || len(p.Runs) != 1 || p.Runs[0].DisplayReason == "" {
-			t.Fatalf("list %+v %v", p, err)
-		}
-	}
-}
 
 type branchReadHook struct {
 	service.Git
