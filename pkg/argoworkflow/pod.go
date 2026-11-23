@@ -39,14 +39,29 @@ func (g *graph) mutex(mutex *wfv1.Mutex, where string) {
 		g.refuse(where, "mutex_scope")
 		return
 	}
-	// The slash terminates the exact catalogue repository, not a name prefix.
-	name, scoped := strings.CutPrefix(mutex.Name, g.request.Repository+"/")
-	if g.request.Repository == "" || !scoped || !literal(name) {
+	if !g.mutexName(mutex.Name) {
 		g.refuse(where+".name", "mutex_scope")
 	}
 	if mutex.Namespace != "" && mutex.Namespace != g.request.IdentityRequest.Namespace {
 		g.refuse(where+".namespace", "mutex_namespace")
 	}
+}
+func (g *graph) mutexName(name string) bool {
+	if g.offlineValidation && g.offline() && g.request.Repository == "" {
+		parts := strings.SplitN(name, "/", 4)
+		if len(parts) != 4 {
+			return false
+		}
+		for _, part := range parts {
+			if !literal(part) {
+				return false
+			}
+		}
+		return true
+	}
+	// The slash terminates the exact catalogue repository, not a name prefix.
+	lock, scoped := strings.CutPrefix(name, g.request.Repository+"/")
+	return g.request.Repository != "" && scoped && literal(lock)
 }
 func (g *graph) claims(claims []corev1.PersistentVolumeClaim, where string) {
 	for _, c := range claims {

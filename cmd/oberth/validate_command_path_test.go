@@ -7,9 +7,34 @@ import (
 	"strings"
 	"testing"
 
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"github.com/oberthci/oberth/internal/api/fake"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
+
+func TestValidateAcceptsDocumentedMutexWithoutRepository(t *testing.T) {
+	app, out, diagnostic := fixture(t, fake.Bindings())
+	app.directory = t.TempDir()
+	w, err := argoworkflow.Decode([]byte(starterWorkflow()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Spec.Synchronization = &wfv1.Synchronization{Mutexes: []*wfv1.Mutex{{Name: "forge/team/app/publish"}}}
+	document, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app.directory, "pipeline.yaml"), document, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if code := app.run(t.Context(), []string{"validate", "pipeline.yaml", "-o", "json"}); code != 0 {
+		t.Fatal(code, out.String(), diagnostic.String())
+	}
+	var result validationResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil || !result.OK || len(result.Refusals) != 0 {
+		t.Fatal("documented mutex refused offline", result, err)
+	}
+}
 
 func TestValidateCommandsUseRepositoryFile(t *testing.T) {
 	document := validationGrantDocument(t)

@@ -147,16 +147,30 @@ func TestMutexAndSemaphoreNamesAreNotRewritten(t *testing.T) {
 	}
 }
 
-func TestMutexNeedsRepositoryDuringInspection(t *testing.T) {
+func TestOfflineMutexShapeAndRepositoryBinding(t *testing.T) {
 	t.Parallel()
-	w := simpleWorkflow()
-	w.Spec.Synchronization = &wfv1.Synchronization{Mutexes: []*wfv1.Mutex{{Name: "/publish"}}}
-	r := requestFor(t, w)
-	r.Mode, r.Repository = admissioncontract.ModeInspect, ""
-	r.IdentityRequest.Mode = r.Mode
-	prepared, err := Prepare(t.Context(), r, Policy{}, identityHooks())
-	if prepared != nil {
-		t.Fatal("unbound mutex admitted")
+	for _, tc := range []struct {
+		name, repository, lock, code string
+	}{
+		{"documented example", "", "forge/team/app/publish", ""},
+		{"nested lock", "", "forge/team/app/publish/latest", ""},
+		{"missing scope", "", "publish", "mutex_scope"},
+		{"empty upstream", "", "/team/app/publish", "mutex_scope"},
+		{"empty organization", "", "forge//app/publish", "mutex_scope"},
+		{"empty repository", "", "forge/team//publish", "mutex_scope"},
+		{"empty lock", "", "forge/team/app/", "mutex_scope"},
+		{"no lock", "", "forge/team/app", "mutex_scope"},
+		{"dynamic scope", "", "{{workflow.parameters.forge}}/team/app/publish", "mutex_scope"},
+		{"dynamic lock", "", "forge/team/app/{{workflow.name}}", "mutex_scope"},
+		{"known repository", "forge/team/app", "forge/team/app/publish", ""},
+		{"foreign repository", "forge/other/app", "forge/team/app/publish", "mutex_scope"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := checkDocument{wf: simpleWorkflow(), request: requestFor(t, simpleWorkflow()), hooks: admissioncontract.PrepareHooks{OfflineValidation: true}}
+			d.request.Mode, d.request.Repository = admissioncontract.ModeInspect, tc.repository
+			d.request.IdentityRequest = admissioncontract.IdentityRequest{}
+			d.wf.Spec.Synchronization = &wfv1.Synchronization{Mutexes: []*wfv1.Mutex{{Name: tc.lock}}}
+			assertMutexAdmission(t, &d, tc.code, "spec.synchronization.mutexes[0].name")
+		})
 	}
-	requireCode(t, err, "mutex_scope")
 }
