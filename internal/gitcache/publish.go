@@ -88,6 +88,11 @@ func validatePublishedCommit(r model.Publication) error {
 	return nil
 }
 func (c *Cache) publishIntent(ctx context.Context, p string, remote Remote, r model.Publication) error {
+	if r.Ref != remote.DefaultBranch {
+		if _, err := c.policyHead(ctx, r.Repo, remote); err != nil {
+			return err
+		}
+	}
 	held, err := c.forgeHolds(ctx, p, remote, r)
 	if err != nil || held {
 		return err

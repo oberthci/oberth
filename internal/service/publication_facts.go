@@ -106,7 +106,13 @@ func (s *Service) publicationEvent(p model.Publication, kind model.EventKind, re
 		observation.Detail = ""
 		event.Data, _ = json.Marshal(observation)
 	}
-	return stateport.EventWrite{Event: event, Dedupe: string(kind) + ":" + p.ID}
+	dedupe := string(kind) + ":" + p.ID
+	if kind == model.EventPublicationFailed {
+		// An explicit retry resets the attempt count. Its persisted start time
+		// distinguishes a new final failure from the preceding notification.
+		dedupe += ":" + p.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return stateport.EventWrite{Event: event, Dedupe: dedupe}
 }
 
 // RecoverPublications rearms only durable ref intents, then gives a retest to

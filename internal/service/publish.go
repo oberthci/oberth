@@ -199,7 +199,16 @@ func (s *Service) remoteRef(ctx context.Context, repo, ref string) (gitport.Ref,
 	v, err := s.c.MovingGit.RemoteRef(ctx, repo, ref)
 	var absent *gitport.AbsentError
 	var empty *gitport.EmptyRepositoryError
-	if errors.As(err, &absent) || errors.As(err, &empty) {
+	if errors.As(err, &empty) {
+		branch, readErr := s.c.Source.DefaultBranch(ctx, repo)
+		if readErr != nil {
+			return v, readErr
+		}
+		if ref == branch {
+			return gitport.Ref{Name: ref}, nil
+		}
+	}
+	if errors.As(err, &absent) {
 		return gitport.Ref{Name: ref}, nil
 	}
 	return v, err

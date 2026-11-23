@@ -266,7 +266,7 @@ repositories. A manual schedule trigger uses ordinary admission; force bypasses 
 
 - Older branch results cannot overwrite a newer mirror head. Branch head check and
   publication share the repository lock; branch force-sync is an explicit existing
-  operation. Tags and promotion targets never force-push. Promotion retains its exact
+  operation. Tags and promotion targets never force-push. Only the default branch may publish to an empty forge; another ref needs a live default head at each publication attempt, including an explicit retry after bootstrap. Promotion retains its exact
   planned base/result, conflicts and object pins. A target in the tested commit's history and committed before it fast-forwards to that commit, with no merge and no promotion run; otherwise the merge takes the tested commit's committer date, or one second after the base's when the base is not older, so a repeat writes the same commit and Go pseudo-versions rank it above the base; C2 decides whether to
   reprepare/retest. Git commands use sanitized environment and managed no-detach
   configuration. Cancellation preserves its cause, signals only the pinned command group
