@@ -1,5 +1,6 @@
 import type { EngineInterface, PluginOptions } from 'claude-code'
 import { decodeRun } from './model'
+import type { ObservedRun } from '../types'
 
 export const SETUP = 'Set executable to the absolute verified path printed by oberth join.'
 export const PROFILE_SETUP = 'Set profile to the uplink profile from oberth join, set OBERTH_PROFILE or start in the joined checkout.'
@@ -20,6 +21,15 @@ export async function profile($: EngineInterface, options: PluginOptions): Promi
   const name = chosen(options.profile) || chosen(await $.env.get('OBERTH_PROFILE')) || await bound($)
   if (!name) throw new Error(PROFILE_SETUP)
   return name
+}
+
+// An explicit list replaces the single-profile selection; credentials stay with the CLI.
+export async function profiles($: EngineInterface, options: PluginOptions): Promise<string[]> {
+  const configured = options.profiles as string | undefined
+  if (!configured?.trim()) return [await profile($, options)]
+  const names = [...new Set(configured.split(',').map(name => name.trim()))]
+  if (names.includes('') || names.length > 32) throw new Error('Set profiles to 1 to 32 comma-separated joined profile names.')
+  return names
 }
 
 // The executable option, else the fetcher's install under HOME; always an absolute path.
@@ -45,10 +55,17 @@ export async function checkedExecutable($: EngineInterface, options: PluginOptio
   return file.realPath
 }
 
-async function json($: EngineInterface, options: PluginOptions, args: string[]): Promise<unknown> {
-  const argv = [await checkedExecutable($, options), ...args, '--json']
-  const selected = await profile($, options)
-  const out = await $.process.run(argv, { timeoutMs: 3500, env: { OBERTH_PROFILE: selected } })
+type Connection = { executable: string; profile: string }
+
+async function connections($: EngineInterface, options: PluginOptions, source?: string): Promise<Connection[]> {
+  const executable = await checkedExecutable($, options)
+  const names = source ? [source] : await profiles($, options)
+  return names.map(profile => ({ executable, profile }))
+}
+
+async function json($: EngineInterface, connection: Connection, args: string[]): Promise<unknown> {
+  const argv = [connection.executable, ...args, '--json']
+  const out = await $.process.run(argv, { timeoutMs: 3500, env: { OBERTH_PROFILE: connection.profile } })
   if (out.isStdoutTruncated || out.isStderrTruncated) throw new Error('Run output exceeded the host output limit.')
   if (out.exitCode !== 0) {
     throw new Error(out.stderr.trim() || out.stdout.trim() || 'Oberth is unreachable. Check the selected CLI profile.')
@@ -56,17 +73,36 @@ async function json($: EngineInterface, options: PluginOptions, args: string[]):
   return JSON.parse(out.stdout)
 }
 
-// The listed runs and the server's clock when it read them (undefined from a server
-// that does not send it).
+// Read each selected profile, then merge before applying the total row limit.
 export async function list($: EngineInterface, options: PluginOptions, count: number) {
-  const page = await json($, options, ['run', 'list', '--limit', String(count)]) as { runs?: unknown[] | null; server_time?: unknown }
+  const peers = await connections($, options)
+  const pages = await Promise.allSettled(peers.map(peer => listProfile($, peer, count)))
+  const successful = pages.flatMap(page => page.status === 'fulfilled' ? [page.value] : [])
+  if (!successful.length) throw (pages[0] as PromiseRejectedResult).reason
+  const created = (run: ObservedRun) => Date.parse(run.created_at) + (run.clockOffset ?? 0)
+  const runs = successful.flat().sort((a, b) => created(b) - created(a))
+  const unique = runs.filter((run, index) => runs.findIndex(row => row.id === run.id) === index)
+  const unavailable = peers.filter((_, index) => pages[index]!.status === 'rejected').map(peer => peer.profile)
+  return { runs: unique.slice(0, count), serverTime: await $.clock.now(), unavailable }
+}
+
+async function listProfile($: EngineInterface, connection: Connection, count: number): Promise<ObservedRun[]> {
+  const page = await json($, connection, ['run', 'list', '--limit', String(count)]) as { runs?: unknown[] | null; server_time?: unknown }
   if (!page || !Object.hasOwn(page, 'runs')) throw new Error('Invalid run-list JSON.')
   if (page.runs !== null && !Array.isArray(page.runs)) throw new Error('Invalid run-list JSON.')
   const time = typeof page.server_time === 'string' ? Date.parse(page.server_time) : NaN
-  return { runs: (page.runs ?? []).map(decodeRun), serverTime: Number.isFinite(time) ? time : undefined }
+  const now = await $.clock.now()
+  return (page.runs ?? []).map(value => ({ ...decodeRun(value), profile: connection.profile, clockOffset: Number.isFinite(time) ? now - time : 0 }))
 }
 
-export async function get($: EngineInterface, options: PluginOptions, id: string) {
+export async function get($: EngineInterface, options: PluginOptions, id: string, source?: string): Promise<ObservedRun> {
   if (!id || id.startsWith('-') || /\s/.test(id)) throw new Error('Use /oberth-watch <run id or prefix>.')
-  return decodeRun(await json($, options, ['run', 'get', id]))
+  const peers = await connections($, options, source)
+  const results = await Promise.allSettled(peers.map(async connection => ({
+    ...decodeRun(await json($, connection, ['run', 'get', id])), profile: connection.profile,
+  })))
+  const runs = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
+  if (!runs.length) throw (results[0] as PromiseRejectedResult).reason
+  if (runs.some(run => run.id !== runs[0]!.id || run.repo !== runs[0]!.repo)) throw new Error('Run prefix matches several profiles. Use the full run ID.')
+  return runs[0]!
 }

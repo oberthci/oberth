@@ -1,4 +1,4 @@
-import type { Run, Snapshot } from '../types'
+import type { ObservedRun as Run, Snapshot } from '../types'
 
 // One refresh interval, active or idle: a run shorter than it can start and finish unseen.
 export const REFRESH_MS = 15000
@@ -43,14 +43,14 @@ export function span(ms: number, units: 1 | 2): string {
 
 export function duration(run: Run, now: number): string {
   const start = Date.parse(run.started_at ?? run.created_at)
-  const end = run.finished_at ? Date.parse(run.finished_at) : now
+  const end = run.finished_at ? Date.parse(run.finished_at) : now - (run.clockOffset ?? 0)
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '—'
   return span(end - start, 2)
 }
 
 export function age(run: Run, now: number): string {
   const created = Date.parse(run.created_at)
-  return Number.isFinite(created) ? span(now - created, 1) : '—'
+  return Number.isFinite(created) ? span(now - (run.clockOffset ?? 0) - created, 1) : '—'
 }
 
 export function shortID(id: string, runs: Run[]): string {
@@ -72,11 +72,11 @@ export function shown(value: unknown): number | undefined {
 
 // A finished run keeps the box up this long, so its row is seen turning passed or failed.
 export const WINDOW_MS = 600000
-const lately = (run: Run, now: number) => active(run) || now - Date.parse(run.finished_at ?? '') < WINDOW_MS
+const lately = (run: Run, now: number) => active(run) || now - (run.clockOffset ?? 0) - Date.parse(run.finished_at ?? '') < WINDOW_MS
 
 export function visible(state: Snapshot, count: number): Run[] {
   if (!state.reachable) return []
-  const pins = state.pins.map(pin => pin.run)
+  const pins = state.pins.map(pin => pin.run).filter(run => !run.profile || !state.unavailable?.includes(run.profile))
   if (![...state.recent, ...pins].some(run => lately(run, state.now))) return []
   const priority = [...pins, ...state.recent]
   return priority.filter((run, index) => priority.findIndex(row => row.id === run.id) === index).slice(0, count)

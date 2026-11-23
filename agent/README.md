@@ -6,6 +6,9 @@ absolute executable path and uplink profile printed by `oberth join`; keep the e
 a checkout. The box shows up to `runs` runs, three by default or when blank, none at 0. The person
 has `/oberth-runs` and `/oberth-watch`; the model uses the `oberth mcp` bridge, and the plugin
 registers no model tools (they would share the bridge's server name).
+For several upstreams, set **Uplink profiles** (`profiles`) to the comma-separated joined
+profile names, for example `work,personal`. The box and `/oberth-runs` merge them newest
+first with one total row limit; blank uses the single **Uplink profile** selection.
 
 The run box requires a host with function-hook modules and the `atom`, `read`
 and `update` state API, with plugin validation and test harness support.

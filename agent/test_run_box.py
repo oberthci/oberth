@@ -17,7 +17,7 @@ def struct_fields(file, name):
 
 
 def check_calls(client, commands):
-    calls = re.findall(r"json\(\$, options, \[([^\]]+)\]\)", client)
+    calls = re.findall(r"json\(\$, connection, \[([^\]]+)\]\)", client)
     if len(calls) != 2:
         raise ValueError("expected the list and single-run JSON calls")
     for call in calls:
@@ -31,7 +31,9 @@ def check_calls(client, commands):
     envelope = set(re.findall(r"(\w+)\?:", re.search(r"as \{ ([^}]+) \}", client).group(1)))
     if not envelope or envelope - struct_fields("internal/apicontract/results.go", "RunPage"):
         raise ValueError("unknown run-list JSON field")
-    if client.count("$.process.run(") != 2 or "[await checkedExecutable($, options), ...args, '--json']" not in client:
+    if (client.count("$.process.run(") != 2 or "[connection.executable, ...args, '--json']" not in client
+            or "const executable = await checkedExecutable($, options)" not in client
+            or "return names.map(profile => ({ executable, profile }))" not in client):
         raise ValueError("all execution must use the configured absolute executable")
     check_defaults(client)
 

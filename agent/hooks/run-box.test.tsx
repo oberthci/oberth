@@ -670,6 +670,125 @@ test('a competing state write cannot duplicate a completion toast', { options },
 
 const six = [1, 2, 3, 4, 5, 6].map(n => run(String(n).repeat(8) + '0'.repeat(24)))
 
+const multiple = { executable: options.executable, profiles: ' first, second, first ', runs: 2 }
+
+test('configured profiles merge upstreams newest first with one global row limit and each server clock', { options: multiple }, async ($, on) => {
+  bottom(on)
+  mock.clock(on, { now: Date.parse('2026-11-18T00:10:00Z') })
+  const calls: string[] = []
+  on('process.run', (_, e) => {
+    const name = String(e.init?.env?.OBERTH_PROFILE)
+    calls.push(name)
+    expect(e.init?.timeoutMs).toBe(3500)
+    expect(e.argv).toEqual(['/verified/oberth', 'run', 'list', '--limit', '2', '--json'])
+    const data = name === 'first' ? {
+      runs: [{ ...six[0]!, repo: 'one/team/widget', created_at: '2026-11-18T00:08:00Z', started_at: '2026-11-18T00:08:00Z' }, six[2]!],
+      server_time: '2026-11-18T00:10:00Z',
+    } : {
+      runs: [{ ...six[1]!, repo: 'two/team/gadget', created_at: '2026-11-18T01:09:00Z', started_at: '2026-11-18T01:09:00Z' }],
+      server_time: '2026-11-18T01:10:00Z',
+    }
+    return { value: { exitCode: 0, stdout: JSON.stringify(data), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await startSession($, on)
+  expect(calls).toEqual(['first', 'second'])
+  for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
+    const lines = await boxLines($, surface)
+    expect(lines).toHaveLength(3)
+    expect(lines[1]).toMatch(/^22222222 gadget .*1m00s +1m$/)
+    expect(lines[2]).toMatch(/^11111111 widget .*2m00s +2m$/)
+  }
+  const result = await $.command.run({ ...commandInput, command: 'oberth-runs', args: '--limit=2' })
+  expect(result.text!.split('\n').slice(1).map(line => line.slice(0, 8))).toEqual(['22222222', '11111111'])
+  expect(calls).toEqual(['first', 'second', 'first', 'second'])
+})
+
+test('a watch finds the other profile and polls only its source after it leaves the merged list', { options: multiple }, async ($, on) => {
+  bottom(on)
+  const clock = mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+  const notices = toasts(on)
+  let watched = { ...six[1]!, repo: 'two/team/gadget' }
+  let listed = true
+  let unavailable = false
+  const details: string[] = []
+  on('process.run', (_, e) => {
+    const name = String(e.init?.env?.OBERTH_PROFILE)
+    if (e.argv[2] === 'get') details.push(name)
+    const found = name === 'second' && !unavailable
+    const data = e.argv[2] === 'get' ? (found ? watched : undefined) : { runs: found && listed ? [watched] : [six[0]!] }
+    return { value: { exitCode: data ? 0 : 1, stdout: data ? JSON.stringify(data) : '', stderr: data ? '' : 'Run not found.', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await startSession($, on)
+  expect((await $.command.run({ ...commandInput, command: 'oberth-watch', args: watched.id })).text).toContain('Watching')
+  expect(details).toEqual(['first', 'second'])
+  listed = false
+  unavailable = true
+  await clock.advance(REFRESH_MS)
+  expect((await boxLines($)).some(line => line.startsWith('22222222'))).toBe(false)
+  unavailable = false
+  watched = { ...watched, status: 'passed', finished_at: '2026-11-18T00:01:10Z' }
+  await clock.advance(REFRESH_MS)
+  expect(details).toEqual(['first', 'second', 'second', 'second'])
+  expect((await boxLines($))[1]).toMatch(/^22222222 gadget .*✓ passed .*●$/)
+  expect(notices).toEqual([`Oberth ${watched.id}: passed`])
+  await clock.advance(REFRESH_MS)
+  expect(details).toHaveLength(4)
+})
+
+test('overlapping profiles deduplicate runs and an unavailable profile leaves healthy rows visible', { options: multiple }, async ($, on) => {
+  bottom(on)
+  const clock = mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+  let unavailable = false
+  on('process.run', (_, e) => {
+    if (unavailable && e.init?.env?.OBERTH_PROFILE === 'second') throw new Error('unreachable')
+    return { value: { exitCode: 0, stdout: JSON.stringify({ runs: [run()] }), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await startSession($, on)
+  expect(await boxLines($)).toHaveLength(2)
+  unavailable = true
+  await clock.advance(REFRESH_MS)
+  expect(await boxLines($)).toHaveLength(2)
+})
+
+test('a blank profile list keeps the single-profile selection', { options: { ...options, profiles: ' ' } }, async ($, on) => {
+  bottom(on)
+  mock.clock(on)
+  const calls = cli(on, () => [])
+  await startSession($, on)
+  expect(calls).toHaveLength(1)
+})
+
+for (const profiles of ['first,,second', Array(33).fill(0).map((_, n) => `p${n}`).join(',')]) {
+  test(`invalid profile list ${profiles} explains setup once without reading runs`, { options: { ...options, profiles } }, async ($, on) => {
+    bottom(on)
+    const clock = mock.clock(on)
+    const notices = toasts(on)
+    const calls = cli(on, () => [])
+    await startSession($, on)
+    await startSession($, on)
+    await clock.advance(REFRESH_MS)
+    expect(calls).toHaveLength(0)
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toContain('comma-separated joined profile names')
+    expect(notices[0]!.length).toBeLessThanOrEqual(80)
+    await noBox($)
+  })
+}
+
+test('a prefix matching different runs across profiles refuses a watch', { options: multiple }, async ($, on) => {
+  bottom(on)
+  mock.clock(on)
+  const ids = ['cad7d9ec000000000000000000000000', 'cad7d9ec100000000000000000000000']
+  on('process.run', (_, e) => ({ value: { exitCode: 0,
+    stdout: JSON.stringify(e.argv[2] === 'get' ? run(ids[e.init?.env?.OBERTH_PROFILE === 'first' ? 0 : 1]) : { runs: [] }),
+    stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  await startSession($, on)
+  const answer = await $.command.run({ ...commandInput, command: 'oberth-watch', args: 'cad7d9ec' })
+  expect(answer.text).toBe('Run prefix matches several profiles. Use the full run ID.')
+  expect(answer.text!.length).toBeLessThanOrEqual(80)
+  await noBox($)
+})
+
 function cli(on: On, rows: () => Run[]) {
   const calls: string[][] = []
   on('process.run', (_, e) => {
@@ -748,7 +867,7 @@ for (const runs of [11, -1, 2.5]) {
     expect(calls).toEqual([])
     expect(written.value).toBe(0)
     await noBox($)
-    expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain(six[5]!.id.slice(0, 8))
+    expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '--limit=6' })).text).toContain(six[5]!.id.slice(0, 8))
   })
 }
 

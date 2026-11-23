@@ -63,7 +63,12 @@ read only public `run list --json` and `run get --json`, through the absolute ve
 executable (its option, by default the fetcher's install in the user bin directory),
 never a checkout executable or a PATH lookup. The plugin reads with the agent's joined
 uplink profile, selected by its option, `OBERTH_PROFILE` or the checkout's joined uplink
-binding; without one it explains setup once and stays hidden. It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.
+binding. A nonblank `profiles` option lists up to 32 comma-separated joined profiles
+instead; reads merge newest first, deduplicate run IDs and apply one total row limit.
+Each row ages on its server's clock; watches keep their source profile. Failed profile
+reads hide that profile's stale rows while healthy profiles remain visible. When every
+profile read fails, the box hides. Without a selection it explains setup once and stays hidden.
+It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.
 
 One timer refreshes every 15 seconds, active or idle, so short runs and terminal pushes
 are still seen. Refreshes coalesce and each CLI call is bounded. Session start does not

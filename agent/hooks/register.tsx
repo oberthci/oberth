@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Register, Timer } from 'claude-code'
 import type { Snapshot } from '../types'
-import { checkedExecutable, get, list, profile, SETUP, PROFILE_SETUP } from './client'
+import { checkedExecutable, get, list, profiles, SETUP } from './client'
 import { active, boxRows, limit, outcome, REFRESH_MS, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
 
 const empty: Snapshot = { recent: [], pins: [], reachable: false, now: 0 }
@@ -27,11 +27,20 @@ function poll($: EngineInterface, options: PluginOptions, loop: Loop) {
 
 async function refresh($: EngineInterface, options: PluginOptions, loop: Loop) {
   try {
-    const page = loop.count ? await list($, options, loop.count) : { runs: [], serverTime: undefined }
+    const page = loop.count ? await list($, options, loop.count) : { runs: [], serverTime: undefined, unavailable: [] }
     const recent = page.runs
     const before = await read($, snapshot)
     const missing = before.pins.filter(pin => active(pin.run) && !recent.some(run => run.id === pin.run.id))
-    const details = await Promise.all(missing.map(pin => get($, options, pin.run.id)))
+    const details = await Promise.allSettled(missing.map(async pin => ({ ...await get($, options, pin.run.id, pin.run.profile), clockOffset: pin.run.clockOffset })))
+    const unavailable = new Set(page.unavailable)
+    details.forEach((detail, index) => {
+      const source = missing[index]!.run.profile
+      if (source) {
+        if (detail.status === 'fulfilled') unavailable.delete(source)
+        else unavailable.add(source)
+      }
+    })
+    const observed = [...recent, ...details.flatMap(detail => detail.status === 'fulfilled' ? [detail.value] : [])]
     const now = await $.clock.now()
     if (loop.stopped) return
     const finished: string[] = []
@@ -41,10 +50,10 @@ async function refresh($: EngineInterface, options: PluginOptions, loop: Loop) {
       if (loop.stopped) return state
       // Rows age on the server's clock, which stamped them; watches expire on this one.
       return {
-        recent, reachable: true, now: page.serverTime ?? now,
+        recent, reachable: true, now: page.serverTime ?? now, unavailable: [...unavailable],
         pins: state.pins.map(pin => {
           if (pin.doneAt !== null) return pin
-          const run = [...recent, ...details].find(run => run.id === pin.run.id) ?? pin.run
+          const run = observed.find(run => run.id === pin.run.id) ?? pin.run
           const doneAt = active(run) ? null : now
           if (doneAt !== null) finished.push(outcome(run))
           return { run, doneAt }
@@ -63,7 +72,8 @@ async function watch($: EngineInterface, options: PluginOptions, id: string): Pr
   await update($, snapshot, state => {
     const pins = state.pins.filter(pin => active(pin.run) && pin.run.id !== run.id)
     if (pins.length === 3) throw new Error('Three runs are already pinned. Wait for one to finish.')
-    return { ...state, reachable: true, pins: [...pins, { run, doneAt: null }] }
+    const clockOffset = state.recent.find(row => row.id === run.id)?.clockOffset
+    return { ...state, reachable: true, pins: [...pins, { run: { ...run, clockOffset }, doneAt: null }] }
   })
   return `Watching ${run.id} until it finishes.`
 }
@@ -94,7 +104,7 @@ async function registerCommands($: EngineInterface) {
 // The setup notice the box needs before it can read runs, or none.
 async function missingSetup($: EngineInterface, options: PluginOptions): Promise<{ key: string; text: string } | undefined> {
   try { await checkedExecutable($, options) } catch { return { key: 'executable-notice', text: SETUP } }
-  try { await profile($, options) } catch { return { key: 'profile-notice', text: PROFILE_SETUP } }
+  try { await profiles($, options) } catch (error) { return { key: 'profile-notice', text: errorText(error) } }
   return undefined
 }
 
