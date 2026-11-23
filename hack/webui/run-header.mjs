@@ -1,4 +1,5 @@
 import {writeFile} from 'node:fs/promises';
+import {wideCounts} from './run-header-wide.mjs';
 import {check} from './cdp.mjs';
 
 export async function runHeader(client) {
@@ -8,23 +9,24 @@ export async function runHeader(client) {
   await client.loaded('/runs/33333333','.steps a.row');
   await client.evaluate(`(async()=>{screen.controller.abort();window.headerRun=await get('/api/runs/33333333');window.headerRuns=await Promise.all(['a','b'].flatMap(prefix=>[0,1,2,3,4].map(index=>get('/api/runs/'+prefix+index.toString(16).padStart(30,'0')+'0'))));})()`);
   for(const theme of ['light','dark','mono','color'])for(const [index,status] of ['queued','running','passed','failed','cancelled'].entries())for(const specific of [false,true]) {
-   const metrics=await client.evaluate(`(()=>{
+   const metrics=await client.evaluate(`(async()=>{
     document.documentElement.dataset.theme=${JSON.stringify(theme)};
     const run={...headerRuns[${index+(specific?5:0)}],status:${JSON.stringify(status)},step_count:14,passed:13,failed:0,pending:0,steps_planned_exact:true};
     if(run.status==='queued'){run.started_at=null;run.commit_sha=null;run.pending=14;run.passed=0;}
     if(run.status==='failed'){run.passed=12;run.failed=1;run.pending=1;}
     const header=document.querySelector('.run-head'),actions=runActions(screen,run,[],[]);
     header.replaceChildren(...runHeader(run,actions,false));
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     const rect=header.getBoundingClientRect(),style=getComputedStyle(header),summary=header.querySelector('.run-summary'),meta=header.querySelector('.run-meta');
     const line=node=>{const range=document.createRange();range.selectNodeContents(node);return range.getBoundingClientRect().height;};
     return {height:rect.height-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)-parseFloat(style.borderTopWidth)-parseFloat(style.borderBottomWidth),lineHeight:parseFloat(style.lineHeight),summary:summary.textContent,counts:header.querySelector('.run-counts').textContent,
      reason:header.querySelector('.run-reason')?.textContent||'',reasonHeight:header.querySelector('.run-reason')?line(header.querySelector('.run-reason')):0,
-     summaryHeight:summary.getBoundingClientRect().height,metaHeight:meta.getBoundingClientRect().height,
+     wrapped:summary.classList.contains('wrap-counts'),summaryHeight:summary.getBoundingClientRect().height,metaHeight:meta.getBoundingClientRect().height,
      sizes:[summary,meta,...summary.children].map(node=>[node.className,node.clientWidth,node.scrollWidth,getComputedStyle(node).fontSize]),overflow:document.documentElement.scrollWidth>innerWidth||summary.scrollWidth>summary.clientWidth||meta.scrollWidth>meta.clientWidth,
      cancel:Array.from(summary.querySelectorAll('button')).map(node=>({text:node.textContent,disabled:node.disabled,right:node.getBoundingClientRect().right})),right:rect.right};
    })()`);
    check(metrics.summary.startsWith(status)&&!metrics.summary.includes('run is'),'status sentence retained '+JSON.stringify(metrics));
-   check(!metrics.overflow&&metrics.summaryHeight<=metrics.lineHeight&&metrics.metaHeight<=metrics.lineHeight&&metrics.height<=metrics.lineHeight*(metrics.reason?3:2),'header wraps or overflows '+JSON.stringify({width,theme,status,...metrics}));
+   check(!metrics.overflow&&metrics.summaryHeight<=metrics.lineHeight*(metrics.wrapped?2:1)&&metrics.metaHeight<=metrics.lineHeight&&metrics.height<=metrics.lineHeight*(2+Number(Boolean(metrics.reason))+Number(metrics.wrapped)),'header wraps or overflows '+JSON.stringify({width,theme,status,...metrics}));
    check(metrics.reason===(specific?'waiting for a node':'')&&metrics.reasonHeight<=metrics.lineHeight&&(!metrics.reason||metrics.reason==='waiting for a node'),'reason cut or missing '+JSON.stringify(metrics));
    check(metrics.counts===(status==='queued'?'0/14 passed · 14 pending':status==='failed'?'12/14 passed · 1 failed · 1 pending':'13/14 passed'),'step counts changed '+JSON.stringify(metrics));
    check(['queued','running'].includes(status)?metrics.cancel.length===1&&!metrics.cancel[0].disabled&&metrics.cancel[0].right<=metrics.right:metrics.cancel.length===0,'Cancel visibility wrong '+JSON.stringify(metrics));
@@ -39,6 +41,7 @@ export async function runHeader(client) {
    results.push({width,theme,status,...metrics});
   }
  }
+ results.push(...await wideCounts(client));
  const wire=await client.evaluate(`Promise.all(headerRuns.slice(0,5).map(run=>call('run_get',{id:run.id})))`);
  check(wire.every(run=>run.display_reason===''),'MCP added a redundant run reason');
  const inexact=await client.evaluate(`(()=>{const run={...headerRun,steps_planned_exact:false},box=h("div");box.append(...runHeader(run,runActions(screen,run,[],[]),false));return box.querySelector(".run-counts").textContent;})()`);

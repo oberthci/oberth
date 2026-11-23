@@ -117,12 +117,20 @@ function runDetail(run, open) {
 }
 function otherRuns(run) { return h("a", {href: "/runs?" + params({repo: run.repo, ref: run.ref})}, "Other runs of this ref"); }
 function runHeader(run, actions, open) {
- const counts = [run.passed + "/" + (run.steps_planned_exact ? "" : ">=") + run.step_count + " passed", run.failed && run.failed + " failed", run.pending && run.pending + " pending"].filter(Boolean).join(" · ");
+ const counts = [run.passed + "/" + (run.steps_planned_exact ? "" : ">=") + run.step_count + " passed", run.failed && run.failed + " failed", run.pending && run.pending + " pending"].filter(Boolean).map((text, index) => h("span", {}, (index ? " · " : "") + text));
  const cancel = ["queued", "running"].includes(run.status) ? actions.querySelector("button") : null;
- return [h("h1", {class: "run-summary", title: run.repo + " · " + run.ref}, state(run.status), clock(run), h("span", {class: "run-counts"}, counts), cancel),
+ const row = h("h1", {class: "run-summary", title: run.repo + " · " + run.ref}, state(run.status), clock(run), h("span", {class: "run-counts"}, counts), cancel);
+ new ResizeObserver((_, observer) => { if (row.isConnected) fitRunHeader(row); else observer.disconnect(); }).observe(row);
+ return [row,
   run.display_reason ? h("p", {class: "run-reason"}, run.failure ? h("b", {class: "failed-step"}, run.failure.failed_step_name || run.failure.failed_step) : null, run.display_reason) : null,
   h("div", {class: "run-meta muted"}, h("div", {class: "run-metadata"}, runIdentity(run), runOrigin(run) ? h("span", {class: "meta-extra", "aria-label": "Started by"}, " · " + runOrigin(run)) : null,
    h("span", {class: "meta-extra"}, " · ", run.started_at ? "Started " : "Created ", h("time", {datetime: run.started_at || run.created_at, title: fullTimes(run)}, time(run.started_at || run.created_at)), " · ", otherRuns(run))), runDetail(run, open))].filter(Boolean);
+}
+function fitRunHeader(row) {
+ const counts = row.querySelector(".run-counts"), gap = parseFloat(getComputedStyle(row).columnGap), countGap = parseFloat(getComputedStyle(counts).columnGap);
+ const items = row.querySelectorAll(":scope > :not(.run-counts), .run-counts > span");
+ const width = Array.from(items).reduce((total, node) => total + node.getBoundingClientRect().width, 0) + 3 * gap + (counts.children.length - 1) * countGap;
+ row.classList.toggle("wrap-counts", width > row.clientWidth);
 }
 setInterval(() => document.querySelectorAll("[data-start]").forEach(node => { node.textContent = duration(node.dataset.start, node.dataset.end); }), 1000);
 function replace(region, nodes) {
