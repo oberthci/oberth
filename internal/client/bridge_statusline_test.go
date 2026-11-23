@@ -60,14 +60,22 @@ func footerPage(now time.Time) apicontract.RunPage {
 
 func footerReply(t *testing.T, p *bridgePeer, id string) string {
 	t.Helper()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
 	p.send(id, "resources/read", map[string]any{"uri": footerURI, "_meta": map[string]any{"com.openai/codex-statusline-state": map[string]any{"thread": map[string]any{"id": "t"}}}})
+	var data json.RawMessage
+	select {
+	case data = <-p.frames:
+	case <-deadline.C:
+		t.Fatal("footer read exceeded the one-second host budget")
+	}
 	var reply struct {
 		ID     string
 		Result struct {
 			Contents []struct{ URI, MimeType, Text string }
 		}
 	}
-	if err := json.Unmarshal(p.frame(), &reply); err != nil || reply.ID != id || len(reply.Result.Contents) != 1 {
+	if err := json.Unmarshal(data, &reply); err != nil || reply.ID != id || len(reply.Result.Contents) != 1 {
 		t.Fatalf("footer read: %v %+v", err, reply)
 	}
 	c := reply.Result.Contents[0]
@@ -75,6 +83,44 @@ func footerReply(t *testing.T, p *bridgePeer, id string) string {
 		t.Fatalf("footer content: %+v", c)
 	}
 	return c.Text
+}
+
+func TestBridgeFooterSlowListReadBudget(t *testing.T) {
+	bindings := fake.Bindings()
+	started, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	list := &fake.Handler[apicontract.RunListArgs, apicontract.RunPage]{Run: func(ctx context.Context) (apicontract.RunPage, error) {
+		close(started)
+		select {
+		case <-release:
+			return footerPage(fake.NewClock().Now()), nil
+		case <-ctx.Done():
+			return apicontract.RunPage{}, ctx.Err()
+		}
+	}}
+	bindings.RunList.Handler = list
+	p := newBridgePeer(t, bridgeProfile(t, streamingTransport(server(t, bindings))))
+	p.initialize()
+	if text := footerReply(t, p, "first"); !strings.Contains(text, "Oberth: reading runs") {
+		t.Fatalf("blocked list did not show a placeholder: %s", text)
+	}
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	select {
+	case <-started:
+	case <-deadline.C:
+		t.Fatal("footer refresh did not start")
+	}
+	p.send("ping", "ping", nil)
+	if data := p.frame(); !strings.Contains(string(data), `"id":"ping"`) {
+		t.Fatalf("a blocked footer list stopped other traffic: %s", data)
+	}
+	for i := range 3 {
+		if text := footerReply(t, p, fmt.Sprint(i)); !strings.Contains(text, "Oberth: reading runs") {
+			t.Fatalf("pending list lost its placeholder: %s", text)
+		}
+	}
+	assertFooterCalls(t, list, 1)
 }
 
 // Codex picks a statusline provider from a tool's entrypoint and reads its resource about
@@ -147,13 +193,13 @@ func TestBridgeCodexFooterCacheBound(t *testing.T) {
 			}
 			t.Cleanup(remote.Close)
 			b := &bridge{ctx: t.Context(), eventCtx: t.Context(), client: remote}
-			b.footerTree(t.Context())
+			b.footerTree()
 			b.workers.Wait()
 			assertFooterCalls(t, list, 1)
 			for interval := 0; interval < 3; interval++ {
 				for read := 0; read < 29; read++ {
 					clock.Advance(500 * time.Millisecond)
-					b.footerTree(t.Context())
+					b.footerTree()
 					// Join every refresh before counting; a reply alone is not a barrier.
 					b.workers.Wait()
 					assertFooterCalls(t, list, interval+1)
@@ -161,7 +207,7 @@ func TestBridgeCodexFooterCacheBound(t *testing.T) {
 				clock.Advance(500 * time.Millisecond)
 				var readers sync.WaitGroup
 				for range 40 {
-					readers.Go(func() { b.footerTree(t.Context()) })
+					readers.Go(func() { b.footerTree() })
 				}
 				readers.Wait()
 				b.workers.Wait()

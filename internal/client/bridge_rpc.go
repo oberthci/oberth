@@ -16,7 +16,7 @@ func (b *bridge) handle(ctx context.Context, req rpcRequest) {
 		b.tool(ctx, req)
 		return
 	}
-	if footerRead(req) {
+	if isFooterRead(req) {
 		b.footerRead(ctx, req)
 		return
 	}

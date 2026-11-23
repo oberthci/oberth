@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/publicerr"
 )
 
 // Codex draws its footer from a statusline entrypoint on one listed tool: it reads the
@@ -23,17 +23,16 @@ const (
 	footerTool    = "run_list"
 	footerRuns    = 3
 	footerRefresh = 15 * time.Second
-	footerFirst   = 700 * time.Millisecond
 )
 
 type footer struct {
 	mu      sync.Mutex
 	tree    json.RawMessage
 	at      time.Time
-	pending chan struct{}
+	pending bool
 }
 
-func footerRead(req rpcRequest) bool {
+func isFooterRead(req rpcRequest) bool {
 	var params struct {
 		URI string `json:"uri"`
 	}
@@ -41,40 +40,29 @@ func footerRead(req rpcRequest) bool {
 }
 
 func (b *bridge) footerRead(ctx context.Context, req rpcRequest) {
-	content := map[string]string{"uri": footerURI, "mimeType": "application/json", "text": string(b.footerTree(ctx))}
+	content := map[string]string{"uri": footerURI, "mimeType": "application/json", "text": string(b.footerTree())}
 	data, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"contents": []any{content}}})
 	_ = b.emit(ctx, data)
 }
 
-// footerTree returns the cached tree, starting a refresh when it is stale. Only the first
-// read waits, briefly, for the list; a slower list shows a placeholder until it lands.
-func (b *bridge) footerTree(ctx context.Context) json.RawMessage {
+// footerTree returns the cached tree or a placeholder immediately. A host read starts a
+// refresh only when the tree is stale; server latency never delays the host reply.
+func (b *bridge) footerTree() json.RawMessage {
 	f := &b.footer
 	f.mu.Lock()
-	tree, pending := f.tree, f.pending
-	if pending == nil && (tree == nil || b.client.now().Sub(f.at) >= footerRefresh) {
-		pending = make(chan struct{})
-		f.pending = pending
-		b.workers.Go(func() { b.refreshFooter(b.eventCtx, pending) })
+	tree := f.tree
+	if !f.pending && (tree == nil || b.client.now().Sub(f.at) >= footerRefresh) {
+		f.pending = true
+		b.workers.Go(func() { b.refreshFooter(b.eventCtx) })
 	}
 	f.mu.Unlock()
 	if tree != nil {
 		return tree
 	}
-	timer := time.NewTimer(footerFirst)
-	defer timer.Stop()
-	select {
-	case <-pending:
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		return f.tree
-	case <-timer.C:
-	case <-ctx.Done():
-	}
 	return footerText("status-metadata", "Oberth: reading runs")
 }
 
-func (b *bridge) refreshFooter(ctx context.Context, done chan struct{}) {
+func (b *bridge) refreshFooter(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var page apicontract.RunPage
@@ -83,9 +71,8 @@ func (b *bridge) refreshFooter(ctx context.Context, done chan struct{}) {
 	tree := footerRows(page, err, now)
 	f := &b.footer
 	f.mu.Lock()
-	f.tree, f.at, f.pending = tree, now, nil
+	f.tree, f.at, f.pending = tree, now, false
 	f.mu.Unlock()
-	close(done)
 }
 
 // footerStatus is a run's icon and status word and the color the run box gives it.
@@ -109,12 +96,7 @@ func footerStatus(status string) (string, string) {
 // steps, time, age and a failed run's step.
 func footerRows(page apicontract.RunPage, err error, now time.Time) json.RawMessage {
 	if err != nil {
-		var public interface{ Reason() string }
-		reason := "Oberth is unreachable."
-		if errors.As(err, &public) && public.Reason() != "" {
-			reason = public.Reason()
-		}
-		return footerText("red", "Oberth: "+clean(reason))
+		return footerText("red", "Oberth: "+clean(publicerr.Classify(err).Reason()))
 	}
 	if len(page.Runs) == 0 {
 		return footerText("status-metadata", "Oberth: no runs")
