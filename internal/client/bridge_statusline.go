@@ -127,9 +127,11 @@ func footerRun(run apicontract.RunRecord, runs []apicontract.RunRecord, now time
 	if run.FinishedAt != nil {
 		end = *run.FinishedAt
 	}
+	age := max(0, now.Sub(run.CreatedAt))
+	duration := min(age, max(0, end.Sub(start)))
 	cells := []string{footerID(run.ID, runs), run.Repo[strings.LastIndex(run.Repo, "/")+1:],
 		strings.TrimPrefix(strings.TrimPrefix(run.Ref, "refs/heads/"), "refs/tags/"),
-		status, steps, span(end.Sub(start), 2), span(now.Sub(run.CreatedAt), 1)}
+		status, steps, span(duration, 2), span(age, 1)}
 	if run.Status == "failed" && run.Failure != nil && run.Failure.Name != "" {
 		cells = append(cells, run.Failure.Name)
 	}

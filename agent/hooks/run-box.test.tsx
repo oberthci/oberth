@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Run, Snapshot } from '../types'
-import { age, decodeRun, duration, progress, PROFILE_REASON, PROFILE_REMEDY, REFRESH_MS, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, span, table, visible, WINDOW_MS } from './model'
+import { age, boxRows, decodeRun, duration, progress, PROFILE_REASON, PROFILE_REMEDY, REFRESH_MS, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, span, table, visible, WINDOW_MS } from './model'
 import { SETUP } from './client'
 import { hostProps, hostValues } from './host-elements'
 
@@ -468,6 +468,34 @@ test('durations and ages read as seconds, then two units or one', async () => {
   expect(age(item, Date.parse('2026-11-18T01:00:00Z'))).toBe('1h')
   expect(age(item, Date.parse('2026-11-17T23:00:00Z'))).toBe('0s')
 })
+
+test('one render time bounds duration by age when native start predates creation', async () => {
+  const now = Date.parse('2026-11-18T00:00:20.999Z')
+  const item = { ...run(), started_at: '2026-11-17T23:59:59Z' }
+  const state: Snapshot = { recent: [item], pins: [], reachable: true, now, singleProfile: true }
+  expect(duration(item, now)).toBe('20s')
+  expect(age(item, now)).toBe('20s')
+  expect(boxRows(state, 3, 120)[1]).toMatch(/ ▶ running +6\/11 +20s +20s$/)
+  expect(table([item], now, 120)).toMatch(/ ▶ running +6\/11 +20s +20s$/)
+  // The same snapshot crosses the second boundary together in both columns.
+  expect(boxRows({ ...state, now: now + 1 }, 3, 120)[1]).toMatch(/ +21s +21s$/)
+  expect(duration({ ...item, started_at: '2026-11-18T00:00:10Z' }, now)).toBe('10s')
+  expect(duration({ ...item, status: 'queued', started_at: null }, now)).toBe('20s')
+  expect(duration({ ...item, status: 'passed', finished_at: '2026-11-18T00:00:21Z' }, now)).toBe('20s')
+})
+
+for (const clockOffset of [-5000, 5000]) {
+  test(`profile clock offset ${clockOffset} bounds duration by age`, async () => {
+    const now = Date.parse('2026-11-18T00:00:20.999Z') + clockOffset
+    const item = { ...run(), started_at: '2026-11-17T23:59:59Z', clockOffset }
+    const state: Snapshot = { recent: [item], pins: [], reachable: true, now, singleProfile: true }
+    expect(duration(item, now)).toBe('20s')
+    expect(age(item, now)).toBe('20s')
+    expect(boxRows(state, 3, 120)[1]).toMatch(/ ▶ running +6\/11 +20s +20s$/)
+    expect(table([item], now, 120)).toMatch(/ ▶ running +6\/11 +20s +20s$/)
+    expect(duration({ ...item, status: 'passed', finished_at: '2026-11-18T00:00:21Z' }, now)).toBe('20s')
+  })
+}
 
 test('idle reads and refused change waits share one coalesced timer', { options }, async ($, on) => {
   bottom(on)

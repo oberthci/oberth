@@ -58,6 +58,8 @@ authoritative plan counts, duration, age, a watched mark and a failed run's step
 measured in terminal cells, cut to the box's width and never wrapped; the last column
 gives way first. `/oberth-runs` prints the same lines with a failed run's step and reason
 or a cancelled run's reason last; there the names give way before the reason.
+The box and bridge footer use one time per render and each profile's clock to bound
+duration by age, even when native start predates creation.
 Finished watches produce one completion notice. The box, `/oberth-runs` and `/oberth-watch`
 read only public `run list --json`, `run get --json` and `run wait --json`, through the absolute verified
 executable (its option, by default the fetcher's install in the user bin directory),

@@ -175,6 +175,32 @@ func TestBridgeCodexFooterRows(t *testing.T) {
 	}
 }
 
+func TestBridgeFooterDurationNeverExceedsAge(t *testing.T) {
+	t.Parallel()
+	now := fake.NewClock().Now()
+	created, nativeStart, futureEnd := now.Add(-20*time.Second), now.Add(-21*time.Second), now.Add(time.Second)
+	for _, test := range []struct {
+		name string
+		run  stepmodel.RunSummary
+		want string
+	}{
+		{"queued", stepmodel.RunSummary{Status: stepmodel.RunQueued, CreatedAt: created}, "20s 20s"},
+		{"running", stepmodel.RunSummary{Status: stepmodel.RunRunning, CreatedAt: created, StartedAt: &nativeStart}, "20s 20s"},
+		{"finished", stepmodel.RunSummary{Status: stepmodel.RunPassed, CreatedAt: created, StartedAt: &nativeStart, FinishedAt: &futureEnd}, "20s 20s"},
+		{"future-created", stepmodel.RunSummary{Status: stepmodel.RunRunning, CreatedAt: futureEnd, StartedAt: &nativeStart}, "0s 0s"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			run := apicontract.RunRecord{RunSummary: test.run}
+			run.ID, run.Repo, run.Ref = "47c0aa006d128a0325afe873e65cde30", "source/team/widget", "refs/heads/work"
+			page := apicontract.RunPage{Runs: []apicontract.RunRecord{run}, ServerTime: now}
+			text := string(footerRows(page, nil, now.Add(time.Hour)))
+			if !strings.Contains(text, test.want) {
+				t.Fatalf("duration exceeded age or used the bridge clock: %s", text)
+			}
+		})
+	}
+}
+
 func TestBridgeCodexFooterCacheBound(t *testing.T) {
 	for _, refused := range []bool{false, true} {
 		t.Run(fmt.Sprint(refused), func(t *testing.T) {
