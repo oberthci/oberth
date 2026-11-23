@@ -5,6 +5,7 @@ import (
 	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -64,7 +65,8 @@ func checkNativeStepShape(t *testing.T, f RunFixture) {
 // are skipped;
 // it runs from the first step that starts, whose start is the run's, and never
 // queues again. A later save never moves the start forward, an earlier
-// observed start moves it back.
+// observed start moves it back. A queued run is listed by its status, progress
+// keeps the control revision, and a finished run keeps its verdict.
 func checkRunStart(t *testing.T, f RunFixture) {
 	saved, err := f.Port.AcceptBatch(t.Context(), batchFor(t, f, RunCase{ID: "run-start"}))
 	mustRun(t, err)
@@ -85,6 +87,11 @@ func checkRunStart(t *testing.T, f RunFixture) {
 	}
 	mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps, Waiting: "waiting for sync limit go"}))
 	runState(t, f, id, progressWant{stepmodel.RunQueued, "waiting for sync limit go", nil})
+	queued, err := f.Port.Runs(t.Context(), stateport.RunFilter{Status: stepmodel.RunQueued, Limit: 100})
+	mustRun(t, err)
+	if !slices.ContainsFunc(queued, func(r stateport.Run) bool { return r.ID == id && r.DisplayReason == "waiting for sync limit go" }) {
+		t.Fatal("a queued run is not listed by its status", queued)
+	}
 	for _, c := range []struct{ step, want time.Time }{{base, base}, {base.Add(time.Minute), base}, {base.Add(-time.Second), base.Add(-time.Second)}} {
 		started := c.step.In(time.FixedZone("east", 3600))
 		steps[0].Status, steps[0].StartedAt = stepmodel.StepRunning, &started
@@ -94,6 +101,14 @@ func checkRunStart(t *testing.T, f RunFixture) {
 	steps[0].Status = stepmodel.StepQueued
 	mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps, Waiting: "waiting for a node"}))
 	runState(t, f, id, progressWant{stepmodel.RunRunning, "", new(base.Add(-time.Second))})
+	mustRun(t, f.Port.Finish(t.Context(), stateport.Action{Actor: "operator"}, stateport.RunUpdate{ID: id, Revision: saved.Runs[0].Revision, Status: stepmodel.RunFailed, Reason: "run failed"}))
+	steps[0].Status = stepmodel.StepRunning
+	mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps, Waiting: "waiting for a node"}))
+	r, err := f.Port.Run(t.Context(), id)
+	mustRun(t, err)
+	if r.Status != stepmodel.RunFailed || r.DisplayReason != "run failed" {
+		t.Fatal("progress changed a finished run", r.Status, r.DisplayReason)
+	}
 }
 
 type progressWant struct {
