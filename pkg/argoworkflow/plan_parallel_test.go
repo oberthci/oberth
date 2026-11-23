@@ -1,10 +1,32 @@
 package argoworkflow
 
 import (
+	"slices"
 	"testing"
 
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 )
+
+func TestPlanGroupsStayConsecutiveBesideChains(t *testing.T) {
+	w := planDAG()
+	w.Spec.Templates[0].DAG.Tasks = []wf.DAGTask{
+		{Name: "a", Template: "leaf"},
+		{Name: "b", Template: "leaf", Dependencies: []string{"a"}},
+		{Name: "e", Template: "leaf", Dependencies: []string{"b"}},
+		{Name: "c", Template: "leaf", Dependencies: []string{"a"}},
+		{Name: "d", Template: "leaf", Dependencies: []string{"c"}},
+	}
+	p, err := planFixture(t.Context(), w, admissionFixture{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(planPaths(p), []string{"a", "b", "c", "e", "d"}) {
+		t.Fatal("dependency levels are interleaved", planPaths(p))
+	}
+	if p.Entries[1].ParallelGroup == 0 || p.Entries[1].ParallelGroup != p.Entries[2].ParallelGroup || p.Entries[3].ParallelGroup == 0 || p.Entries[3].ParallelGroup != p.Entries[4].ParallelGroup || p.Entries[1].ParallelGroup == p.Entries[3].ParallelGroup {
+		t.Fatal("consecutive dependency levels do not have distinct groups", p)
+	}
+}
 
 func TestPlanParallelGroupsComeFromDependencyLevels(t *testing.T) {
 	t.Parallel()
@@ -68,7 +90,8 @@ func TestParallelLevelsIncludeDifferentDependenciesAndKeepPlanOrder(t *testing.T
 		{name: "d", dag: true, target: leaf, after: []string{"b", "Succeeded"}},
 		{name: "e", dag: true, target: leaf, after: []string{"c", "d"}},
 	}
-	groups := p.parallelCalls(executionOrder(calls))
+	ordered, levels := executionOrder(calls)
+	groups := p.parallelCalls(ordered, levels)
 	if groups[calls[0]] == 0 || groups[calls[0]] != groups[calls[1]] || groups[calls[2]] == 0 || groups[calls[2]] != groups[calls[3]] || groups[calls[4]] != 0 || groups[calls[0]] == groups[calls[2]] {
 		t.Fatal("groups do not follow dependency levels", groups)
 	}

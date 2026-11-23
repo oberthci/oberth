@@ -33,7 +33,7 @@ func TestPlanListsStepsInExecutionOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"build", "test[0].unit", "test[0].race", "test[1].report", "lint", "release", "docs"}
+	want := []string{"build", "docs", "test[0].unit", "test[0].race", "test[1].report", "lint", "release"}
 	var got []string
 	for _, entry := range plan.Entries {
 		got = append(got, entry.Path)
@@ -46,11 +46,11 @@ func TestPlanListsStepsInExecutionOrder(t *testing.T) {
 func TestExecutionOrderKeepsDeclarationOrderWithoutDependencies(t *testing.T) {
 	t.Parallel()
 	steps := []*call{{name: "b"}, {name: "a"}}
-	if got := executionOrder(steps); got[0].name != "b" || got[1].name != "a" {
+	if got, _ := executionOrder(steps); got[0].name != "b" || got[1].name != "a" {
 		t.Fatal("steps calls were reordered")
 	}
 	cycle := []*call{{name: "x", dag: true, after: []string{"y"}}, {name: "y", dag: true, after: []string{"x"}}, {name: "z", dag: true, after: []string{"z", "unknown"}}}
-	got := executionOrder(cycle)
+	got, _ := executionOrder(cycle)
 	if len(got) != 3 || got[0].name != "z" || got[1].name != "x" || got[2].name != "y" {
 		t.Fatalf("cycle or self and unknown references lost a task: %v %v %v", got[0].name, got[1].name, got[2].name)
 	}

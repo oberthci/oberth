@@ -126,7 +126,7 @@ func TestOwnPlanStaysSmall(t *testing.T) {
 		want []string
 	}{
 		{"build", []string{"prepare-base", "go-tests-pass-with-race", "release-bytes-build", "lint-and-guards-pass"}},
-		{"walk", []string{"prepare-base", "release-bytes-build", "walk-vm-key-generated", "walk-vm-boots", "first-run-walk-passes", "walk-vm-deleted"}},
+		{"walk", []string{"prepare-base", "walk-vm-key-generated", "release-bytes-build", "walk-vm-boots", "first-run-walk-passes", "walk-vm-deleted"}},
 	} {
 		p, err := prepareOwn(t, tc.name, model.TriggerPromotion)
 		if err != nil {

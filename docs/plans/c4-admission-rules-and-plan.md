@@ -72,7 +72,7 @@ those definitions; they do not define rival DTOs.
   references. Include admitted container, script, containerSet, resource and suspend leaves,
   including a leaf entrypoint. Exclude structural grouping and retry nodes. Identity is the
   native invocation path without Workflow prefix or retry suffix; display names cannot establish
-  identity. Display order is static run order: a DAG task after the tasks it depends on (ties in
+  identity. Display order is static run order: DAG tasks by dependency level (ties in
   declaration order), steps groups in order, a called template in place; never observed runtime
   order. Leaf siblings at the same local DAG dependency level or steps group carry a positive `parallel_group`; serial leaves and hooks carry none. Literal `withItems` expands statically; runtime-dependent fan-out and recursion retain
   an expandable entry and make exactness false. Native observations expand that entry in the

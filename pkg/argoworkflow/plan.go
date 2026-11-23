@@ -128,8 +128,8 @@ func (p *planner) visit(n *node, path, name string, group int) bool {
 	start, size := len(p.plan.Entries), p.bytes
 	p.active[n] = true
 	defer delete(p.active, n)
-	ordered := executionOrder(n.calls)
-	groups := p.parallelCalls(ordered)
+	ordered, levels := executionOrder(n.calls)
+	groups := p.parallelCalls(ordered, levels)
 	for _, c := range ordered {
 		if !p.invoke(c, path, groups[c]) {
 			p.plan.Entries = p.plan.Entries[:start]

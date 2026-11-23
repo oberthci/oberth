@@ -8,21 +8,13 @@ import (
 // parallelCalls assigns a scope-local group to leaf siblings at the same DAG
 // dependency level, or in the same steps group. Nested templates compute their
 // own groups so serial descendants and exit hooks never share a parallel border.
-func (p *planner) parallelCalls(ordered []*call) map[*call]int {
-	levels := map[string]int{}
+func (p *planner) parallelCalls(ordered []*call, levels map[*call]int) map[*call]int {
 	keys := map[*call]string{}
 	counts := map[string]int{}
 	for _, c := range ordered {
 		key, _, _ := strings.Cut(c.suffix, "]")
 		if c.dag {
-			level := 0
-			for _, name := range c.after {
-				if prior, ok := levels[name]; ok {
-					level = max(level, prior+1)
-				}
-			}
-			levels[c.name] = level
-			key = strconv.Itoa(level)
+			key = strconv.Itoa(levels[c])
 		}
 		if parallelLeaf(c) {
 			keys[c] = key
