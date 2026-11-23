@@ -27,5 +27,6 @@ func (s *Service) cancellationReason(ctx context.Context, o *FinishedRun) error 
 		}
 		o.Detail = strings.TrimSpace("Cancelled by " + obligation.Actor + ".\n" + o.Detail)
 	}
+	o.Detail = strings.TrimSpace(o.Detail + "\n" + detailCancelled)
 	return nil
 }

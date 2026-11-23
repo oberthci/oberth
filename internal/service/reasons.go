@@ -40,6 +40,7 @@ const (
 	reasonPassed      = "run passed"
 	reasonFailed      = "run failed"
 	reasonCancelled   = "run cancelled"
+	detailCancelled   = "This run was cancelled. Push a new commit or request a rerun to run again."
 	reasonSkipped     = "step skipped"
 	reasonPending     = "step not reached"
 	reasonUnknown     = "execution evidence unavailable"

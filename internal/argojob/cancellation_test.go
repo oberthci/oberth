@@ -33,7 +33,7 @@ func TestCancelledExitIsNotAnAuthorFailure(t *testing.T) {
 				w.Spec.Shutdown = mode
 				w.Status.Phase = wf.WorkflowFailed
 				out := project(t, in)
-				if out.Status != stepmodel.RunCancelled || out.Reason != "stopped" || out.Failure.Class != stepmodel.FailureCancelled || out.Failure.Retry.Action != stepmodel.RetryNone || out.Failure.Retry.ReasonCode != "cancelled" {
+				if out.Status != stepmodel.RunCancelled || out.Reason != "stopped" || out.Failure != nil || out.Steps[0].FailureClass != stepmodel.FailureCancelled {
 					t.Fatal("cancel treated as code failure", out, out.Failure)
 				}
 				if out.Steps[0].DisplayReason != "stopped" || out.Nodes[0].Exit == nil || *out.Nodes[0].Exit != 143 {
@@ -50,7 +50,7 @@ func TestCancelledQueuedRunHasNoStartedSteps(t *testing.T) {
 	w.Spec.Shutdown = wf.ShutdownStrategyTerminate
 	w.Status.Phase = wf.WorkflowFailed
 	out := project(t, argojob.Projection{Plan: admissioncontract.Plan{Entries: []admissioncontract.PlanEntry{{Path: "build"}}}, Workflow: w})
-	if out.Status != stepmodel.RunCancelled || out.Failure.Class != stepmodel.FailureCancelled || out.Steps[0].Status != stepmodel.StepSkipped || out.Steps[0].StartedAt != nil {
+	if out.Status != stepmodel.RunCancelled || out.Failure != nil || out.Steps[0].Status != stepmodel.StepSkipped || out.Steps[0].StartedAt != nil {
 		t.Fatal("queued cancellation became execution", out)
 	}
 }

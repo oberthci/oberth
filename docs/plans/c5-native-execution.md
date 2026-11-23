@@ -164,7 +164,7 @@ source runtime, concrete Store, service, transport or installer imports.
 2. Argo Succeeded stays passed even with tolerated failed nodes; under shutdown its root must have succeeded. Other shutdown verdicts are cancelled; killed steps keep native exits as evidence, not author failures. Missing exit
    evidence is unknown. Run failure is infrastructure only if every failed step
    has typed infrastructure evidence. No message parsing or reboot inference
-   grants retry authority; retry hints are advice only.
+   grants retry authority; retry hints are advice only. Cancelled runs have no run-level failure or retry hint; step diagnoses remain evidence.
 3. **Delta:** Preserve authored commands, resources, placement, locks, retries and deadlines.
    Argo's `failedPodRestart` is on with `maxRestarts: 1`. Oberth adds no
    automatic infrastructure retry or run cap.

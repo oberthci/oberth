@@ -50,3 +50,16 @@ func TestCancellationAttributionSurvivesRestartAndFitsReason(t *testing.T) {
 		}
 	}
 }
+
+func TestCancelledRunExplainsHowToStartAgain(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	f.seed(stepmodel.RunRunning)
+	if err := f.s.Finished(t.Context(), service.FinishedRun{RunID: runID, Status: stepmodel.RunCancelled, Reason: "stopped"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.store.native.Run(t.Context(), runID)
+	if err != nil || got.Failure != nil || !strings.Contains(got.Detail, "This run was cancelled. Push a new commit or request a rerun to run again.") || len(got.Detail) > 120 {
+		t.Fatal("cancelled run offers code repair or lacks restart guidance", got, err)
+	}
+}

@@ -238,16 +238,7 @@ func finishProjection(out *Observation, w *wf.Workflow, rows []projected) {
 		return
 	}
 	out.Status, out.Reason = runVerdict(w)
-	if out.Status == stepmodel.RunCancelled {
-		if out.Failure == nil {
-			out.Failure = &stepmodel.FailureRecord{}
-		}
-		if out.Failure.Class == "" {
-			out.Failure.Class = stepmodel.FailureCancelled
-		}
-		out.Failure.Retry = stepmodel.RetryHint{Action: stepmodel.RetryNone, ReasonCode: "cancelled"}
-	}
-	if out.Status == stepmodel.RunPassed {
+	if out.Status == stepmodel.RunPassed || out.Status == stepmodel.RunCancelled {
 		out.Failure = nil
 	}
 	if out.Status == stepmodel.RunFailed && out.Failure != nil {

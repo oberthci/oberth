@@ -53,7 +53,7 @@ func (f *composedFixture) finishCancellationRun(t *testing.T, run stateport.Run,
 		f.updateNative(t, w)
 	}
 	final := f.waitRun(t, func(r stateport.Run) bool { return r.Status == stepmodel.RunCancelled })
-	if final.Failure == nil || final.Failure.Class != stepmodel.FailureCancelled || final.Failure.Retry.ReasonCode != "cancelled" || !strings.HasPrefix(final.DisplayReason, "cancelled by ") {
+	if final.Failure != nil || !strings.HasPrefix(final.DisplayReason, "cancelled by ") || !strings.Contains(final.Detail, "Push a new commit or request a rerun") {
 		t.Fatal("cancellation became a code failure", final)
 	}
 	if !running && final.StartedAt != nil {
