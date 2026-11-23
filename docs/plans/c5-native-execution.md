@@ -182,7 +182,7 @@ source runtime, concrete Store, service, transport or installer imports.
 | --- | --- | --- |
 | no node / Pending | `waiting to start` | — |
 | Pending for the run cap | `waiting for a run slot` | — |
-| Unschedulable / synchronization wait | `waiting for a node` / `waiting for sync limit K`, `waiting for mutex N` (`waiting for a lock` when the name does not fit) | — |
+| Unschedulable / synchronization wait | `waiting for a node` / `waiting for sync limit K`, `waiting for mutex N` (N is the lock part after the repository segments; `waiting for a lock` when the name is not plain or does not fit) | — |
 | image pull errors | `image pull failed` | unknown |
 | ContainerCreating / PodInitializing | `starting containers` | — |
 | main exit N / OOMKilled | `exited with code N` / `out of memory` | author |

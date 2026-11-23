@@ -78,16 +78,16 @@ func waitingDetail(w *wf.Workflow, reason string) string {
 
 // lockReason names a lock by the controller's key: a semaphore,
 // namespace/ConfigMap/name/key, by its key among the sync limits, a mutex,
-// namespace/Mutex/name, by its name. A name that is not a plain key or does
+// namespace/Mutex/upstream/org/repo/name, by its lock name. A non-plain name or one that does
 // not fit the 40 characters of a reason leaves the general phrase.
 func lockReason(lock string) string {
-	parts := strings.Split(lock, "/")
+	parts := strings.SplitN(lock, "/", 6)
 	reason := reasonLock
 	switch {
 	case len(parts) == 4 && parts[1] == "ConfigMap" && plainName(parts[3]):
 		reason = fmt.Sprintf(reasonSyncLimit, parts[3])
-	case len(parts) == 3 && parts[1] == "Mutex" && plainName(parts[2]):
-		reason = fmt.Sprintf(reasonMutex, parts[2])
+	case len(parts) == 6 && parts[1] == "Mutex" && plainName(parts[5]):
+		reason = fmt.Sprintf(reasonMutex, parts[5])
 	}
 	if publicerr.CheckMessage(reason, 40) != nil {
 		return reasonLock

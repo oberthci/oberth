@@ -81,16 +81,22 @@ func TestQueuedRunNamesTheLockItWaitsFor(t *testing.T) {
 			return []wf.NodeStatus{{ID: "r", Name: w.Name + ".test", Type: wf.NodeTypeRetry, Phase: wf.NodePending, SynchronizationStatus: &wf.NodeSynchronizationStatus{Waiting: "ci/ConfigMap/oberth-sync-limits/heavy-go"}}}
 		}, "waiting for sync limit heavy-go", 1},
 		"mutex": {func(*wf.Workflow) []wf.NodeStatus {
-			return []wf.NodeStatus{waitingNode("a", ".build", "ci/Mutex/release-finalize")}
+			return []wf.NodeStatus{waitingNode("a", ".build", "ci/Mutex/forge/org/repo/release-finalize")}
 		}, "waiting for mutex release-finalize", 0},
 		"name too long": {func(*wf.Workflow) []wf.NodeStatus {
 			return []wf.NodeStatus{waitingNode("a", ".build", "ci/ConfigMap/oberth-sync-limits/"+strings.Repeat("k", 30))}
 		}, "waiting for a lock", 0},
 		"mutex name of 22 fits": {func(*wf.Workflow) []wf.NodeStatus {
-			return []wf.NodeStatus{waitingNode("a", ".build", "ci/Mutex/"+strings.Repeat("m", 22))}
+			return []wf.NodeStatus{waitingNode("a", ".build", "ci/Mutex/forge/org/repo/"+strings.Repeat("m", 22))}
 		}, "waiting for mutex " + strings.Repeat("m", 22), 0},
 		"mutex name of 23 falls back": {func(*wf.Workflow) []wf.NodeStatus {
-			return []wf.NodeStatus{waitingNode("a", ".build", "ci/Mutex/"+strings.Repeat("m", 23))}
+			return []wf.NodeStatus{waitingNode("a", ".build", "ci/Mutex/forge/org/repo/"+strings.Repeat("m", 23))}
+		}, "waiting for a lock", 0},
+		"mutex nested lock falls back": {func(*wf.Workflow) []wf.NodeStatus {
+			return []wf.NodeStatus{waitingNode("a", ".build", "ci/Mutex/forge/org/repo/publish/latest")}
+		}, "waiting for a lock", 0},
+		"mutex unprintable lock falls back": {func(*wf.Workflow) []wf.NodeStatus {
+			return []wf.NodeStatus{waitingNode("a", ".build", "ci/Mutex/forge/org/repo/publish\n")}
 		}, "waiting for a lock", 0},
 		"sync limit key of 17 fits": {func(*wf.Workflow) []wf.NodeStatus {
 			return []wf.NodeStatus{waitingNode("a", ".build", "ci/ConfigMap/oberth-sync-limits/"+strings.Repeat("k", 17))}
@@ -138,7 +144,7 @@ func TestWorkflowLevelLockNamesTheMutex(t *testing.T) {
 	t.Parallel()
 	w := nativeWorkflow()
 	w.Status.Phase = wf.WorkflowPending
-	w.Status.Synchronization = &wf.SynchronizationStatus{Mutex: &wf.MutexStatus{Waiting: []wf.MutexHolding{{Mutex: "ci/Mutex/release", Holder: "ci/other"}}}}
+	w.Status.Synchronization = &wf.SynchronizationStatus{Mutex: &wf.MutexStatus{Waiting: []wf.MutexHolding{{Mutex: "ci/Mutex/forge/org/repo/release", Holder: "ci/other"}}}}
 	out := project(t, argojob.Projection{Plan: queuedPlan(), Workflow: w})
 	if out.Status != stepmodel.RunQueued || out.Reason != "waiting for mutex release" {
 		t.Fatalf("workflow lock: %s %q", out.Status, out.Reason)
