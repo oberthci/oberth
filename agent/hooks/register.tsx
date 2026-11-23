@@ -139,8 +139,8 @@ export const register: Register = (on, options) => {
     const { Box, Text } = $.ui.resolve(e)
     const color = (status: string) => status === 'passed' ? 'green' : status === 'failed' ? 'red' : status === 'cancelled' ? 'gray' : 'yellow'
     return <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor="gray" paddingX={1}>
-      <Text wrap="truncate-end" maxLines={1} dimColor>{header}</Text>
-      {rows.map((run, index) => <Text wrap="truncate-end" maxLines={1} color={color(run.status)}>{lines[index]}</Text>)}
+      <Text wrap="truncate-end" dimColor>{header}</Text>
+      {rows.map((run, index) => <Text wrap="truncate-end" color={color(run.status)}>{lines[index]}</Text>)}
     </Box>
   })
 }

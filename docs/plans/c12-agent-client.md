@@ -149,7 +149,8 @@ the working executable on failure.
 
 The plugin contract check binds every CLI command, flag and JSON field to the
 public catalogue and DTOs and refuses credential/home paths. Rendering remains
-a manual host-runtime gate, with the exact command beside the rendering tests;
+a manual host-runtime gate; rendered trees also check the supported host's prop names,
+with the exact command beside the rendering tests;
 the build image has no host JavaScript runtime. The UX walk checks active,
 finished, unreachable and watched states, unwrapped lines, profile selection, idle
 and active call counts, nonblocking startup and a single completion notice.

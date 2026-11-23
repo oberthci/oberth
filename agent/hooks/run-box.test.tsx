@@ -5,6 +5,20 @@ import type { On } from 'claude-code'
 import type { Run, Snapshot } from '../types'
 import { age, decodeRun, duration, progress, REFRESH_MS, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, span, table, visible, WINDOW_MS } from './model'
 import { SETUP } from './client'
+import { hostProps } from './host-elements'
+
+// The current harness also validates values. Check names against the supported
+// host floor so a newer harness cannot silently accept an incompatible prop.
+function validateTree(node: unknown): void {
+  if (typeof node === 'string') return
+  const element = node as { type: keyof typeof hostProps; props: Record<string, unknown>; children: unknown[] }
+  const allowed: readonly string[] | undefined = hostProps[element.type]
+  if (!allowed) throw new Error(`Unknown element ${element.type}`)
+  for (const prop of Object.keys(element.props)) {
+    if (!allowed.includes(prop)) throw new Error(`${element.type} prop ${prop} is not allowed`)
+  }
+  for (const child of element.children) validateTree(child)
+}
 
 // The default run's row: id, short repository, short ref, then the status word beside its icon.
 const ROW = /^cad7d9ec oberth +v0\.24\.0 +▶ running /
@@ -183,6 +197,7 @@ for (const explicit of [true, false]) {
 
 async function boxLines($: Engine, surface: 'terminal' | 'desktop' | 'mobile' = 'terminal', bodyColumns = 100) {
   const ui = await $.ui.mount({ ...band, props: { ...band.props, bodyColumns }, surface })
+  validateTree(await ui.drawn())
   const lines = (await ui.findAll({ type: 'Text' })).map(line => line.text)
   await ui.unmount()
   return lines
@@ -342,9 +357,15 @@ test('rows stay single aligned lines within narrow widths', { options }, async (
   const ui = await $.ui.mount({ ...band, surface: 'terminal' })
   for (const line of await ui.findAll({ type: 'Text' })) {
     expect(line.props.wrap).toBe('truncate-end')
-    expect(line.props.maxLines).toBe(1)
   }
   await ui.unmount()
+})
+
+test('the supported host contract refuses unknown Box and Text props', () => {
+  for (const type of ['Box', 'Text'] as const) {
+    expect(() => validateTree({ type, props: { unknownProp: true }, children: [] })).toThrow('is not allowed')
+  }
+  expect(() => validateTree({ type: 'Text', props: { maxLines: 1 }, children: ['run'] })).toThrow('is not allowed')
 })
 
 const lintFailure = { failed_step: 'onExit[0].lint', failed_step_name: 'lint', node_id: 'generated-node-419' }
