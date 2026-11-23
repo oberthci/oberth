@@ -68,7 +68,7 @@ func assertPublishedHumanOutput(t *testing.T, root string, result validationResu
 	if code := app.run(t.Context(), []string{"validate", result.File}); code != 0 {
 		t.Fatal(code, diagnostic.String())
 	}
-	if !strings.Contains(out.String(), "Needs before the first run:") {
+	if !strings.Contains(out.String(), "Not checked offline:") {
 		t.Fatal("needs have no separate heading", out.String())
 	}
 	for _, need := range result.Needs {

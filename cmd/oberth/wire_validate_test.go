@@ -133,7 +133,7 @@ func TestValidateDefersSecretStoreChecksUntilPush(t *testing.T) {
 	if code := app.run(t.Context(), []string{"validate", "workflow.yaml"}); code != 0 {
 		t.Fatal(code, diagnostic.String())
 	}
-	if !strings.Contains(out.String(), "Needs before the first run:") || !strings.Contains(out.String(), "oberth secretstore check") || strings.Contains(diagnostic.String(), "Secret store is not configured") {
+	if !strings.Contains(out.String(), "Not checked offline:") || !strings.Contains(out.String(), "oberth secretstore check") || strings.Contains(diagnostic.String(), "Secret store is not configured") {
 		t.Fatal(out.String(), diagnostic.String())
 	}
 }

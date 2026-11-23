@@ -48,6 +48,12 @@ func (s *flowSession) validateDocument(path string, document []byte) error {
 		result.Plan = &view.Plan
 		result.Needs = append(result.Needs, view.Findings...)
 	}
+	for i := range result.Needs {
+		if result.Needs[i].Code == "live" {
+			result.Needs[i].Reason = "not checked offline"
+			result.Needs[i].Remedy = "Run oberth check to verify live identity, templates and grants."
+		}
+	}
 	if outputErr := s.validationOutput(result); outputErr != nil {
 		return outputErr
 	}
@@ -83,7 +89,7 @@ func (s *flowSession) validationOutput(result validationResult) error {
 		}
 	}
 	if len(result.Needs) > 0 {
-		if err := s.fact("Needs before the first run:"); err != nil {
+		if err := s.fact("Not checked offline:"); err != nil {
 			return err
 		}
 		for _, f := range result.Needs {
@@ -93,7 +99,7 @@ func (s *flowSession) validationOutput(result validationResult) error {
 		}
 	}
 	if result.OK {
-		return s.fact("%s valid; installation needs are listed above", result.File)
+		return s.fact("%s valid offline; run oberth check for live checks", result.File)
 	}
 	return nil
 }
