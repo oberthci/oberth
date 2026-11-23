@@ -471,13 +471,14 @@ func productLiteral(t *testing.T, expr ast.Expr, limit int, path string) {
 		if !productLength(value, limit) {
 			t.Errorf("%s: message exceeds %d characters", path, limit)
 		}
-	} else if limit == 40 {
+	} else if limit == 40 && !reasonFormatter(expr) {
 		switch expr.(type) {
 		case *ast.BinaryExpr, *ast.CallExpr:
 			t.Errorf("%s: status reasons must come from a literal catalogue", path)
 		}
 	}
 }
+
 func productLength(value string, limit int) bool {
 	return utf8.ValidString(value) && utf8.RuneCountInString(value) <= limit
 }

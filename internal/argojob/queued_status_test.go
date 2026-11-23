@@ -86,6 +86,18 @@ func TestQueuedRunNamesTheLockItWaitsFor(t *testing.T) {
 		"name too long": {func(*wf.Workflow) []wf.NodeStatus {
 			return []wf.NodeStatus{waitingNode("a", ".build", "ci/ConfigMap/oberth-sync-limits/"+strings.Repeat("k", 30))}
 		}, "waiting for a lock", 0},
+		"mutex name of 22 fits": {func(*wf.Workflow) []wf.NodeStatus {
+			return []wf.NodeStatus{waitingNode("a", ".build", "ci/Mutex/"+strings.Repeat("m", 22))}
+		}, "waiting for mutex " + strings.Repeat("m", 22), 0},
+		"mutex name of 23 falls back": {func(*wf.Workflow) []wf.NodeStatus {
+			return []wf.NodeStatus{waitingNode("a", ".build", "ci/Mutex/"+strings.Repeat("m", 23))}
+		}, "waiting for a lock", 0},
+		"sync limit key of 17 fits": {func(*wf.Workflow) []wf.NodeStatus {
+			return []wf.NodeStatus{waitingNode("a", ".build", "ci/ConfigMap/oberth-sync-limits/"+strings.Repeat("k", 17))}
+		}, "waiting for sync limit " + strings.Repeat("k", 17), 0},
+		"sync limit key of 18 falls back": {func(*wf.Workflow) []wf.NodeStatus {
+			return []wf.NodeStatus{waitingNode("a", ".build", "ci/ConfigMap/oberth-sync-limits/"+strings.Repeat("k", 18))}
+		}, "waiting for a lock", 0},
 		"database lock": {func(*wf.Workflow) []wf.NodeStatus {
 			return []wf.NodeStatus{waitingNode("a", ".build", "ci/Database/shared")}
 		}, "waiting for a lock", 0},
