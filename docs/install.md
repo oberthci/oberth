@@ -96,8 +96,11 @@ time, age, failed step. `/oberth-runs [--limit=N]` adds why a run failed or was 
 `/oberth-watch <id-or-prefix>` toasts on completion; the model uses the bridge's tools. Update:
 `claude plugin marketplace update oberthci`, `claude plugin update oberth@oberthci`, restart.
 Codex: `codex plugin marketplace add oberthci/oberth`, then `codex plugin add oberth@oberthci`
-(the skill from `agent/.codex-plugin/plugin.json`, no above-prompt view). Register join's exact
-bridge line as in [agent connection](agents.md#connect-the-tools).
+(the skill from `agent/.codex-plugin/plugin.json`). Register join's exact bridge line with
+`codex mcp add oberth -- <line>` as in [agent connection](agents.md#connect-the-tools). With Custom
+status line on in `/experimental`, `/statusline` offers `Oberth runs`: the box's cells for the
+latest three runs in the footer, refreshed every 15 seconds. Codex has no plugin commands or
+completion toasts; ask the model for the run list.
 
 ## Upgrade
 

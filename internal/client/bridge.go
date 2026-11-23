@@ -38,6 +38,7 @@ type bridge struct {
 	workers     sync.WaitGroup
 	eventCtx    context.Context
 	events      sync.WaitGroup
+	footer      footer
 }
 
 // Bridge speaks newline JSON-RPC until EOF or cancellation, then joins requests.

@@ -16,6 +16,10 @@ func (b *bridge) handle(ctx context.Context, req rpcRequest) {
 		b.tool(ctx, req)
 		return
 	}
+	if footerRead(req) {
+		b.footerRead(ctx, req)
+		return
+	}
 	b.relay(ctx, req)
 }
 
@@ -31,7 +35,7 @@ func (b *bridge) relay(ctx context.Context, req rpcRequest) {
 		return
 	}
 	if req.Method == "tools/list" {
-		data = withoutOutputSchemas(data)
+		data = listedTools(data)
 	}
 	if len(data) > 0 {
 		_ = b.emit(ctx, data)
@@ -241,9 +245,10 @@ func editToolReply(data, payload []byte, text string) []byte {
 	return encoded
 }
 
-// withoutOutputSchemas lists tools without output schemas: a host requires
-// structured content from a tool with one, and a reply with a display block has none.
-func withoutOutputSchemas(data []byte) []byte {
+// listedTools lists tools without output schemas, because a host requires structured
+// content from a tool with one and a reply with a display block has none, and with the
+// footer entrypoint on run_list.
+func listedTools(data []byte) []byte {
 	var envelope, result map[string]json.RawMessage
 	var tools []map[string]json.RawMessage
 	if json.Unmarshal(data, &envelope) != nil || json.Unmarshal(envelope["result"], &result) != nil || json.Unmarshal(result["tools"], &tools) != nil {
@@ -251,6 +256,7 @@ func withoutOutputSchemas(data []byte) []byte {
 	}
 	for _, tool := range tools {
 		delete(tool, "outputSchema")
+		withFooter(tool)
 	}
 	result["tools"], _ = json.Marshal(tools)
 	envelope["result"], _ = json.Marshal(result)
