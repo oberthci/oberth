@@ -260,6 +260,7 @@ as returned by the log read;
 the script has no folding rule. Live updates use `events_wait` to trigger reads.
 Signed-out visitors see only the sign-in card. The header starts hidden and appears
 only after an accepted bearer or browser certificate sign-in; a 401 hides it.
+Navigation keeps the sign-in card until the server answers.
 
 ## Inspections
 

@@ -16,11 +16,12 @@ export async function signout(client){
   window.fetch=async(...args)=>{await answer;return original(...args);};
   localStorage.setItem('oberth.token','invalid');
   try{
-   const pending=route(),shown=document.querySelector('header').getBoundingClientRect().height>0;
+   const pending=route(),shown={header:document.querySelector('header').getBoundingClientRect().height>0,card:!signin.hidden,mainHidden:main.hidden};
    release();await pending;return shown;
   }finally{release();window.fetch=original;}
  })()`);
- check(!checking,'stored but refused bearer flashed the header before its answer');
+ check(!checking.header,'stored but refused bearer flashed the header before its answer');
+ check(checking.card&&checking.mainHidden,'sign-in card vanished before the server answered navigation');
  await pause(100);
  check((await client.evaluate(`notice.textContent`)).includes('credentials'), 'invalid credentials did not show their refusal');
  const refused=await headerState();
