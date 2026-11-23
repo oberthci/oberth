@@ -112,7 +112,7 @@ type eventQuery struct {
 	Limit                   int
 	Repos, RunIDs, RefsGlob []string
 	Kinds                   []model.EventKind
-	Own, Future             bool
+	Own, Future, Snapshot   bool
 	Timeout                 time.Duration
 	repositories            []string
 }

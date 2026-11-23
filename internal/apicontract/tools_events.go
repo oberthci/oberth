@@ -2,7 +2,7 @@ package apicontract
 
 // EventsTools declares the events service operations.
 type EventsTools struct {
-	EventsWait      Binding[EventsWaitArgs, EventResult]    `tool:"events_wait" summary:"Wait for matching durable events or recover after a gap." desc:"Wait for matching durable events or read events after a gap with after_id. Continue with next_after_id after both results and timeouts." wait:"true"`
+	EventsWait      Binding[EventsWaitArgs, EventResult]    `tool:"events_wait" summary:"Wait for matching durable events or recover after a gap." desc:"Use snapshot:true before pushing to return a cursor immediately; push, then wait with after_id. Read events after a gap with after_id. Continue with next_after_id after both results and timeouts." wait:"true"`
 	ScheduleList    Binding[ScheduleListArgs, SchedulePage] `tool:"schedule_list" summary:"Read authored schedules and their visible admission state." desc:"Read authored schedules and their visible admission state. Select the exact entry before pausing, resuming or triggering it." get:"/api/schedules"`
 	SchedulePause   Binding[SchedulePauseArgs, Receipt]     `tool:"schedule_pause" summary:"Pause future admission for an authored schedule entry." desc:"Pause future admission for an authored schedule entry. Read schedule_list to verify the persisted pause state." access:"repository_admin" mutation:"true" check:"schedule_list"`
 	ScheduleResume  Binding[ScheduleResumeArgs, Receipt]    `tool:"schedule_resume" summary:"Resume future admission for a paused schedule entry." desc:"Resume future admission for a paused schedule entry. Read schedule_list to inspect its next occurrence." access:"repository_admin" mutation:"true" check:"schedule_list"`

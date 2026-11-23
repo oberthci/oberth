@@ -134,8 +134,8 @@ func validProtocolHeader(header http.Header) bool {
 }
 
 const agentInstructions = `An agent push requests CI with -o oberth.run=1; otherwise it is parked and creates no run.
-Keep one background events_wait {kinds:[run.held,run.finished], own:true, after_id, timeout_s:600} open while work is in flight.
-Start before pushing, or read the new run once with run_get after starting the wait.
+Before pushing, call events_wait {snapshot:true, own:true} without after_id; it returns immediately. Save next_after_id, then push.
+After pushing, keep one background events_wait {kinds:[run.held,run.finished], own:true, after_id:next_after_id, timeout_s:600} open while work is in flight; if background calls are unavailable, wait only after the push.
 Act on every event, deduplicate IDs, resume with next_after_id even after timed_out; on a gap or lower latest_id read current state and resume from that boundary.
 run.finished: read run_get; if cancelled, show who cancelled and stop without fixing code or rerunning. Otherwise read failure.retry_hint.action. rerun: run_rerun once per code change; if that rerun also asks for rerun, show the reason, then stop and tell the person.
 none: read run_logs for failed_step and retry_hint.detail; if the logs show a code fault, fix the code, obtain commit/push consent and push again; otherwise show the reason, detail and log lines to the person and stop.

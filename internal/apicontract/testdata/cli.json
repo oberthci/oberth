@@ -1901,6 +1901,11 @@
         "Position": 0
       },
       {
+        "Name": "snapshot",
+        "Sensitive": false,
+        "Position": 0
+      },
+      {
         "Name": "kinds",
         "Sensitive": false,
         "Position": 0

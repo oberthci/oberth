@@ -29,7 +29,8 @@ func TestInitializeTeachesPushWaitLogsFixPromoteRelease(t *testing.T) {
 	}
 	for _, phrase := range []string{
 		"parked and creates no run", "-o oberth.run=1", "one background events_wait",
-		"Start before pushing", "next_after_id even after timed_out", "run.finished: read run_get",
+		"Before pushing, call events_wait {snapshot:true, own:true} without after_id; it returns immediately", "Save next_after_id, then push",
+		"wait only after the push", "next_after_id even after timed_out", "run.finished: read run_get",
 		"run_rerun once per code change", "then stop and tell the person", "none: read run_logs",
 		"retry_hint.detail", "if the logs show a code fault", "show the reason, detail and log lines to the person and stop",
 		"if cancelled, show who cancelled and stop without fixing code or rerunning",

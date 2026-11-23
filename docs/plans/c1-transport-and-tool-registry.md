@@ -159,7 +159,7 @@ routes and downloads, `oberth artifacts`, `--artifact-retention`,
 `--artifacts-budget-bytes` and artifact chart retention settings. `run_purge` and its
 `what` selector cover logs only; old run/artifact data is not imported.
 
-The `events_wait` arguments carry `repos`, `refs_glob`, `kinds`, `own`. C2 applies actor scope
+The `events_wait` arguments carry `repos`, `refs_glob`, `kinds`, `own`, and `snapshot` (return immediately without waiting). C2 applies actor scope
 first. `EventPage` carries `events`, `next_after_id`, `latest_id`, `oldest_id`,
 `has_more`, optional `gap`; waits add timeout information. Events carry `id`, `kind`,
 `at`, public run/promotion/repository/ref/SHA identity, summary and bounded data;

@@ -14,6 +14,7 @@ type AuditListArgs struct {
 
 type EventsWaitArgs struct {
 	AfterID  *int64   `json:"after_id,omitempty" desc:"Resume after this event ID; use next_after_id even after an empty page or timeout." min:"0" sensitive:"false" position:"0"`
+	Snapshot bool     `json:"snapshot,omitempty" desc:"Return immediately without waiting. Omit after_id to capture a cursor before pushing, then wait from next_after_id after the push." sensitive:"false" position:"0"`
 	Kinds    []string `json:"kinds,omitempty" desc:"Select durable event kinds, including issue.updated for issue changes; an empty list observes every authorized kind." maxItems:"32" sensitive:"false" position:"0"`
 	Limit    int      `json:"limit,omitempty" desc:"Bound the number of records returned; continue with the cursor in the reply." min:"1" max:"200" default:"100" sensitive:"false" position:"0"`
 	Own      bool     `json:"own,omitempty" desc:"Include only observations attributed to the authenticated identity." sensitive:"false" position:"0"`

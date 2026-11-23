@@ -98,6 +98,12 @@ func (s *Service) prepareEventsWait(ctx context.Context, a actor.Actor, q eventQ
 		}
 		q.After = page.LatestID
 	}
+	if q.Snapshot {
+		return func(ctx context.Context) (apicontract.EventResult, error) {
+			page, err := s.eventsSince(ctx, a, q)
+			return apicontract.EventResult{EventPage: page}, err
+		}, nil
+	}
 	return func(ctx context.Context) (apicontract.EventResult, error) { return s.eventsWait(ctx, a, q) }, nil
 }
 

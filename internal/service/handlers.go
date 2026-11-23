@@ -112,7 +112,7 @@ func (s *Service) PrepareSyncStatus(ctx context.Context, c apicontract.Caller, q
 	}, nil
 }
 func eventsInput(q apicontract.EventsWaitArgs) eventQuery {
-	out := eventQuery{Future: q.AfterID == nil, Limit: q.Limit, Own: q.Own, RefsGlob: q.RefsGlob, Repos: q.Repos}
+	out := eventQuery{Future: q.AfterID == nil, Snapshot: q.Snapshot, Limit: q.Limit, Own: q.Own, RefsGlob: q.RefsGlob, Repos: q.Repos}
 	if q.AfterID != nil {
 		out.After = *q.AfterID
 	}

@@ -9390,10 +9390,10 @@
     }
   },
   "spec_sha256": {
-    "docs/plans/c1-transport-and-tool-registry.md": "bb64cdb67da5b97bdf49457589a6b96971dab1f54b61820c5f5d67692dafae14",
+    "docs/plans/c1-transport-and-tool-registry.md": "d3eae704c900e81a955d9e243ceab7f148d05abfab0b08ae6f63fb7c2802c8da",
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
     "docs/plans/c11-cli-and-server-composition.md": "da3e5d49a307b81cfa23146fc450da5d090e67a2ff9703b43ec7ef9d36ed2bdf",
-    "docs/plans/c12-agent-client.md": "eccc9e03573bb573c8f6982cc721b50c5beb82c0b8c7d770ca500d52cd05bc1a",
+    "docs/plans/c12-agent-client.md": "96a7f1cf35ffc15666d02a84f88095b6c833753ec2153254f5776f4a6e9ca21c",
     "docs/plans/c13-own-pipelines.md": "7bf8d26daa7f51f8897f126f230345f41b683bd6a06adc771f0bb491a2149fb7",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
     "docs/plans/c2-service-actions-and-history.md": "8dc953a12d7e72f87f30bea45413f16f8cd64841a4d93b048d9259aab7ccbb83",
@@ -9820,7 +9820,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "The `events_wait` arguments carry `repos`, `refs_glob`, `kinds`, `own`. C2 applies actor scope first. `EventPage` carries `events`, `next_after_id`, `latest_id`, `oldest_id`, `has_more`, optional `gap`; waits add timeout information. Events carry `id`, `kind`, `at`, public run/promotion/repository/ref/SHA identity, summary and bounded data; internal deduplication keys stay hidden. **Delta:** use the eight kinds in [Shared contracts](README.md#shared-contracts), including observation-only `run.updated`, owned by the component recording each fact. The filter is `events_wait.kinds`. C2's [Events and observation](c2-service-actions-and-history.md#events-and-observation) defines its payload `{run_id,repo,ref,object_sha,commit_sha,data?}`, internal count pair in `Data`, revision dedupe key, fact-and-event transaction without coalescing, and separate 24-hour/newest-10,000 progress retention. C1 preserves those semantics and cursor gaps; it emits no independent update events. Delivery is at least once. Clients deduplicate IDs and continue with `next_after_id`, including on empty filtered pages and timeout. Push and `run://<id>` resource notifications are observations. Reconnects resume with `Last-Event-ID`; gaps/backlog limits are explicit, never completion evidence. `GET /mcp` must not silently reset a supplied old/future Last-Event-ID cursor to the current head; use C2's cursor contract.",
+      "basis": "The `events_wait` arguments carry `repos`, `refs_glob`, `kinds`, `own`, and `snapshot` (return immediately without waiting). C2 applies actor scope first. `EventPage` carries `events`, `next_after_id`, `latest_id`, `oldest_id`, `has_more`, optional `gap`; waits add timeout information. Events carry `id`, `kind`, `at`, public run/promotion/repository/ref/SHA identity, summary and bounded data; internal deduplication keys stay hidden. **Delta:** use the eight kinds in [Shared contracts](README.md#shared-contracts), including observation-only `run.updated`, owned by the component recording each fact. The filter is `events_wait.kinds`. C2's [Events and observation](c2-service-actions-and-history.md#events-and-observation) defines its payload `{run_id,repo,ref,object_sha,commit_sha,data?}`, internal count pair in `Data`, revision dedupe key, fact-and-event transaction without coalescing, and separate 24-hour/newest-10,000 progress retention. C1 preserves those semantics and cursor gaps; it emits no independent update events. Delivery is at least once. Clients deduplicate IDs and continue with `next_after_id`, including on empty filtered pages and timeout. Push and `run://<id>` resource notifications are observations. Reconnects resume with `Last-Event-ID`; gaps/backlog limits are explicit, never completion evidence. `GET /mcp` must not silently reset a supplied old/future Last-Event-ID cursor to the current head; use C2's cursor contract.",
       "rows": [
         {
           "category": "MCP arguments",

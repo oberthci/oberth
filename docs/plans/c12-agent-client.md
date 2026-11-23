@@ -70,9 +70,9 @@ The connection skill stays shared and host-neutral.
 ### Push and wait
 
 The server's MCP instructions carry the loop once. With work in flight, keep
-one `events_wait` open for its held/finished events and add promotion completion
-while promoting. Capture the cursor before pushing, or read the run after the
-first wait starts. Handle every event, deduplicate IDs and advance
+one background `events_wait` open for its held/finished events and add promotion completion
+while promoting. Before pushing, call `events_wait` with `snapshot:true` and no `after_id`;
+it returns a cursor immediately. Push, then wait from that cursor, even if background calls are unavailable. Handle every event, deduplicate IDs and advance
 `next_after_id`, including after timeout; a gap requires a new snapshot. Pushed
 notifications are an extra. A parked push has no run; request CI with a real ref
 update and `oberth.run=1`.
