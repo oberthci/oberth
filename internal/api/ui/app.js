@@ -53,6 +53,7 @@ async function exchange(path, options = {}) {
   }
   throw Object.assign(new Error(), value, {refused: true, status: response.status, retry: retryAfter(response.headers.get("Retry-After"))});
  }
+ header.hidden = false; signin.hidden = true; main.hidden = false;
  return response;
 }
 // Connection trouble (no answer, a non-JSON answer, or a gateway or drain status)
@@ -196,8 +197,7 @@ async function route() {
  screen?.controller.abort(); screen?.logs?.abort();
  const view = {controller: new AbortController(), filter: {}}; screen = view;
  main.replaceChildren(); notice.replaceChildren();
- if (!localStorage.getItem("oberth.token")) { header.hidden = true; signin.hidden = false; main.hidden = true; return; }
- header.hidden = false; signin.hidden = true; main.hidden = false;
+ header.hidden = !localStorage.getItem("oberth.token"); signin.hidden = true; main.hidden = false;
  const parts = location.pathname.split("/").filter(Boolean);
  document.querySelectorAll("nav a").forEach(link => { if (link.pathname === "/" + parts[0]) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current"); });
  try {

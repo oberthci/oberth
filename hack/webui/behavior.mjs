@@ -1,4 +1,5 @@
 import {check,pause,deadline} from './cdp.mjs';
+import {signout} from './authentication.mjs';
 
 async function burst(client){
  await client.loaded('/runs','.runs a.row');await pause(20);
@@ -198,33 +199,6 @@ async function logAppend(client){
  check(result.bytes===1048576&&result.ends,'live tail is not complete at its byte bound');
  check(result.largest<=4096&&result.encoded<=4096*128+128&&result.nodes<=260,'live append reprocessed the retained buffer');
  return result;
-}
-
-async function signout(client){
- await client.loaded('/runs','.runs a.row');
- const headerState=()=>client.evaluate(`({nav:document.querySelector('nav').getBoundingClientRect().height>0,signout:document.querySelector('#signout').getBoundingClientRect().height>0,header:document.querySelector('header').getBoundingClientRect().height>0})`);
- const signedIn=await headerState();
- check(signedIn.nav&&signedIn.signout&&signedIn.header,'signed-in navigation or Sign out missing');
- await deadline('load after sign-out',async()=>{const ready=client.nextEvent('Page.loadEventFired');await client.evaluate(`document.querySelector('#signout').click()`);await ready;});await pause(100);
- const result=await client.evaluate(`({hasToken:localStorage.getItem('oberth.token')!==null,form:!signin.hidden,mainHidden:main.hidden,notice:notice.textContent})`);
- check(!result.hasToken,'sign-out retained the bearer token');
- check(result.form&&result.mainHidden&&result.notice==='', 'first visit did not show a quiet sign-in form');
- const signedOut=await headerState();
- check(!signedOut.nav&&!signedOut.signout&&!signedOut.header,'signed-out page shows navigation or Sign out');
- await client.evaluate(`localStorage.setItem('oberth.token','invalid');route()`);
- await pause(100);
- check((await client.evaluate(`notice.textContent`)).includes('credentials'), 'invalid credentials did not show their refusal');
- const refused=await headerState();
- check(!refused.nav&&!refused.signout&&!refused.header,'refused sign-in shows navigation or Sign out');
- await deadline('load after sign-in',async()=>{
-  const ready=client.nextEvent('Page.loadEventFired');
-  await client.evaluate(`signin.querySelector('input').value=${JSON.stringify(client.token)};signin.querySelector('form').requestSubmit()`);
-  await ready;
-  await client.evaluate(`new Promise(resolve=>{const test=()=>{if(document.querySelector('header').hidden||!document.querySelector('.runs a.row'))return;observer.disconnect();resolve();};const observer=new MutationObserver(test);observer.observe(document,{subtree:true,childList:true,attributes:true});test();})`);
- });
- const restored=await headerState();
- check(restored.nav&&restored.signout&&restored.header,'sign-in did not restore navigation and Sign out');
- return {...result,signedIn,signedOut,refused,restored};
 }
 
 async function inspectHolds(client){
@@ -511,7 +485,6 @@ export async function behavior(client){
  result.promote=await actions(client,'Promote','/runs/77777777','promote');
  result.release=await actions(client,'Release','/runs/33333333','run_hold_abandon');
  result.holds=await inspectHolds(client);
-
  result.confirmation=await confirmationAndFetch(client);
  result.refusedRerun=await refusedRerun(client);
  result.logs=await logAppend(client);

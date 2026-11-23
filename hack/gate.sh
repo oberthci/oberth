@@ -50,6 +50,7 @@ tool_paths=(
     hack/ui-check.sh
     hack/webui/cdp.mjs
     hack/webui/behavior.mjs
+    hack/webui/authentication.mjs
     hack/webui/captures.mjs
     hack/webui/parallel.mjs
     hack/webui/check.mjs
