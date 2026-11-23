@@ -17,6 +17,48 @@ from tools.gate_fixture import GateFixture
 
 class GateVerdicts(GateFixture, unittest.TestCase):
 
+    def test_main_module_files_keep_branch_code_out_of_trusted_go(self):
+        module = self.fixture / "internal/zzyaml"
+        module.mkdir(parents=True)
+        (module / "go.mod").write_text("module go.yaml.in/yaml/v3\n\ngo 1.26.0\n")
+        (module / "yaml.go").write_text('package yaml\nimport ("io"; "os")\n'
+            'type Decoder struct{}\nfunc NewDecoder(io.Reader)*Decoder { return &Decoder{} }\n'
+            'func (*Decoder) Decode(any)error { return io.EOF }\n'
+            'func init(){ _ = os.WriteFile(os.Getenv("GATE_BRANCH_MARKER"), []byte("branch code"), 0600); os.Exit(0) }\n')
+        mod = self.fixture / "go.mod"
+        mod.write_text(mod.read_text() + "\nreplace go.yaml.in/yaml/v3 => ./internal/zzyaml\n")
+        sums = self.fixture / "go.sum"
+        sums.write_text(sums.read_text() + "\n")
+        (self.fixture / "go.work").write_text("go 1.26.0\nuse .\nreplace go.yaml.in/yaml/v3 => ./internal/zzyaml\n")
+        (self.fixture / "go.work.sum").write_text("\n")
+        files = ("go.mod", "go.sum", "go.work", "go.work.sum")
+        self.git("add", *files, "internal/zzyaml")
+        self.git("commit", "-qm", "Replace a tool dependency")
+        gate = self.run_gate()
+        self.assertEqual(0, gate.returncode, gate.stdout)
+        marker = self.fixture / "module-ran"
+        body = '''if [[ $* == "-f Makefile check" ]]; then
+    printf "%s %s %s\\n" "$PWD" "${GOWORK-unset}" "${GOFLAGS-unset}" >> "$GATE_CHECKS.env"
+    go run -p=2 -buildvcs=false ./hack/guards --yaml < /dev/null || exit "$?"
+    if [[ $PWD == */src && -e $GATE_BRANCH_MARKER ]]; then
+        printf 'branch module executed in trusted guard\\n' >&2; exit 13
+    fi
+fi
+'''
+        with patch.dict(os.environ, {"GOWORK": "auto", "GOFLAGS": "", "GATE_BRANCH_MARKER": str(marker)}):
+            result, vm = self.run_vm_script(make_body=body)
+        self.assertEqual(0, result.returncode, result.stdout)
+        changed = next(line for line in gate.stdout.splitlines() if line.startswith("GATE FILES CHANGED:"))
+        for name in files:
+            self.assertIn(name, changed)
+        for name in ("go.mod", "go.sum"):
+            self.assertEqual(self.git("show", "main:" + name), (vm / "src" / name).read_bytes())
+            self.assertEqual((self.fixture / name).read_bytes(), (vm / "branch" / name).read_bytes())
+        observed = (vm / "checks.env").read_text().splitlines()
+        self.assertEqual(f"{vm / 'src'} off -mod=readonly", observed[0])
+        self.assertEqual(f"{vm / 'branch'} auto ", observed[1])
+        self.assertEqual("branch code", marker.read_text())
+
     def test_root_python_cannot_replace_trusted_entries(self):
         files = ("unittest.py", "json.py", "portable.py", "sitecustomize.py")
         body = "import os\np = os.environ.get('GATE_BRANCH_MARKER')\nif p:\n open(p, 'w').write(__name__)\n raise SystemExit(0)\n"
@@ -180,7 +222,7 @@ class GateVerdicts(GateFixture, unittest.TestCase):
         self.assertEqual(command.splitlines()[-2:], [self.fixture.name, self.fixture.name])
         self.assertIn('git config user.name "$3"\n        git config user.email "$4"', command)
         self.assertLess(command.index("tar -xf /tooling.tar"), command.index("make -f Makefile check"))
-        self.assertIn('if [[ -n $2 ]]; then timed lint-selftest make -f Makefile lint-selftest; fi', command)
+        self.assertIn('if [[ -n $2 ]]; then timed lint-selftest env GOWORK=off GOFLAGS=-mod=readonly make -f Makefile lint-selftest; fi', command)
 
     def test_missing_main_guards_requires_bootstrap(self):
         self.git("checkout", "-q", "main")

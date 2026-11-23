@@ -22,7 +22,7 @@ class GateFixture:
         manifest = re.search(r"tool_paths=\((.*?)\)", (root / "hack/gate.sh").read_text(), re.S)
         plans = [str(p.relative_to(root)) for p in (root / "docs/plans").rglob("*") if p.is_file()]
         # Contents only: a step receives the checkout with read-only files and the fixture edits its copies.
-        inputs = ["hack/guards", "hack/base-image/inputs.lock.json", "hack/base-image/git-no-shell.patch", "internal/staticgit/build.env",
+        inputs = ["go.mod", "go.sum", "hack/guards", "hack/base-image/inputs.lock.json", "hack/base-image/git-no-shell.patch", "internal/staticgit/build.env",
                   "internal/staticgit/qualified-artifacts.json"]
         for name in [*shlex.split(manifest[1]), *plans, *inputs]:
             source = root / name
@@ -83,10 +83,10 @@ esac
         self.assertEqual(list(self.fixture.glob("gate.*")), [])
         return result
 
-    def run_vm_script(self, status=0):
+    def run_vm_script(self, status=0, make_body=""):
         make = self.bin_path / "make"
         make.write_text('#!/usr/bin/env bash\nprintf "%s %s\\n" "$PWD" "$*" >> "$GATE_CHECKS"\n'
-                        'exit "${GATE_MAKE_STATUS:-0}"\n')
+                        + make_body + 'exit "${GATE_MAKE_STATUS:-0}"\n')
         make.chmod(0o755)
         vm = Path(self.enterContext(tempfile.TemporaryDirectory(dir=self.fixture.parent)))
         command = (self.fixture / "commands").read_text()
