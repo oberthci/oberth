@@ -50,7 +50,14 @@ tool_paths=(
     hack/lint-tool.sh
     hack/tools
     hack/test_docs.py
-    hack/base-image
+    hack/base-image/build.py
+    hack/base-image/layout.py
+    hack/base-image/test_driver.py
+    hack/base-image/test_recipe.py
+    hack/base-image/check.sh
+    hack/base-image/compile.sh
+    hack/base-image/Dockerfile
+    hack/base-image/Dockerfile.layout
     hack/ui-check.sh
     hack/webui
     hack/test_ui.py
@@ -88,7 +95,7 @@ tool_paths=(
     hack/guards/run.py
     hack/guards/test_run.py
 )
-changed=$(git diff --name-only main "$head" -- "${tool_paths[@]}" docs/plans hack/guards hack/plans hack/devloop | paste -sd ' ' -)
+changed=$(git diff --name-only main "$head" -- "${tool_paths[@]}" docs/plans hack/guards hack/plans hack/devloop hack/base-image | paste -sd ' ' -)
 for file in "${tool_paths[@]}"; do
     git cat-file -e "main:$file" 2>/dev/null || { printf 'FAIL: main lacks %s; review and bootstrap main tooling first\n' "$file" >&2; exit 1; }
 done
@@ -122,9 +129,14 @@ container=$("${docker[@]}" create --cpus 2 --memory 7681m --pids-limit 512 \
         git -c init.defaultBranch=main clone -q --bare /source.bundle /repo.git
         git --git-dir=/repo.git worktree add -q --detach /src "$1"
         cd /src
-        for dir in hack/guards hack/plans hack/devloop docs/plans hack/webui hack/base-image hack/tools; do
+        for dir in hack/guards hack/plans hack/devloop docs/plans hack/webui hack/tools; do
             if [[ -e $dir || -L $dir ]]; then find "$dir" -depth -delete; fi
         done
+        if [[ -L hack/base-image || ! -d hack/base-image ]]; then
+            if [[ -e hack/base-image || -L hack/base-image ]]; then find hack/base-image -depth -delete; fi
+        else
+            find hack/base-image -depth \( -type l -o -name "*.py" -o -name "*.pyc" -o -name "*.sh" -o -name "Dockerfile*" \) -delete
+        fi
         tar -xf /tooling.tar
         git config user.name "$3"
         git config user.email "$4"

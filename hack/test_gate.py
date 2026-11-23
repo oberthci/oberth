@@ -1,5 +1,6 @@
 """Exercise gate refusals and trusted tooling with local Git and a fake VM."""
 import os
+import hashlib
 import json
 import re
 import shlex
@@ -23,7 +24,8 @@ class GateVerdicts(unittest.TestCase):
         manifest = re.search(r"tool_paths=\((.*?)\)", (root / "hack/gate.sh").read_text(), re.S)
         plans = [str(p.relative_to(root)) for p in (root / "docs/plans").rglob("*") if p.is_file()]
         # Contents only: a step receives the checkout with read-only files and the fixture edits its copies.
-        for name in [*shlex.split(manifest[1]), *plans]:
+        inputs = ["hack/base-image/inputs.lock.json", "hack/base-image/git-no-shell.patch", "internal/staticgit/build.env"]
+        for name in [*shlex.split(manifest[1]), *plans, *inputs]:
             source = root / name
             files = source.rglob("*") if source.is_dir() else [source]
             for file in files:
@@ -107,6 +109,10 @@ esac
         self.assertFalse((self.fixture / "commands").exists())
 
     def run_vm_script(self, status=0):
+        make = self.bin_path / "make"
+        make.write_text('#!/usr/bin/env bash\nprintf "%s %s\\n" "$PWD" "$*" >> "$GATE_CHECKS"\n'
+                        'exit "${GATE_MAKE_STATUS:-0}"\n')
+        make.chmod(0o755)
         vm = Path(self.enterContext(tempfile.TemporaryDirectory(dir=self.fixture.parent)))
         command = (self.fixture / "commands").read_text()
         script = command.split("bash\n-ec\n", 1)[1].rsplit("\ngate\n", 1)[0]
@@ -131,10 +137,6 @@ esac
         self.git("add", *files)
         self.git("commit", "-qm", "Establish product tree")
         self.git("checkout", "-qB", "w0/probe", "main")
-        make = self.bin_path / "make"
-        make.write_text('#!/usr/bin/env bash\nprintf "%s %s\\n" "$PWD" "$*" >> "$GATE_CHECKS"\n'
-                        'exit "${GATE_MAKE_STATUS:-0}"\n')
-        make.chmod(0o755)
         for changed in (False, True):
             with self.subTest(tooling_changed=changed):
                 if changed:
@@ -189,7 +191,7 @@ esac
                  "hack/steps.sh", "hack/history.py", "hack/test_lint.py", "hack/devloop/Dockerfile",
                  "hack/guards/main.go", "hack/guards/run.py")
         for name in files:
-            self.fixture.joinpath(name).write_text("weakened branch tooling\n")
+            self.fixture.joinpath(name).write_text("# weakened branch tooling\n")
         self.fixture.joinpath("hack/guards/branch_only.py").write_text("raise RuntimeError('branch tooling')\n")
         self.git("add", *files)
         self.git("add", "hack/guards/branch_only.py")
@@ -212,10 +214,9 @@ esac
         self.assertLess(command.index("tar -xf /tooling.tar"), command.index("make -f Makefile check"))
         self.assertLess(command.index('for dir in hack/guards hack/plans hack/devloop docs/plans'), command.index("tar -xf /tooling.tar"))
         self.assertIn('if [[ -n $2 ]]; then timed lint-selftest make -f Makefile lint-selftest; fi', command)
-        restore = command.split("        cd /src\n", 1)[1].split('git config user.name', 1)[0]
-        subprocess.run(["bash", "-ec", restore.replace("/tooling.tar", "trusted.tar")],
-                       cwd=self.fixture, check=True)
-        self.assertFalse((self.fixture / "hack/guards/branch_only.py").exists())
+        result, vm = self.run_vm_script()
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertFalse((vm / "src/hack/guards/branch_only.py").exists())
 
     def test_missing_main_guards_requires_bootstrap(self):
         self.git("checkout", "-q", "main")
@@ -249,13 +250,14 @@ esac
                 self.assertNotIn(addition, archive.getnames())
         command = (self.fixture / "commands").read_text()
         self.assertEqual(command.splitlines()[-3], changed)
-        restore = command.split("        cd /src\n", 1)[1].split('git config user.name', 1)[0]
-        subprocess.run(["bash", "-ec", restore.replace("/tooling.tar", "trusted.tar")],
-                       cwd=self.fixture, check=True, timeout=10)
+        result, vm = self.run_vm_script()
+        self.assertEqual(0, result.returncode, result.stdout)
         for name in files:
-            self.assertEqual((self.fixture / name).read_bytes(), self.git("show", f"main:{name}"))
+            self.assertEqual((vm / "src" / name).read_bytes(), self.git("show", f"main:{name}"))
+            self.assertEqual((vm / "branch" / name).read_bytes(), self.git("show", f"HEAD:{name}"))
         if addition:
-            self.assertFalse((self.fixture / addition).exists())
+            self.assertFalse((vm / "src" / addition).exists())
+            self.assertTrue((vm / "branch" / addition).is_file())
 
     def test_lint_launcher_and_modules_use_main_tooling(self):
         self.check_trusted_tools(("hack/lint-tool.sh", "hack/tools/go.mod", "hack/tools/go.sum",
@@ -265,10 +267,31 @@ esac
     def test_docs_check_uses_main_tooling(self):
         self.check_trusted_tools(("hack/test_docs.py",))
 
-    def test_base_image_checks_use_only_main_directory(self):
+    def test_base_image_checks_use_main_logic(self):
         self.check_trusted_tools(("hack/base-image/test_driver.py", "hack/base-image/test_recipe.py",
-                                  "hack/base-image/build.py", "hack/base-image/layout.py"),
+                                  "hack/base-image/build.py", "hack/base-image/layout.py", "hack/base-image/check.sh",
+                                  "hack/base-image/compile.sh", "hack/base-image/Dockerfile", "hack/base-image/Dockerfile.layout"),
                                  "hack/base-image/test_branch.py")
+
+    def test_base_image_patch_and_pin_update_pass_main_checks(self):
+        patch_file = self.fixture / "hack/base-image/git-no-shell.patch"
+        patch_file.write_bytes(patch_file.read_bytes() + b"\n# revised input\n")
+        pins = self.fixture / "internal/staticgit/build.env"
+        pins.write_text(re.sub(r"GIT_PATCH_SHA256=.*", "GIT_PATCH_SHA256=" + hashlib.sha256(patch_file.read_bytes()).hexdigest(),
+                               pins.read_text()))
+        self.git("add", "hack/base-image/git-no-shell.patch", "internal/staticgit/build.env")
+        self.git("commit", "-qm", "Update reviewed patch and pin")
+        gate = self.run_gate()
+        self.assertEqual(0, gate.returncode, gate.stdout)
+        self.assertIn("hack/base-image/git-no-shell.patch", gate.stdout)
+        result, vm = self.run_vm_script()
+        self.assertEqual(0, result.returncode, result.stdout)
+        for checkout in (vm / "src", vm / "branch"):
+            self.assertEqual((checkout / "hack/base-image/git-no-shell.patch").read_bytes(), patch_file.read_bytes())
+            result = subprocess.run(["python3", "-m", "unittest", "discover", "-s", "hack/base-image", "-p", "test_*.py"],
+                                    cwd=checkout, capture_output=True, text=True, check=False, timeout=30)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("Ran 7 tests", result.stderr)
 
     def test_main_guard_and_plan_additions_are_in_the_trusted_bundle(self):
         self.git("checkout", "-q", "main")
@@ -315,13 +338,11 @@ esac
         self.git("commit", "-qm", "Update component fixtures")
         result = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stdout)
-        command = (self.fixture / "commands").read_text()
-        restore = command.split("        cd /src\n", 1)[1].split('git config user.name', 1)[0]
-        subprocess.run(["bash", "-ec", restore.replace("/tooling.tar", "trusted.tar")],
-                       cwd=self.fixture, check=True)
-        for name in files:
-            self.assertEqual("branch contents\n", (self.fixture / name).read_text())
         self.assertIn("GATE FILES CHANGED: none", result.stdout)
+        result, vm = self.run_vm_script()
+        self.assertEqual(0, result.returncode, result.stdout)
+        for name in files:
+            self.assertEqual("branch contents\n", (vm / "src" / name).read_text())
 
     def test_check_runs_guard_fixtures_and_propagates_failure(self):
         go = self.bin_path / "go"
@@ -396,10 +417,10 @@ esac
         with tarfile.open(self.fixture / "trusted.tar") as archive:
             self.assertNotIn(name, archive.getnames())
             self.assertEqual(self.git("show", "main:hack/webui/behavior.mjs"), archive.extractfile("hack/webui/behavior.mjs").read())
-        command = (self.fixture / "commands").read_text()
-        restore = command.split("        cd /src\n", 1)[1].split('git config user.name', 1)[0]
-        subprocess.run(["bash", "-ec", restore.replace("/tooling.tar", "trusted.tar")], cwd=self.fixture, check=True)
-        self.assertFalse((self.fixture / name).exists())
+        result, vm = self.run_vm_script()
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertFalse((vm / "src" / name).exists())
+        self.assertTrue((vm / "branch" / name).is_file())
 
     def test_branch_policy_changes_use_target_and_request_branch_check(self):
         data=json.loads((self.fixture/"docs/plans/dependencies.json").read_text())

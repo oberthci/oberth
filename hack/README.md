@@ -35,13 +35,15 @@ bash hack/gate.sh main
 `hack/gate.sh <branch>` requires the branch to contain current main and verifies
 commit identities/messages against repository Git configuration. It runs main's
 complete plans bundle and
-Makefile, shell/Python tooling, lint configuration and version pin in a detached
+Makefile, shell/Python tooling, tool modules, lint configuration and version pin in a detached
 VM worktree capped at two CPUs and 7681 MiB. It lists tooling changes on one
 verdict line for review, and runs `make lint-selftest` only when tooling changed.
 When tooling or plans change, a second detached worktree also runs the branch's
 own check and parity. The external names policy is required, existing parity
 cannot be removed, and the container has a 25-minute deadline plus kill grace.
 Main must contain the tooling first; its initial installation needs review.
+Base-image scripts, Python tests and Dockerfile logic come from main. Input locks,
+patches and their pins stay from the branch and are checked by main's tests.
 The Go image pinned in `hack/devloop/Dockerfile` must already be present in the
 development VM. Python, Git and SSH are included in that image. Missing tools
 belong in the VM image bootstrap, rather than an interactive container change.
