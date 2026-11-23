@@ -15,7 +15,7 @@ def args(root, action, *arguments):
 
 
 def environment():
-    return {**os.environ, "GOWORK": "off", "GOFLAGS": "-mod=readonly -p=2 -buildvcs=false"}
+    return {**os.environ, "GOWORK": "off", "GOFLAGS": "-mod=readonly -p=2 -buildvcs=false", "GOTOOLCHAIN": "local"}
 
 
 @cache

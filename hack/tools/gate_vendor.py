@@ -7,6 +7,19 @@ import tempfile
 
 
 class VendorGateTests:
+    def test_toolchain_stays_local_for_trusted_commands(self):
+        modfile = self.fixture / "go.mod"
+        modfile.write_text(modfile.read_text() + "\ntoolchain go1.99.1\n")
+        result = subprocess.run(["python3", "-I", "-c",
+            'import runpy, sys; g=runpy.run_path("hack/guards/run.py"); r=g["command"](["go", "env", "GOTOOLCHAIN", "GOVERSION"]); print(r.stdout); sys.exit(r.returncode)'],
+            cwd=self.fixture, capture_output=True, text=True, check=False, timeout=30,
+            env={**os.environ, "GOTOOLCHAIN": "auto", "GOPROXY": "off"})
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual("local", lines[0])
+        self.assertTrue(lines[1].startswith("go"))
+        self.assertNotIn("go1.99.1", result.stdout)
+
     def check_vendor_tool(self, manifest, poisoned_package, package_name, entry):
         tools = self.fixture / "hack/tools"
         staging = Path(self.enterContext(tempfile.TemporaryDirectory(dir=self.fixture.parent)))

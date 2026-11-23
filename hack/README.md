@@ -55,7 +55,8 @@ restored file paths; discovery adds the restored test directories.
 The product keeps the branch's module files for tests, vet, lint and UI builds.
 The gate copies main's module pair outside that checkout and passes it through
 `OBERTH_TOOLS_MODFILE`. Guard, names, plan and self-test tool builds use that
-explicit `-modfile`, with `GOWORK=off` and readonly dependencies. Standalone
+explicit `-modfile`, with `GOWORK=off` and readonly dependencies. Trusted Go
+commands keep the installed compiler with `GOTOOLCHAIN=local`. Standalone
 tools use the current checkout's module pair. Lint and deadcode retain their
 own tool modules. They build with explicit readonly flags in private module
 directories without vendor data, then run those binaries in the product tree.
