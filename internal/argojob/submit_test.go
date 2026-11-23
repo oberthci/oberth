@@ -3,6 +3,7 @@ package argojob_test
 import (
 	"context"
 	"errors"
+	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	argofake "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned/fake"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"reflect"
@@ -61,6 +62,7 @@ func TestAdoptAbsentOnlyOnNotFound(t *testing.T) {
 func TestCancelStopNeverOverTerminate(t *testing.T) {
 	t.Parallel()
 	e, f, b := submitted(t)
+	f.Object.Status.Nodes = wf.Nodes{"active": {ID: "active", Type: wf.NodeTypePod, Phase: wf.NodeRunning}}
 	for _, stop := range []func(context.Context, nativebinding.RunBinding) error{e.Stop, e.Terminate, e.Stop} {
 		if err := stop(t.Context(), b); err != nil {
 			t.Fatal(err)
@@ -113,6 +115,7 @@ func TestSubmitPreservesAuthoredMetadataAndSealedSpec(t *testing.T) {
 func TestNativeWorkflowClientCancellation(t *testing.T) {
 	t.Parallel()
 	_, f, b := submitted(t)
+	f.Object.Status.Nodes = wf.Nodes{"active": {ID: "active", Type: wf.NodeTypePod, Phase: wf.NodeRunning}}
 	native := argofake.NewSimpleClientset(f.Object.DeepCopy())
 	client := argojob.WorkflowClient{NativeWorkflows: native.ArgoprojV1alpha1().Workflows(b.Workflow.Namespace)}
 	e := argojob.New(argojob.Config{Workflows: client})

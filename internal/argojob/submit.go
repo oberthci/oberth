@@ -170,6 +170,10 @@ func (e *Executor) cancel(ctx context.Context, b nativebinding.RunBinding, mode 
 	if terminalWorkflow(w) {
 		return nil
 	}
+	mode, err = cancellationMode(ctx, w, mode)
+	if err != nil {
+		return err
+	}
 	if w.Spec.Shutdown == wf.ShutdownStrategyTerminate || w.Spec.Shutdown == mode {
 		return nil
 	}

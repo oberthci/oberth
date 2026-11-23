@@ -11,13 +11,13 @@ import (
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
-func TestQueuedCancelTerminatesAndNamesCaller(t *testing.T) {
+func TestQueuedCancelDefersNativeModeAndNamesCaller(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
 	f.seed(stepmodel.RunQueued)
 	f.exec.CancelFunc = func(ctx context.Context, _ stateport.Run, terminate bool) error {
-		if !terminate {
-			t.Fatal("queued cancellation left exit handlers or lock waiting enabled")
+		if terminate {
+			t.Fatal("stored queued status bypassed the native cancellation decision")
 		}
 		return f.s.Finished(ctx, service.FinishedRun{RunID: runID, Status: stepmodel.RunCancelled, Reason: "stopped", Detail: "native shutdown"})
 	}

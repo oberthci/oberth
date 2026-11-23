@@ -14,6 +14,7 @@ import (
 func TestReviewStopRecordedChildThenObserve(t *testing.T) {
 	t.Parallel()
 	f := newChildFixture(t)
+	f.child.Status.Nodes = wf.Nodes{"active": {ID: "active", Type: wf.NodeTypePod, Phase: wf.NodeRunning}}
 	c := f.executorConfig()
 	native := c.Workflows.(*nativefake.Workflows)
 	compositionOK(t, f.executor().RecordChildForTest(t.Context(), f.child))
