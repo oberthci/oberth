@@ -28,6 +28,7 @@ Run the merge gate with the pinned linter and the external names policy:
 
 ```sh
 GOLANGCI_LINT=/path/to/golangci-lint \
+OBERTH_TEST_GIT=/path/to/packaged/git \
 OBERTH_GUARDS_NAMES_FILE=/path/outside/the/repository/names.txt \
 bash hack/gate.sh main
 ```
@@ -36,11 +37,11 @@ bash hack/gate.sh main
 commit identities/messages against repository Git configuration. It runs main's
 complete plans bundle and
 Makefile, shell/Python tooling, tool modules, lint configuration and version pin in a detached
-VM worktree capped at two CPUs and 7681 MiB. It lists tooling changes on one
+VM worktree capped at six CPUs and 7681 MiB. It lists tooling changes on one
 verdict line for review, and runs `make lint-selftest` only when tooling changed.
 When tooling or plans change, a second detached worktree also runs the branch's
 own check and parity. The external names policy is required, existing parity
-cannot be removed, and the container has a 25-minute deadline plus kill grace.
+cannot be removed, and the container has a 80-minute deadline plus kill grace.
 Main must contain the tooling first; its initial installation needs review.
 Base-image scripts, Python tests and Dockerfile logic come from main. Input locks,
 patches and their pins stay from the branch and are checked by main's tests.
@@ -52,6 +53,12 @@ belong in the VM image bootstrap, rather than an interactive container change.
 The names policy is checked on the branch snapshot before the VM starts and
 stays outside both checkouts. A temporary container copy supplies both VM check
 phases and is removed with the container.
+The test Git must match main's architecture-specific qualification hash. Its
+container copy supplies `OBERTH_TEST_GIT`; PATH keeps the image's Git and HTTPS
+helper for tests that need them.
+The root container drops `DAC_OVERRIDE` so filesystem permission tests observe
+mode bits; its cache and scratch files remain owned by that container user.
+Its private names-policy copy is owned by that user and retains its file mode.
 
 The gate prints wall seconds for resolve, tooling, history, names, prepare,
 check, parity and cleanup. Tooling changes also run the timed lint self-test.
@@ -76,59 +83,53 @@ reuse it for a warm run, then remove only those measurement volumes. Build and
 module caches persist intentionally; scratch does not. Each cache family
 retains its own storage.
 
-Measured baseline, 2026-11-16, main `828deeb` product and plans in the
-development VM (6 CPUs, 10 GiB), with Go 1.26.10 and linter 2.12.2. The gate
-used two CPUs and a temporary 6 GiB measurement cap. Both runs used the
-corrected guards from `c0191ea`; the remaining check tooling came from main.
-The guard changes distinguish walk definitions from proof and keep successful
-module-download diagnostics separate from JSON output.
+Measured product gate, 2026-11-23, on main `b56563d5` and branch snapshot
+`d2d3707a`, in the development VM (6 CPUs, 10 GiB). The real gate used six CPUs,
+`GOMAXPROCS=6`, Go 1.26.10, linter 2.12.2 and the qualified Git 2.56.0.
+Both checks ran the complete race suite with `-count=1`; make was not stubbed.
+Build and module volumes were reused after environment preflights. This is a
+warm-cache measurement; tests themselves were rerun.
 
-| Phase / observation | Cold | Warm |
-| --- | ---: | ---: |
-| Verdict | PASS | PASS |
-| Resolve / tooling / history, each | <1 s | <1 s |
-| Names | <1 s | 1 s |
-| Prepare | 2 s | 1 s |
-| Check (plans, race tests, tooling, lint, guards) | 927 s | 199 s |
-| Parity (target pending) | <1 s | <1 s |
-| Container phases including startup | 928 s | 199 s |
-| Cleanup | 0 s | 0 s |
-| Total | 930 s | 201 s |
-| Peak container cgroup memory | 5.925 GiB | 6.000 GiB |
-| Peak sampled reachability process RSS | 4.738 GiB | 4.538 GiB |
-| Peak sampled linter process RSS | 2.597 GiB | 2.418 GiB |
-| Host one-minute load, range | 6.62–16.82 | 6.25–8.81 |
-| Host five-minute load, range | 6.24–12.40 | 8.57–10.36 |
+| Phase / observation | Measured |
+| --- | ---: |
+| Verdict | PASS |
+| Resolve / tooling / history, each | 0 s |
+| Names | 4 s |
+| Prepare | 2 s |
+| Trusted check, complete | 1576 s |
+| Trusted Go race suite, within check | 1360 s |
+| Lint self-test | 5 s |
+| Parity, target absent | 0 s |
+| Branch check, complete | 1478 s |
+| Branch Go race suite, within check | 1265 s |
+| Branch parity, target absent | 0 s |
+| Container phases including startup | 3061 s |
+| Cleanup | 1 s |
+| Total | 3068 s |
+| Peak container cgroup memory, including file cache | 7.501 GiB |
+| Sampled OOM kills | 0 |
+| Host one-minute load, range | 4.33–26.22 |
+| Host five-minute load, range | 7.92–18.72 |
 
-The gate cap is **7681 MiB**: the larger kernel memory peak,
-6,442,455,040 bytes, plus 25%, rounded up to a whole MiB. Reachability analysis
-(`deadcode -test=true ./...`) dominates process memory; lint is the next
-largest process. A separate trial kept the same whole-module analysis but
-used one package worker and `GOMAXPROCS=1`: the 3 GiB container was OOM-killed
-in 22 seconds. Lower parallelism alone does not make that cap sufficient;
-the analyzer retains the module's type and SSA graphs. The gate keeps two
-package workers and the measured headroom.
+The chosen CPU limit is **six**, the measured passing configuration, with
+matching `GOMAXPROCS`. The outer deadline is **4800 seconds (80 minutes)**:
+3061 seconds plus 50% reserve, rounded up to five minutes. This supplies
+56.8% headroom over the observed container phases. The passing measurement
+used a 7200-second ceiling; its elapsed time is below the final deadline.
+Each Go package retains its 20-minute limit. Two such limits total 40 minutes
+inside the outer 80-minute budget. The longest measured package was the CLI
+at 733 seconds; the installer took at most 678 seconds across the two checks.
 
-Times are gate wall seconds. The kernel cgroup `memory.peak` includes charged
-file cache; process RSS and host load were sampled about once a second.
-Each run started below one-minute load 16 and five-minute load 12, with more
-than 6 GiB host memory available. Load can rise during a run; the table shows
-the observed ranges. Runs were serial. Cold used fresh private build/module
-volumes; warm reused those volumes, including valid Go test results. Image
-layers and operating-system page caches were warm. Neither successful run
-had an OOM event. The temporary cap can reclaim file cache; the final cap
-adds headroom above the recorded charge.
+The container retains its **7681 MiB** memory cap. Kernel `memory.peak`
+includes charged file cache; samples were taken every ten seconds. The run
+reclaimed cache at the cap without an OOM kill. Check and Go-suite rows are
+nested timings and must not be added together. The container and host scratch
+were removed; shared build and module caches remain.
 
-Parity's target, install and walk remain pending; these figures measure the
-check gate, not live product execution. Main did not require tooling self-tests
-for these measurements. Earlier cold attempts retained a store deadline
-assertion failure, a successful tool's diagnostics mixed into JSON, and a
-requirements-function complexity refusal. The guard fixes have focused
-regression coverage; the successful pair includes them. All attempt containers
-and gate scratch were removed. The two private measurement volumes are removed
-after branch verification. Logs, samples, kernel counters, source identities,
-listings and scripts accompany the report at `trains/out/w0-guard-proven/`
-outside this repository.
+This measures the source gate. The parity target was absent, the browser check
+reported its missing-browser skip, and install and walk reported that they were
+not run. The complete log is `trains/out/cx-1799-r2.gate.log.txt` beside the task
+report outside this repository.
 
 `make ui-check` runs the real embedded UI in an installed headless browser,
 including burst bounds, action races, browser lifecycle, authentication and

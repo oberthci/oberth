@@ -60,6 +60,11 @@ func TestSecretHelperStaticWithoutShellOrLibc(t *testing.T) {
 func checkSecretHelperEmptyRoot(t *testing.T, binary string) {
 	t.Helper()
 	root := t.TempDir()
+	t.Cleanup(func() {
+		if err := os.Chmod(root, 0700); err != nil {
+			t.Error(err)
+		}
+	})
 	destination := filepath.Join(root, "run/oberth/bin")
 	if err := os.MkdirAll(destination, 0755); err != nil {
 		t.Fatal(err)

@@ -115,20 +115,30 @@ fi
 run python3 "$scratch/hack/guards/run.py" names "$head"
 next_phase prepare
 linter=$(command -v "${GOLANGCI_LINT:-golangci-lint}")
+test_git=$(command -v "${OBERTH_TEST_GIT:-git}")
 image=$(sed -n 's/^ARG GO_IMAGE=//p' "$scratch/hack/devloop/Dockerfile")
 cache_prefix=${GATE_CACHE_PREFIX:-oberth-dev}
 [[ $cache_prefix =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] || { printf 'FAIL: invalid GATE_CACHE_PREFIX\n' >&2; exit 2; }
 run "${docker[@]}" image inspect "$image" --format '{{.Id}}'
+architecture=$("${docker[@]}" image inspect "$image" --format '{{.Architecture}}')
+run python3 -I -c 'import hashlib, json, subprocess, sys
+record = json.loads(subprocess.check_output(["git", "show", "main:internal/staticgit/qualified-artifacts.json"]))
+observed = hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest()
+if observed != record[sys.argv[2]]["git_sha256"]:
+    raise SystemExit("FAIL: packaged Git differs from main\nSet OBERTH_TEST_GIT to the reviewed binary and rerun.")
+' "$test_git" "$architecture"
 run git bundle create "$scratch/source.bundle" "$head" refs/heads/main
-# Peak container memory plus 25%, rounded up to MiB; see hack/README.md.
+# Container limits and the measured source gate are recorded in hack/README.md.
 # The positional arguments are expanded by the shell inside the VM.
 # shellcheck disable=SC2016
-container=$("${docker[@]}" create --cpus 2 --memory 7681m --pids-limit 512 \
+container=$("${docker[@]}" create --cpus 6 --memory 7681m --pids-limit 512 --cap-drop DAC_OVERRIDE \
     --label oberth.gate=true \
     --mount "type=volume,src=$cache_prefix-go-build,dst=/go/cache" \
     --mount "type=volume,src=$cache_prefix-go-mod,dst=/go/pkg/mod" \
-    -e GOCACHE=/go/cache -e GOTMPDIR=/go/tmp -e GOMAXPROCS=2 -e OBERTH_GUARDS_NAMES_FILE=/guard-names.txt "$image" \
+    -e GOCACHE=/go/cache -e GOTMPDIR=/go/tmp -e GOMAXPROCS=6 -e OBERTH_GUARDS_NAMES_FILE=/guard-names.txt \
+    -e OBERTH_TEST_GIT=/usr/local/bin/oberth-test-git "$image" \
     bash -ec 'mkdir -p /go/tmp
+        chown "$(id -u):$(id -g)" /guard-names.txt
         git -c init.defaultBranch=main clone -q --bare /source.bundle /repo.git
         git --git-dir=/repo.git worktree add -q --detach /src "$1"
         cd /src
@@ -168,7 +178,8 @@ container=$("${docker[@]}" create --cpus 2 --memory 7681m --pids-limit 512 \
 run "${docker[@]}" cp "$scratch/source.bundle" "$container:/source.bundle"
 run "${docker[@]}" cp "$scratch/tooling.tar" "$container:/tooling.tar"
 run "${docker[@]}" cp "$linter" "$container:/usr/local/bin/golangci-lint"
+run "${docker[@]}" cp "$test_git" "$container:/usr/local/bin/oberth-test-git"
 run "${docker[@]}" cp -L "$OBERTH_GUARDS_NAMES_FILE" "$container:/guard-names.txt"
 next_phase check-and-parity
-run timeout --signal=TERM --kill-after=15s 1500 "${docker[@]}" start --attach "$container"
+run timeout --signal=TERM --kill-after=15s 4800 "${docker[@]}" start --attach "$container"
 next_phase passed
