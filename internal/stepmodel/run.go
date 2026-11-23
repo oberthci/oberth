@@ -64,8 +64,6 @@ func Progress(current RunStatus, previous string, steps []RunStep, waiting strin
 func waitingRank(reason string) int {
 	switch reason {
 	case "starting containers", "image pull failed":
-		return 2
-	case "waiting to start", "waiting for a node":
 		return 1
 	case "":
 		return -1
