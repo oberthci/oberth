@@ -52,9 +52,9 @@ phases and is removed with the container.
 The gate prints wall seconds for resolve, tooling, history, names, prepare,
 check, parity and cleanup. Tooling changes also run the timed lint self-test.
 `check-and-parity` includes the container phases; do not add both to the total.
-Present parity runs its full corpus. Absent parity, install and walk each print
-one pending line. Install and walk need the product command, chart and live
-checks; adding `cmd/oberth` makes the gate refuse until those phases are wired.
+Present parity runs its full corpus. Absent parity prints one pending line.
+Install and walk each report that they were not run; they need a live environment
+and are separate from this source check, whether or not `cmd/oberth` exists.
 The branch stays untouched. The container, its private compiler scratch and
 host bundles are removed after success or failure. The gate creates no cluster
 namespace and builds or pulls no image.

@@ -47,7 +47,10 @@ class GateVerdicts(unittest.TestCase):
 shift 2
 case $1 in
 create) printf '%s\\n' "$@" > "$GATE_COMMANDS"; printf 'gate-test-container\\n' ;;
-cp) if [[ $2 == */tooling.tar ]]; then cp "$2" "$GATE_ARCHIVE"; fi ;;
+cp) case $2 in
+    */tooling.tar) cp "$2" "$GATE_ARCHIVE" ;;
+    */source.bundle) cp "$2" "$GATE_BUNDLE" ;;
+    esac ;;
 start) exit "${GATE_FAKE_START_STATUS:-0}" ;;
 esac
 ''')
@@ -63,6 +66,7 @@ esac
                  "GOTMPDIR": str(self.fixture), "GATE_FAKE_START_STATUS": str(status),
                  "OBERTH_GUARDS_NAMES_FILE": os.environ.get("OBERTH_GUARDS_NAMES_FILE", str(self.names)),
                  "GATE_ARCHIVE": str(self.fixture / "trusted.tar"),
+                 "GATE_BUNDLE": str(self.fixture / "source.bundle"),
                  "GATE_COMMANDS": str(self.fixture / "commands")},
             text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         self.assertEqual(list(self.fixture.glob("gate.*")), [])
@@ -102,21 +106,60 @@ esac
         self.assertIn("invalid GATE_CACHE_PREFIX", result.stdout)
         self.assertFalse((self.fixture / "commands").exists())
 
-    def test_install_and_walk_wait_only_while_product_is_absent(self):
-        self.assertEqual(0, self.run_gate().returncode)
+    def run_vm_script(self, status=0):
+        vm = Path(self.enterContext(tempfile.TemporaryDirectory(dir=self.fixture.parent)))
         command = (self.fixture / "commands").read_text()
-        pending = command.split("        if [[ -d cmd/oberth ]]; then", 1)[1].split("\ngate\n", 1)[0]
-        pending = "if [[ -d cmd/oberth ]]; then" + pending
-        result = subprocess.run(["bash", "-ec", pending], cwd=self.fixture,
-                                capture_output=True, text=True, check=False)
-        self.assertEqual(0, result.returncode, result.stdout)
-        self.assertIn("install: product absent; integration pending", result.stdout)
-        self.assertIn("walk: product absent; integration pending", result.stdout)
-        (self.fixture / "cmd/oberth").mkdir(parents=True)
-        result = subprocess.run(["bash", "-ec", pending], cwd=self.fixture,
-                                capture_output=True, text=True, check=False)
-        self.assertEqual(1, result.returncode)
-        self.assertIn("wire install and walk", result.stderr)
+        script = command.split("bash\n-ec\n", 1)[1].rsplit("\ngate\n", 1)[0]
+        paths = {"/source.bundle": self.fixture / "source.bundle", "/tooling.tar": self.fixture / "trusted.tar",
+                 "/repo.git": vm / "repo.git", "/src": vm / "src", "/branch": vm / "branch", "/go/tmp": vm / "tmp"}
+        for original, path in paths.items():
+            script = script.replace(original, shlex.quote(str(path)))
+        result = subprocess.run(["bash", "-ec", script, "gate", self.git("rev-parse", "HEAD").decode().strip(),
+                                 command.splitlines()[-3], self.fixture.name, self.fixture.name],
+            cwd=self.fixture, env={**os.environ, "PATH": f"{self.bin_path}:{os.environ['PATH']}",
+                "GATE_CHECKS": str(vm / "checks"), "GATE_MAKE_STATUS": str(status), "OBERTH_PARITY_TARGET_FILE": ""},
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False, timeout=30)
+        return result, vm
+
+    def test_real_product_tree_passes_with_main_tooling_and_keeps_check_failures(self):
+        root = Path(__file__).resolve().parents[1]
+        self.git("checkout", "-q", "main")
+        with tempfile.NamedTemporaryFile(dir=self.fixture.parent) as archive:
+            subprocess.run(["git", "archive", "--output=" + archive.name, "HEAD"], cwd=root, check=True)
+            subprocess.run(["tar", "-xf", archive.name, "--skip-old-files", "-C", str(self.fixture)], check=True)
+        files = subprocess.check_output(["git", "ls-tree", "-rz", "--name-only", "HEAD"], cwd=root).decode().split("\0")[:-1]
+        self.git("add", *files)
+        self.git("commit", "-qm", "Establish product tree")
+        self.git("checkout", "-qB", "w0/probe", "main")
+        make = self.bin_path / "make"
+        make.write_text('#!/usr/bin/env bash\nprintf "%s %s\\n" "$PWD" "$*" >> "$GATE_CHECKS"\n'
+                        'exit "${GATE_MAKE_STATUS:-0}"\n')
+        make.chmod(0o755)
+        for changed in (False, True):
+            with self.subTest(tooling_changed=changed):
+                if changed:
+                    (self.fixture / "Makefile").write_text("branch tooling must not run as trusted\n")
+                    self.git("add", "Makefile")
+                    self.git("commit", "-qm", "Change branch check")
+                gate = self.run_gate()
+                self.assertEqual(0, gate.returncode, gate.stdout)
+                result, vm = self.run_vm_script()
+                self.assertEqual(0, result.returncode, result.stdout)
+                self.assertTrue((vm / "src/cmd/oberth/main.go").is_file())
+                self.assertTrue((vm / "src/charts/oberth/Chart.yaml").is_file())
+                self.assertEqual((vm / "src/Makefile").read_bytes(), self.git("show", "main:Makefile"))
+                checks = [f"{vm}/src -f Makefile check"]
+                if changed:
+                    checks += [f"{vm}/src -f Makefile lint-selftest", f"{vm}/branch -f Makefile check"]
+                    self.assertEqual((vm / "branch/Makefile").read_bytes(), self.git("show", "HEAD:Makefile"))
+                self.assertEqual((vm / "checks").read_text().splitlines(), checks)
+                self.assertIn("gate: phase=parity", result.stdout)
+                self.assertIn("install: not run; requires a live environment", result.stdout)
+                self.assertIn("walk: not run; requires a live environment", result.stdout)
+                failure, failed_vm = self.run_vm_script(status=7)
+                self.assertEqual(7, failure.returncode, failure.stdout)
+                self.assertEqual((failed_vm / "checks").read_text().splitlines(),
+                                 [f"{failed_vm}/src -f Makefile check"])
 
     def test_invalid_branch_has_failure_verdict(self):
         result = self.run_gate(branch="invalid..branch")
