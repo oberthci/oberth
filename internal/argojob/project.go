@@ -102,7 +102,7 @@ func appendPlan(rows []projected, in projectionInput) []projected {
 	for _, path := range paths {
 		waiting := waitingFor(in.w, in.waits, path)
 		row := projected{step: stepmodel.RunStep{Path: path, Name: in.entry.Name, Status: stepmodel.StepPending, DisplayReason: waiting}}
-		if waiting != reasonWaiting {
+		if waiting != reasonWaiting && !terminalWorkflow(in.w) {
 			row.step.Detail = waitingDetail(in.w, waiting)
 		}
 		nodes := in.groups[path]

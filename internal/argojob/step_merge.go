@@ -64,8 +64,9 @@ func mergeDiagnosis(row projected, old stepmodel.RunStep) projected {
 		row.step.DisplayReason, row.step.Detail, row.class = old.DisplayReason, old.Detail, stepmodel.FailureUnknown
 	}
 	// A step that passed since an unfinished observation keeps none of that
-	// observation's waiting detail, such as PodInitializing.
-	if row.step.Status != stepmodel.StepPassed || terminalStep(old.Status) {
+	// observation's waiting detail, such as PodInitializing. A step without an
+	// attempt keeps none either: its detail described a wait that is over.
+	if len(row.step.Attempts) > 0 && (row.step.Status != stepmodel.StepPassed || terminalStep(old.Status)) {
 		row.step.Detail = cmp.Or(row.step.Detail, old.Detail)
 	}
 	row.step.Name = cmp.Or(row.step.Name, old.Name)
