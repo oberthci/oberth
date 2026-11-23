@@ -40,3 +40,17 @@ func (p *planner) parallelCalls(ordered []*call, levels map[*call]int) map[*call
 func parallelLeaf(c *call) bool {
 	return c.target != nil && leaf(c.target.template)
 }
+
+func (p *planner) fanOutGroup(c *call, group int, dynamic bool) int {
+	if group == 0 && parallelLeaf(c) && (dynamic || len(c.items) > 1) {
+		p.nextGroup++
+		return p.nextGroup
+	}
+	return group
+}
+
+func (p *planner) collapsedCall(c *call, path string, group int) bool {
+	entry := p.dynamicEntry(path, c.name, c.target, group)
+	entry.FanOut = parallelLeaf(c) && (c.dynamic || len(c.items) > 0)
+	return p.append(entry)
+}

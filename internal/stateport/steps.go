@@ -94,6 +94,9 @@ func orderedSteps(plan admissioncontract.Plan, entries map[string]stepmodel.RunS
 		for _, child := range group {
 			child.CredentialIntent = entry.CredentialIntent
 			child.ParallelGroup = 0
+			if entry.FanOut {
+				child.ParallelGroup = entry.ParallelGroup
+			}
 			result = append(result, child.Clone())
 		}
 	}

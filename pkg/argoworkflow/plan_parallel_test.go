@@ -28,6 +28,26 @@ func TestPlanGroupsStayConsecutiveBesideChains(t *testing.T) {
 	}
 }
 
+func TestRuntimeLeafFanOutHasAGroupAtAdmission(t *testing.T) {
+	for _, withParam := range []bool{false, true} {
+		w := planDAG()
+		task := &w.Spec.Templates[0].DAG.Tasks[0]
+		if withParam {
+			task.WithParam = "{{workflow.parameters.items}}"
+		} else {
+			task.WithItems = loopItems()
+			task.WithItems[0].Value = []byte(`"{{workflow.parameters.item}}"`)
+		}
+		p, err := planFixture(t.Context(), w, admissionFixture{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p.Entries) != 1 || !p.Entries[0].Dynamic || !p.Entries[0].FanOut || p.Entries[0].ParallelGroup == 0 {
+			t.Fatal("runtime loop has no admitted group", p)
+		}
+	}
+}
+
 func TestPlanParallelGroupsComeFromDependencyLevels(t *testing.T) {
 	t.Parallel()
 	w := planDAG()

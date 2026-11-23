@@ -48,15 +48,13 @@ func (p *planner) invoke(c *call, parent string, group int) bool {
 	}
 	base := invocationPath(parent, c.suffix)
 	start, size := len(p.plan.Entries), p.bytes
-	if c.dynamic || dynamicItems(c.items) {
+	dynamic := c.dynamic || dynamicItems(c.items)
+	group = p.fanOutGroup(c, group, dynamic)
+	if dynamic {
 		p.omit(c)
-		return p.placeholder(base, c.name, c.target, group)
+		return p.collapsedCall(c, base, group)
 	}
 	success := true
-	if len(c.items) > 1 && group == 0 && parallelLeaf(c) {
-		p.nextGroup++
-		group = p.nextGroup
-	}
 	if len(c.items) > 0 {
 		for i, item := range c.items {
 			if !p.one(c, loopPath(base, i, item), group) {
@@ -73,7 +71,7 @@ func (p *planner) invoke(c *call, parent string, group int) bool {
 	p.plan.Entries = p.plan.Entries[:start]
 	p.bytes = size
 	p.omit(c)
-	return p.placeholder(base, c.name, c.target, group)
+	return p.collapsedCall(c, base, group)
 }
 func (p *planner) one(c *call, path string, group int) bool {
 	if c.target == nil || p.active[c.target] {
@@ -140,6 +138,9 @@ func (p *planner) visit(n *node, path, name string, group int) bool {
 	return true
 }
 func (p *planner) placeholder(path, name string, n *node, group int) bool {
+	return p.append(p.dynamicEntry(path, name, n, group))
+}
+func (p *planner) dynamicEntry(path, name string, n *node, group int) admissioncontract.PlanEntry {
 	p.plan.Exact = false
 	template := ""
 	if n != nil {
@@ -148,7 +149,7 @@ func (p *planner) placeholder(path, name string, n *node, group int) bool {
 			name = n.template.Name
 		}
 	}
-	return p.append(admissioncontract.PlanEntry{Path: path, Name: name, Template: template, Dynamic: true, ParallelGroup: group, CredentialIntent: p.credentialIntent})
+	return admissioncontract.PlanEntry{Path: path, Name: name, Template: template, Dynamic: true, ParallelGroup: group, CredentialIntent: p.credentialIntent}
 }
 func (p *planner) append(entry admissioncontract.PlanEntry) bool {
 	raw, err := json.Marshal(entry)

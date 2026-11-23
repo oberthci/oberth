@@ -9,6 +9,7 @@ type PlanEntry struct {
 	Path             string `json:"plan_path"`
 	Name             string `json:"name"`
 	Template         string `json:"-"`
+	FanOut           bool   `json:"fan_out,omitempty"`
 	Dynamic          bool   `json:"dynamic"`
 	ParallelGroup    int    `json:"parallel_group,omitempty"`
 	CredentialIntent bool   `json:"credential_intent"`

@@ -31,7 +31,7 @@ func checkNativeStepShape(t *testing.T, f RunFixture) {
 	batch := batchFor(t, f, RunCase{ID: "native-step-shape"})
 	view := batch.Runs[0].Prepared.View()
 	view.Plan.Exact = false
-	view.Plan.Entries = []admissioncontract.PlanEntry{{Path: "z-build", Name: "build"}, {Path: "loop", Name: "test", Dynamic: true, CredentialIntent: true}, {Path: "a-publish", Name: "publish"}}
+	view.Plan.Entries = []admissioncontract.PlanEntry{{Path: "z-build", Name: "build"}, {Path: "loop", Name: "test", Dynamic: true, FanOut: true, CredentialIntent: true, ParallelGroup: 2}, {Path: "a-publish", Name: "publish"}}
 	prepared, err := admissioncontract.Seal(view)
 	mustRun(t, err)
 	batch.Runs[0].Prepared = prepared
@@ -54,7 +54,7 @@ func checkNativeStepShape(t *testing.T, f RunFixture) {
 	}
 	for index, item := range []string{"a", "z"} {
 		step := steps[index+2]
-		if step.Name != "test ["+item+"]" || !step.CredentialIntent {
+		if step.Name != "test ["+item+"]" || !step.CredentialIntent || step.ParallelGroup != 2 {
 			t.Fatal("dynamic child lost plan name, item or credential intent", step)
 		}
 	}
