@@ -40,8 +40,8 @@ func TestEmptyCheckoutNeverFallsBackOnAbsentDefaultOrOutage(t *testing.T) {
 	c := f.Cache(t, nil)
 	f.Git(t, f.Bare, "update-ref", "-d", "refs/heads/main")
 	_, err := c.Checkout(t.Context(), gittest.Repository, sourcecontract.Ref{})
-	var empty *gitport.EmptyRepositoryError
-	if !errors.As(err, &empty) {
+	var lost *gitport.ForgeHistoryLostError
+	if !errors.As(err, &lost) {
 		t.Fatal("empty forge not explicit", err)
 	}
 	if err = os.Rename(f.Bare, f.Bare+".offline"); err != nil {

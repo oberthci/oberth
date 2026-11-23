@@ -197,7 +197,7 @@ func (c *Cache) policyAbsence(ctx context.Context, p string, r Remote) error {
 		return err
 	}
 	if len(data) == 0 {
-		return &gitport.EmptyRepositoryError{}
+		return c.emptyForge(ctx, p)
 	}
 	return &RefusalError{reason: reasonDeletedDefault, remedy: remedyDeletedDefault, Field: r.DefaultBranch}
 }

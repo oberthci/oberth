@@ -88,10 +88,8 @@ func validatePublishedCommit(r model.Publication) error {
 	return nil
 }
 func (c *Cache) publishIntent(ctx context.Context, p string, remote Remote, r model.Publication) error {
-	if r.Ref != remote.DefaultBranch {
-		if _, err := c.policyHead(ctx, r.Repo, remote); err != nil {
-			return err
-		}
+	if err := c.publicationDefault(ctx, remote, r); err != nil {
+		return err
 	}
 	held, err := c.forgeHolds(ctx, p, remote, r)
 	if err != nil || held {
@@ -106,6 +104,20 @@ func (c *Cache) publishIntent(ctx context.Context, p string, remote Remote, r mo
 		return err
 	}
 	return c.pushIntent(ctx, p, remote, r)
+}
+
+// A saved empty predecessor must not recreate an emptied established forge.
+// Other refs always need a live default head, including on explicit retries.
+func (c *Cache) publicationDefault(ctx context.Context, remote Remote, r model.Publication) error {
+	if r.Ref == remote.DefaultBranch && *r.PreviousSHA != "" {
+		return nil
+	}
+	_, err := c.policyHead(ctx, r.Repo, remote)
+	var empty *gitport.EmptyRepositoryError
+	if r.Ref == remote.DefaultBranch && errors.As(err, &empty) {
+		return nil
+	}
+	return err
 }
 
 // forgeHolds reports whether the forge already has the intended object at the

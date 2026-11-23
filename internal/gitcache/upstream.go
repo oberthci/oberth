@@ -173,10 +173,7 @@ func (c *Cache) fetch(ctx context.Context, t fetchTarget) (updates []RefUpdate, 
 	if len(after) == 0 {
 		// Local pushes do not establish forge history. Until the forge has
 		// advertised refs, an empty refresh preserves them without a change.
-		if len(before) != 0 {
-			return nil, &gitport.EmptyRepositoryError{}
-		}
-		return nil, nil
+		return nil, lostForgeHistory(before)
 	}
 	args := []string{"fetch", "--no-auto-maintenance", "--no-write-fetch-head", "--no-tags", "--", dir}
 	for _, oid := range after {

@@ -33,8 +33,8 @@ func TestEmptyForgeAcceptsCloneAndRefresh(t *testing.T) {
 		t.Fatal("first commit did not refresh", err)
 	}
 	f.Git(t, f.Bare, "update-ref", "-d", "refs/heads/main")
-	var empty *gitport.EmptyRepositoryError
-	if _, err := c.RemoteRef(t.Context(), gittest.Repository, "HEAD"); !errors.As(err, &empty) {
+	var lost *gitport.ForgeHistoryLostError
+	if _, err := c.RemoteRef(t.Context(), gittest.Repository, "HEAD"); !errors.As(err, &lost) {
 		t.Fatal("existing cache hid empty forge", err)
 	}
 }
@@ -44,6 +44,37 @@ func TestEmptyForgeRefreshPreservesCachedHistory(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			checkEmptyForgeCachedHistory(t, state)
 		})
+	}
+}
+
+func TestEmptyForgeLiveReadsRefuseTrackedHistory(t *testing.T) {
+	f := gittest.New(t)
+	c := f.Cache(t, nil)
+	f.Git(t, f.Bare, "update-ref", "-d", "refs/heads/main")
+	var lost *gitport.ForgeHistoryLostError
+	if err := c.DefaultHead(t.Context(), gittest.Repository); !errors.As(err, &lost) {
+		t.Fatal("recent refresh bypassed live gate refusal", err)
+	}
+	if _, err := c.RemoteRef(t.Context(), gittest.Repository, "refs/heads/main"); !errors.As(err, &lost) {
+		t.Fatal("publication read treated lost history as bootstrap", err)
+	}
+}
+
+func TestEmptyForgePublicationRetryRefusesTrackedHistory(t *testing.T) {
+	f := gittest.New(t)
+	c := f.Cache(t, nil)
+	f.Git(t, f.Bare, "update-ref", "-d", "refs/heads/main")
+	before := cacheRefs(t, f)
+	var lost *gitport.ForgeHistoryLostError
+	intent := publicationFor(f, "refs/heads/main", f.Commit, "")
+	if _, err := c.Publish(t.Context(), intent); !errors.As(err, &lost) {
+		t.Fatal("saved absent predecessor bypassed lost-history refusal", err)
+	}
+	if after := cacheRefs(t, f); after != before {
+		t.Fatal("refused publication changed the cache", before, after)
+	}
+	if refs := f.Git(t, f.Bare, "for-each-ref", "--format=%(refname)"); refs != "" {
+		t.Fatal("publication retry recreated lost forge history", refs)
 	}
 }
 
@@ -70,8 +101,8 @@ func checkEmptyForgeCachedHistory(t *testing.T, state string) {
 	before := f.Git(t, f.Store(), "for-each-ref", "--format=%(refname) %(objectname)")
 	notices.Store(0)
 	gittest.ExpireRefresh(t, f.Store())
-	var empty *gitport.EmptyRepositoryError
-	if err := c.Fetch(t.Context(), gittest.Repository); !errors.As(err, &empty) {
+	var lost *gitport.ForgeHistoryLostError
+	if err := c.Fetch(t.Context(), gittest.Repository); !errors.As(err, &lost) {
 		t.Fatal("empty forge refresh accepted over cached history", err)
 	}
 	if after := f.Git(t, f.Store(), "for-each-ref", "--format=%(refname) %(objectname)"); after != before {
