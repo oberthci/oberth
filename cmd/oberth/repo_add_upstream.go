@@ -119,11 +119,14 @@ func requireUpstreamURL(source apicontract.Upstream, u *url.URL, joined bool) er
 	return problem
 }
 
-// sameForgeAccount reports whether the stored and supplied addresses log in to
-// the same account on the same forge; another account or forge whose directory
-// has the same name only clashes with the stored organization name.
+// sameForgeAccount compares accounts within one scheme and hosts across
+// schemes, whose ports and accounts are independent. It selects refusal
+// guidance; matching still requires the full registered address.
 func sameForgeAccount(base string, supplied *url.URL) bool {
 	stored, err := url.Parse(base)
+	if err == nil && stored.Scheme != supplied.Scheme {
+		return stored.Hostname() == supplied.Hostname()
+	}
 	return err == nil && stored.Host == supplied.Host && reponame.ForgeUser(stored) == reponame.ForgeUser(supplied)
 }
 

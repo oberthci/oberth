@@ -22,6 +22,7 @@ func TestRepoAddNamesAnOrganizationClashWithAnotherForge(t *testing.T) {
 			{"ssh://oberth@other.oberth.ci/srv/repos/x.git", nil},
 			{"ssh://oberth@other.oberth.ci/srv/repos/x.git", []string{"--upstream", "h2"}},
 			{"ssh://alice@h.oberth.ci/home/alice/repos/x.git", nil},
+			{"ssh://oberth@h.oberth.ci:2222/~/repos/x.git", nil},
 		} {
 			t.Run(strconv.FormatBool(joined)+tc.address+strings.Join(tc.flags, ""), func(t *testing.T) {
 				b := fake.Bindings()
@@ -60,9 +61,14 @@ func TestRepoAddOtherSchemeNamesTheRegisteredForgeAddress(t *testing.T) {
 	for _, tc := range []struct{ stored, supplied string }{
 		{"https://h.oberth.ci/team", "git@h.oberth.ci:team/widget.git"},
 		{"ssh://h.oberth.ci/team", "https://h.oberth.ci/team/widget.git"},
+		{"https://h.oberth.ci/team", "ssh://git@h.oberth.ci:2222/team/widget.git"},
+		{"ssh://h.oberth.ci:2222/team", "https://h.oberth.ci/team/widget.git"},
+		{"https://h.oberth.ci:8443/team", "git@h.oberth.ci:team/widget.git"},
+		{"ssh://oberth@h.oberth.ci/team", "https://h.oberth.ci/team/widget.git"},
+		{"https://h.oberth.ci/team", "oberth@h.oberth.ci:team/widget.git"},
 	} {
 		for _, joined := range []bool{false, true} {
-			t.Run(tc.stored+strconv.FormatBool(joined), func(t *testing.T) {
+			t.Run(tc.stored+"->"+tc.supplied+strconv.FormatBool(joined), func(t *testing.T) {
 				b := fake.Bindings()
 				sources := []apicontract.Upstream{{Name: "h", Org: "team", BaseURL: tc.stored}}
 				b.UpstreamList.Handler = &fake.Handler[apicontract.UpstreamListArgs, apicontract.UpstreamPage]{Value: apicontract.UpstreamPage{Upstreams: sources}}
