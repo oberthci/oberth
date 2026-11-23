@@ -74,9 +74,9 @@ It registers no model tools: they would share the bridge's server name, and the 
 
 One timer refreshes every 15 seconds, active or idle, so short runs and terminal pushes
 are still seen. Refreshes coalesce and each CLI call is bounded. Session start does not
-await the first refresh. Missing configuration is explained once per installation;
-unreachable or malformed responses hide stale rows quietly. Session exit cancels the
-timer.
+await the first refresh. Missing profile setup is explained once per option value;
+other missing configuration once per installation. Failed reads hide stale rows and
+name the unreadable profiles. Session exit cancels the timer.
 
 Plugin packaging follows C13's [guard naming policy](c13-own-pipelines.md#check-tooling).
 The connection skill stays shared and host-neutral.

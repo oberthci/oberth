@@ -76,6 +76,7 @@ function bottom(on: On, resolved?: string, checkout = true, profileEnv?: string,
       size: 1, mtimeMs: 0, isLink: false,
     } }
   })
+  return store
 }
 
 function nextSnapshot(on: On): Promise<void> {
@@ -848,6 +849,17 @@ test('a blank profile list keeps the single-profile selection', { options: { ...
   const calls = cli(on, () => [])
   await startSession($, on)
   expect(calls).toHaveLength(1)
+})
+
+test('a mistyped profile list explains setup again after an earlier notice', { options: { ...options, profiles: 'a,,b' } }, async ($, on) => {
+  const store = bottom(on)
+  store.set('profile-notice', true)
+  const notices = toasts(on)
+  await startSession($, on)
+  await startSession($, on)
+  expect(notices).toHaveLength(1)
+  expect(notices[0]).toContain('comma-separated joined profile names')
+  expect(store.get('profile-notice')).toBe('a,,b')
 })
 
 for (const profiles of ['first,,second', Array(33).fill(0).map((_, n) => `p${n}`).join(',')]) {

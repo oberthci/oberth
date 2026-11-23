@@ -102,9 +102,9 @@ async function registerCommands($: EngineInterface) {
 }
 
 // The setup notice the box needs before it can read runs, or none.
-async function missingSetup($: EngineInterface, options: PluginOptions): Promise<{ key: string; text: string } | undefined> {
+async function missingSetup($: EngineInterface, options: PluginOptions): Promise<{ key: string; text: string; mark?: string } | undefined> {
   try { await checkedExecutable($, options) } catch { return { key: 'executable-notice', text: SETUP } }
-  try { await profiles($, options) } catch (error) { return { key: 'profile-notice', text: errorText(error) } }
+  try { await profiles($, options) } catch (error) { return { key: 'profile-notice', text: errorText(error), mark: String(options.profiles) } }
   return undefined
 }
 
@@ -125,7 +125,7 @@ export const register: Register = (on, options) => {
     const missing = await missingSetup($, options)
     if (missing) {
       await update($, snapshot, () => empty)
-      await setupNotice($, missing.key, missing.text)
+      await setupNotice($, missing.key, missing.text, missing.mark)
     } else {
       if (loop.count) void poll($, options, loop)
       loop.timer = $.clock.every(REFRESH_MS, () => { void tick($, options, loop).catch(() => {}) })
