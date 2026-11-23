@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -11,6 +12,38 @@ import (
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
+
+func TestBridgeFooterEOFStopsRefresh(t *testing.T) {
+	bindings := fake.Bindings()
+	started := make(chan struct{})
+	bindings.RunList.Handler = &fake.Handler[apicontract.RunListArgs, apicontract.RunPage]{Run: func(ctx context.Context) (apicontract.RunPage, error) {
+		close(started)
+		<-ctx.Done()
+		return apicontract.RunPage{}, ctx.Err()
+	}}
+	p := newBridgePeer(t, bridgeProfile(t, streamingTransport(server(t, bindings))))
+	p.initialize()
+	footerReply(t, p, "footer")
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	select {
+	case <-started:
+	case <-deadline.C:
+		t.Fatal("footer refresh did not start")
+	}
+	if err := p.input.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline.Reset(time.Second)
+	select {
+	case err := <-p.done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-deadline.C:
+		t.Fatal("EOF did not cancel the footer refresh within one second")
+	}
+}
 
 func footerPage(now time.Time) apicontract.RunPage {
 	started, finished := now.Add(-50*time.Minute), now.Add(-5*time.Minute)

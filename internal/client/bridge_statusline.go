@@ -55,7 +55,7 @@ func (b *bridge) footerTree(ctx context.Context) json.RawMessage {
 	if pending == nil && (tree == nil || b.client.now().Sub(f.at) >= footerRefresh) {
 		pending = make(chan struct{})
 		f.pending = pending
-		b.workers.Go(func() { b.refreshFooter(pending) })
+		b.workers.Go(func() { b.refreshFooter(b.eventCtx, pending) })
 	}
 	f.mu.Unlock()
 	if tree != nil {
@@ -74,8 +74,8 @@ func (b *bridge) footerTree(ctx context.Context) json.RawMessage {
 	return footerText("status-metadata", "Oberth: reading runs")
 }
 
-func (b *bridge) refreshFooter(done chan struct{}) {
-	ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second)
+func (b *bridge) refreshFooter(ctx context.Context, done chan struct{}) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var page apicontract.RunPage
 	err := b.client.Invoke(ctx, footerTool, apicontract.RunListArgs{Limit: footerRuns}, &page)
