@@ -7,6 +7,7 @@ import (
 
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
 // throttledMessage is the pinned controller's message on a Workflow it keeps
@@ -98,11 +99,12 @@ func plainName(name string) bool {
 	return name != "" && strings.Trim(name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.") == ""
 }
 
-// queuedReason is a queued run's reason: the first step, in plan order, that
-// says what it waits for, else waiting to start.
+// queuedReason is a queued run's reason: the first pending or queued step, in
+// plan order, that says what it waits for, else waiting to start.
 func queuedReason(rows []projected) string {
 	for _, r := range rows {
-		if !r.step.Started() && r.step.DisplayReason != "" && r.step.DisplayReason != reasonWaiting {
+		waiting := r.step.Status == stepmodel.StepPending || r.step.Status == stepmodel.StepQueued
+		if waiting && r.step.DisplayReason != "" && r.step.DisplayReason != reasonWaiting {
 			return r.step.DisplayReason
 		}
 	}

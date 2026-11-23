@@ -34,7 +34,7 @@ func TestRunIsQueuedUntilAStepNodeStarts(t *testing.T) {
 		"one pending":   {[]wf.NodePhase{wf.NodePending}, stepmodel.RunQueued, "waiting to start"},
 		"one running":   {[]wf.NodePhase{wf.NodeRunning, wf.NodePending}, stepmodel.RunRunning, ""},
 		"one finished":  {[]wf.NodePhase{wf.NodeSucceeded, wf.NodePending}, stepmodel.RunRunning, ""},
-		"one skipped":   {[]wf.NodePhase{wf.NodePending, wf.NodeSkipped}, stepmodel.RunRunning, ""},
+		"one skipped":   {[]wf.NodePhase{wf.NodePending, wf.NodeSkipped}, stepmodel.RunQueued, "waiting to start"},
 		"one failed":    {[]wf.NodePhase{wf.NodeFailed}, stepmodel.RunRunning, ""},
 		"no step nodes": {nil, stepmodel.RunQueued, "waiting to start"},
 	} {

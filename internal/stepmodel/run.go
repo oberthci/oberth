@@ -28,8 +28,9 @@ type RunStep struct {
 	Logs             []LogSelector `json:"logs,omitzero"`
 }
 
-// Started reports a step that has run or ended in any attempt: a step that is
-// only pending or queued, waiting for a lock, a node or its containers, has not.
+// Started reports a step that ran or failed in any attempt: a step that is
+// only pending or queued, waiting for a lock, a node or its containers, has
+// not, nor has a step that was skipped or never reached.
 func (s RunStep) Started() bool {
 	if s.Status.started() {
 		return true
@@ -42,7 +43,7 @@ func (s RunStep) Started() bool {
 	return false
 }
 
-func (s StepStatus) started() bool { return s != StepPending && s != StepQueued }
+func (s StepStatus) started() bool { return s != StepPending && s != StepQueued && s != StepSkipped }
 
 // Progress is the run-status rule for an unfinished run: it is queued until
 // one of its steps has started and running from then on, never queued again,

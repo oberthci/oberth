@@ -60,7 +60,8 @@ func checkNativeStepShape(t *testing.T, f RunFixture) {
 	savedStepShape(t, f, id, steps)
 }
 
-// checkRunStart: a run is queued, without a start, while its steps only wait;
+// checkRunStart: a run is queued, without a start, while its steps only wait or
+// are skipped;
 // it runs from the first step that starts, whose start is the run's, and never
 // queues again. A later save never moves the start forward, an earlier
 // observed start moves it back.
@@ -75,6 +76,9 @@ func checkRunStart(t *testing.T, f RunFixture) {
 	}
 	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	waited := base.Add(-time.Hour)
+	steps[0].Status, steps[0].StartedAt = stepmodel.StepSkipped, &waited
+	mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps}))
+	runState(t, f, id, progressWant{stepmodel.RunQueued, "", nil})
 	steps[0].Status, steps[0].StartedAt = stepmodel.StepQueued, &waited
 	if err = f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps, Waiting: "waiting for a run slot that is far too long"}); err == nil {
 		t.Fatal("a waiting reason over 40 characters was saved")
