@@ -54,7 +54,7 @@ func TestAdoptedServerJSONContract(t *testing.T) {
 			"database_file": "/var/lib/oberth/restored.db",
 			"protocol":      map[string]any{"schema_identity": protocol.SchemaIdentity, "audit_domain": protocol.AuditDomain},
 			"secret_store":  map[string]any{"address": "https://store.oberth.ci", "kv_mount": "values", "auth_mount": "cluster", "writer_role": "writer", "audience": "oberth-store"},
-			"runs":          values["runs"], "logs": values["logs"], "schedules": values["schedules"], "assist": values["assist"],
+			"logs":          values["logs"], "schedules": values["schedules"], "assist": values["assist"],
 			"runtime": configuredServerRuntime(),
 		}
 		if got := serverJSON(t, objects); jsonOf(t, got) != jsonOf(t, want) {
@@ -62,7 +62,7 @@ func TestAdoptedServerJSONContract(t *testing.T) {
 		}
 		cm := object(t, objects, "ConfigMap", "oberth-controller-config")["data"].(map[string]any)
 		if cm["parallelism"] != jsonOf(t, parallel) {
-			t.Fatal("server status and controller use different parallelism")
+			t.Fatal("controller run cap differs")
 		}
 		object(t, objects, "Namespace", "jobs")
 	}
@@ -209,8 +209,9 @@ func TestInstallPublishesAdoptedServerInputs(t *testing.T) {
 	if jsonOf(t, config["public"]) != `{"ssh_port":34022,"url":"https://oberth.ci:34443"}` || config["pipeline_namespace"] != "jobs" || config["database_file"] != "/var/lib/oberth/restored.db" {
 		t.Fatal("install choices differ from server input", config)
 	}
-	if config["runs"].(map[string]any)["parallel"] != float64(0) {
-		t.Fatal("explicit unlimited status value lost", config)
+	controller := object(t, rendered(t, values), "ConfigMap", "oberth-controller-config")["data"].(map[string]any)
+	if controller["parallelism"] != "0" {
+		t.Fatal("explicit unlimited run cap lost", controller)
 	}
 	annotations := serverDeployment(t, rendered(t, values)).Spec.Template.Annotations
 	if annotations["checksum/admin"] == "" || annotations["checksum/admin"] != values["adminPublicKeySHA256"] {

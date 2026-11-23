@@ -15,7 +15,7 @@
 {{- $_ := set $server "pipeline_namespace" .Values.pipeline.namespace -}}
 {{- $_ := set $server "database_file" .Values.database.file -}}
 {{- $_ := set $server "secret_store" (pick .Values.secretStore "address" "audience" "kv_mount" "auth_mount" "writer_role") -}}
-{{- range $key := list "runs" "logs" "schedules" "assist" -}}
+{{- range $key := list "logs" "schedules" "assist" -}}
 {{- $_ := set $server $key (index $.Values $key) -}}
 {{- end -}}
 

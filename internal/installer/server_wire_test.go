@@ -56,9 +56,6 @@ type chartServerConfig struct {
 		AuthMount  string `json:"auth_mount"`
 		WriterRole string `json:"writer_role"`
 	} `json:"secret_store"`
-	Runs struct {
-		Parallel int `json:"parallel"`
-	} `json:"runs"`
 	Logs struct {
 		RunLimitBytes int64 `json:"run_limit_bytes"`
 	} `json:"logs"`

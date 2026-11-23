@@ -179,7 +179,8 @@ no service, wiring, native executor, source implementation or concrete Store.
 9. **Delta:** **Native configuration.** Keep server and pipeline namespaces and identities
    distinct. Managed controllers get reviewed settings; external controllers are
    verify-only with actionable corrections. Argo's global run cap defaults to 4;
-   zero is unlimited. No additional run cap, CPU formula, queue or workload
+   zero is unlimited. The cap is controller configuration only; changing it leaves
+   the server Pod template unchanged. No additional run cap, CPU formula, queue or workload
    resource rewriting. Argo `failedPodRestart` is on with `maxRestarts: 1`.
    Chart roles follow component contracts: no Workflow deletion, no secret-approval
    mirror and no arbitrary exec in the server namespace. The server may create

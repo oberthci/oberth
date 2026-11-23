@@ -34,8 +34,8 @@ mounted at `/etc/oberth/config/server.json`. The sole configuration flag is:
 `/usr/local/bin/oberth serve --config /etc/oberth/config/server.json`.
 The chart writes explicit server, pipeline and Argo namespaces, six `files.*`
 paths, public endpoints, fixed listeners, protocol, database and store settings,
-and the run/log/schedule/assist sections. `runs.parallel` is a server status
-value; the controller enforces it. Each file path names a rendered Secret item.
+and the log/schedule/assist sections. `runs.parallel` appears only in the
+controller ConfigMap, so changing it leaves the server Pod template unchanged. Each file path names a rendered Secret item.
 
 The runtime object contains the Git path, source/admission durations, source
 client burst, default branch, image prefixes, public CA ConfigMap, helper image,

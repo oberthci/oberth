@@ -50,7 +50,7 @@ func TestCompositionRequiresTypedFields(t *testing.T) {
 		}
 	}
 	config := serverJSON(t, rendered(t, map[string]any{"runs": map[string]any{"parallel": 0}, "schedules": map[string]any{"max_entries": 0}, "assist": map[string]any{"ttl_seconds": 1}}))
-	if jsonOf(t, config["runs"]) != `{"parallel":0}` || jsonOf(t, config["schedules"]) != `{"max_entries":0}` || jsonOf(t, config["assist"]) != `{"ttl_seconds":1}` {
+	if jsonOf(t, config["schedules"]) != `{"max_entries":0}` || jsonOf(t, config["assist"]) != `{"ttl_seconds":1}` {
 		t.Fatal("required zero omitted", config)
 	}
 }

@@ -55,9 +55,6 @@ type serverConfig struct {
 		AuthMount  string `json:"auth_mount"`
 		WriterRole string `json:"writer_role"`
 	} `json:"secret_store"`
-	Runs struct {
-		Parallel int `json:"parallel"`
-	} `json:"runs"`
 	Logs struct {
 		RunLimitBytes int64 `json:"run_limit_bytes"`
 	} `json:"logs"`
@@ -210,7 +207,7 @@ func (c serverConfig) problems() []string {
 		"protocol":      c.Protocol.Validate() == nil, "secret_store.address": httpsURL(c.SecretStore.Address),
 		"secret_store.audience": strings.TrimSpace(c.SecretStore.Audience) != "" && strings.TrimSpace(c.SecretStore.Audience) == c.SecretStore.Audience,
 		"secret_store.kv_mount": c.SecretStore.KVMount != "", "secret_store.auth_mount": c.SecretStore.AuthMount != "", "secret_store.writer_role": c.SecretStore.WriterRole != "",
-		"runs.parallel": c.Runs.Parallel >= 0, "logs.run_limit_bytes": c.Logs.RunLimitBytes > 0,
+		"logs.run_limit_bytes":  c.Logs.RunLimitBytes > 0,
 		"schedules.max_entries": c.Schedules.MaxEntries >= 0 && c.Schedules.MaxEntries <= 256,
 		"assist.ttl_seconds":    c.Assist.TTLSeconds > 0, "runtime": len(c.Runtime) > 0 && c.Runtime[0] == '{',
 	} {

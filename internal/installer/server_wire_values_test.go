@@ -28,7 +28,6 @@ func validateChartValues(c chartServerConfig) error {
 		{"secret_store.kv_mount", c.SecretStore.KVMount != ""},
 		{"secret_store.auth_mount", c.SecretStore.AuthMount != ""},
 		{"secret_store.writer_role", c.SecretStore.WriterRole != ""},
-		{"runs.parallel", c.Runs.Parallel >= 0},
 		{"logs.run_limit_bytes", c.Logs.RunLimitBytes > 0},
 		{"schedules.max_entries", c.Schedules.MaxEntries >= 0 && c.Schedules.MaxEntries <= 256},
 		{"assist.ttl_seconds", c.Assist.TTLSeconds > 0},

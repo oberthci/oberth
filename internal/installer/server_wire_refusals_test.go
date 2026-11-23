@@ -50,7 +50,6 @@ func invalidServerValues() map[string][]any {
 		"secret_store.kv_mount":                    {""},
 		"secret_store.auth_mount":                  {""},
 		"secret_store.writer_role":                 {""},
-		"runs.parallel":                            {-1},
 		"logs.run_limit_bytes":                     {0},
 		"schedules.max_entries":                    {-1, 257},
 		"assist.ttl_seconds":                       {0},
