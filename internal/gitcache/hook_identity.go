@@ -4,43 +4,61 @@ import (
 	"crypto/sha256"
 	"io"
 	"os"
+	"sync"
 
 	"golang.org/x/sys/unix"
 )
 
-// The configured hook is trusted at startup and must retain its identity for
-// every receive. Git itself skips missing or non-executable hook programs.
-func hookIdentity(path string) ([sha256.Size]byte, error) {
+type trustedHook struct {
+	mu     sync.Mutex
+	digest [sha256.Size]byte
+	info   os.FileInfo
+}
+
+// The configured hook is trusted at startup. Device/inode, size, mode, mtime
+// and ctime identify unchanged bytes. A changed identity must hash to the same
+// startup digest before it can become the fast path for later receives.
+func (h *trustedHook) check(path string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	var digest [sha256.Size]byte
 	f, err := os.Open(path)
 	if err != nil {
-		return digest, hookUnavailable(err)
+		return hookUnavailable(err)
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
-		return digest, hookUnavailable(err)
+		return hookUnavailable(err)
 	}
 	if !info.Mode().IsRegular() || info.Size() == 0 || unix.Access(path, unix.X_OK) != nil {
-		return digest, hookUnavailable(nil)
+		return hookUnavailable(nil)
+	}
+	if sameHookFile(h.info, info) {
+		return nil
 	}
 	hash := sha256.New()
 	if _, err = io.Copy(hash, f); err != nil {
-		return digest, hookUnavailable(err)
+		return hookUnavailable(err)
 	}
 	copy(digest[:], hash.Sum(nil))
-	return digest, nil
-}
-func (c *Cache) checkHook() error {
-	digest, err := hookIdentity(c.config.HookBinary)
-	if err != nil {
-		return err
+	after, err := f.Stat()
+	if err != nil || !sameHookFile(info, after) {
+		return hookUnavailable(err)
 	}
-	if digest != c.hookDigest {
+	if h.info != nil && digest != h.digest {
 		return hookUnavailable(nil)
 	}
+	h.digest, h.info = digest, after
 	return nil
 }
+
+func sameHookFile(a, b os.FileInfo) bool {
+	return a != nil && b != nil && os.SameFile(a, b) && a.Size() == b.Size() && a.Mode() == b.Mode() &&
+		a.ModTime().Equal(b.ModTime()) && hookChangeTime(a).Equal(hookChangeTime(b))
+}
+
+func (c *Cache) checkHook() error { return c.hookIdentity.check(c.config.HookBinary) }
 
 type hookFailure struct{ cause error }
 
@@ -59,7 +77,6 @@ func (c *Cache) loadHookIdentity() error {
 	if c.config.HookBinary == "" {
 		return nil
 	}
-	digest, err := hookIdentity(c.config.HookBinary)
-	c.hookDigest = digest
-	return err
+	c.hookIdentity = &trustedHook{}
+	return c.checkHook()
 }

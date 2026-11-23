@@ -2,7 +2,6 @@ package gitcache
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -81,8 +80,8 @@ type Cache struct {
 	answers *headAnswers
 	// unscoped is the cache a receive-scoped copy was made from; transfers
 	// that outlive the receive run there, never in its quarantine.
-	unscoped   *Cache
-	hookDigest [sha256.Size]byte
+	unscoped     *Cache
+	hookIdentity *trustedHook
 	// Receive boundaries permit deterministic fault injection.
 	receivePrepared, receiveReturned func()
 }
