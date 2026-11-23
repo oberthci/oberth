@@ -181,7 +181,7 @@ no service, wiring, native executor, source implementation or concrete Store.
    verify-only with actionable corrections. Argo's global run cap defaults to 4;
    zero is unlimited. The cap is controller configuration only; changing it leaves
    the server Pod template unchanged. No additional run cap, CPU formula, queue or workload
-   resource rewriting. Argo `failedPodRestart` is on with `maxRestarts: 1`.
+   resource rewriting. Argo `failedPodRestart` is on with `maxRestarts: 1`. Control Pods have fixed measured CPU/memory requests; only store memory is capped. Controller workflow state and repository-dependent server Git processes remain uncapped.
    Chart roles follow component contracts: no Workflow deletion, no secret-approval
    mirror and no arbitrary exec in the server namespace. The server may create
    and delete step service accounts only in the pipeline namespace.

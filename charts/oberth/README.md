@@ -73,6 +73,10 @@ ten years from CA creation. There is no store-leaf renewal loop or Secret
 update permission. The store drops every capability, uses RuntimeDefault
 seccomp and a read-only root; an emptyDir at `/tmp` supports the upstream
 configuration preparation. The controller also uses RuntimeDefault seccomp.
+Fixed CPU/memory requests are 250m/1Gi for the server, 100m/512Mi for the
+controller and 50m/128Mi for the store. Only the store has a memory limit, 512Mi.
+Controller workflow state and server Git child processes have variable memory
+needs; working-set samples cannot establish safe memory limits for either.
 The server can write data, `/run/oberth` and `/tmp`; its identity, configuration
 and token mounts are read-only. One server replica uses Recreate,
 HTTP `/livez` and `/readyz` probes on a separate port 8081, and a 30-second termination grace.

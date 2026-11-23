@@ -76,6 +76,8 @@ argoNative:
   images:
     pullPolicy: IfNotPresent
   controller:
+    resources:
+      requests: {cpu: 100m, memory: 512Mi}
     workflowDefaults: {}
     securityContext:
       seccompProfile:
@@ -116,6 +118,9 @@ storeNative:
   injector:
     enabled: false
   server:
+    resources:
+      requests: {cpu: 50m, memory: 128Mi}
+      limits: {memory: 512Mi}
     statefulSet:
       securityContext:
         container:
