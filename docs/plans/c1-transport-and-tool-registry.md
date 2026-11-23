@@ -258,8 +258,8 @@ plan order; consecutive runs of at least two rows with the same positive `parall
 values. Issue bodies are plain text. Imported issues show their original author,
 closer, ordered history and imported mark through the same issue view. The status
 screen shows one reason, its detail and run counts. Executor-noise lines appear
-as returned by the log read;
-the script has no folding rule. Live updates use `events_wait` to trigger reads.
+as returned by the log read; the bundled controller disables informational executor diagnostics at their source.
+The script has no folding rule. Live updates use `events_wait` to trigger reads.
 Signed-out visitors see only the sign-in card. The header starts hidden and appears
 only after an accepted bearer or browser certificate sign-in; a 401 hides it.
 Navigation keeps the sign-in card until the server answers.

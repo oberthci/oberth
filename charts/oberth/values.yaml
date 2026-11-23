@@ -82,6 +82,8 @@ argoNative:
     - name: DEFAULT_REQUEUE_TIME
       value: 2s
     workflowDefaults: {}
+    logging:
+      level: warn
     securityContext:
       seccompProfile:
         type: RuntimeDefault

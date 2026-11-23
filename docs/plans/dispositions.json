@@ -9390,7 +9390,7 @@
     }
   },
   "spec_sha256": {
-    "docs/plans/c1-transport-and-tool-registry.md": "ad33a8cee42209144aa0811f4647b52342fa2424221e1cf7711d0daf9bc33df0",
+    "docs/plans/c1-transport-and-tool-registry.md": "2c34e2971c2b29b38fc77202b9a4ca08eced29d5b8e77aaac05e35936b3f72d2",
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
     "docs/plans/c11-cli-and-server-composition.md": "ca015ccba8efcc4a069ffdfd63c4c725809c6881ab3f1a80b9f346cda04995b9",
     "docs/plans/c12-agent-client.md": "91f7db680250cfa1e1c9a32df8e28efb004c687e6ea0a7ef8376ccbbcbe8dfd4",
@@ -10155,7 +10155,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** C1 never writes a secret, token or private key to logs, events, diagnostics or command output. Server diagnostics use a fixed field list. The UI shows a new pushed run within five seconds and preserves the CLI's run, step and log identities. Steps stay in plan order; consecutive runs of at least two rows with the same positive `parallel_group` share an inset rail with visible ends and at least 3:1 panel contrast, keeping one line per row at one text level. The CLI and agent block use `┌ │ └` for each group; single rows carry no mark. `credential_intent` shows one `secret` tag without secret names or values. Issue bodies are plain text. Imported issues show their original author, closer, ordered history and imported mark through the same issue view. The status screen shows one reason, its detail and run counts. Executor-noise lines appear as returned by the log read; the script has no folding rule. Live updates use `events_wait` to trigger reads.",
+      "basis": "**Delta:** C1 never writes a secret, token or private key to logs, events, diagnostics or command output. Server diagnostics use a fixed field list. The UI shows a new pushed run within five seconds and preserves the CLI's run, step and log identities. Steps stay in plan order; consecutive runs of at least two rows with the same positive `parallel_group` share an inset rail with visible ends and at least 3:1 panel contrast, keeping one line per row at one text level. The CLI and agent block use `┌ │ └` for each group; single rows carry no mark. `credential_intent` shows one `secret` tag without secret names or values. Issue bodies are plain text. Imported issues show their original author, closer, ordered history and imported mark through the same issue view. The status screen shows one reason, its detail and run counts. Executor-noise lines appear as returned by the log read; the bundled controller disables informational executor diagnostics at their source. The script has no folding rule. Live updates use `events_wait` to trigger reads.",
       "rows": [],
       "predicates": [
         {
