@@ -304,8 +304,8 @@ func (g *graph) bindSources(hooks admissioncontract.PrepareHooks) error {
 	g.prepareSources(declarations, hooks)
 	var failures []error
 	for _, d := range declarations {
-		if err := g.ctx.Err(); err != nil {
-			return errors.Join(append(failures, err)...)
+		if g.ctx.Err() != nil && (hooks.PrepareSources == nil || d.Descriptor.Kind != sourcecontract.Pinned) {
+			continue
 		}
 		binding, err := hooks.BindSource(g.ctx, d.Descriptor)
 		if err != nil {
@@ -328,7 +328,7 @@ func (g *graph) bindSources(hooks admissioncontract.PrepareHooks) error {
 		}
 		g.bindings = append(g.bindings, binding)
 	}
-	return errors.Join(failures...)
+	return errors.Join(append(failures, g.ctx.Err())...)
 }
 
 func (g *graph) prepareSources(declarations []SourceInput, hooks admissioncontract.PrepareHooks) {

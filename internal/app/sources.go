@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 
 	"github.com/oberthci/oberth/internal/publicerr"
@@ -52,7 +53,10 @@ func (bdr *sourceBinder) bind(ctx context.Context, d sourcecontract.Descriptor) 
 	b.Revision = sourcecontract.Revision{Repository: d.Repository, Commit: d.Commit}
 	decision := bdr.pins[b.Revision]
 	if decision == nil {
-		return b, refusal("unavailable", nil)
+		if err := ctx.Err(); err != nil {
+			return b, err
+		}
+		return b, refusal("unavailable", errors.New("source pin was not prepared"))
 	}
 	if decision.err != nil {
 		return b, refusal("unavailable", decision.err)
@@ -71,6 +75,7 @@ func (bdr *sourceBinder) bind(ctx context.Context, d sourcecontract.Descriptor) 
 
 // prepare starts only allowed, distinct pins, then joins every decision before
 // binding declarations. A refusal for one producer does not cancel the others.
+// C4's pinned-destination limit bounds this fan-out to at most four decisions.
 func (bdr *sourceBinder) prepare(ctx context.Context, descriptors []sourcecontract.Descriptor) {
 	if ctx.Err() != nil {
 		return

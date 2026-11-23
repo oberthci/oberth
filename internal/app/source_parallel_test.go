@@ -4,106 +4,91 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"syscall"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/internal/gitcache/gittest"
 	"github.com/oberthci/oberth/internal/sourcecontract"
 )
 
-// The real three-second head waits must overlap, including when an answered
-// head refuses a commit that the recently refreshed cache still reaches.
-func TestAdmissionWaitsOnceForDistinctSilentProducers(t *testing.T) {
-	for _, answer := range []string{"silent", "reachable", "unreachable"} {
-		t.Run(answer, func(t *testing.T) {
-			f := newFixture(t)
-			readers := map[string]func(context.Context, sourcecontract.Revision) (int64, bool, error){}
-			var pins []sourcecontract.Descriptor
-			var repositories []string
-			for i := range 3 {
-				repo := fmt.Sprintf("origin/team/producer%d", i)
-				state := "silent"
-				if i == 1 {
-					state = answer
-				}
-				pin, read := pinProducer(t, repo, state)
-				pins = append(pins, pin, pin)
-				repositories = append(repositories, repo)
-				readers[repo] = read
-			}
-			f.d.SourcePolicy, _ = json.Marshal(map[string][]string{request().Repository: repositories})
-			f.setDocument(pinnedWorkflow(pins...))
-			f.source.Reachable = func(ctx context.Context, at sourcecontract.Revision) (int64, bool, error) {
-				return readers[at.Repository](ctx, at)
-			}
-			s := f.new(t)
-			// Two serial waits already exceed this bound. It leaves two seconds
-			// for local Git and preparation around the real three-second wait.
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-			prepared, err := s.Admit(ctx, request(), f.source)
-			if ctx.Err() != nil {
-				t.Fatal("producer head waits did not overlap", err)
-			}
-			if answer == "unreachable" {
-				expectRefusal(t, err, "reachable")
-				if prepared != nil {
-					t.Fatal("answered head did not refuse the admission", err)
-				}
-			} else if err != nil || len(prepared.View().SourceBindings) != len(pins) {
-				t.Fatal("silent and answered producers were not bound", err)
-			}
-		})
+// Every decision must enter before any can finish. The deadline only stops a
+// broken implementation from hanging; success makes no wall-clock assertion.
+func TestAdmissionStartsDistinctPinsTogether(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	var pins []sourcecontract.Descriptor
+	var repositories []string
+	for i := range 3 {
+		repo := fmt.Sprintf("origin/team/producer%d", i)
+		pin := sourcecontract.Descriptor{Version: 1, Kind: sourcecontract.Pinned, Repository: repo, Commit: strings.Repeat("e", 40)}
+		pins = append(pins, pin, pin)
+		repositories = append(repositories, repo)
 	}
-}
-
-func pinProducer(t *testing.T, repo, answer string) (sourcecontract.Descriptor, func(context.Context, sourcecontract.Revision) (int64, bool, error)) {
-	t.Helper()
-	g := gittest.New(t)
-	// Cache both disconnected histories, with the requested commit on main.
-	g.Git(t, g.Work, "checkout", "--orphan", "other")
-	g.Write(t, "other", []byte("unrelated history"))
-	other := g.CommitFile(t, "other history")
-	g.Git(t, g.Work, "push", g.Bare, "other")
-	arm := holdPinHead(t, g)
-	c := g.Cache(t, nil)
-	if err := c.Init(t.Context(), repo); err != nil {
-		t.Fatal(err)
-	}
-	switch answer {
-	case "silent":
-		arm()
-	case "unreachable":
-		g.Git(t, g.Bare, "update-ref", "refs/heads/main", other)
-	}
-	return sourcecontract.Descriptor{Version: 1, Kind: sourcecontract.Pinned, Repository: repo, Commit: g.Commit}, c.Pin
-}
-
-// A FIFO holds only head reads after cloning. Cache.Close owns their lifetime
-// and stops them before the FIFO is closed; no test sleeps or network is used.
-func holdPinHead(t *testing.T, g *gittest.Fixture) func() {
-	t.Helper()
-	dir := t.TempDir()
-	gate, armed := filepath.Join(dir, "gate"), filepath.Join(dir, "armed")
-	if err := syscall.Mkfifo(gate, 0600); err != nil {
-		t.Fatal(err)
-	}
-	fifo, err := os.OpenFile(gate, os.O_RDWR, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = fifo.Close() })
-	script := fmt.Sprintf("#!/bin/sh\nfor a do\n if [ \"$a\" = ls-remote ] && [ -f '%s' ]; then read _ < '%s'; fi\ndone\nexec '%s' \"$@\"\n", armed, gate, g.Binary)
-	g.Binary = filepath.Join(dir, "git")
-	if err := os.WriteFile(g.Binary, []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	return func() {
-		if err := os.WriteFile(armed, nil, 0600); err != nil {
-			t.Fatal(err)
+	f.d.SourcePolicy, _ = json.Marshal(map[string][]string{request().Repository: repositories})
+	f.setDocument(pinnedWorkflow(pins...))
+	var calls atomic.Int32
+	entered := make(chan struct{})
+	f.source.Reachable = func(ctx context.Context, _ sourcecontract.Revision) (int64, bool, error) {
+		if calls.Add(1) == 3 {
+			close(entered)
 		}
+		select {
+		case <-entered:
+			return 2, true, nil
+		case <-ctx.Done():
+			return 0, false, ctx.Err()
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	prepared, err := f.new(t).Admit(ctx, request(), f.source)
+	if err != nil || calls.Load() != 3 || len(prepared.View().SourceBindings) != len(pins) {
+		t.Fatal("distinct decisions did not overlap exactly once", calls.Load(), err)
+	}
+}
+
+func TestFiveAllowedPinsAreRefusedBeforeAnyDecision(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.d.SourcePolicy = []byte(`{"origin/team/widget":["origin/team/source"]}`)
+	var pins []sourcecontract.Descriptor
+	for i := range 5 {
+		pins = append(pins, sourcecontract.Descriptor{Version: 1, Kind: sourcecontract.Pinned, Repository: "origin/team/source", Commit: fmt.Sprintf("%040x", i+1)})
+	}
+	f.setDocument(pinnedWorkflow(pins...))
+	var calls atomic.Int32
+	f.source.Reachable = func(context.Context, sourcecontract.Revision) (int64, bool, error) {
+		calls.Add(1)
+		return 2, true, nil
+	}
+	prepared, err := f.new(t).Admit(t.Context(), request(), f.source)
+	if prepared != nil || err == nil || !strings.Contains(err.Error(), "more than four source pins are declared") || calls.Load() != 0 {
+		t.Fatal("pinned-destination limit did not stop fan-out", calls.Load(), err)
+	}
+}
+
+func TestDecidedPinRefusalSurvivesPreparationCancellation(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.d.SourcePolicy = []byte(`{"origin/team/widget":["origin/team/source"]}`)
+	pin := sourcecontract.Descriptor{Version: 1, Kind: sourcecontract.Pinned, Repository: "origin/team/source", Commit: strings.Repeat("e", 40)}
+	slow := pin
+	slow.Commit = strings.Repeat("f", 40)
+	f.setDocument(pinnedWorkflow(pin, slow))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	f.source.Reachable = func(ctx context.Context, at sourcecontract.Revision) (int64, bool, error) {
+		if at.Commit == pin.Commit {
+			cancel()
+			return 2, false, nil
+		}
+		<-ctx.Done()
+		return 0, false, ctx.Err()
+	}
+	prepared, err := f.new(t).Admit(ctx, request(), f.source)
+	expectRefusal(t, err, "reachable")
+	if prepared != nil {
+		t.Fatal("cancelled admission was sealed")
 	}
 }

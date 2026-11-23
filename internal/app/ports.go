@@ -38,6 +38,7 @@ type Deps struct {
 }
 
 // Source reads exact objects during its lifetime; Pin proves fresh default ancestry.
+// Pin is safe for concurrent calls.
 type Source interface {
 	ReadFile(context.Context, gitport.Revision, string) (gitport.File, error)
 	Checkout(context.Context, string, sourcecontract.Ref) (sourcecontract.Export, error)

@@ -45,6 +45,7 @@ type PrepareHooks struct {
 	ReleaseFacts func(context.Context) (ReleaseFacts, error)
 	// PrepareSources decides distinct pins together before BindSource consumes
 	// their evidence. Refusals are returned by BindSource at each declaration.
+	// Prepared pins bind without I/O, even after the context ends.
 	PrepareSources func(context.Context, []sourcecontract.Descriptor)
 	// BindSource resolves one effective source input after admission. C4 assigns
 	// Template, Artifact and Path; the hook supplies the exact source evidence.

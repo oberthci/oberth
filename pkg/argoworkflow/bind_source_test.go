@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/sourcecontract"
@@ -317,4 +318,40 @@ func TestMissingSourceBinderStopsBeforeNativeTransform(t *testing.T) {
 		t.Fatal("native transformation ran without source evidence", transforms, err)
 	}
 	requireCode(t, err, "binding")
+}
+
+func TestPreparedPinsAreReadAfterCancellationWithoutMainIO(t *testing.T) {
+	t.Parallel()
+	for _, denied := range []bool{false, true} {
+		t.Run(fmt.Sprint(denied), func(t *testing.T) {
+			w := sourceWorkflow()
+			w.Spec.Templates[0].Inputs.Artifacts = append(w.Spec.Templates[0].Inputs.Artifacts, pinInput(t, "library"))
+			r := requestFor(t, w)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			hooks := identityHooks()
+			hooks.PrepareSources = func(context.Context, []sourcecontract.Descriptor) { cancel() }
+			cause := errors.New("pin is unreachable")
+			pins, main, transforms := 0, 0, 0
+			hooks.BindSource = func(_ context.Context, d sourcecontract.Descriptor) (sourcecontract.Binding, error) {
+				if d.Kind == sourcecontract.Main {
+					main++
+				} else {
+					pins++
+					if denied {
+						return sourcecontract.Binding{}, cause
+					}
+				}
+				return boundEvidence(r, d), nil
+			}
+			hooks.TransformNative = func(context.Context, *wfv1.Workflow, admissioncontract.TransformInput) error {
+				transforms++
+				return nil
+			}
+			prepared, err := Prepare(ctx, r, Policy{}, hooks)
+			if prepared != nil || !errors.Is(err, context.Canceled) || errors.Is(err, cause) != denied || pins != 1 || main != 0 || transforms != 0 {
+				t.Fatal("cancelled preparation lost a decision or performed new work", pins, main, transforms, err)
+			}
+		})
+	}
 }
