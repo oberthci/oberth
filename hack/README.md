@@ -44,6 +44,8 @@ cannot be removed, and the container has a 25-minute deadline plus kill grace.
 Main must contain the tooling first; its initial installation needs review.
 Base-image scripts, Python tests and Dockerfile logic come from main. Input locks,
 patches and their pins stay from the branch and are checked by main's tests.
+Every added path under `hack/`, including renamed files, is listed and removed
+from the trusted checkout. The branch check receives those additions.
 The Go image pinned in `hack/devloop/Dockerfile` must already be present in the
 development VM. Python, Git and SSH are included in that image. Missing tools
 belong in the VM image bootstrap, rather than an interactive container change.

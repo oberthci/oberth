@@ -293,6 +293,37 @@ esac
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             self.assertIn("Ran 7 tests", result.stderr)
 
+    def test_added_hack_files_are_listed_and_never_run_as_trusted(self):
+        body = "import os\nfrom pathlib import Path\nPath(os.environ['GATE_BRANCH_MARKER']).write_text(__name__)\n"
+        self.git("checkout", "-q", "main")
+        (self.fixture / "hack/component.py").write_text(body)
+        self.git("add", "hack/component.py")
+        self.git("commit", "-qm", "Establish movable component")
+        self.git("checkout", "-qB", "w0/probe", "main")
+        files = ("hack/zz/__init__.py", "hack/zz/test_history.py", "hack/tempfile.py", "hack/new-tool")
+        for name in files:
+            path = self.fixture / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body)
+        self.git("mv", "hack/component.py", "hack/renamed.py")
+        self.git("add", *files)
+        self.git("commit", "-qm", "Add unreviewed tooling")
+        gate = self.run_gate()
+        self.assertEqual(0, gate.returncode, gate.stdout)
+        changed = next(line for line in gate.stdout.splitlines() if line.startswith("GATE FILES CHANGED:"))
+        for name in (*files, "hack/renamed.py"):
+            self.assertIn(name, changed)
+        result, vm = self.run_vm_script()
+        self.assertEqual(0, result.returncode, result.stdout)
+        for name in (*files, "hack/renamed.py"):
+            self.assertFalse((vm / "src" / name).exists(), name)
+            self.assertTrue((vm / "branch" / name).is_file(), name)
+        result = subprocess.run(["python3", "-m", "unittest", "discover", "-s", "hack", "-p", "test_history.py"],
+            cwd=vm / "src", env={**os.environ, "GATE_BRANCH_MARKER": str(vm / "branch-ran")},
+            capture_output=True, text=True, check=False, timeout=30)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertFalse((vm / "branch-ran").exists())
+
     def test_main_guard_and_plan_additions_are_in_the_trusted_bundle(self):
         self.git("checkout", "-q", "main")
         files = ("hack/guards/requirements_test.go", "hack/guards/test_walk.py", "hack/plans/extra.py")

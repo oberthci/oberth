@@ -95,7 +95,10 @@ tool_paths=(
     hack/guards/run.py
     hack/guards/test_run.py
 )
-changed=$(git diff --name-only main "$head" -- "${tool_paths[@]}" docs/plans hack/guards hack/plans hack/devloop hack/base-image | paste -sd ' ' -)
+changed=$({
+    git diff --name-only main "$head" -- "${tool_paths[@]}" docs/plans hack/guards hack/plans hack/devloop hack/base-image
+    git diff --no-renames --diff-filter=A --name-only main "$head" -- hack
+} | LC_ALL=C sort -u | paste -sd ' ' -)
 for file in "${tool_paths[@]}"; do
     git cat-file -e "main:$file" 2>/dev/null || { printf 'FAIL: main lacks %s; review and bootstrap main tooling first\n' "$file" >&2; exit 1; }
 done
@@ -129,6 +132,10 @@ container=$("${docker[@]}" create --cpus 2 --memory 7681m --pids-limit 512 \
         git -c init.defaultBranch=main clone -q --bare /source.bundle /repo.git
         git --git-dir=/repo.git worktree add -q --detach /src "$1"
         cd /src
+        git diff --no-renames --diff-filter=A --name-only -z main "$1" -- hack > /repo.git/added-hack-files
+        while IFS= read -r -d "" file; do
+            if [[ -e $file || -L $file ]]; then find "$file" -depth -delete; fi
+        done < /repo.git/added-hack-files
         for dir in hack/guards hack/plans hack/devloop docs/plans hack/webui hack/tools; do
             if [[ -e $dir || -L $dir ]]; then find "$dir" -depth -delete; fi
         done
