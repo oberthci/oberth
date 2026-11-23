@@ -302,7 +302,7 @@ func (s *flowSession) commit(args []string) (string, error) {
 	}
 	sha, err := s.git("rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
 	if err != nil {
-		return "", usageProblems{"Cannot resolve commit " + commandWord(ref) + "; choose a local commit."}
+		return "", usageProblems{"Cannot resolve a local commit.", "Commit: " + commandWord(ref), "Use the full commit ID with --repo, or run inside a checkout."}
 	}
 	return sha, nil
 }

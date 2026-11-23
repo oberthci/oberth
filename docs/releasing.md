@@ -2,8 +2,8 @@
 
 ## Release your project
 
-Put your publisher in the tested `.oberth/release.yaml`; later sections build Oberth itself.
-Administrators promote full IDs from any directory with [grants](pipelines.md#secrets-and-identity):
+As administrator, provision [pipeline grants](pipelines.md#secrets-and-identity) and commit
+your publisher in the tested `.oberth/release.yaml`. Promote a full commit ID from any directory:
 ```sh
 oberth promote <tested-commit-sha> --repo <repository>
 ```
