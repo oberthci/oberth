@@ -198,6 +198,9 @@ func checkHostFile(known string) error {
 func hostFileFailure(path, key string, err error) error {
 	problem := flowError(key, err)
 	problem.Context = []string{"File: " + path}
+	if key == "host_missing" {
+		return &serverTrustError{problem}
+	}
 	return problem
 }
 func gitFailure(args []string, err error) error {

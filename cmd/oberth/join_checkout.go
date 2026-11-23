@@ -83,10 +83,11 @@ const joinTrustRemedy = "Ask the administrator for a new invitation and join wit
 // joinTrustRefusal keeps a trust refusal's reason and file and replaces the
 // repo add remedy, which names a flag join does not have.
 func joinTrustRefusal(err error) error {
-	var problem *publicerr.Error
-	if !errors.As(err, &problem) || problem.Remedy() != serverTrustRemedy {
+	var trust *serverTrustError
+	if !errors.As(err, &trust) {
 		return err
 	}
+	problem := trust.problem
 	refusal := publicerr.New(problem.Code(), problem.Reason(), joinTrustRemedy, err)
 	refusal.ID, refusal.Context = problem.ID, problem.Context
 	return refusal

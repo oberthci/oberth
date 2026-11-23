@@ -8,6 +8,13 @@ import (
 	"path/filepath"
 )
 
+// serverTrustError identifies a missing or mismatched server pin independently
+// of the remedy's wording, so join can ask for a new invitation.
+type serverTrustError struct{ problem *publicerr.Error }
+
+func (e *serverTrustError) Error() string { return e.problem.Error() }
+func (e *serverTrustError) Unwrap() error { return e.problem }
+
 func sshPort(endpoint *url.URL) string {
 	if port := endpoint.Port(); port != "" {
 		return port
@@ -27,7 +34,7 @@ func checkCheckoutTrust(known string, endpoint *url.URL) error {
 		problem := publicerr.New(publicerr.InvalidInput, "The file has no SSH host key of this Oberth server.", serverTrustRemedy, err)
 		problem.ID = "ssh-trust-endpoint"
 		problem.Context = []string{"File: " + absolute}
-		return problem
+		return &serverTrustError{problem}
 	}
 	return nil
 }
