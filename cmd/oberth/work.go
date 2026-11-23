@@ -126,7 +126,7 @@ func release(s *flowSession, args []string) error {
 	if run.Status != stepmodel.RunPassed {
 		// The forge got the tag at admission and keeps it; only a rerun keeps the version.
 		problem := flowError("release_used", nil)
-		problem.Context = []string{"Used version: " + tag, "Rerun: oberth run rerun " + run.ID, "Logs: oberth log " + run.ID}
+		problem.Context = []string{"Used version: " + tag, "Administrator rerun: oberth run rerun " + run.ID, "Logs: oberth log " + run.ID}
 		return problem
 	}
 	return s.releaseReceipt(run.ID)

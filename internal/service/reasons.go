@@ -95,6 +95,7 @@ const (
 	grantArgumentMissing
 	grantArgumentUnused
 	promotionHeadInvalid
+	releaseRerunAdmin
 )
 
 type diagnostic struct {
@@ -140,6 +141,7 @@ func diagnostics() []diagnostic {
 		{publicerr.InvalidInput, "This grant kind needs the %s argument.", "Pass every argument the grant kind takes; oberth help access allow lists them."},
 		{publicerr.InvalidInput, "This grant kind takes no %s argument.", "Drop that argument, or choose the grant kind it belongs to with kind."},
 		{publicerr.InvalidInput, "The default branch head is not a readable branch.", "Check the repository's default branch on the forge, then retry the promotion."},
+		{publicerr.Forbidden, "Release reruns need an administrator.", "Ask an administrator to rerun this release, or release the next version."},
 	}
 }
 func issueReadAlone(id int64) *publicerr.Error {

@@ -43,13 +43,17 @@ func failedRelease(t *testing.T, status stepmodel.RunStatus) string {
 	return diagnostic.String()
 }
 
-func TestFailedReleaseOffersTheRerunThatKeepsItsVersion(t *testing.T) {
+func TestFailedReleaseNamesAdministratorForRerun(t *testing.T) {
+	message := flowMessages()["release_used"]
+	if len(message[0]) > 40 || len(message[1]) > 120 {
+		t.Fatal("failed-release message exceeds bounds", message)
+	}
 	for _, status := range []stepmodel.RunStatus{stepmodel.RunFailed, stepmodel.RunCancelled} {
 		text := failedRelease(t, status)
-		rerun := strings.Index(text, "Rerun it to keep the version")
+		rerun := strings.Index(text, "An administrator can rerun it to keep the version")
 		next := strings.Index(text, "release the next version")
-		if rerun < 0 || next < rerun || !strings.Contains(text, "oberth run rerun release-run") {
-			t.Fatalf("%s release does not offer its rerun first: %s", status, text)
+		if rerun < 0 || next < rerun || !strings.Contains(text, "Administrator rerun:") || !strings.Contains(text, "oberth run rerun release-run") {
+			t.Fatalf("%s release does not name the administrator rerun: %s", status, text)
 		}
 	}
 	b := fake.Bindings()

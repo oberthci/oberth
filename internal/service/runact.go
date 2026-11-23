@@ -70,6 +70,9 @@ func (s *Service) prepareRerun(ctx context.Context, a actor.Actor, q runAction) 
 	if !terminal(r.Status) || r.Status == stepmodel.RunPassed || r.Origin.Trigger == model.TriggerPromotion {
 		return nil, refuse(active)
 	}
+	if r.Release && !a.Admin {
+		return nil, refuse(releaseRerunAdmin)
+	}
 	if err := actionPolicy(a, r); err != nil {
 		return nil, err
 	}

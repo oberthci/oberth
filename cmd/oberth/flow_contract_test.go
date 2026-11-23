@@ -407,7 +407,7 @@ func TestFailedReleaseStopsBeforePublicationWait(t *testing.T) {
 	if code := app.run(context.Background(), []string{"release", "v0.1.0"}); code != 1 {
 		t.Fatal("failed release kept waiting", code, diagnostic.String())
 	}
-	for _, want := range []string{"The release run failed; its version is now used.", "release the next version", "Used version:\nv0.1.0", "oberth log failed-release"} {
+	for _, want := range []string{"Release failed; its version is used.", "release the next version", "Used version:\nv0.1.0", "oberth log failed-release"} {
 		if !strings.Contains(diagnostic.String(), want) {
 			t.Fatalf("failed release does not say %q: %s", want, diagnostic.String())
 		}

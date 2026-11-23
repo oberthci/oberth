@@ -4,7 +4,6 @@
 
 Put your publisher in the tested `.oberth/release.yaml`; later sections build Oberth itself.
 As administrator, provision [pipeline grants](pipelines.md#secrets-and-identity), then promote:
-
 ```sh
 oberth promote <tested-commit-sha>
 ```
@@ -70,6 +69,7 @@ registry, publishes the files as the tag's GitHub release, verifies them in a cl
 only the image push the registry login, only publish/finalize the GitHub token. Branch CI reaches
 neither those credentials nor the release cache. Oberth puts the tag on GitHub when it admits the
 release, before the run; that uses the version: rerun a failed run or release the next one.
+Only an administrator may rerun a release run; agents can release the next version.
 
 Existing installations must add `release-publish: "1"` to `oberth-sync-limits` before the first
 release from this main. Edit [resources](../.oberth/pipeline-resources.yaml): storage, positive `go`
