@@ -227,7 +227,7 @@ The `waiters wake` walk fills global parallelism and any authored Argo semaphore
 cancels one running step and lets another fail. Every waiting run must start within
 one minute without a controller restart. If the pinned controller loses waiters,
 install pins a version that wakes them or configures native resync to retry them.
-Oberth adds no lock implementation.
+The controller, executor and Go module pin upstream Argo v4.0.15 (#16642/#16567). Oberth adds no lock implementation.
 
 ## Inspections
 

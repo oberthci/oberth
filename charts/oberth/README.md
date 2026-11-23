@@ -90,12 +90,12 @@ key explicitly. The readiness endpoint accepts sealed and
 uninitialized states so chart rollout does not require an unseal operation.
 Store snapshots remain separate from database backups.
 
-Dependencies are bundled, pinned upstream archives, fetched without modifying
-reference code. The release chart digest binds these archive bytes too:
+Dependencies use pinned upstream archives. Controller and executor image overrides
+pin Argo v4.0.15. The release chart digest binds these archive bytes too:
 
 | Dependency | Chart | Application | Archive SHA-256 |
 | --- | --- | --- | --- |
-| Workflow controller | 1.0.24 | v4.0.8 | `7b1d540095ba32bb8c914432b554c64809b47a6f737b1448273d3a4740be3d50` |
+| Workflow controller | 1.0.24 | v4.0.15 | `7b1d540095ba32bb8c914432b554c64809b47a6f737b1448273d3a4740be3d50` |
 | Secret store | 0.30.7 | v2.7.2 | `fa4e6f3c1bbe936dc7ba079f1303ea56810af2f8600f046d8d5809860a4f980f` |
 
 The parent schema rejects unknown keys, including nested native configuration.

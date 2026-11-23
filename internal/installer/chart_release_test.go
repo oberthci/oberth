@@ -53,10 +53,10 @@ func TestSignedChartFactsReplaceHistoricalDefaults(t *testing.T) {
 	}
 	controller := object(t, objects, "ConfigMap", "oberth-controller-config")["data"].(map[string]any)
 	trust := object(t, objects, "ConfigMap", "oberth-source")["data"].(map[string]any)["source.json"].(string)
-	if config["runtime"].(map[string]any)["helper_image"] != "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:"+strings.Repeat("b", 64) || !strings.Contains(controller["executor"].(string), "quay.io/argoproj/argoexec:v4.0.8") || !strings.Contains(trust, source) {
+	if config["runtime"].(map[string]any)["helper_image"] != "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:"+strings.Repeat("b", 64) || !strings.Contains(controller["executor"].(string), "quay.io/argoproj/argoexec:v4.0.15") || !strings.Contains(trust, source) {
 		t.Fatal("runtime facts came from history")
 	}
-	if !strings.Contains(jsonOf(t, object(t, objects, "Deployment", "oberth-controller-workflow-controller")), "quay.io/argoproj/workflow-controller:v4.0.8") || !strings.Contains(jsonOf(t, object(t, objects, "StatefulSet", "oberth-store")), "docker.io/openbao/openbao:2.7.2") {
+	if !strings.Contains(jsonOf(t, object(t, objects, "Deployment", "oberth-controller-workflow-controller")), "quay.io/argoproj/workflow-controller:v4.0.15") || !strings.Contains(jsonOf(t, object(t, objects, "StatefulSet", "oberth-store")), "docker.io/openbao/openbao:2.7.2") {
 		t.Fatal("native refs came from history")
 	}
 	if _, err = m.Upgrade(t.Context(), p, p.Plan.Digest(), nil); err != nil {

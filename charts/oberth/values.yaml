@@ -83,7 +83,7 @@ argoNative:
     image:
       registry: quay.io
       repository: argoproj/workflow-controller
-      tag: v4.0.8@sha256:7a156419f80285859fc8f859927b6cc249f0d128e161e080dc17fca8fcbbceb6
+      tag: v4.0.15@sha256:7014032b9d4b70ff87e279800781b74238a18955d8acba5437424359c530ccde
     rbac:
       create: false
     serviceAccount:
@@ -101,7 +101,7 @@ argoNative:
     image:
       registry: quay.io
       repository: argoproj/argoexec
-      tag: v4.0.8@sha256:86a965d7eea176959351156e24f3a2fa8d8e342e477ef425009af95a12e3fe87
+      tag: v4.0.15@sha256:985c24ef182e066842c424f5aff5ee0a838ca359d78ee2beb415229737fa99a8
   workflow:
     serviceAccount:
       create: false

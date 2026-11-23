@@ -44,11 +44,9 @@ func facts(t *testing.T, rows []wf.Workflow) []string {
 	return out
 }
 
-// A run stopped or terminated while two of its steps had just taken both units
-// of a semaphore ends with no lock status of its own, yet the controller still
-// counts one unit for it: the later waiter names it. Lock status never lists
-// the ended run as a holder and lists it as stale. A run whose steps retry, or
-// fail without a cancel, leaves nothing behind. In the ordinary hand-over the
+// Normal Stop/Terminate and failure release both units in the pinned controller.
+// A later run takes both units while its third step waits. No ended run is
+// listed as a holder or stale. In the ordinary hand-over the
 // run that took the unit keeps its waiting entry and is no waiter, and the
 // waiter not yet woken still names the ended holder, which is not stale because
 // that count does not name the live holder.
@@ -59,12 +57,12 @@ func TestLockFactsOfTheControllerWriteForCancelledRuns(t *testing.T) {
 		"default/ConfigMap/oberth-sync-limits/handover holder handover-b",
 		"default/ConfigMap/oberth-sync-limits/handover waiter handover-c",
 		"default/ConfigMap/oberth-sync-limits/heavy-failed holder waiting-heavy-failed",
+		"default/ConfigMap/oberth-sync-limits/heavy-failed waiter waiting-heavy-failed",
 		"default/ConfigMap/oberth-sync-limits/heavy-retry holder waiting-heavy-retry",
+		"default/ConfigMap/oberth-sync-limits/heavy-retry waiter waiting-heavy-retry",
 		"default/ConfigMap/oberth-sync-limits/heavy-stop holder waiting-heavy-stop",
-		"default/ConfigMap/oberth-sync-limits/heavy-stop stale ended-heavy-stop",
 		"default/ConfigMap/oberth-sync-limits/heavy-stop waiter waiting-heavy-stop",
 		"default/ConfigMap/oberth-sync-limits/heavy-terminate holder waiting-heavy-terminate",
-		"default/ConfigMap/oberth-sync-limits/heavy-terminate stale ended-heavy-terminate",
 		"default/ConfigMap/oberth-sync-limits/heavy-terminate waiter waiting-heavy-terminate",
 		"default/Mutex/release holder mutex-holder",
 		"default/Mutex/release waiter mutex-pending-stop",
@@ -74,11 +72,25 @@ func TestLockFactsOfTheControllerWriteForCancelledRuns(t *testing.T) {
 	}
 }
 
+// A stale count can still outlive a cancelled run. Inject that observation
+// explicitly; normal cancellation no longer produces it in this controller.
+func leakedLocks(t *testing.T) []wf.Workflow {
+	t.Helper()
+	rows := cancelledLocks(t)
+	i := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == "waiting-heavy-stop" })
+	waiting := &rows[i].Status.Synchronization.Semaphore.Waiting[0]
+	waiting.Holders = append(waiting.Holders, "default/ended-heavy-stop/stale")
+	if got := facts(t, rows); !slices.Contains(got, "default/ConfigMap/oberth-sync-limits/heavy-stop stale ended-heavy-stop") {
+		t.Fatal("cancelled Workflow named by a current count not listed stale", got)
+	}
+	return rows
+}
+
 // A live holder named by a waiter is not stale, and a waiter naming a Workflow
 // that is not listed (deleted; the controller drops it itself) adds nothing.
 func TestLockFactsStaleOnlyForListedEndedWorkflows(t *testing.T) {
 	t.Parallel()
-	rows := cancelledLocks(t)
+	rows := leakedLocks(t)
 	live := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == "ended-heavy-stop" })
 	rows[live].Status.Phase = wf.WorkflowRunning
 	if got := facts(t, rows); slices.Contains(got, "default/ConfigMap/oberth-sync-limits/heavy-stop stale ended-heavy-stop") {
@@ -117,7 +129,7 @@ func TestLockFactsRunEndedByItselfIsNeverStale(t *testing.T) {
 // false remedy, is the error this reading allows.
 func TestLockFactsLeakUnlistedBehindALaterHolder(t *testing.T) {
 	t.Parallel()
-	rows := cancelledLocks(t)
+	rows := leakedLocks(t)
 	i := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == "waiting-heavy-stop" })
 	late := *rows[i].DeepCopy()
 	late.Name, late.Status.Nodes = "late", nil
@@ -133,7 +145,7 @@ func TestLockFactsLeakUnlistedBehindALaterHolder(t *testing.T) {
 // waiter and its count, however it reads, names nothing stale.
 func TestLockFactsWaiterOnlyWhileWaiting(t *testing.T) {
 	t.Parallel()
-	rows := cancelledLocks(t)
+	rows := leakedLocks(t)
 	i := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == "waiting-heavy-stop" })
 	for id, n := range rows[i].Status.Nodes {
 		n.SynchronizationStatus = nil
@@ -152,7 +164,7 @@ func TestLockWaitingStepPointsToLockStatus(t *testing.T) {
 	t.Parallel()
 	rows := cancelledLocks(t)
 	i := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == "waiting-heavy-stop" })
-	plan := admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "e", Name: "e"}, {Path: "f", Name: "f"}}}
+	plan := admissioncontract.Plan{Exact: true, Entries: []admissioncontract.PlanEntry{{Path: "e", Name: "e"}, {Path: "f", Name: "f"}, {Path: "g", Name: "g"}}}
 	const hint = "Run oberth lock status to see who holds it."
 	for id, n := range rows[i].Status.Nodes {
 		n.Message = "Waiting for lock. Lock status: 0/2"
@@ -161,7 +173,7 @@ func TestLockWaitingStepPointsToLockStatus(t *testing.T) {
 	out := project(t, argojob.Projection{Plan: plan, Workflow: &rows[i]})
 	for _, s := range out.Steps {
 		waiting := s.DisplayReason == "waiting for sync limit heavy-stop"
-		if waiting != (s.Path == "f") || strings.Contains(s.Detail, hint) != waiting || waiting && s.Detail != "Waiting for lock. Lock status: 0/2\n"+hint {
+		if waiting != (s.Path == "g") || strings.Contains(s.Detail, hint) != waiting || waiting && s.Detail != "Waiting for lock. Lock status: 0/2\n"+hint {
 			t.Fatalf("step %s: reason %q detail %q", s.Path, s.DisplayReason, s.Detail)
 		}
 	}
@@ -188,8 +200,8 @@ func TestLockWaitingRunPointsToLockStatus(t *testing.T) {
 	}
 }
 
-// Terminate marks a run that was waiting for a workflow-level lock Succeeded;
-// it is reported cancelled, never passed. Stop leaves it queued for the lock.
+// Terminate fails a run that was waiting for a workflow-level lock;
+// it is reported cancelled. Stop leaves it queued for the lock.
 // The holder is queued too while its only Pod has not started.
 func TestTerminatedLockWaiterIsCancelledNotPassed(t *testing.T) {
 	t.Parallel()
@@ -203,9 +215,8 @@ func TestTerminatedLockWaiterIsCancelledNotPassed(t *testing.T) {
 	}
 	rows := cancelledLocks(t)
 	i := slices.IndexFunc(rows, func(w wf.Workflow) bool { return w.Name == "mutex-pending-terminate" })
-	root := rows[i].Status.Nodes[rows[i].Name]
-	root.Phase = wf.NodeSucceeded
-	rows[i].Status.Nodes[rows[i].Name] = root
+	rows[i].Status.Nodes = wf.Nodes{rows[i].Name: {ID: rows[i].Name, Name: rows[i].Name, Type: wf.NodeTypePod, Phase: wf.NodeSucceeded}}
+	rows[i].Status.Phase = wf.WorkflowSucceeded
 	if out := project(t, argojob.Projection{Plan: plan, Workflow: &rows[i]}); out.Status != stepmodel.RunPassed {
 		t.Fatal("work that succeeded before the cancel is not passed", out.Status)
 	}

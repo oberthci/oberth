@@ -25,8 +25,8 @@ import (
 const cancelledLocks = "../../internal/argojob/testdata/cancelled-locks.json"
 
 // A run cancelled while holding a semaphore is reported cancelled only once its
-// Workflow has ended; lock status then never lists it as a holder, and the unit
-// the controller still counts for it is named with the command that clears it.
+// Workflow has ended; lock status then never lists it as a holder. An actual
+// stale count, injected separately, names the command that clears it.
 func TestComposedCancelledRunLeavesNoLockHolder(t *testing.T) {
 	t.Parallel()
 	f := composeFixture(t, composeBinary(t))
@@ -58,10 +58,27 @@ func TestComposedCancelledRunLeavesNoLockHolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.waitRun(t, func(r stateport.Run) bool { return r.Status == stepmodel.RunCancelled })
-	// The later run holds the one free unit with step e while step f still waits.
+	f.checkCancelledLockStatus(t, run, waiting, key)
+}
+
+func (f *composedFixture) checkCancelledLockStatus(t *testing.T, run stateport.Run, waiting *wf.Workflow, key string) {
+	t.Helper()
+	lock := waiting.Status.Synchronization.Semaphore.Waiting[0].Semaphore
+	// The later run holds both released units with e and f while g waits.
 	got := f.lockStatus(t, lock)
-	if !slices.Equal(got.Holders, []string{"waiting-heavy-stop"}) || !slices.Equal(got.Waiters, []string{"waiting-heavy-stop"}) || !slices.Equal(got.Stale, []string{run.ID}) {
-		t.Fatal("cancelled run is listed as a holder or its stale unit is hidden", got)
+	if !slices.Equal(got.Holders, []string{"waiting-heavy-stop"}) || !slices.Equal(got.Waiters, []string{"waiting-heavy-stop"}) || len(got.Stale) != 0 {
+		t.Fatal("cancelled run is still listed as holding a unit", got)
+	}
+	if got.Remedy != "" || got.Command != "" {
+		t.Fatal("released units produced a stale-lock remedy", got)
+	}
+	// Preserve the diagnostic path for a cancelled holder named by a current
+	// count, without claiming that this normal shutdown still leaks a unit.
+	waiting.Status.Synchronization.Semaphore.Waiting[0].Holders = append(waiting.Status.Synchronization.Semaphore.Waiting[0].Holders, key+"-stale")
+	f.updateNative(t, waiting)
+	got = f.lockStatus(t, lock)
+	if !slices.Equal(got.Stale, []string{run.ID}) {
+		t.Fatal("cancelled holder in a current count is hidden", got)
 	}
 	if got.Remedy == "" || got.Command != "kubectl -n "+f.config.ArgoNamespace+" rollout restart deployment/oberth-controller-workflow-controller" {
 		t.Fatal("stale unit does not name the command that clears it", got)

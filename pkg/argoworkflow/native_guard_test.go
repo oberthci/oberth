@@ -21,7 +21,7 @@ func TestPinnedNativePlanningDecisions(t *testing.T) {
 		{"operator.go", "mergedTemplateDefaultsInto", "b57b4842aea61c03c407609b080db05c67309c4315fc92e38e6a7c6c42f59a30"},
 		{"operator.go", "generateNodeName", "d72a1713568deab00ce600705848c9df7544242e9a9a781093b12a49e993bc6b"},
 		{"operator.go", "processItem", "0fc3deb10579d3ee3d989071fbc9b9c3383e1d059e6968e1d2ee36e34af411c1"},
-		{"dag.go", "executeDAGTask", "a0dbd94642f902fd19e0d53104fa790aef779a5a93415d8ec5172ee11d5d8186"},
+		{"dag.go", "executeDAGTask", "520e95c94196ac43774e534deafa6875ec07bafd21391a336336593843101fc5"},
 		{"dag.go", "executeDAG", "4c41895a0786db49b2befc3fc062f201ae2d1919e9a0092c5801b91d4f7bb338"},
 		{"steps.go", "executeStepGroup", "ded458163e6350859ea87dea640c43172ff246400ea0fe6c0935bce18100d415"},
 	} {

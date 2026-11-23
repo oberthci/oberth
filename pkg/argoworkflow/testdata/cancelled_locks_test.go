@@ -20,15 +20,15 @@ import (
 
 // lockCase is one run whose steps a and b hold both units of a two-unit
 // semaphore while c and d wait, ended by mode ("" lets every step fail on its
-// own); stale says the ended run leaves a unit the controller still counts.
+// own).
 type lockCase struct {
-	key          string
-	mode         wfv1.ShutdownStrategy
-	retry, stale bool
+	key   string
+	mode  wfv1.ShutdownStrategy
+	retry bool
 }
 
 // The pinned controller's lock bookkeeping around a cancelled run. Each case
-// ends one run as described above, then a later run with two steps asks for
+// ends one run as described above, then a later run with three steps asks for
 // the same semaphore; then an ordinary hand-over of a one-unit lock; then runs
 // waiting for a workflow-level mutex are stopped or terminated. The Workflows are written as the controller left them,
 // reduced to the fields lock status and run status read.
@@ -39,7 +39,7 @@ func TestOberthCancelledRunLocks(t *testing.T) {
 	})
 	defer cancel()
 	controller.syncManager = sync.NewLockManager(ctx, controller.kubeclientset, controller.namespace, nil, getSyncLimitFunc(ctx, controller.kubeclientset), func(string) {}, workflowExistenceFunc)
-	cases := []lockCase{{key: "heavy-stop", mode: wfv1.ShutdownStrategyStop, stale: true}, {key: "heavy-terminate", mode: wfv1.ShutdownStrategyTerminate, stale: true}, {key: "heavy-retry", mode: wfv1.ShutdownStrategyStop, retry: true}, {key: "heavy-failed"}}
+	cases := []lockCase{{key: "heavy-stop", mode: wfv1.ShutdownStrategyStop}, {key: "heavy-terminate", mode: wfv1.ShutdownStrategyTerminate}, {key: "heavy-retry", mode: wfv1.ShutdownStrategyStop, retry: true}, {key: "heavy-failed"}}
 	limits := &apiv1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "oberth-sync-limits", Namespace: "default"}, Data: map[string]string{}}
 	for _, c := range cases {
 		limits.Data[c.key] = "2"
@@ -53,9 +53,9 @@ func TestOberthCancelledRunLocks(t *testing.T) {
 		holder := lockRun(ctx, t, controller, semaphoreWorkflow("ended-"+c.key, c, "a", "b", "c", "d"))
 		makePodsPhase(ctx, newWorkflowOperationCtx(ctx, holder, controller), apiv1.PodRunning)
 		holder = endRun(ctx, t, controller, lockRun(ctx, t, controller, holder).Name, c.mode)
-		waiter := lockRun(ctx, t, controller, semaphoreWorkflow("waiting-"+c.key, lockCase{key: c.key}, "e", "f"))
+		waiter := lockRun(ctx, t, controller, semaphoreWorkflow("waiting-"+c.key, lockCase{key: c.key}, "e", "f", "g"))
 		observed = append(observed, *reduced(holder), *reduced(waiter))
-		checkRestartFrees(ctx, t, controller, c)
+		checkRestartPreservesHolds(ctx, t, controller, c)
 	}
 	observed = append(observed, handOver(ctx, t, controller)...)
 	first := lockRun(ctx, t, controller, mutexWorkflow("mutex-holder"))
@@ -92,14 +92,13 @@ func handOver(ctx context.Context, t *testing.T, controller *WorkflowController)
 		}
 	}
 	b = lockRun(ctx, t, controller, b)
-	checkRestartFrees(ctx, t, controller, c)
+	checkRestartPreservesHolds(ctx, t, controller, c)
 	return []wfv1.Workflow{*reduced(a), *reduced(b), *reduced(waiting)}
 }
 
-// checkRestartFrees proves the remedy: the running controller has no unit left
-// for a further step, and a controller started now, which rebuilds its count
-// from Workflow statuses, has one exactly when the ended run left a stale unit.
-func checkRestartFrees(ctx context.Context, t *testing.T, controller *WorkflowController, c lockCase) {
+// Normal shutdown releases node locks before final cleanup in the pinned
+// controller. Both live and restarted managers must count all later holders.
+func checkRestartPreservesHolds(ctx context.Context, t *testing.T, controller *WorkflowController, c lockCase) {
 	t.Helper()
 	rows, err := controller.wfclientset.ArgoprojV1alpha1().Workflows("default").List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -116,8 +115,8 @@ func checkRestartFrees(ctx context.Context, t *testing.T, controller *WorkflowCo
 		t.Fatal("running controller had a free unit", c.key, err)
 	}
 	restarted, _, _, _, err := fresh.TryAcquire(ctx, probe.DeepCopy(), "probe", ref)
-	if err != nil || restarted != c.stale {
-		t.Fatal("restart did not free exactly the stale unit", c.key, restarted, err)
+	if err != nil || restarted {
+		t.Fatal("restart lost a recorded live holder", c.key, restarted, err)
 	}
 }
 
