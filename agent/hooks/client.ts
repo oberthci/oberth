@@ -16,19 +16,12 @@ async function bound($: EngineInterface): Promise<string> {
   return out?.exitCode === 0 && !out.isStdoutTruncated ? out.stdout.trim() : ''
 }
 
-// The profile option, then OBERTH_PROFILE, then the checkout's joined uplink.
-export async function profile($: EngineInterface, options: PluginOptions): Promise<string> {
-  const name = chosen(options.profile) || chosen(await $.env.get('OBERTH_PROFILE')) || await bound($)
-  if (!name) throw new Error(PROFILE_SETUP)
-  return name
-}
-
-// An explicit list replaces the single-profile selection; credentials stay with the CLI.
+// One name or a list from the option, environment or checkout; credentials stay with the CLI.
 export async function profiles($: EngineInterface, options: PluginOptions): Promise<string[]> {
-  const configured = options.profiles as string | undefined
-  if (!configured?.trim()) return [await profile($, options)]
+  const configured = chosen(options.profile) || chosen(await $.env.get('OBERTH_PROFILE')) || await bound($)
+  if (!configured) throw new Error(PROFILE_SETUP)
   const names = [...new Set(configured.split(',').map(name => name.trim()))]
-  if (names.includes('') || names.length > 32) throw new Error('Set profiles to 1 to 32 comma-separated joined profile names.')
+  if (names.includes('') || names.length > 32) throw new Error('Set profile to 1 to 32 comma-separated joined profile names.')
   return names
 }
 

@@ -104,7 +104,7 @@ async function registerCommands($: EngineInterface) {
 // The setup notice the box needs before it can read runs, or none.
 async function missingSetup($: EngineInterface, options: PluginOptions): Promise<{ key: string; text: string; mark?: string } | undefined> {
   try { await checkedExecutable($, options) } catch { return { key: 'executable-notice', text: SETUP } }
-  try { await profiles($, options) } catch (error) { return { key: 'profile-notice', text: errorText(error), mark: String(options.profiles) } }
+  try { await profiles($, options) } catch (error) { return { key: 'profile-notice', text: errorText(error), mark: String(options.profile) } }
   return undefined
 }
 

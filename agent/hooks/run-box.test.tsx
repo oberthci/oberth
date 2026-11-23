@@ -682,7 +682,7 @@ test('a competing state write cannot duplicate a completion toast', { options },
 
 const six = [1, 2, 3, 4, 5, 6].map(n => run(String(n).repeat(8) + '0'.repeat(24)))
 
-const multiple = { executable: options.executable, profiles: ' first, second, first ', runs: 2 }
+const multiple = { executable: options.executable, profile: ' first, second, first ', runs: 2 }
 
 for (const selection of [options, multiple]) {
   for (const skew of [11 * 60000, -30 * 60000]) {
@@ -853,15 +853,15 @@ test('a watch detail cannot clear a failed profile list or invent its clock', { 
   expect((await boxLines($))[1]).toMatch(/^dddddddd .*▶ running +6\/11 +1m30s +1m +●$/)
 })
 
-test('a blank profile list keeps the single-profile selection', { options: { ...options, profiles: ' ' } }, async ($, on) => {
-  bottom(on)
+test('a blank profile option keeps the environment selection', { options: { ...options, profile: ' ' } }, async ($, on) => {
+  bottom(on, undefined, true, options.profile)
   mock.clock(on)
   const calls = cli(on, () => [])
   await startSession($, on)
   expect(calls).toHaveLength(1)
 })
 
-test('a mistyped profile list explains setup again after an earlier notice', { options: { ...options, profiles: 'a,,b' } }, async ($, on) => {
+test('a mistyped profile list explains setup again after an earlier notice', { options: { ...options, profile: 'a,,b' } }, async ($, on) => {
   const store = bottom(on)
   store.set('profile-notice', true)
   const notices = toasts(on)
@@ -872,8 +872,8 @@ test('a mistyped profile list explains setup again after an earlier notice', { o
   expect(store.get('profile-notice')).toBe('a,,b')
 })
 
-for (const profiles of ['first,,second', Array(33).fill(0).map((_, n) => `p${n}`).join(',')]) {
-  test(`invalid profile list ${profiles} explains setup once without reading runs`, { options: { ...options, profiles } }, async ($, on) => {
+for (const profile of ['first,,second', Array(33).fill(0).map((_, n) => `p${n}`).join(',')]) {
+  test(`invalid profile list ${profile} explains setup once without reading runs`, { options: { ...options, profile } }, async ($, on) => {
     bottom(on)
     const clock = mock.clock(on)
     const notices = toasts(on)

@@ -101,6 +101,11 @@ def check_paths(source):
 
 
 class RunBoxContract(unittest.TestCase):
+    def test_one_profile_option_for_single_and_merged_views(self):
+        manifest = json.loads((AGENT / ".claude-plugin/plugin.json").read_text())
+        self.assertEqual(set(manifest["userConfig"]), {"executable", "profile", "runs"})
+        self.assertEqual(manifest["userConfig"]["profile"]["type"], "string")
+
     def test_commands_flags_and_output_contracts(self):
         client = (AGENT / "hooks/client.ts").read_text()
         contract = (AGENT / "types/index.d.ts").read_text()

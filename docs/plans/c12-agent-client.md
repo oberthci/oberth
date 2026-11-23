@@ -63,8 +63,8 @@ read only public `run list --json` and `run get --json`, through the absolute ve
 executable (its option, by default the fetcher's install in the user bin directory),
 never a checkout executable or a PATH lookup. The plugin reads with the agent's joined
 uplink profile, selected by its option, `OBERTH_PROFILE` or the checkout's joined uplink
-binding. A nonblank `profiles` option lists up to 32 comma-separated joined profiles
-instead; reads merge newest first, deduplicate run IDs and apply one total row limit.
+binding. The selected value accepts one joined profile or up to 32 comma-separated
+names; reads merge newest first, deduplicate run IDs and apply one total row limit.
 Each profile list keeps its server-clock offset even without rows; unlisted watches
 use that offset and keep their source profile. Failed profile
 reads hide that profile's stale rows while healthy profiles remain visible. The box and
