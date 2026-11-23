@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	core "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/argojob"
@@ -129,5 +130,22 @@ func TestWorkflowLevelLockNamesTheMutex(t *testing.T) {
 	out := project(t, argojob.Projection{Plan: queuedPlan(), Workflow: w})
 	if out.Status != stepmodel.RunQueued || out.Reason != "waiting for mutex release" {
 		t.Fatalf("workflow lock: %s %q", out.Status, out.Reason)
+	}
+}
+
+// A queued run whose Pod waits gives that wait as its reason, except a wait
+// with no typed reason, which says nothing: the run is waiting to start.
+func TestQueuedRunGivesItsPodsWait(t *testing.T) {
+	t.Parallel()
+	for waiting, reason := range map[string]string{"ImagePullBackOff": "image pull failed", "ContainerCreating": "starting containers", "CreateContainerConfigError": "waiting to start"} {
+		w := nativeWorkflow()
+		n := nativeNode("a", ".build", wf.NodePending, 1)
+		w.Status.Nodes[n.ID] = n
+		p := nativePod(w, n, 0)
+		p.Status.ContainerStatuses = []core.ContainerStatus{{Name: "main", State: core.ContainerState{Waiting: &core.ContainerStateWaiting{Reason: waiting}}}}
+		out := project(t, argojob.Projection{Plan: queuedPlan(), Workflow: w, Pods: []*core.Pod{p}})
+		if out.Status != stepmodel.RunQueued || out.Reason != reason {
+			t.Fatalf("%s: %s %q, want queued %q", waiting, out.Status, out.Reason, reason)
+		}
 	}
 }

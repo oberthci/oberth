@@ -196,10 +196,11 @@ source runtime, concrete Store, service, transport or installer imports.
 | terminal generic start or failed source init; authored containers never ran | `failed before starting` | infrastructure |
 
 A run is queued until one of its steps has started (a node of it ran or
-failed, in any attempt; a skipped step has not) and running from then on, never queued again; its
-start is the earliest start of a started step. A queued run's reason is its
-first waiting step's: the lock, a run slot, or waiting to start. Progress
-writes no event and no control revision.
+failed, in any attempt; a skipped step has not) and running from then on,
+never queued again; its start is the earliest start of a started step. A
+queued run's reason is its first waiting step's reason (a lock, a run slot,
+a node, `image pull failed`, `starting containers`), else `waiting to start`;
+`unknown` is passed over. Progress writes no event and no control revision.
 
 The never-started fallback requires native waiting states with no prior start or
 restart. Image, deadline, node and authored-init diagnoses retain their typed

@@ -100,11 +100,13 @@ func plainName(name string) bool {
 }
 
 // queuedReason is a queued run's reason: the first pending or queued step, in
-// plan order, that says what it waits for, else waiting to start.
+// plan order, that says what it waits for (a lock, a run slot, a node, image
+// pull failed, starting containers), else waiting to start; unknown says
+// nothing and is passed over.
 func queuedReason(rows []projected) string {
 	for _, r := range rows {
 		waiting := r.step.Status == stepmodel.StepPending || r.step.Status == stepmodel.StepQueued
-		if waiting && r.step.DisplayReason != "" && r.step.DisplayReason != reasonWaiting {
+		if waiting && r.step.DisplayReason != "" && r.step.DisplayReason != reasonWaiting && r.step.DisplayReason != reasonUnknown {
 			return r.step.DisplayReason
 		}
 	}
