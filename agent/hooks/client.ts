@@ -100,3 +100,10 @@ export async function get($: EngineInterface, options: PluginOptions, id: string
   if (runs.some(run => run.id !== runs[0]!.id || run.repo !== runs[0]!.repo)) throw new Error('Run prefix matches several profiles. Use the full run ID.')
   return runs[0]!
 }
+
+export async function waitForChange($: EngineInterface, options: PluginOptions, id: string, source: string): Promise<void> {
+  if (!id || id.startsWith('-') || /\s/.test(id)) throw new Error('Invalid run-wait JSON.')
+  const connection = (await connections($, options, source))[0]!
+  const page = await json($, connection, ['run', 'wait', id, '--until', 'any', '--timeout-s', '1']) as { run?: unknown; timed_out?: unknown }
+  if (!page || typeof page.timed_out !== 'boolean' || decodeRun(page.run).id !== id) throw new Error('Invalid run-wait JSON.')
+}

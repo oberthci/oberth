@@ -59,7 +59,7 @@ measured in terminal cells, cut to the box's width and never wrapped; the last c
 gives way first. `/oberth-runs` prints the same lines with a failed run's step and reason
 or a cancelled run's reason last; there the names give way before the reason.
 Finished watches produce one completion notice. The box, `/oberth-runs` and `/oberth-watch`
-read only public `run list --json` and `run get --json`, through the absolute verified
+read only public `run list --json`, `run get --json` and `run wait --json`, through the absolute verified
 executable (its option, by default the fetcher's install in the user bin directory),
 never a checkout executable or a PATH lookup. The plugin reads with the agent's joined
 uplink profile, selected by its option, `OBERTH_PROFILE` or the checkout's joined uplink
@@ -72,9 +72,12 @@ table name each unreadable profile with a whole reason and remedy, also when all
 these notices wrap. Without a selection it explains setup once and stays hidden.
 It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.
 
-One timer refreshes every 15 seconds, active or idle, so short runs and terminal pushes
-are still seen. Refreshes coalesce and each CLI call is bounded. Session start does not
-await the first refresh. Missing profile setup is explained once per option value;
+One timer discovers idle runs every 15 seconds. While a shown or pinned run is live,
+public `run wait --until any --timeout-s 1` replaces the sleep between coalesced
+refreshes, so changes appear in about one second. Failed change waits leave the next
+read to the idle timer. Watches begin reading immediately; every CLI call is bounded.
+Session start does not await the first refresh. A new session retires the previous
+loop, including its pending waits and watch reads. Missing profile setup is explained once per option value;
 other missing configuration once per installation. Failed reads hide stale rows and
 name the unreadable profiles. Session exit cancels the timer.
 

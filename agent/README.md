@@ -9,6 +9,7 @@ registers no model tools (they would share the bridge's server name).
 For several upstreams, set **Uplink profile** (`profile`) to the comma-separated joined
 profile names, for example `work,personal`. The box and `/oberth-runs` merge them newest
 first with one total row limit; blank uses the environment or joined checkout selection.
+Live changes appear in about one second; idle discovery runs every 15 seconds.
 
 The run box requires a host with function-hook modules and the `atom`, `read`
 and `update` state API, with plugin validation and test harness support.

@@ -217,7 +217,7 @@ test('a finished run stays in place as passed for ten minutes, then the box goes
     started_at: '2026-11-17T22:00:00Z', finished_at: '2026-11-17T23:00:00Z' }
   let rows = [run(), older]
   on('process.run', (_, e) => {
-    calls.push([...e.argv])
+    if (e.argv[2] === 'list') calls.push([...e.argv])
     return { value: { exitCode: 0, stdout: JSON.stringify({ runs: rows }), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   await startSession($, on)
@@ -469,7 +469,7 @@ test('durations and ages read as seconds, then two units or one', async () => {
   expect(age(item, Date.parse('2026-11-17T23:00:00Z'))).toBe('0s')
 })
 
-test('idle and watched reads share the one interval', { options }, async ($, on) => {
+test('idle reads and refused change waits share one coalesced timer', { options }, async ($, on) => {
   bottom(on)
   const clock = mock.clock(on)
   let lists = 0
@@ -477,7 +477,7 @@ test('idle and watched reads share the one interval', { options }, async ($, on)
   on('process.run', (_, e) => {
     const detail = e.argv[2] === 'get'
     if (detail) gets++
-    else lists++
+    else if (e.argv[2] === 'list') lists++
     return { value: { exitCode: 0, stdout: JSON.stringify(detail ? run() : { runs: [] }),
       stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -487,11 +487,11 @@ test('idle and watched reads share the one interval', { options }, async ($, on)
   expect(lists).toBe(4)
   await $.command.run({ ...commandInput, command: 'oberth-watch', args: run().id })
   await clock.advance(REFRESH_MS)
-  expect(lists).toBe(5)
-  expect(gets).toBe(2)
-  await clock.advance(REFRESH_MS)
   expect(lists).toBe(6)
   expect(gets).toBe(3)
+  await clock.advance(REFRESH_MS)
+  expect(lists).toBe(7)
+  expect(gets).toBe(4)
 })
 
 test('pin missing from list stays visible, finishes with one toast and stops detail reads', { options }, async ($, on) => {
@@ -511,13 +511,13 @@ test('pin missing from list stays visible, finishes with one toast and stops det
   await startSession($, on)
   expect((await $.command.run({ ...commandInput, command: 'oberth-watch', args: 'bbbbbbbb' })).text).toContain('Watching')
   await clock.advance(60000)
-  expect(gets).toBe(5)
+  expect(gets).toBe(6)
   expect((await boxLines($))[1]).toMatch(/^bbbbbbbb oberth +v0\.24\.0 +▶ running +6\/11 /)
   current = { ...pinned, status: 'failed', failed: 1, failure: { failed_step: 'onExit[0].lint', failed_step_name: 'lint', node_id: 'generated-node-419' } } as Run
   await clock.advance(15000)
   expect(toasts).toEqual([`Oberth ${pinned.id}: failed; step lint`])
   await clock.advance(60000)
-  expect(gets).toBe(6)
+  expect(gets).toBe(7)
   expect(toasts.length).toBe(1)
   const finished = await $.command.run({ ...commandInput, command: 'oberth-watch', args: pinned.id })
   expect(finished.text).toBe(`${pinned.id}: failed; step lint; already finished.`)
@@ -610,8 +610,8 @@ test('session end cancels the sole refresh timer and clears the box', { options 
   bottom(on)
   const clock = mock.clock(on)
   let calls = 0
-  on('process.run', () => {
-    calls++
+  on('process.run', (_, e) => {
+    if (e.argv[2] === 'list') calls++
     return { value: { exitCode: 0, stdout: JSON.stringify({ runs: [run()] }), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   await startSession($, on)
@@ -682,7 +682,130 @@ test('a competing state write cannot duplicate a completion toast', { options },
 
 const six = [1, 2, 3, 4, 5, 6].map(n => run(String(n).repeat(8) + '0'.repeat(24)))
 
+test('a live run changes in the box within one second through a bounded change wait', { options }, async ($, on) => {
+  bottom(on)
+  let server = Date.parse('2026-11-18T00:01:00Z')
+  const clock = mock.clock(on, { now: server })
+  let current = run()
+  const waits: string[][] = []
+  let release!: () => void
+  const changed = new Promise<void>(resolve => { release = resolve })
+  on('process.run', async (_, e) => {
+    if (e.argv[2] === 'wait') {
+      waits.push([...e.argv])
+      expect(e.init?.env?.OBERTH_PROFILE).toBe(options.profile)
+      await changed
+      return { value: { exitCode: 0, stdout: JSON.stringify({ run: current, timed_out: current.status === 'running' }),
+        stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    return { value: { exitCode: 0, stdout: JSON.stringify({ runs: [current], server_time: new Date(server).toISOString() }),
+      stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await startSession($, on)
+  expect((await boxLines($))[1]).toContain('▶ running')
+  current = { ...current, status: 'passed', finished_at: '2026-11-18T00:01:01Z' }
+  server += 1000
+  await clock.advance(1000)
+  const refreshed = waits.length ? nextSnapshot(on) : undefined
+  release()
+  if (refreshed) await refreshed
+  expect((await boxLines($))[1]).toContain('✓ passed')
+  expect(waits).toEqual([['/verified/oberth', 'run', 'wait', current.id, '--until', 'any', '--timeout-s', '1', '--json']])
+})
+
+for (const rows of [[], [{ ...run(), status: 'passed' as const, finished_at: '2026-11-18T00:01:00Z' }]]) {
+  test(`idle polling stays at fifteen seconds with ${rows.length ? 'a finished run' : 'no runs'}`, { options }, async ($, on) => {
+    bottom(on)
+    const clock = mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+    const calls = cli(on, () => rows)
+    await startSession($, on)
+    await clock.advance(14999)
+    expect(calls).toHaveLength(1)
+    await clock.advance(1)
+    expect(calls).toHaveLength(2)
+    expect(calls.every(args => args[2] === 'list')).toBe(true)
+  })
+}
+
 const multiple = { executable: options.executable, profile: ' first, second, first ', runs: 2 }
+
+test('a live unlisted watch keeps its profile clock and other profile warnings during change waits', { options: multiple }, async ($, on) => {
+  bottom(on)
+  let server = Date.parse('2026-11-18T00:01:00Z')
+  const clock = mock.clock(on, { now: server + 11 * 60000 })
+  const notices = toasts(on)
+  let current = run('dddddddd000000000000000000000000')
+  let release!: () => void
+  let waiting!: () => void
+  const changed = new Promise<void>(resolve => { release = resolve })
+  const started = new Promise<void>(resolve => { waiting = resolve })
+  on('process.run', async (_, e) => {
+    if (e.init?.env?.OBERTH_PROFILE === 'first') throw new Error('Unavailable profile.')
+    let value: unknown
+    if (e.argv[2] === 'wait') {
+      expect(e.init?.env?.OBERTH_PROFILE).toBe('second')
+      waiting()
+      await changed
+      value = { run: current, timed_out: false }
+    } else value = e.argv[2] === 'get' ? current : { runs: [], server_time: new Date(server).toISOString() }
+    return { value: { exitCode: 0, stdout: JSON.stringify(value), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await startSession($, on)
+  await $.command.run({ ...commandInput, command: 'oberth-watch', args: current.id })
+  await started
+  expect((await boxLines($))[1]).toMatch(/^dddddddd .*▶ running +6\/11 +1m00s +1m +●$/)
+  current = { ...current, status: 'passed', finished_at: '2026-11-18T00:01:01Z' }
+  server += 1000
+  await clock.advance(1000)
+  const refreshed = nextSnapshot(on)
+  release()
+  await refreshed
+  const lines = await boxLines($)
+  expect(lines[1]).toMatch(/^dddddddd .*✓ passed +6\/11 +1m01s +1m +●$/)
+  expect(lines.join('\n')).toContain('Profile "first": Could not read runs.')
+  expect(notices).toEqual([`Oberth ${current.id}: passed`])
+})
+
+test('a new session retires pending live waits and watch reads without delaying its idle view', { options }, async ($, on) => {
+  bottom(on)
+  const clock = mock.clock(on)
+  const old = run()
+  let rows = [old]
+  let lists = 0
+  let releaseWait!: () => void
+  let releaseGet!: () => void
+  let waitStarted!: () => void
+  let getStarted!: () => void
+  const wait = new Promise<void>(resolve => { releaseWait = resolve })
+  const get = new Promise<void>(resolve => { releaseGet = resolve })
+  const waiting = new Promise<void>(resolve => { waitStarted = resolve })
+  const getting = new Promise<void>(resolve => { getStarted = resolve })
+  on('process.run', async (_, e) => {
+    let value: unknown
+    if (e.argv[2] === 'wait') { waitStarted(); await wait; value = { run: old, timed_out: true } }
+    else if (e.argv[2] === 'get') { getStarted(); await get; value = old }
+    else { lists++; value = { runs: rows } }
+    return { value: { exitCode: 0, stdout: JSON.stringify(value), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await startSession($, on)
+  await waiting
+  const watched = $.command.run({ ...commandInput, command: 'oberth-watch', args: old.id })
+  await getting
+  await $.session.end({ sessionId: 'test-session', resume: { id: 'test-session' }, reason: 'prompt_input_exit' })
+  rows = []
+  await startSession($, on)
+  await noBox($)
+  releaseWait()
+  releaseGet()
+  await watched
+  await clock.advance(0)
+  await noBox($)
+  expect(lists).toBe(2)
+  await clock.advance(14999)
+  expect(lists).toBe(2)
+  await clock.advance(1)
+  expect(lists).toBe(3)
+})
 
 for (const selection of [options, multiple]) {
   for (const skew of [11 * 60000, -30 * 60000]) {
@@ -721,6 +844,7 @@ test('configured profiles merge upstreams newest first with one global row limit
   mock.clock(on, { now: Date.parse('2026-11-18T00:10:00Z') })
   const calls: string[] = []
   on('process.run', (_, e) => {
+    if (e.argv[2] === 'wait') throw new Error('Change wait unavailable in this list fixture.')
     const name = String(e.init?.env?.OBERTH_PROFILE)
     calls.push(name)
     expect(e.init?.timeoutMs).toBe(3500)
@@ -772,11 +896,11 @@ test('a watch finds the other profile and polls only its source after it leaves 
   unavailable = false
   watched = { ...watched, status: 'passed', finished_at: '2026-11-18T00:01:10Z' }
   await clock.advance(REFRESH_MS)
-  expect(details).toEqual(['first', 'second', 'second', 'second'])
+  expect(details).toEqual(['first', 'second', 'second', 'second', 'second'])
   expect((await boxLines($))[1]).toMatch(/^22222222 gadget .*✓ passed .*●$/)
   expect(notices).toEqual([`Oberth ${watched.id}: passed`])
   await clock.advance(REFRESH_MS)
-  expect(details).toHaveLength(4)
+  expect(details).toHaveLength(5)
 })
 
 test('overlapping profiles deduplicate runs and an unavailable profile leaves healthy rows visible', { options: multiple }, async ($, on) => {
@@ -1002,9 +1126,11 @@ test('runs 0 keeps the table and watches with completion toasts', { options: { .
   rows = rows.map(row => ({ ...row, status: 'passed' }))
   await clock.advance(15000)
   expect(notices).toEqual(rows.map(row => `Oberth ${row.id}: passed`))
-  expect(calls.map(call => call[2])).toEqual(['list', 'list', 'get', 'get', 'get', 'get'])
+  expect(calls.filter(call => call[2] === 'list')).toHaveLength(2)
+  expect(calls.filter(call => call[2] === 'wait').map(call => call[3])).toEqual(rows.map(row => row.id))
+  const finished = calls.length
   await clock.advance(180000)
-  expect(calls).toHaveLength(6)
+  expect(calls).toHaveLength(finished)
   await noBox($)
 })
 

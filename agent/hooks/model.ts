@@ -1,6 +1,6 @@
 import type { ObservedRun as Run, Snapshot } from '../types'
 
-// One refresh interval, active or idle: a run shorter than it can start and finish unseen.
+// Idle discovery; live runs use bounded change waits between refreshes.
 export const REFRESH_MS = 15000
 export const ICON ={ queued: '…', running: '▶', passed: '✓', failed: '✗', cancelled: '■' }
 export const active = (run: Run) => run.status === 'queued' || run.status === 'running'

@@ -18,19 +18,23 @@ def struct_fields(file, name):
 
 def check_calls(client, commands):
     calls = re.findall(r"json\(\$, connection, \[([^\]]+)\]\)", client)
-    if len(calls) != 2:
-        raise ValueError("expected the list and single-run JSON calls")
+    if len(calls) != 3:
+        raise ValueError("expected the list, single-run and change-wait JSON calls")
     for call in calls:
         call = call.replace("String(count)", "'3'")
         call = re.sub(r"\bid\b", "'cad7d9ec'", call)
         args = re.findall(r"'([^']+)'", call)
         check_command(" ".join(args + ["--json"]), commands)
     flags = set(re.findall(r"'(--[a-z-]+)'", re.sub(r"const BINDING = \[[^\]]+\]", "", client)))
-    if flags != {"--limit", "--json"}:
+    if flags != {"--limit", "--json", "--until", "--timeout-s"}:
         raise ValueError("unchecked CLI flags")
-    envelope = set(re.findall(r"(\w+)\?:", re.search(r"as \{ ([^}]+) \}", client).group(1)))
-    if not envelope or envelope - struct_fields("internal/apicontract/results.go", "RunPage"):
-        raise ValueError("unknown run-list JSON field")
+    envelopes = re.findall(r"as \{ ([^}]+) \}", client)
+    if len(envelopes) != 2:
+        raise ValueError("expected list and wait envelopes")
+    for body, result in zip(envelopes, ("RunPage", "WaitResult")):
+        envelope = set(re.findall(r"(\w+)\?:", body))
+        if not envelope or envelope - struct_fields("internal/apicontract/results.go", result):
+            raise ValueError("unknown " + result + " JSON field")
     if (client.count("$.process.run(") != 2 or "[connection.executable, ...args, '--json']" not in client
             or "const executable = await checkedExecutable($, options)" not in client
             or "return names.map(profile => ({ executable, profile }))" not in client):
@@ -82,7 +86,10 @@ def check_projection(contract):
     if not re.search(r"^\tstepmodel\.RunSummary$", record, re.M) or not re.search(r"^\tRuns\s+\[\]RunRecord\s", page, re.M):
         raise ValueError("run record no longer carries the run projection fields")
     catalogue = (ROOT / "internal/apicontract/tools_runs.go").read_text()
-    for tool, result in (("run_get", "RunRecord"), ("run_list", "RunPage")):
+    wait = results.split("type WaitResult struct {", 1)[1].split("\n}", 1)[0]
+    if not re.search(r"^\tRun\s+\*stepmodel\.RunSummary\s", wait, re.M):
+        raise ValueError("run wait no longer carries the run projection fields")
+    for tool, result in (("run_get", "RunRecord"), ("run_list", "RunPage"), ("run_wait", "WaitResult")):
         if not re.search(re.escape(result) + r'[^\n]+?tool:"' + tool + r'"', catalogue):
             raise ValueError("CLI command result contract drift")
 

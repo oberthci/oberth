@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Register, Timer } from 'claude-code'
 import type { Snapshot } from '../types'
-import { checkedExecutable, get, list, profiles, SETUP } from './client'
+import { checkedExecutable, get, list, profiles, SETUP, waitForChange } from './client'
 import { active, boxRows, limit, outcome, profileProblems, REFRESH_MS, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
 
 const empty: Snapshot = { recent: [], pins: [], reachable: false, now: 0 }
@@ -13,6 +13,7 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : '
 type Loop = { count: number; timer?: Timer; pending?: Promise<void>; stopped?: boolean }
 
 async function tick($: EngineInterface, options: PluginOptions, loop: Loop) {
+  if (loop.stopped || loop.pending) return
   const state = await read($, snapshot)
   if (!loop.count && !state.pins.some(pin => active(pin.run))) return
   await poll($, options, loop)
@@ -21,8 +22,23 @@ async function tick($: EngineInterface, options: PluginOptions, loop: Loop) {
 // Background refreshes are never awaited by the host: a refused state call (for example
 // after the module unloads) ends the attempt instead of becoming an unhandled rejection.
 function poll($: EngineInterface, options: PluginOptions, loop: Loop) {
-  if (!loop.pending) loop.pending = refresh($, options, loop).catch(() => {}).finally(() => { loop.pending = undefined })
+  if (!loop.pending) loop.pending = follow($, options, loop).catch(() => {}).finally(() => { loop.pending = undefined })
   return loop.pending
+}
+
+async function follow($: EngineInterface, options: PluginOptions, loop: Loop) {
+  while (!loop.stopped) {
+    await refresh($, options, loop)
+    const state = await read($, snapshot)
+    if (loop.stopped || !state.reachable) return
+    const runs = [...state.recent, ...state.pins.map(pin => pin.run)]
+      .filter(run => active(run) && run.profile && !state.unavailable?.includes(run.profile))
+      .filter((run, index, all) => all.findIndex(row => row.id === run.id) === index)
+    if (!runs.length) return
+    const changes = await Promise.allSettled(runs.map(run => waitForChange($, options, run.id, run.profile!)))
+    // A failed change feed falls back to the idle timer, never a busy loop.
+    if (loop.stopped || changes.every(change => change.status === 'rejected')) return
+  }
 }
 
 async function refresh($: EngineInterface, options: PluginOptions, loop: Loop) {
@@ -66,19 +82,21 @@ async function refresh($: EngineInterface, options: PluginOptions, loop: Loop) {
   }
 }
 
-async function watch($: EngineInterface, options: PluginOptions, id: string): Promise<string> {
+async function watch($: EngineInterface, options: PluginOptions, id: string, loop: Loop): Promise<string> {
   const run = await get($, options, id)
   if (!active(run)) return `${outcome(run)}; already finished.`
   await update($, snapshot, state => {
+    if (loop.stopped) return state
     const pins = state.pins.filter(pin => active(pin.run) && pin.run.id !== run.id)
     if (pins.length === 3) throw new Error('Three runs are already pinned. Wait for one to finish.')
     const clockOffset = state.clocks?.find(clock => clock.profile === run.profile)?.offset
     return { ...state, reachable: true, pins: [...pins, { run: { ...run, clockOffset }, doneAt: null }] }
   })
+  if (!loop.stopped) void poll($, options, loop)
   return `Watching ${run.id} until it finishes.`
 }
 
-function commands(on: On, options: PluginOptions) {
+function commands(on: On, options: PluginOptions, current: () => Loop) {
   on('command.run', { command: 'oberth-runs' }, async ($, e) => {
     try {
       const arg = e.args.trim()
@@ -89,7 +107,7 @@ function commands(on: On, options: PluginOptions) {
     } catch (error) { return { text: errorText(error) } }
   })
   on('command.run', { command: 'oberth-watch' }, async ($, e) => {
-    try { return { text: await watch($, options, e.args.trim()) } }
+    try { return { text: await watch($, options, e.args.trim(), current()) } }
     catch (error) { return { text: errorText(error) } }
   })
 }
@@ -116,19 +134,22 @@ async function setupNotice($: EngineInterface, key: string, message: string, mar
 
 export const register: Register = (on, options) => {
   const count = shown(options.runs)
-  const loop: Loop = { count: count ?? 0 }
+  let loop: Loop = { count: count ?? 0 }
   on('session.start', async ($, e, next) => {
+    loop.stopped = true
     loop.timer?.cancel()
-    loop.stopped = false
+    const current: Loop = { count: count ?? 0 }
+    loop = current
     await registerCommands($)
     if (count === undefined) await setupNotice($, 'runs-notice', `${SHOWN_REASON} ${SHOWN_REMEDY}`, String(options.runs))
     const missing = await missingSetup($, options)
+    if (current.stopped) return next(e)
     if (missing) {
       await update($, snapshot, () => empty)
       await setupNotice($, missing.key, missing.text, missing.mark)
     } else {
-      if (loop.count) void poll($, options, loop)
-      loop.timer = $.clock.every(REFRESH_MS, () => { void tick($, options, loop).catch(() => {}) })
+      if (current.count) void poll($, options, current)
+      current.timer = $.clock.every(REFRESH_MS, () => { void tick($, options, current).catch(() => {}) })
     }
     return next(e)
   })
@@ -139,7 +160,7 @@ export const register: Register = (on, options) => {
     await update($, snapshot, () => empty)
     return next(e)
   })
-  commands(on, options)
+  commands(on, options, () => loop)
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const state = await read($, snapshot)
