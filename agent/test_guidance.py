@@ -115,6 +115,11 @@ def check_guidance(skill, instructions, commands=None):
 
 
 class GuidanceContract(unittest.TestCase):
+    def test_install_summary_keeps_the_printed_web_signin_line(self):
+        skill = (ROOT / "agent/skills/oberth/SKILL.md").read_text()
+        apply = next(line for line in skill.splitlines() if "Apply after consent" in line)
+        self.assertIn("Show the printed web-view sign-in line verbatim.", apply)
+
     def test_registration_requires_a_verified_absolute_executable(self):
         skill = (ROOT / "agent/skills/oberth/SKILL.md").read_text()
         check_registration(skill)
