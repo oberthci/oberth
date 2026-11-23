@@ -19,6 +19,7 @@ func TestHookSignatures(t *testing.T) {
 		{"OfflineValidation", reflect.TypeFor[bool]()},
 		{"LoginAudience", reflect.TypeFor[string]()},
 		{"ReleaseFacts", reflect.TypeFor[func(context.Context) (ReleaseFacts, error)]()},
+		{"PrepareSources", reflect.TypeFor[func(context.Context, []sourcecontract.Descriptor)]()},
 		{"BindSource", reflect.TypeFor[func(context.Context, sourcecontract.Descriptor) (sourcecontract.Binding, error)]()},
 		{"TransformNative", reflect.TypeFor[func(context.Context, *wfv1.Workflow, TransformInput) error]()},
 		{"VerifyIdentities", reflect.TypeFor[func(context.Context, IdentityRequest) (IdentityEvidence, error)]()},

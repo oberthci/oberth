@@ -43,10 +43,10 @@ those definitions; they do not define rival DTOs.
   contracts](README.md#shared-contracts). Audit, Create, source intent and plan
   explanation consume that same result. Admission checks grants and account identity
   once before sealing. Adoption verifies ownership of the same recorded Workflow.
-- **Binding hook.** PrepareHooks includes BindSource. During preparation C4 calls
-  it for each source descriptor; C3 supplies exact producer authority and revision
-  binding. C4 records template/artifact/path coordinates once before sealing.
-  C3 does not parse YAML to prefill bindings.
+- **Binding hooks.** C4 calls PrepareHooks.PrepareSources with all discovered descriptors,
+  then BindSource for each declaration; C3 decides distinct allowed pins in parallel
+  once per admission and supplies exact producer authority and revision binding.
+  C4 records template/artifact/path coordinates; C3 does not parse YAML to prefill bindings.
 - **Source declarations.** `SourceInputInventory` records effective inputs, forwarding,
   pinned destinations and shared declarations; it proves no access. Main input uses
   plugin `oberth`, key `{{workflow.parameters.oberth-source}}`, configuration

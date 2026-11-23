@@ -43,6 +43,9 @@ type PrepareHooks struct {
 	LoginAudience string
 	// ReleaseFacts reads server evidence after authored admission checks.
 	ReleaseFacts func(context.Context) (ReleaseFacts, error)
+	// PrepareSources decides distinct pins together before BindSource consumes
+	// their evidence. Refusals are returned by BindSource at each declaration.
+	PrepareSources func(context.Context, []sourcecontract.Descriptor)
 	// BindSource resolves one effective source input after admission. C4 assigns
 	// Template, Artifact and Path; the hook supplies the exact source evidence.
 	BindSource       func(context.Context, sourcecontract.Descriptor) (sourcecontract.Binding, error)

@@ -159,7 +159,8 @@ func (s *Submitter) admissionHooks(r Request, source Source, scope Scope) admiss
 	preparation := scope.Preparation
 	preparation.RepositoryID, preparation.Ref, preparation.Trigger = r.RepositoryID, r.Ref, string(r.Trigger)
 	hooks := s.d.Native.Hooks(preparation)
-	hooks.BindSource = s.binder(r, source)
+	binder := s.binder(r, source)
+	hooks.PrepareSources, hooks.BindSource = binder.prepare, binder.bind
 	if r.Release && scope.Release && s.d.ReleaseFacts != nil {
 		hooks.ReleaseFacts = func(ctx context.Context) (admissioncontract.ReleaseFacts, error) {
 			return s.d.ReleaseFacts(ctx, r, scope.File)

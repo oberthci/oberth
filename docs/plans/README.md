@@ -152,8 +152,8 @@ C3 calls C4 preparation, which invokes C5 transformation hooks before final
 native schema validation, planning and sealing. Only C4 calls
 `admissioncontract.Seal`. Prepared fields remain private; constructors and
 accessors make deep copies, including maps, native objects and raw snapshots.
-PrepareHooks includes BindSource: C4 discovers descriptors, calls the C3-provided
-binder and records coordinates before sealing. The pipeline account is the
+PrepareHooks includes PrepareSources and BindSource: C4 discovers descriptors, prepares
+them together, then binds each and records coordinates before sealing. The pipeline account is the
 executor account; identity evidence records it once. Argo mounts a Pod-bound
 projected token. Create receives the sealed spec unchanged. C10 copies it into a schedule parent;
 a child acquires a run identity only when accepted.

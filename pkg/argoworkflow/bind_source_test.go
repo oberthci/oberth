@@ -40,10 +40,17 @@ func TestPrepareBindsDeclaredSourcesOnceBeforeNativeTransform(t *testing.T) {
 	r := requestFor(t, w)
 	hooks := identityHooks()
 	var seen []sourcecontract.Descriptor
+	var descriptors []sourcecontract.Descriptor
+	hooks.PrepareSources = func(ctx context.Context, inputs []sourcecontract.Descriptor) {
+		if ctx != t.Context() || len(inputs) != 3 || len(seen) != 0 {
+			t.Fatal("source preparation lost context or ran after binding", inputs, seen)
+		}
+		descriptors = inputs
+	}
 	retained := []sourcecontract.Ref{{Name: "refs/tags/retained", ObjectSHA: r.ObjectSHA}}
 	hooks.BindSource = func(ctx context.Context, d sourcecontract.Descriptor) (sourcecontract.Binding, error) {
-		if ctx != t.Context() {
-			t.Fatal("source binder lost context")
+		if ctx != t.Context() || len(descriptors) != 3 || descriptors[len(seen)] != d {
+			t.Fatal("source binder lost context or preparation")
 		}
 		seen = append(seen, d)
 		b := boundEvidence(r, d)
@@ -174,6 +181,7 @@ func TestSourceBinderRunsOnlyForAdmittedDeclaredInputs(t *testing.T) {
 			}
 			hooks := identityHooks()
 			calls := 0
+			hooks.PrepareSources = func(context.Context, []sourcecontract.Descriptor) { calls++ }
 			hooks.BindSource = func(context.Context, sourcecontract.Descriptor) (sourcecontract.Binding, error) {
 				calls++
 				return sourcecontract.Binding{}, nil
