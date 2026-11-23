@@ -20,10 +20,13 @@ class GateVerdicts(GoGateTests, GateFixture, unittest.TestCase):
 
 
     def test_root_python_cannot_replace_trusted_entries(self):
-        files = ("unittest.py", "json.py", "portable.py", "sitecustomize.py")
+        files = ("unittest.py", "json.py", "portable.py", "sitecustomize.py", "unittest/__init__.py",
+                 "unittest/__main__.py", "json/__init__.py", "zz.pth")
         body = "import os\np = os.environ.get('GATE_BRANCH_MARKER')\nif p:\n open(p, 'w').write(__name__)\n raise SystemExit(0)\n"
         for name in files:
-            (self.fixture / name).write_text(body)
+            path = self.fixture / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body)
         self.git("add", *files)
         self.git("commit", "-qm", "Add root modules")
         marker = self.fixture / "root-ran"

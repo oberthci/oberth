@@ -47,7 +47,8 @@ Base-image scripts, Python tests and Dockerfile logic come from main. Input lock
 patches and their pins stay from the branch and are checked by main's tests.
 Every added path under `hack/`, including renamed files, is listed and removed
 from the trusted checkout. The branch check receives those additions.
-Added root Python files are listed too. Trusted Python entries and their child
+Added Python files in root packages and added `.pth` files are listed too.
+Trusted Python entries and their child
 commands use isolated mode, so branch-root modules and Python environment paths
 cannot replace the interpreter's runner or imports. Plan helpers load by their
 restored file paths; discovery adds the restored test directories.

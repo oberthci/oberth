@@ -97,7 +97,7 @@ tool_paths=(
 )
 changed=$({
     git diff --name-only main "$head" -- "${tool_paths[@]}" docs/plans hack/guards hack/plans hack/devloop hack/base-image go.mod go.sum go.work go.work.sum
-    git diff --no-renames --diff-filter=A --name-only main "$head" -- hack ':(top,glob)*.py'
+    git diff --no-renames --diff-filter=A --name-only main "$head" -- hack ':(top,glob)**/*.py' ':(top,glob)**/*.pth'
 } | LC_ALL=C sort -u | paste -sd ' ' -)
 for file in "${tool_paths[@]}"; do
     git cat-file -e "main:$file" 2>/dev/null || { printf 'FAIL: main lacks %s; review and bootstrap main tooling first\n' "$file" >&2; exit 1; }
