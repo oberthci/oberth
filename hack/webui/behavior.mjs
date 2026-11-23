@@ -202,15 +202,29 @@ async function logAppend(client){
 
 async function signout(client){
  await client.loaded('/runs','.runs a.row');
+ const headerState=()=>client.evaluate(`({nav:document.querySelector('nav').getBoundingClientRect().height>0,signout:document.querySelector('#signout').getBoundingClientRect().height>0,header:document.querySelector('header').getBoundingClientRect().height>0})`);
+ const signedIn=await headerState();
+ check(signedIn.nav&&signedIn.signout&&signedIn.header,'signed-in navigation or Sign out missing');
  await deadline('load after sign-out',async()=>{const ready=client.nextEvent('Page.loadEventFired');await client.evaluate(`document.querySelector('#signout').click()`);await ready;});await pause(100);
  const result=await client.evaluate(`({hasToken:localStorage.getItem('oberth.token')!==null,form:!signin.hidden,mainHidden:main.hidden,notice:notice.textContent})`);
  check(!result.hasToken,'sign-out retained the bearer token');
  check(result.form&&result.mainHidden&&result.notice==='', 'first visit did not show a quiet sign-in form');
+ const signedOut=await headerState();
+ check(!signedOut.nav&&!signedOut.signout&&!signedOut.header,'signed-out page shows navigation or Sign out');
  await client.evaluate(`localStorage.setItem('oberth.token','invalid');route()`);
  await pause(100);
  check((await client.evaluate(`notice.textContent`)).includes('credentials'), 'invalid credentials did not show their refusal');
- await client.evaluate(`localStorage.setItem('oberth.token',${JSON.stringify(client.token)})`);
- return result;
+ const refused=await headerState();
+ check(!refused.nav&&!refused.signout&&!refused.header,'refused sign-in shows navigation or Sign out');
+ await deadline('load after sign-in',async()=>{
+  const ready=client.nextEvent('Page.loadEventFired');
+  await client.evaluate(`signin.querySelector('input').value=${JSON.stringify(client.token)};signin.querySelector('form').requestSubmit()`);
+  await ready;
+  await client.evaluate(`new Promise(resolve=>{const test=()=>{if(document.querySelector('header').hidden||!document.querySelector('.runs a.row'))return;observer.disconnect();resolve();};const observer=new MutationObserver(test);observer.observe(document,{subtree:true,childList:true,attributes:true});test();})`);
+ });
+ const restored=await headerState();
+ check(restored.nav&&restored.signout&&restored.header,'sign-in did not restore navigation and Sign out');
+ return {...result,signedIn,signedOut,refused,restored};
 }
 
 async function inspectHolds(client){
