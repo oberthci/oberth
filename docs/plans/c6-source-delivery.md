@@ -221,8 +221,8 @@ repositories. A manual schedule trigger uses ordinary admission; force bypasses 
   locking. None of these limits gates run submission. More than 16 flooding Workflows
   can delay another tenant's Loads; no isolation guarantee is claimed. **Delta:** retain
   one Git/compression slot, release it before network writes, and bound active staged
-  transfers separately at two. Archives are request-private, with no persistent cache or
-  cross-request reuse.
+  transfers separately at two. Reuse staged files for a sealed binding, with independent
+  readers; keep at most two archives, evict idle files for space and collect dead owners' files.
 
 - Main delivery contains regular files plus sanitized detached `.git` history, index and
   the recorded checkout snapshot. Never export hooks, remotes, credentials, private refs

@@ -69,6 +69,7 @@ type Cache struct {
 	gates          *repositoryGates
 	rootLock       *os.File
 	export         chan struct{}
+	staged         *stagedArchives
 	activeMu       *sync.Mutex
 	active         map[string]bool
 	receives       map[string]*receiveFiles
@@ -127,6 +128,7 @@ func New(ctx context.Context, config Config) (*Cache, error) {
 		rootLock:  owner,
 		gates:     &repositoryGates{repos: make(map[string]chan struct{})},
 		export:    make(chan struct{}, 1),
+		staged:    newStagedArchives(),
 		activeMu:  &sync.Mutex{},
 		active:    make(map[string]bool),
 	}
@@ -160,7 +162,7 @@ func prepareCachePaths(config Config) error {
 func (c *Cache) Close() error {
 	c.stopDelivery()
 	c.transfers.close()
-	return c.rootLock.Close()
+	return errors.Join(c.staged.prune(nil), c.rootLock.Close())
 }
 
 func (c *Cache) path(repository string) (string, error) {

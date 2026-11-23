@@ -23,11 +23,18 @@ const (
 	PinFiles               = 4096
 )
 
-// Stage builds an independent request-private archive. The compression slot and
-// repository lock are released before any network writer receives bytes.
+// Stage reuses a sealed binding's archive with an independent reader per load.
+// Authorization is always done by the caller. Repository recovery and recorded
+// object availability are checked even on a hit; no locks span network writes.
 func (c *Cache) Stage(ctx context.Context, b sourcecontract.Binding) (sourcedelivery.Staged, error) {
 	if err := b.Validate(); err != nil {
 		return sourcedelivery.Staged{}, &sourcedelivery.Failure{Code: "forbidden"}
+	}
+	ctx, cancel := context.WithTimeout(ctx, c.budgets.local)
+	defer cancel()
+	key := archiveIdentity(b)
+	if stage, found, err := c.staged.open(key); found {
+		return c.checkedStage(ctx, b, stage, err)
 	}
 	select {
 	case c.export <- struct{}{}:
@@ -35,8 +42,12 @@ func (c *Cache) Stage(ctx context.Context, b sourcecontract.Binding) (sourcedeli
 		return sourcedelivery.Staged{}, &sourcedelivery.Failure{Code: "unavailable", Reason: "export-slot"}
 	}
 	defer func() { <-c.export }()
-	ctx, cancel := context.WithTimeout(ctx, c.budgets.local)
-	defer cancel()
+	if stage, found, err := c.staged.open(key); found {
+		return c.checkedStage(ctx, b, stage, err)
+	}
+	if err := c.staged.room(ctx); err != nil {
+		return sourcedelivery.Staged{}, err
+	}
 	dir, err := os.MkdirTemp(c.config.Scratch, "oberth-export-")
 	if err != nil {
 		return sourcedelivery.Staged{}, err
@@ -46,7 +57,7 @@ func (c *Cache) Stage(ctx context.Context, b sourcecontract.Binding) (sourcedeli
 		_ = os.RemoveAll(dir)
 		return stage, stageFailure(b, err)
 	}
-	return stage, err
+	return c.staged.put(key, dir, stage), nil
 }
 func (c *Cache) build(ctx context.Context, dir string, b sourcecontract.Binding) (sourcedelivery.Staged, error) {
 	p, err := c.path(b.Revision.Repository)
@@ -87,15 +98,38 @@ func (c *Cache) build(ctx context.Context, dir string, b sourcecontract.Binding)
 	if err != nil {
 		return sourcedelivery.Staged{}, err
 	}
-	return sourcedelivery.Staged{Body: &archiveBody{File: f, dir: dir}, Bytes: writer.total}, nil
+	return sourcedelivery.Staged{Body: f, Bytes: writer.total}, nil
 }
 
-type archiveBody struct {
-	*os.File
-	dir string
+func (c *Cache) checkedStage(ctx context.Context, b sourcecontract.Binding, stage sourcedelivery.Staged, err error) (sourcedelivery.Staged, error) {
+	if err == nil {
+		err = c.checkStagedObjects(ctx, b)
+	}
+	if err != nil {
+		if stage.Body != nil {
+			err = errors.Join(err, stage.Body.Close())
+		}
+		return sourcedelivery.Staged{}, stageFailure(b, err)
+	}
+	return stage, nil
 }
 
-func (a *archiveBody) Close() error { return errors.Join(a.File.Close(), os.RemoveAll(a.dir)) }
+func (c *Cache) checkStagedObjects(ctx context.Context, b sourcecontract.Binding) error {
+	p, err := c.path(b.Revision.Repository)
+	if err != nil {
+		return err
+	}
+	if err = c.lockRead(ctx, p); err != nil {
+		return err
+	}
+	defer c.unlock(p)
+	if err = c.commit(ctx, p, b.Revision.Commit); err != nil {
+		return err
+	}
+	refs := append([]sourcecontract.Ref{b.Export.Ref, b.Export.DefaultBranch}, b.Export.Tags...)
+	return c.checkArchiveObjects(ctx, p, refs)
+}
+
 func cleanExports(dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

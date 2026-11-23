@@ -128,12 +128,14 @@ func TestBatchExport3000FilesHasBoundedWorkIsDeterministicAndReadOnly(t *testing
 	f.Git(t, f.Work, "update-ref", "refs/heads/main", commit)
 	f.Git(t, f.Work, "push", "--force", f.Bare, "main")
 	f.Binary = reviewWrapper(t, f)
-	c := f.Cache(t, nil)
 	b := f.Binding()
 	b.Revision.Commit = commit
 	b.Export = sourcecontract.Export{}
 	var previous []byte
 	for range 2 {
+		// Exercise two cold exports so reuse cannot hide a batching or
+		// determinism regression. Warm reuse has its own deciding test.
+		c := f.Cache(t, nil)
 		commands := filepath.Join(f.Root, "commands.jsonl")
 		if err := os.WriteFile(commands, nil, 0600); err != nil {
 			t.Fatal(err)
@@ -151,6 +153,7 @@ func TestBatchExport3000FilesHasBoundedWorkIsDeterministicAndReadOnly(t *testing
 		}
 		data, err := io.ReadAll(stage.Body)
 		_ = stage.Body.Close()
+		closeExportCache(t, c)
 		if err != nil {
 			t.Fatal(err)
 		}

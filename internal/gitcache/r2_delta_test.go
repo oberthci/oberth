@@ -288,6 +288,9 @@ func TestDeltaExportBatchAndCrash(t *testing.T) {
 		t.Fatal("retry export after restart", e)
 	}
 	_ = stage.Body.Close()
+	// Successful archives remain reusable; Close must remove them along with
+	// any interrupted export debris before the next cache owns this scratch.
+	closeExportCache(t, c)
 	entries, _ := os.ReadDir(cfg.Scratch)
 	if len(entries) != 0 {
 		t.Error("export debris", entries)

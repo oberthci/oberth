@@ -2,6 +2,7 @@ package gitcache
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -26,7 +27,7 @@ func (c *Cache) GC(ctx context.Context) error {
 				failures = errors.Join(failures, fmt.Errorf("repository %s: %w", p, err))
 			}
 		}
-		return failures
+		return errors.Join(failures, c.staged.prune(snapshot.archives))
 	})
 }
 func (c *Cache) withOwners(ctx context.Context, visit func(collection) error) error {
@@ -52,9 +53,10 @@ func (c *Cache) refreshRetention(ctx context.Context, p string) error {
 }
 
 type collection struct {
-	live    map[string]bool
-	stalled map[string]error // cleaned repository path -> a live owner's gone source
-	epoch   uint64
+	live     map[string]bool
+	archives map[[sha256.Size]byte]bool
+	stalled  map[string]error // cleaned repository path -> a live owner's gone source
+	epoch    uint64
 }
 
 func (c *Cache) collect(ctx context.Context, p string, snapshot collection) error {
@@ -115,7 +117,7 @@ func (c *Cache) logExpirations(owners map[string]bool) {
 }
 
 func (c *Cache) restoreOwners(ctx context.Context) (collection, error) {
-	snapshot := collection{live: make(map[string]bool), stalled: make(map[string]error)}
+	snapshot := collection{live: make(map[string]bool), archives: make(map[[sha256.Size]byte]bool), stalled: make(map[string]error)}
 	cursor := ""
 	seen := make(map[string]bool)
 	for {
@@ -137,7 +139,7 @@ func (c *Cache) restoreOwners(ctx context.Context) (collection, error) {
 			if err != nil {
 				c.stall(snapshot, owner, err)
 			}
-			snapshot.live[owner.ID] = true
+			snapshot.recordOwner(owner)
 		}
 		if page.Next == "" {
 			return snapshot, nil
@@ -149,6 +151,14 @@ func (c *Cache) restoreOwners(ctx context.Context) (collection, error) {
 		cursor = page.Next
 	}
 }
+
+func (s collection) recordOwner(owner Owner) {
+	s.live[owner.ID] = true
+	for _, binding := range owner.Bindings {
+		s.archives[archiveIdentity(binding)] = true
+	}
+}
+
 // stall stops deletion in each repository an owner with gone source records.
 func (c *Cache) stall(snapshot collection, owner Owner, cause error) {
 	for repo := range bindingRoots(owner.Bindings) {

@@ -91,3 +91,10 @@ func archiveRepository(ctx context.Context, store, dir string) (io.ReadCloser, e
 	}
 	return &archiveBody{File: body, dir: dir}, nil
 }
+
+type archiveBody struct {
+	*os.File
+	dir string
+}
+
+func (a *archiveBody) Close() error { return errors.Join(a.File.Close(), os.RemoveAll(a.dir)) }

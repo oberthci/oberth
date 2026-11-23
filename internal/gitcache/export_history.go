@@ -35,15 +35,12 @@ func (w *archiveWriter) history(ctx context.Context) error {
 		return err
 	}
 	refs := append([]sourcecontract.Ref{b.Export.Ref, b.Export.DefaultBranch}, b.Export.Tags...)
+	if err = c.checkArchiveObjects(ctx, w.store, refs); err != nil {
+		return err
+	}
 	roots := []string{b.Revision.Commit}
 	for _, r := range refs {
 		if r.Name != "" {
-			if err = c.object(ctx, w.store, r.ObjectSHA); err != nil {
-				if isAbsent(err) && strings.HasPrefix(r.Name, "refs/tags/") {
-					return &tagMovedError{err}
-				}
-				return err
-			}
 			roots = append(roots, r.ObjectSHA)
 		}
 	}
