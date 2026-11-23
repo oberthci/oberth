@@ -80,19 +80,21 @@ export async function list($: EngineInterface, options: PluginOptions, count: nu
   const successful = pages.flatMap(page => page.status === 'fulfilled' ? [page.value] : [])
   if (!successful.length) throw (pages[0] as PromiseRejectedResult).reason
   const created = (run: ObservedRun) => Date.parse(run.created_at) + (run.clockOffset ?? 0)
-  const runs = successful.flat().sort((a, b) => created(b) - created(a))
+  const runs = successful.flatMap(page => page.runs).sort((a, b) => created(b) - created(a))
   const unique = runs.filter((run, index) => runs.findIndex(row => row.id === run.id) === index)
   const unavailable = peers.filter((_, index) => pages[index]!.status === 'rejected').map(peer => peer.profile)
-  return { runs: unique.slice(0, count), serverTime: await $.clock.now(), unavailable }
+  const clocks = pages.flatMap((page, index) => page.status === 'fulfilled' ? [{ profile: peers[index]!.profile, offset: page.value.clockOffset }] : [])
+  return { runs: unique.slice(0, count), clocks, unavailable }
 }
 
-async function listProfile($: EngineInterface, connection: Connection, count: number): Promise<ObservedRun[]> {
+async function listProfile($: EngineInterface, connection: Connection, count: number) {
   const page = await json($, connection, ['run', 'list', '--limit', String(count)]) as { runs?: unknown[] | null; server_time?: unknown }
   if (!page || !Object.hasOwn(page, 'runs')) throw new Error('Invalid run-list JSON.')
   if (page.runs !== null && !Array.isArray(page.runs)) throw new Error('Invalid run-list JSON.')
   const time = typeof page.server_time === 'string' ? Date.parse(page.server_time) : NaN
   const now = await $.clock.now()
-  return (page.runs ?? []).map(value => ({ ...decodeRun(value), profile: connection.profile, clockOffset: Number.isFinite(time) ? now - time : 0 }))
+  const clockOffset = Number.isFinite(time) ? now - time : 0
+  return { clockOffset, runs: (page.runs ?? []).map(value => ({ ...decodeRun(value), profile: connection.profile, clockOffset })) }
 }
 
 export async function get($: EngineInterface, options: PluginOptions, id: string, source?: string): Promise<ObservedRun> {

@@ -672,6 +672,38 @@ const six = [1, 2, 3, 4, 5, 6].map(n => run(String(n).repeat(8) + '0'.repeat(24)
 
 const multiple = { executable: options.executable, profiles: ' first, second, first ', runs: 2 }
 
+for (const selection of [options, multiple]) {
+  for (const skew of [11 * 60000, -30 * 60000]) {
+    test(`an unlisted watch uses its profile clock with ${selection === options ? 'one' : 'several'} profiles and skew ${skew}`,
+      { options: { ...selection, runs: 1 } }, async ($, on) => {
+        bottom(on)
+        let server = Date.parse('2026-11-18T00:01:00Z')
+        const clock = mock.clock(on, { now: server + skew })
+        const notices = toasts(on)
+        let watched = run('dddddddd000000000000000000000000')
+        const source = selection === options ? options.profile : 'second'
+        on('process.run', (_, e) => {
+          const selected = e.init?.env?.OBERTH_PROFILE === source
+          const value = e.argv[2] === 'get' ? (selected ? watched : undefined) : {
+            runs: [], server_time: new Date(server + (selected ? 0 : 2 * 3600000)).toISOString(),
+          }
+          return { value: { exitCode: value ? 0 : 1, stdout: value ? JSON.stringify(value) : '',
+            stderr: value ? '' : 'Run not found.', isStdoutTruncated: false, isStderrTruncated: false } }
+        })
+        const advance = async () => { server += REFRESH_MS; await clock.advance(REFRESH_MS) }
+        await startSession($, on)
+        await $.command.run({ ...commandInput, command: 'oberth-watch', args: watched.id })
+        expect((await boxLines($))[1]).toMatch(/^dddddddd .*▶ running +6\/11 +1m00s +1m +●$/)
+        await advance()
+        expect((await boxLines($))[1]).toMatch(/1m15s +1m +●$/)
+        watched = { ...watched, status: 'passed', finished_at: new Date(server + REFRESH_MS).toISOString() }
+        await advance()
+        expect((await boxLines($))[1]).toMatch(/^dddddddd .*✓ passed +6\/11 +1m30s +1m +●$/)
+        expect(notices).toEqual([`Oberth ${watched.id}: passed`])
+      })
+  }
+}
+
 test('configured profiles merge upstreams newest first with one global row limit and each server clock', { options: multiple }, async ($, on) => {
   bottom(on)
   mock.clock(on, { now: Date.parse('2026-11-18T00:10:00Z') })

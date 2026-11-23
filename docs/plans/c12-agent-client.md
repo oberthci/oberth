@@ -65,7 +65,8 @@ never a checkout executable or a PATH lookup. The plugin reads with the agent's 
 uplink profile, selected by its option, `OBERTH_PROFILE` or the checkout's joined uplink
 binding. A nonblank `profiles` option lists up to 32 comma-separated joined profiles
 instead; reads merge newest first, deduplicate run IDs and apply one total row limit.
-Each row ages on its server's clock; watches keep their source profile. Failed profile
+Each profile list keeps its server-clock offset even without rows; unlisted watches
+use that offset and keep their source profile. Failed profile
 reads hide that profile's stale rows while healthy profiles remain visible. When every
 profile read fails, the box hides. Without a selection it explains setup once and stays hidden.
 It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.

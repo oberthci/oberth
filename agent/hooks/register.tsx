@@ -27,11 +27,12 @@ function poll($: EngineInterface, options: PluginOptions, loop: Loop) {
 
 async function refresh($: EngineInterface, options: PluginOptions, loop: Loop) {
   try {
-    const page = loop.count ? await list($, options, loop.count) : { runs: [], serverTime: undefined, unavailable: [] }
+    const page = loop.count ? await list($, options, loop.count) : { runs: [], clocks: [], unavailable: [] }
     const recent = page.runs
     const before = await read($, snapshot)
+    const clocks = [...page.clocks, ...(before.clocks ?? [])].filter((clock, index, all) => all.findIndex(row => row.profile === clock.profile) === index)
     const missing = before.pins.filter(pin => active(pin.run) && !recent.some(run => run.id === pin.run.id))
-    const details = await Promise.allSettled(missing.map(async pin => ({ ...await get($, options, pin.run.id, pin.run.profile), clockOffset: pin.run.clockOffset })))
+    const details = await Promise.allSettled(missing.map(pin => get($, options, pin.run.id, pin.run.profile)))
     const unavailable = new Set(page.unavailable)
     details.forEach((detail, index) => {
       const source = missing[index]!.run.profile
@@ -50,10 +51,12 @@ async function refresh($: EngineInterface, options: PluginOptions, loop: Loop) {
       if (loop.stopped) return state
       // Rows age on the server's clock, which stamped them; watches expire on this one.
       return {
-        recent, reachable: true, now: page.serverTime ?? now, unavailable: [...unavailable],
+        recent, reachable: true, now, clocks, unavailable: [...unavailable],
         pins: state.pins.map(pin => {
-          if (pin.doneAt !== null) return pin
-          const run = observed.find(run => run.id === pin.run.id) ?? pin.run
+          const observedRun = observed.find(run => run.id === pin.run.id) ?? pin.run
+          const clockOffset = clocks.find(clock => clock.profile === observedRun.profile)?.offset
+          const run = { ...observedRun, clockOffset }
+          if (pin.doneAt !== null) return { ...pin, run }
           const doneAt = active(run) ? null : now
           if (doneAt !== null) finished.push(outcome(run))
           return { run, doneAt }
@@ -72,7 +75,7 @@ async function watch($: EngineInterface, options: PluginOptions, id: string): Pr
   await update($, snapshot, state => {
     const pins = state.pins.filter(pin => active(pin.run) && pin.run.id !== run.id)
     if (pins.length === 3) throw new Error('Three runs are already pinned. Wait for one to finish.')
-    const clockOffset = state.recent.find(row => row.id === run.id)?.clockOffset
+    const clockOffset = state.clocks?.find(clock => clock.profile === run.profile)?.offset
     return { ...state, reachable: true, pins: [...pins, { run: { ...run, clockOffset }, doneAt: null }] }
   })
   return `Watching ${run.id} until it finishes.`
@@ -85,7 +88,7 @@ function commands(on: On, options: PluginOptions) {
       const match = /^(?:--limit[= ](\d+))?$/.exec(arg)
       if (!match) throw new Error('Use /oberth-runs [--limit=N].')
       const page = await list($, options, limit(match[1]))
-      return { text: table(page.runs, page.serverTime ?? await $.clock.now(), e.presentation.columns) }
+      return { text: table(page.runs, await $.clock.now(), e.presentation.columns) }
     } catch (error) { return { text: errorText(error) } }
   })
   on('command.run', { command: 'oberth-watch' }, async ($, e) => {

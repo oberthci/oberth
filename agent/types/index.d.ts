@@ -24,7 +24,8 @@ export type Run = {
 // Local provenance; never sent to the CLI. Offset maps each server's clock to this host's.
 export type ObservedRun = Run & { profile?: string; clockOffset?: number }
 export type Pin = { run: ObservedRun; doneAt: number | null }
-export type Snapshot = { recent: ObservedRun[]; pins: Pin[]; reachable: boolean; now: number; unavailable?: string[] }
+export type ProfileClock = { profile: string; offset: number }
+export type Snapshot = { recent: ObservedRun[]; pins: Pin[]; reachable: boolean; now: number; unavailable?: string[]; clocks?: ProfileClock[] }
 
 declare module 'claude-code' {
   interface PluginState {
