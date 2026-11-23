@@ -1666,7 +1666,8 @@
       "internal/argojob/argojobtest"
     ],
     "internal/api": [
-      "pkg/argoworkflow/argoworkflowtest"
+      "pkg/argoworkflow/argoworkflowtest",
+      "internal/service"
     ],
     "pkg/argoworkflow": [
       "pkg/argoworkflow/argoworkflowtest"
