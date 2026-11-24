@@ -7,6 +7,18 @@ import (
 	"testing"
 )
 
+func TestRegistryFederationRefusesMalformedHosts(t *testing.T) {
+	for _, host := range []string{"", "https://registry.example.invalid", "registry.example.invalid/path", "registry.example.invalid?query", "registry.example.invalid:123456", "registry.example.invalid\n"} {
+		t.Run(host, func(t *testing.T) {
+			_, _, _, err := registryIdentity([]string{"--provider", "projects/123/locations/global/workloadIdentityPools/pool/providers/provider",
+				"--service-account", "writer@project.iam.gserviceaccount.com", "--identity-file", "subject", "--dir", "unused", "--registry", host})
+			if !errors.Is(err, federationConfig) {
+				t.Fatal("malformed registry host was accepted", err)
+			}
+		})
+	}
+}
+
 func TestRegistryFederationRefusesMalformedResources(t *testing.T) {
 	const provider = "projects/123/locations/global/workloadIdentityPools/pool/providers/provider"
 	const account = "writer@project.iam.gserviceaccount.com"
