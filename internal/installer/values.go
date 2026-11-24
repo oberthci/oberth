@@ -51,7 +51,7 @@ func values(r Release, c Choices, stored map[string]any) (map[string]any, error)
 		return nil, err
 	}
 	v = merge(v, map[string]any{"nodePorts": map[string]any{"https": c.HTTPSNodePort, "ssh": c.SSHNodePort}})
-	v["statusChosen"] = statusChoices(c, stored)
+	v["statusOrigins"] = statusOrigins(c, stored)
 	return inputs(r.chart, v, c.Namespace)
 }
 
@@ -144,29 +144,64 @@ func copyValue(value any) any {
 	}
 }
 
-func statusChoices(c Choices, stored map[string]any) []any {
-	chosen := append(savedStatusChoices(stored), c.statusSelected...)
+func statusOrigins(c Choices, stored map[string]any) map[string]any {
+	origins := inheritedStatusOrigins(stored)
+	if c.statusOrigins != nil {
+		origins = maps.Clone(c.statusOrigins)
+	}
+	for _, name := range c.statusSelected {
+		origins[name] = "chosen"
+	}
+	values := map[string]any{}
+	for name, origin := range origins {
+		values[name] = origin
+	}
+	return values
+}
+
+func inheritedStatusOrigins(stored map[string]any) map[string]string {
+	raw, _ := json.Marshal(stored["statusOrigins"])
+	origins := map[string]string{}
+	_ = json.Unmarshal(raw, &origins)
+	if origins == nil {
+		origins = map[string]string{}
+	}
+	baseline := "default"
+	if len(stored) > 0 {
+		baseline = ""
+	}
+	for _, name := range configurableSettings() {
+		if _, known := origins[name]; !known {
+			origins[name] = baseline
+		}
+	}
+	return origins
+}
+
+func configurableSettings() []string {
+	return []string{"namespace", "pipeline namespace", "HTTPS node port", "SSH node port", "SSH port", "server URL", "parallel runs", "Pod defaults", "link-local egress filter", "source pins", "store mode", "log bytes per run", "schedule entries", "assist TTL seconds", "data volume size", "temporary volume size", "database file"}
+}
+
+func explicitStatusChoices(c Choices) []string {
+	chosen := scalarStatusChoices(c)
 	for name, selected := range map[string]bool{
-		"parallel runs":            c.Parallel != nil,
-		"Pod defaults":             c.PodFloor != nil,
+		"parallel runs": c.Parallel != nil, "Pod defaults": c.PodFloor != nil,
 		"link-local egress filter": c.Egress != nil,
 		"source pins":              c.ClearSourcePins || c.SourcePins != nil,
-		"server URL":               !c.derivedURL && c.URL != "",
-		"store mode":               c.Store != nil || c.StoreAddress != "",
+		"server URL":               c.URL != "", "store mode": c.Store != nil || c.StoreAddress != "",
 	} {
-		if selected && !slices.Contains(chosen, name) {
+		if selected {
 			chosen = append(chosen, name)
 		}
 	}
-	chosen = append(chosen, explicitValueSettings(c)...)
+	return append(chosen, explicitValueSettings(c)...)
+}
 
-	slices.Sort(chosen)
-	chosen = slices.Compact(chosen)
-	values := make([]any, len(chosen))
-	for i, name := range chosen {
-		values[i] = name
+func (c *Choices) captureStatusChoices() {
+	c.statusSelected = nil
+	if c.statusOrigins == nil {
+		c.statusSelected = explicitStatusChoices(*c)
 	}
-	return values
 }
 
 func explicitValueSettings(c Choices) []string {
@@ -174,7 +209,7 @@ func explicitValueSettings(c Choices) []string {
 	for name, path := range map[string][2]string{
 		"parallel runs": {"runs", "parallel"}, "Pod defaults": {"policies", "floor"}, "link-local egress filter": {"policies", "egress"},
 		"log bytes per run": {"logs", "run_limit_bytes"}, "schedule entries": {"schedules", "max_entries"}, "assist TTL seconds": {"assist", "ttl_seconds"},
-		"store mode":       {"secretStore", "bundled"},
+		"store mode": {"secretStore", "bundled"}, "database file": {"database", "file"},
 		"data volume size": {"storage", "size"}, "temporary volume size": {"storage", "tmp"},
 	} {
 		if object, ok := c.Values[path[0]].(map[string]any); ok {
@@ -184,13 +219,6 @@ func explicitValueSettings(c Choices) []string {
 		}
 	}
 	return chosen
-}
-
-func savedStatusChoices(stored map[string]any) []string {
-	raw, _ := json.Marshal(stored["statusChosen"])
-	var names []string
-	_ = json.Unmarshal(raw, &names)
-	return names
 }
 
 func scalarStatusChoices(c Choices) []string {

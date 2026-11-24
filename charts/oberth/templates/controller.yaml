@@ -44,7 +44,7 @@ metadata:
   name: {{ .Values.server.runtime.controller_configmap }}
   namespace: {{ include "oberth.argoNamespace" . }}
   annotations:
-    oberth.ci/parallel-origin: {{ ternary "chosen" "default" (has "parallel runs" (default (list) .Values.statusChosen)) | quote }}
+    oberth.ci/parallel-origin: {{ get (default (dict "parallel runs" "default") .Values.statusOrigins) "parallel runs" | quote }}
 data:
   {{- include "oberth.controllerData" . | nindent 2 }}
 ---

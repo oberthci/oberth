@@ -9392,7 +9392,7 @@
   "spec_sha256": {
     "docs/plans/c1-transport-and-tool-registry.md": "a20f41f102aef6a09777a919ff133566bc17813a6461b6d36617c2bf114942bf",
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
-    "docs/plans/c11-cli-and-server-composition.md": "4d4de9c281c0220266cffd5603c4c0314d680266446c9ed64d8bb45916106afb",
+    "docs/plans/c11-cli-and-server-composition.md": "ee9cc312b80039fe37d60f35b9c31c33dbc83aea4dfbe2aac943e40ecf38ce53",
     "docs/plans/c12-agent-client.md": "91f7db680250cfa1e1c9a32df8e28efb004c687e6ea0a7ef8376ccbbcbe8dfd4",
     "docs/plans/c13-own-pipelines.md": "2be0f87654a8cc52525eb7d105b4f662a8b4f21fdd899cd19e4459bda150bda0",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
@@ -9403,7 +9403,7 @@
     "docs/plans/c6-source-delivery.md": "a3846f5f32189988bc2135ff72d4db6cce88d68ed675df116e508bb84f29e113",
     "docs/plans/c7-durable-state.md": "62094b0475735bd2427ee573807cdc767a45befdaa86a0472f6587629d537361",
     "docs/plans/c8-logs.md": "d406f3a01f449719be4aa255d628b908e9a8a1e33230f3c21b9b50ce0e74a61d",
-    "docs/plans/c9-install-and-upgrade.md": "a5d7f3b4672cbdf9e81c2dfe6698c8a6b8fb0da4201d0e28f2c0133e1a6060b3"
+    "docs/plans/c9-install-and-upgrade.md": "f06974905316c70450ecd48006e615e45ceff5e126fe530f39a4327adb76a1d2"
   },
   "deltas": [
     {

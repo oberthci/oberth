@@ -222,7 +222,7 @@ and cancellation causes.
 commit, date and schema to the selected build and database, so identity values
 vary by installation. Health, readiness and metrics belong to C11; retain
 readiness verdicts and scenario counters, with typed DTO and metric names as
-declared here. System status and web share allowlisted effective settings with default/chosen origins; raw configuration and credentials stay private. Settings are authenticated; registration totals are admin-only. Run cap and origin come from the controller ConfigMap; cap choices do not change server inputs.
+declared here. System status and web share allowlisted effective settings with origins from saved explicit choices and unmarked observations; raw configuration and credentials stay private. Settings are authenticated; registration totals are admin-only. Run cap and origin come from the controller ConfigMap; cap choices do not change server inputs.
 
 **Delta:** The happy path allows `oberth promote <sha>` without a file,
 pipeline scaffolding, secret storage without cluster access and enrollment

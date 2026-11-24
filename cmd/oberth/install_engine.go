@@ -92,9 +92,6 @@ func (a application) openInstallation(r installationRequest) (installationSessio
 	if s.name == "" && dir != "" {
 		s.name = filepath.Base(dir)
 	}
-	if s.choices.Namespace == "" {
-		s.choices.Namespace = s.profile.Namespace
-	}
 	return s, nil
 }
 

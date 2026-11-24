@@ -57,7 +57,7 @@ func TestAdoptedServerJSONContract(t *testing.T) {
 			"logs":          values["logs"], "schedules": values["schedules"], "assist": values["assist"],
 			"runtime": configuredServerRuntime(),
 			"installation": map[string]any{
-				"bundled_store": true, "chosen": []any{}, "data_size": "10Gi", "tmp_size": "2Gi",
+				"bundled_store": true, "origins": map[string]any{}, "data_size": "10Gi", "tmp_size": "2Gi",
 				"https_node_port": 30443, "ssh_node_port": 30022,
 				"link_local_filter": true, "pod_defaults": true, "pod_security": "baseline",
 				"source_image":     "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin:dev",

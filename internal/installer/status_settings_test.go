@@ -5,7 +5,6 @@ import (
 	"errors"
 	"github.com/oberthci/oberth/internal/installer"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -50,15 +49,15 @@ func TestExplicitScalarDefaultsKeepChosenOrigins(t *testing.T) {
 	p := prepare(t, f)
 	var detail struct {
 		Values struct {
-			Chosen []string `json:"statusChosen"`
+			Origins map[string]string `json:"statusOrigins"`
 		} `json:"values"`
 	}
 	if err := json.Unmarshal([]byte(strings.Join(p.Detail(), "\n")), &detail); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"namespace", "pipeline namespace", "HTTPS node port", "SSH node port", "SSH port", "source pins", "store mode"} {
-		if !slices.Contains(detail.Values.Chosen, name) {
-			t.Fatal("explicit default origin lost", name, detail.Values.Chosen)
+		if detail.Values.Origins[name] != "chosen" {
+			t.Fatal("explicit default origin lost", name, detail.Values.Origins)
 		}
 	}
 }

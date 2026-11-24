@@ -434,19 +434,23 @@
         "type": "string"
       }
     },
-    "statusChosen": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "uniqueItems": true
-    },
     "statusPodSecurity": {
       "type": "string",
       "enum": [
         "baseline",
         "restricted"
       ]
+    },
+    "statusOrigins": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": [
+          "default",
+          "chosen",
+          ""
+        ]
+      }
     }
   },
   "$schema": "http://json-schema.org/draft-07/schema#",

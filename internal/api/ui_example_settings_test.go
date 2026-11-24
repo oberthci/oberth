@@ -32,6 +32,10 @@ func exampleSettingsStatus() apicontract.SystemStatus {
 		if i%3 == 0 {
 			source = "chosen"
 		}
+		switch pair[0] {
+		case "store state", "last backup", "registered upstreams", "registered repositories":
+			source = ""
+		}
 		settings = append(settings, apicontract.EffectiveSetting{Name: pair[0], Value: pair[1], Source: source})
 	}
 	status.Settings = &settings

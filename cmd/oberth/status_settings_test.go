@@ -13,7 +13,7 @@ import (
 func TestEffectiveSettingsExcludePrivateConfiguration(t *testing.T) {
 	c := testComposition(t)
 	taintStatusConfiguration(c)
-	c.config.Installation = installationSettings{PodDefaults: true, BundledStore: true, LinkLocalFilter: true, PodSecurity: "baseline", HTTPSNodePort: 30443, SSHNodePort: 30022, Chosen: []string{"Pod defaults"}}
+	c.config.Installation = installationSettings{PodDefaults: true, BundledStore: true, LinkLocalFilter: true, PodSecurity: "baseline", HTTPSNodePort: 30443, SSHNodePort: 30022, Origins: map[string]string{"Pod defaults": "chosen"}}
 	c.settings.Defaults.WorkflowDefaults = json.RawMessage(`{"env":[{"name":"PASSWORD","value":"PRIVATE-DEFAULT"}]}`)
 	c.settings.SourcePolicy = json.RawMessage(`{"PRIVATE-SECRET-PATH":["PRIVATE-PRODUCER"]}`)
 	a := serverAdministration{&serverOwners{c: c, settings: c.settings, cluster: clusterClients{Kube: statusControllerClient(c.config.ArgoNamespace, "4", "default")}}}
@@ -36,7 +36,7 @@ func assertEffectiveSettings(t *testing.T, settings []apicontract.EffectiveSetti
 	t.Helper()
 	byName := map[string]apicontract.EffectiveSetting{}
 	for _, row := range settings {
-		if row.Source != "default" && row.Source != "chosen" {
+		if row.Source != "default" && row.Source != "chosen" && row.Source != "" {
 			t.Fatal("missing origin", row)
 		}
 		byName[row.Name] = row

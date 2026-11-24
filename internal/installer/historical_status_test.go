@@ -53,6 +53,7 @@ func TestRollbackToReleasedChartUsesItsDeclaredValues(t *testing.T) {
 	previous := f.charts.History.Deployed
 	previous.Version, previous.Kind = old.version, "verified"
 	delete(previous.Values, "statusChosen")
+	delete(previous.Values, "statusOrigins")
 	delete(previous.Values, "statusPodSecurity")
 	f.charts.History.Deployed, f.charts.History.Latest = previous, previous
 	setInstalledMetadata(t, f, "verified", 6)
@@ -81,7 +82,7 @@ func TestRollbackToReleasedChartUsesItsDeclaredValues(t *testing.T) {
 	if _, err = installer.Render(last.Chart, last.Values, last.Namespace); err != nil {
 		t.Fatal("released chart does not validate", err)
 	}
-	for _, name := range []string{"statusChosen", "statusPodSecurity"} {
+	for _, name := range []string{"statusChosen", "statusOrigins", "statusPodSecurity"} {
 		if _, exists := last.Values[name]; exists {
 			t.Fatal("undeclared value reached the old chart", name)
 		}

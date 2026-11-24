@@ -87,6 +87,7 @@ func (m Maintenance) rollbackPlan(ctx context.Context, r Record) (*Plan, error) 
 		return nil, problem("restore-proof", nil)
 	}
 	c := deployedChoices(Choices{Context: r.Context, Namespace: r.Namespace, Values: operatorValues(merge(earlier.chart.Values, r.Source.Values))}, r.Source.Values)
+	c.statusOrigins = inheritedStatusOrigins(r.Source.Values)
 	// The source pins come from the recorded source revision, not from the
 	// revision being rolled back.
 	c.ClearSourcePins = true

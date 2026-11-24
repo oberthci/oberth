@@ -7,7 +7,7 @@ func TestChosenRunCapDoesNotChangeServerInputs(t *testing.T) {
 	server := object(t, baseline, "Deployment", "oberth")["spec"].(map[string]any)["template"]
 	config := object(t, baseline, "ConfigMap", "oberth-server")["data"]
 	for _, cap := range []int{0, 1, 4, 6} {
-		objects := rendered(t, map[string]any{"runs": map[string]any{"parallel": cap}, "statusChosen": []any{"parallel runs"}})
+		objects := rendered(t, map[string]any{"runs": map[string]any{"parallel": cap}, "statusOrigins": map[string]any{"parallel runs": "chosen"}})
 		if jsonOf(t, object(t, objects, "Deployment", "oberth")["spec"].(map[string]any)["template"]) != jsonOf(t, server) || jsonOf(t, object(t, objects, "ConfigMap", "oberth-server")["data"]) != jsonOf(t, config) {
 			t.Fatal("chosen run cap changes server inputs", cap)
 		}

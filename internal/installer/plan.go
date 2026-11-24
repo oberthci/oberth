@@ -114,7 +114,7 @@ func (e *Engine) prepare(ctx context.Context, r Release, c Choices, minimumSchem
 	if r.chart == nil || !e.configured() {
 		return nil, problem("wiring", nil)
 	}
-	c.statusSelected = scalarStatusChoices(c)
+	c.captureStatusChoices()
 	c, uid, err := e.target(ctx, c)
 	if err != nil {
 		return nil, err
@@ -134,6 +134,7 @@ func (e *Engine) prepare(ctx context.Context, r Release, c Choices, minimumSchem
 	if err != nil {
 		return nil, err
 	}
+	c.statusOrigins = inheritedStatusOrigins(v)
 	if err = e.readIdentities(ctx, c.Namespace, h.Deployed.Number > 0); err != nil {
 		return nil, err
 	}
