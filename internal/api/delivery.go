@@ -1,8 +1,6 @@
 package api
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -81,11 +79,7 @@ func (s *Server) writeJSON(w http.ResponseWriter, r *http.Request, reply jsonRep
 		}
 	}
 	if acceptsGzip(r.Header.Get("Accept-Encoding")) {
-		var buf bytes.Buffer
-		z := gzip.NewWriter(&buf)
-		_, _ = z.Write(data)
-		_ = z.Close()
-		data = buf.Bytes()
+		data = gzipJSON(data)
 		w.Header().Set("Content-Encoding", "gzip")
 	}
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
