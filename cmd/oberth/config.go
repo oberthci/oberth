@@ -31,11 +31,12 @@ type serverFiles struct {
 }
 
 type serverConfig struct {
-	Files             serverFiles `json:"files"`
-	Version           int         `json:"version"`
-	Namespace         string      `json:"namespace"`
-	ArgoNamespace     string      `json:"argo_namespace"`
-	PipelineNamespace string      `json:"pipeline_namespace"`
+	Installation      installationSettings `json:"installation"`
+	Files             serverFiles          `json:"files"`
+	Version           int                  `json:"version"`
+	Namespace         string               `json:"namespace"`
+	ArgoNamespace     string               `json:"argo_namespace"`
+	PipelineNamespace string               `json:"pipeline_namespace"`
 	Public            struct {
 		URL     string `json:"url"`
 		SSHPort int    `json:"ssh_port"`

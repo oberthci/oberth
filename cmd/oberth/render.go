@@ -103,6 +103,9 @@ func factLine(path, value string) string {
 }
 
 func renderView(out io.Writer, value map[string]any, detail bool) (bool, error) {
+	if _, ok := value["settings"].([]any); ok {
+		return true, renderSettings(out, value, detail)
+	}
 	if _, ok := value["tested_run_id"]; ok {
 		return true, renderPromotion(out, value, detail)
 	}

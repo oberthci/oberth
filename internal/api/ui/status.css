@@ -1,0 +1,5 @@
+.effective-settings { margin-top: 1.5rem; min-width: 0; }
+.settings-scroll { overflow-x: auto; max-width: 100%; }
+.settings-table { display: grid; grid-template-columns: minmax(12rem, max-content) 5rem minmax(16rem, 1fr); width: max-content; min-width: 100%; }
+.setting-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; white-space: nowrap; }
+.setting-row > span { padding: .4rem .7rem; border-bottom: 1px solid var(--line); }

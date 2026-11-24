@@ -19,6 +19,7 @@
 {{- $_ := set $server $key (index $.Values $key) -}}
 {{- end -}}
 
+{{- $_ := set $server "installation" (include "oberth.statusSettings" . | fromJson) -}}
 {{- $json := $server | toJson -}}
 {{- if gt (len $json) 1048576 -}}
 {{- fail "server.json must be at most 1 MiB" -}}

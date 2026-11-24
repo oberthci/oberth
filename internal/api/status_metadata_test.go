@@ -19,7 +19,7 @@ func TestAdminStatusRegistryDeclaresExactlySchemaAndProtocolMetadata(t *testing.
 	if err := json.Unmarshal(w.Body.Bytes(), &fields); err != nil {
 		t.Fatal(err)
 	}
-	if string(fields["schema_version"]) != "7" {
+	if string(fields["schema_version"]) != "7" || fields["settings"] != nil {
 		t.Fatal("schema metadata missing")
 	}
 	b := fake.Bindings()
@@ -32,8 +32,17 @@ func TestAdminStatusRegistryDeclaresExactlySchemaAndProtocolMetadata(t *testing.
 			continue
 		}
 		properties := tool.OutputSchema["properties"].(apicontract.Schema)
-		if len(properties) != 7 || properties["schema_version"].(apicontract.Schema)["type"] != "integer" || properties["protocol"].(apicontract.Schema)["type"] != "object" || properties["parts"].(apicontract.Schema)["type"] != "array" {
+		if len(properties) != 8 || properties["schema_version"].(apicontract.Schema)["type"] != "integer" || properties["protocol"].(apicontract.Schema)["type"] != "object" || properties["parts"].(apicontract.Schema)["type"] != "array" {
 			t.Fatal("status metadata contract differs")
 		}
+		assertOptionalSettingsSchema(t, properties["settings"].(apicontract.Schema))
+	}
+}
+
+func assertOptionalSettingsSchema(t *testing.T, schema apicontract.Schema) {
+	t.Helper()
+	settings := schema["anyOf"].([]apicontract.Schema)
+	if len(settings) != 2 || settings[0]["type"] != "array" || settings[1]["type"] != "null" {
+		t.Fatal("optional public settings contract differs", settings)
 	}
 }

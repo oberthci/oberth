@@ -154,6 +154,10 @@ func (a serverAdministration) Status(ctx context.Context, action string) (apicon
 			result.Ready, result.DisplayReason = false, "not ready"
 		}
 	}
+	if action == "system_status" {
+		settings := a.effectiveSettings(ctx, result.Parts)
+		result.Settings = &settings
+	}
 	if action == "admin_idle" {
 		idle, err := a.owner.c.store.Idle(ctx)
 		if err != nil {

@@ -106,7 +106,7 @@ func uiExample(t *testing.T) *fixture {
 		b.IssueGet.Handler = exampleImportedIssue(issue, issues)
 		b.IssueList.Handler = exampleIssueList(issues)
 		c.Views.Counts.Handler = &fake.Handler[apicontract.Empty, apicontract.RunCounts]{Value: apicontract.RunCounts{Queued: 1, Running: 2, Passed: 140, Failed: 9, Cancelled: 3}}
-		b.SystemStatus.Handler = &fake.Handler[apicontract.SystemStatusArgs, apicontract.SystemStatus]{Value: apicontract.SystemStatus{Ready: true, Version: "1"}}
+		b.SystemStatus.Handler = &fake.Handler[apicontract.SystemStatusArgs, apicontract.SystemStatus]{Value: exampleSettingsStatus()}
 		c.Views.Containers.Handler = &fake.Handler[apicontract.IDArgs, apicontract.ContainerPage]{Value: apicontract.ContainerPage{Containers: []apicontract.Container{{NodeID: "attempt-one", Container: "main"}, {NodeID: "attempt-two", Container: "main"}}}}
 	})
 }

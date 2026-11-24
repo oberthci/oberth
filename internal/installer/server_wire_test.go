@@ -23,7 +23,8 @@ import (
 // This wire type follows cmd/oberth/config.go and server_runtime.go on C11.
 // C11 runs the real loader against the chart after the install landing.
 type chartServerConfig struct {
-	Files struct {
+	Installation json.RawMessage `json:"installation"`
+	Files        struct {
 		SecretStoreCA    string `json:"secret_store_ca" format:"absolute-path"`
 		SecretStoreToken string `json:"secret_store_token" format:"absolute-path"`
 		CACertificate    string `json:"ca_certificate" format:"absolute-path"`

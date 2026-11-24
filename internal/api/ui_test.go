@@ -26,12 +26,12 @@ func uiRequest(f *fixture, path string) *httptest.ResponseRecorder {
 }
 
 // uiScripts are the page's scripts, app.js first so its copy catalogue leads the sources.
-func uiScripts() []string { return []string{"app.js", "log.js", "issues.js", "run.js"} }
+func uiScripts() []string { return []string{"app.js", "log.js", "issues.js", "run.js", "status.js"} }
 
 // Each script and the stylesheet stay under the 500-line file budget.
 func TestUIAssetsStayWithinTheFileBudget(t *testing.T) {
 	f := setup(t, nil)
-	for _, name := range append(uiScripts(), "app.css") {
+	for _, name := range append(uiScripts(), "app.css", "status.css") {
 		if lines := strings.Count(uiRequest(f, "/assets/"+name).Body.String(), "\n"); lines == 0 || lines >= 500 {
 			t.Fatal("asset outside the file budget", name, lines)
 		}
@@ -76,7 +76,7 @@ func TestUIHeaders(t *testing.T) {
 func TestUIAssetsVersioned(t *testing.T) {
 	f := setup(t, nil)
 	shell := uiRequest(f, "/runs").Body.String()
-	for _, name := range append(uiScripts(), "app.css") {
+	for _, name := range append(uiScripts(), "app.css", "status.css") {
 		w := uiRequest(f, "/assets/"+name)
 		if w.Header().Get("X-Content-Type-Options") != "nosniff" {
 			t.Fatal("asset sniffing permitted", name)

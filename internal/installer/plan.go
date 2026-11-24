@@ -114,6 +114,7 @@ func (e *Engine) prepare(ctx context.Context, r Release, c Choices, minimumSchem
 	if r.chart == nil || !e.configured() {
 		return nil, problem("wiring", nil)
 	}
+	c.statusSelected = scalarStatusChoices(c)
 	c, uid, err := e.target(ctx, c)
 	if err != nil {
 		return nil, err

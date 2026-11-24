@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,8 @@ import (
 // Choices distinguishes unset values from explicit false and zero. Values uses
 // JSON containers; preparation takes an owned snapshot of nested maps and lists.
 type Choices struct {
+	statusSelected    []string
+	derivedURL        bool
 	StoreAddress      string
 	Context           string
 	URL               string
@@ -69,6 +72,7 @@ func resolve(c Choices, host string) (Choices, error) {
 		c.SSHPort = c.SSHNodePort
 	}
 	if c.URL == "" {
+		c.derivedURL = true
 		if loopbackHost(host) {
 			return c, problem("loopback-url", nil)
 		}
@@ -167,6 +171,7 @@ func deployedChoices(c Choices, stored map[string]any) Choices {
 	public, _ := server["public"].(map[string]any)
 	if c.URL == "" {
 		c.URL, _ = public["url"].(string)
+		c.derivedURL = !slices.Contains(savedStatusChoices(stored), "server URL")
 	}
 	if c.SSHPort == 0 {
 		c.SSHPort = number(public["ssh_port"])

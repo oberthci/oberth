@@ -215,14 +215,21 @@ type PartStatus struct {
 	DisplayReason string `json:"display_reason"`
 }
 
+type EffectiveSetting struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Source string `json:"source"`
+}
+
 type SystemStatus struct {
-	SchemaVersion int                `json:"schema_version,omitempty"`
-	Protocol      stateport.Protocol `json:"protocol,omitzero"`
-	Parts         []PartStatus       `json:"parts"`
-	Ready         bool               `json:"ready"`
-	Version       string             `json:"version"`
-	DisplayReason string             `json:"display_reason"`
-	Detail        string             `json:"detail,omitempty"`
+	Settings      *[]EffectiveSetting `json:"settings,omitempty"`
+	SchemaVersion int                 `json:"schema_version,omitempty"`
+	Protocol      stateport.Protocol  `json:"protocol,omitzero"`
+	Parts         []PartStatus        `json:"parts"`
+	Ready         bool                `json:"ready"`
+	Version       string              `json:"version"`
+	DisplayReason string              `json:"display_reason"`
+	Detail        string              `json:"detail,omitempty"`
 }
 type EventResult struct {
 	model.EventPage

@@ -410,6 +410,7 @@ function statusScreen(view) {
    h("div", {class: "card"}, h("p", {class: "card-name"}, h("span", {class: "mark " + ready, "aria-hidden": "true"}), "Server"), h("p", {class: "card-value " + ready}, status.ready ? "ready" : "unavailable"),
     h("p", {class: "muted"}, "version " + status.version), h("p", {}, status.display_reason), detail(status.detail) || h("span")),
    ...Object.entries(counts).map(([name, count]) => h("div", {class: "card"}, h("p", {class: "card-name"}, h("span", {class: "mark " + name, "aria-hidden": "true"}), "Runs " + name), h("p", {class: "card-value " + name}, String(count))))));
+  region.append(window.OberthStatus.settings(h, status));
  };
 }
 const themes = ["auto", "light", "dark", "mono", "color"], themeButton = document.querySelector("#theme");

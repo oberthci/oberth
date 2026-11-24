@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"encoding/json"
 	"maps"
 	"net/url"
 	"slices"
@@ -50,6 +51,7 @@ func values(r Release, c Choices, stored map[string]any) (map[string]any, error)
 		return nil, err
 	}
 	v = merge(v, map[string]any{"nodePorts": map[string]any{"https": c.HTTPSNodePort, "ssh": c.SSHNodePort}})
+	v["statusChosen"] = statusChoices(c, stored)
 	return inputs(r.chart, v, c.Namespace)
 }
 
@@ -140,4 +142,66 @@ func copyValue(value any) any {
 	default:
 		return value
 	}
+}
+
+func statusChoices(c Choices, stored map[string]any) []any {
+	chosen := append(savedStatusChoices(stored), c.statusSelected...)
+	for name, selected := range map[string]bool{
+		"parallel runs":            c.Parallel != nil,
+		"Pod defaults":             c.PodFloor != nil,
+		"link-local egress filter": c.Egress != nil,
+		"source pins":              c.ClearSourcePins || c.SourcePins != nil,
+		"server URL":               !c.derivedURL && c.URL != "",
+		"store mode":               c.Store != nil || c.StoreAddress != "",
+	} {
+		if selected && !slices.Contains(chosen, name) {
+			chosen = append(chosen, name)
+		}
+	}
+	chosen = append(chosen, explicitValueSettings(c)...)
+
+	slices.Sort(chosen)
+	chosen = slices.Compact(chosen)
+	values := make([]any, len(chosen))
+	for i, name := range chosen {
+		values[i] = name
+	}
+	return values
+}
+
+func explicitValueSettings(c Choices) []string {
+	chosen := []string{}
+	for name, path := range map[string][2]string{
+		"parallel runs": {"runs", "parallel"}, "Pod defaults": {"policies", "floor"}, "link-local egress filter": {"policies", "egress"},
+		"log bytes per run": {"logs", "run_limit_bytes"}, "schedule entries": {"schedules", "max_entries"}, "assist TTL seconds": {"assist", "ttl_seconds"},
+		"store mode":       {"secretStore", "bundled"},
+		"data volume size": {"storage", "size"}, "temporary volume size": {"storage", "tmp"},
+	} {
+		if object, ok := c.Values[path[0]].(map[string]any); ok {
+			if _, selected := object[path[1]]; selected && !slices.Contains(chosen, name) {
+				chosen = append(chosen, name)
+			}
+		}
+	}
+	return chosen
+}
+
+func savedStatusChoices(stored map[string]any) []string {
+	raw, _ := json.Marshal(stored["statusChosen"])
+	var names []string
+	_ = json.Unmarshal(raw, &names)
+	return names
+}
+
+func scalarStatusChoices(c Choices) []string {
+	names := []string{}
+	for name, selected := range map[string]bool{
+		"namespace": c.Namespace != "", "pipeline namespace": c.PipelineNamespace != "",
+		"HTTPS node port": c.HTTPSNodePort != 0, "SSH node port": c.SSHNodePort != 0, "SSH port": c.SSHPort != 0,
+	} {
+		if selected {
+			names = append(names, name)
+		}
+	}
+	return names
 }

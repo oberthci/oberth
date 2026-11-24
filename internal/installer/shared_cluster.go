@@ -11,6 +11,7 @@ func (e *Engine) discoverSharedCluster(ctx context.Context, p *Plan) error {
 		return err
 	}
 	p.request.Values["pipeline"].(map[string]any)["createNamespace"] = pipelineNamespaceCreation(p, state.pipeline)
+	p.request.Values["statusPodSecurity"] = namespaceSecurityLevel(state)
 	p.portScope, err = e.checkNodePorts(ctx, p.choices)
 	if err != nil {
 		return err
@@ -32,6 +33,9 @@ func (e *Engine) recheckSharedCluster(ctx context.Context, p *Plan) (bool, error
 	if err != nil {
 		return false, err
 	}
+	if p.request.Values["statusPodSecurity"] != namespaceSecurityLevel(state) {
+		return false, described("target", nil, "Pipeline Pod Security changed after review.")
+	}
 	create := pipelineNamespaceCreation(p, state.pipeline)
 	if p.request.Values["pipeline"].(map[string]any)["createNamespace"] != create {
 		return false, described("target", nil, "Pipeline namespace ownership changed after review.")
@@ -48,4 +52,11 @@ func (e *Engine) recheckSharedCluster(ctx context.Context, p *Plan) (bool, error
 		return false, described("target", nil, "Shared node ports or workflow definitions changed after review.")
 	}
 	return state.serverAbsent, nil
+}
+
+func namespaceSecurityLevel(state namespaceState) string {
+	if state.pipeline == nil {
+		return "baseline"
+	}
+	return state.pipeline.Labels[podSecurityEnforce]
 }
