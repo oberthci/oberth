@@ -44,4 +44,14 @@ func checkRequestedWorkflow(t *testing.T, f RunFixture) {
 		_, err := f.Port.AcceptBatch(t.Context(), b)
 		runCode(t, err, publicerr.InvalidInput)
 	}
+	// A rejected admission has no prepared seal, so only the stored-request
+	// boundary can refuse an unsafe path here.
+	b := batchFor(t, f, RunCase{ID: "invalid-rejected"})
+	b.Runs[0].Prepared = nil
+	b.Runs[0].Rejected = &stateport.RejectedAdmission{ID: "invalid-rejected",
+		Failure:  stepmodel.FailureRecord{Class: stepmodel.FailureAuthor, Retry: stepmodel.RetryHint{Action: stepmodel.RetryRerun}},
+		Findings: []admissioncontract.Finding{{Code: "missing", Reason: "workflow file is missing", Remedy: "Restore the requested workflow."}}}
+	b.Runs[0].Request.RequestedFile = "../escape.yaml"
+	_, err := f.Port.AcceptBatch(t.Context(), b)
+	runCode(t, err, publicerr.InvalidInput)
 }
