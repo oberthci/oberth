@@ -26,19 +26,12 @@ func readProgress(ctx context.Context, tx *sql.Tx, id string) (progressSnapshot,
 	return before, databaseError(err)
 }
 
-func (s *Store) progressEvent(ctx context.Context, tx *sql.Tx, before progressSnapshot) error {
-	after, err := readProgress(ctx, tx, before.run.ID)
-	if err != nil {
-		return err
-	}
-	if before.steps == after.steps && encode(before.run.RunSummary) == encode(after.run.RunSummary) {
-		return unchanged{}
-	}
+func (s *Store) progressEvent(ctx context.Context, tx *sql.Tx, run stateport.Run) error {
 	// The existing event allocator survives pruning and supplies the projection revision.
 	var sequence int64
-	if err = tx.QueryRowContext(ctx, `SELECT coalesce((SELECT seq FROM sqlite_sequence WHERE name='events'),0)+1`).Scan(&sequence); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT coalesce((SELECT seq FROM sqlite_sequence WHERE name='events'),0)+1`).Scan(&sequence); err != nil {
 		return databaseError(err)
 	}
-	_, err = insertEvent(ctx, tx, stateport.ProgressEvent(after.run, sequence, s.options.Clock()))
+	_, err := insertEvent(ctx, tx, stateport.ProgressEvent(run, sequence, s.options.Clock()))
 	return err
 }

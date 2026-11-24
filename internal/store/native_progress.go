@@ -19,10 +19,10 @@ func (s *Store) SaveProgress(ctx context.Context, id string, p stateport.Progres
 		if err != nil {
 			return err
 		}
-		plan, err := readPlan(ctx, tx, id)
-		if err != nil {
-			return err
+		if !before.run.HasAdmission {
+			return refuse(noAdmission, nil)
 		}
+		plan := before.run.Admission.Plan
 		if !stateport.ValidNativeSteps(plan, steps) || publicerr.CheckMessage(p.Waiting, 40) != nil {
 			return refuse(invalid, nil)
 		}
@@ -31,33 +31,40 @@ func (s *Store) SaveProgress(ctx context.Context, id string, p stateport.Progres
 		if err != nil {
 			return refuse(invalid, err)
 		}
+		next := projectNativeProgress(before.run, stateport.Progress{Steps: steps, Waiting: p.Waiting})
+		next.LogicalStepCounts = counts
+		sameSummary := encode(before.run.RunSummary) == encode(next.RunSummary)
+		if before.steps == encode(steps) && sameSummary {
+			return unchanged{}
+		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO native_steps VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET value=excluded.value`, id, encode(steps)); err != nil {
 			return databaseError(err)
 		}
-		if err = recordProgress(ctx, tx, before.run, stateport.Progress{Steps: steps, Waiting: p.Waiting}); err != nil {
-			return err
+		if !sameSummary {
+			if err = writeProgressSummary(ctx, tx, id, next.RunSummary); err != nil {
+				return err
+			}
 		}
-		if err = saveCounts(ctx, tx, id, counts); err != nil {
-			return err
-		}
-		return s.progressEvent(ctx, tx, before)
+		return s.progressEvent(ctx, tx, next)
 	})
 }
 
-// recordProgress sets the run's start from its earliest started step and, while
+func writeProgressSummary(ctx context.Context, tx *sql.Tx, id string, summary stepmodel.RunSummary) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status=?,summary=? WHERE id=?`, summary.Status, encode(summary), id); err != nil {
+		return databaseError(err)
+	}
+	return saveCounts(ctx, tx, id, summary.LogicalStepCounts)
+}
+
+// projectNativeProgress sets the run's start from its earliest started step and, while
 // the run is unfinished, its queued or running status and reason by the rule
 // of stepmodel.Progress. A finished run keeps its status and reason.
-func recordProgress(ctx context.Context, tx *sql.Tx, r stateport.Run, p stateport.Progress) error {
-	next := r.RunSummary
-	next.StartedAt = stepmodel.RunStart(r.StartedAt, p.Steps)
+func projectNativeProgress(r stateport.Run, p stateport.Progress) stateport.Run {
+	r.StartedAt = stepmodel.RunStart(r.StartedAt, p.Steps)
 	if !terminal(r.Status) {
-		next.Status, next.DisplayReason = stepmodel.Progress(r.Status, r.DisplayReason, p.Steps, p.Waiting)
+		r.Status, r.DisplayReason = stepmodel.Progress(r.Status, r.DisplayReason, p.Steps, p.Waiting)
 	}
-	if next.StartedAt == r.StartedAt && next.Status == r.Status && next.DisplayReason == r.DisplayReason {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, `UPDATE runs SET status=?,summary=? WHERE id=?`, next.Status, encode(next), r.ID)
-	return databaseError(err)
+	return r
 }
 
 // Steps returns the saved projection verbatim, or the plan and evidence before observation.
