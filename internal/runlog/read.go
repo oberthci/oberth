@@ -87,7 +87,7 @@ func validSpans(spans []span, size int64) error {
 func (s *Store) Read(ctx context.Context, id string, request ReadRequest) ([]byte, Meta, error) {
 	file, view, err := s.snapshot(ctx, id, request)
 	if err != nil {
-		return nil, Meta{Reason: publicerr.Classify(err).Reason(), Follow: view.follow, Copying: view.copying}, err
+		return nil, Meta{Reason: publicerr.Classify(err).Reason(), Follow: view.follow, Copying: view.copying, Waiting: view.waiting}, err
 	}
 	var source io.ReaderAt = strings.NewReader("")
 	if file != nil {
@@ -96,7 +96,7 @@ func (s *Store) Read(ctx context.Context, id string, request ReadRequest) ([]byt
 	}
 	body, meta, err := scan(ctx, source, view.spans, request.Filter)
 	meta.Reason, meta.Detail, meta.Follow = view.reason, view.detail, view.follow
-	meta.Copying = view.copying
+	meta.Copying, meta.Waiting = view.copying, view.waiting
 	meta.Truncated = meta.Truncated || view.truncated
 	if meta.Bytes == 0 && meta.Reason == "" && unfiltered(request) {
 		meta.Reason = noOutputReason

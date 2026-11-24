@@ -12,6 +12,7 @@ type selected struct {
 	truncated      bool
 	follow         bool
 	copying        bool
+	waiting        bool
 }
 
 func selection(saved index, request ReadRequest) (selected, error) {
@@ -39,7 +40,9 @@ func selection(saved index, request ReadRequest) (selected, error) {
 		result.explain(entry)
 	}
 	if filtered && !matched {
-		return result, missingSelection(saved, request)
+		err := missingSelection(saved, request)
+		result.waiting = publicerr.Classify(err).Reason() == waitingReason
+		return result, err
 	}
 	if len(result.spans) == 0 {
 		return result, notStored(stateReason(pending))
@@ -141,6 +144,8 @@ func matchesRequest(entry ContainerLog, request ReadRequest) bool {
 
 func (r *selected) observe(entry ContainerLog) {
 	switch entry.State {
+	case Waiting:
+		r.waiting = true
 	case Following:
 		r.follow = true
 	case Copying:

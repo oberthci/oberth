@@ -279,6 +279,7 @@ function runScreen(view, id) {
   replace(steps, (run.steps || []).length ? [h("p", {class: "steps-head"}, "Steps · " + (run.steps_planned_exact ? "" : ">=") + run.step_count), ...stepRows(view, run.steps, path, pane)] : [empty(copy.emptySteps)]);
   if (run.next_step_offset !== undefined) steps.append(button("Next 100 steps", () => { view.offset = run.next_step_offset; refresh(view); }));
   if (view.offset) steps.append(button("First steps", () => { view.offset = 0; refresh(view); }));
+  view.runStatus = run.status;
   const selected = run.steps?.find(step => step.plan_path === view.selected);
   if (view.selected === undefined && run.steps?.length) chooseStep(view, run.steps.find(step => step.status === "failed") || run.steps[0], path, pane, false);
   else updateSelectedStep(view, selected);

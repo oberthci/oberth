@@ -21,18 +21,20 @@ import (
 )
 
 type progressPage struct {
-	store   *statefake.MovingRuns
-	id      string
-	mu      sync.Mutex
-	ready   chan struct{}
-	waiting bool
+	store    *statefake.MovingRuns
+	id       string
+	mu       sync.Mutex
+	ready    chan struct{}
+	waiting  bool
+	lateLog  bool
+	logReady bool
 }
 
 // The browser drives native facts; the real event service supplies every wakeup.
 func progressExample(t *testing.T) http.Handler {
 	store := statefake.WithMoving(statefake.NewRuns(testNow))
 	store.SeedRepository(stateport.Repository{ID: 1, Upstream: "origin", Name: "web", Canonical: "origin/team/web"})
-	p := &progressPage{store: store, id: strings.Repeat("c", 32), ready: make(chan struct{})}
+	p := &progressPage{store: store, id: strings.Repeat("c", 32), ready: make(chan struct{}), lateLog: os.Getenv("OBERTH_UI_LATE_LOG") != ""}
 	plan := admissioncontract.Plan{Entries: []admissioncontract.PlanEntry{{Path: "prepare", Name: "prepare"}, {Path: "test", Name: "test"}}}
 	store.SeedRun(stateport.Run{HasAdmission: true, RepositoryID: 1, RunSummary: stepmodel.RunSummary{ID: p.id, Repo: "origin/team/web", Ref: "refs/heads/progress", Status: stepmodel.RunQueued, CreatedAt: testNow()}, Admission: admissioncontract.PreparedView{Plan: plan}})
 	store.SeedSteps(p.id, []stepmodel.RunStep{{Path: "prepare", Name: "prepare", Status: stepmodel.StepQueued, Detail: "Prepare diagnostics."}, {Path: "test", Name: "test", Status: stepmodel.StepPending}})
@@ -48,6 +50,13 @@ func progressExample(t *testing.T) http.Handler {
 		b.SystemStatus.Handler = &fake.Handler[apicontract.SystemStatusArgs, apicontract.SystemStatus]{Value: apicontract.SystemStatus{Ready: true, Version: "1"}}
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/example/log-ready" {
+			p.mu.Lock()
+			p.logReady = true
+			p.mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.URL.Path != "/example/progress" {
 			f.server.Handler().ServeHTTP(w, r)
 			return
@@ -130,6 +139,12 @@ func progressSteps(steps []stepmodel.RunStep, phase string, at time.Time) []step
 }
 
 func (p *progressPage) logs(ctx context.Context) (apicontract.LogResult, error) {
+	p.mu.Lock()
+	waiting := p.lateLog && !p.logReady
+	p.mu.Unlock()
+	if waiting {
+		return apicontract.LogResult{Meta: logcontract.Meta{Waiting: true, Reason: "waiting for output"}}, nil
+	}
 	steps, err := p.store.Steps(ctx, p.id)
 	content := "prepare finished\n"
 	if len(steps) > 0 && steps[0].Status == stepmodel.StepRunning {

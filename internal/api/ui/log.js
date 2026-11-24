@@ -18,7 +18,8 @@ async function loadLog(view, path, args, regions, restart) {
     regions.controls.querySelector("button")?.remove();
     if (result.meta.has_more) regions.controls.append(button("Earlier output", () => loadLog(view, path, {...args, byte_offset: result.meta.next_byte_offset}, regions, true)));
     const target = native ? args : result.containers?.at(-1);
-    if (result.meta.copying || (result.meta.follow && args.byte_offset === undefined && !target)) { await waitRetry(250, signal); continue; }
+    const waiting = result.meta.waiting && view.runStatus === "running" && view.logStep?.status === "running" && args.byte_offset === undefined;
+    if (result.meta.copying || waiting || (result.meta.follow && args.byte_offset === undefined && !target)) { await waitRetry(250, signal); continue; }
     if (!result.meta.follow || args.byte_offset !== undefined || !target) return;
     await streamLog(path, target, {regions, signal});
    } catch (error) {

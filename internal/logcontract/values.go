@@ -32,7 +32,8 @@ type Filter struct {
 
 // Meta carries a complete reason of at most 40 characters and separate detail.
 type Meta struct {
-	Copying          bool    `json:"copying"` // Selected retained output has an active copy; readers may poll.
+	Waiting          bool    `json:"waiting,omitempty"` // Selected planned output has no capture yet; an active view may retry.
+	Copying          bool    `json:"copying"`           // Selected retained output has an active copy; readers may poll.
 	Reason           string  `json:"reason,omitempty"`
 	Follow           bool    `json:"follow"` // The view may follow the selected running step through its live transport.
 	Detail           string  `json:"detail,omitempty"`

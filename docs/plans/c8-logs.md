@@ -36,8 +36,8 @@ those definitions; they do not define rival DTOs.
   cursors move backward. Preserve `Meta`'s snake_case fields: `scan_limit_bytes`, `total_lines`, `matched_lines`, `returned_lines`, `tail`, `truncated`,
   `bytes`, `line_numbers`, `line_offsets`, `scan_complete`, `bytes_exact`,
   `scanned_bytes`, `withheld_bytes`, `withheld_lines`,
-  `omitted_long_lines`, `has_more`, `next_byte_offset`, `follow`, `reason`, `detail`. Counts over an incomplete scan
-  cannot claim whole-log totals. `logs.pattern`, `run_logs.pattern`, `logs.raw`,
+  `omitted_long_lines`, `has_more`, `next_byte_offset`, `follow`, `copying`, `waiting`, `reason`, `detail`. Counts over an incomplete scan
+  cannot claim whole-log totals. `waiting` marks planned output with no capture yet; it never marks interrupted or captured output. `logs.pattern`, `run_logs.pattern`, `logs.raw`,
   `run_logs.raw` and CLI `--raw` use plain content; remove automatic prefix stripping.
 - C1/C2 own authenticated surfaces: MCP `run_logs {id,..}` and `logs {repo?,sha,..}`,
   container inventory via `containers:true`, exact `node_id`/`container` selection, and
