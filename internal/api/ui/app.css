@@ -136,7 +136,8 @@ a.row:focus-visible { outline-offset: -2px; }
 .run-metadata, .identity { display: flex; align-items: center; white-space: nowrap; }
 .run-metadata { min-width: 0; column-gap: 6px; flex-wrap: wrap; white-space: normal; }
 .run-metadata > * { flex-shrink: 0; }
-.run-metadata > .identity::before { content: "·"; }
+.run-metadata > .identity.same-line::before { content: "·"; }
+.run-metadata > .identity:not(.same-line) { flex-basis: 100%; }
 .run-metadata .run-ref { max-width: 100%; overflow-wrap: anywhere; }
 .identity { gap: 6px; margin: 0; font-size: inherit; color: var(--muted); }
 .run-meta details { display: contents; }

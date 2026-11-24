@@ -22,13 +22,14 @@ export async function metadata(client) {
     const fragments=Array.from(range.getClientRects());
     return {text:refNode.innerText,title:refNode.title,first:refNode.className,width:rect.width,left:rect.left,right:rect.right,metaRight:meta.getBoundingClientRect().right,
      whole:refNode.scrollWidth<=refNode.clientWidth&&fragments.every(part=>part.width>0&&part.left>=rect.left-.5&&part.right<=rect.right+.5&&part.top>=rect.top-.5&&part.bottom<=rect.bottom+.5),refLines:fragments.length,
-     identity:region.querySelector('[title="Run ID"]').checkVisibility(),id:region.querySelector('[title="Run ID"]').textContent,idHeight:region.querySelector('[title="Run ID"]').getBoundingClientRect().height,commit:region.querySelector('[title="Commit ID"]').checkVisibility(),origin:!region.querySelector('[aria-label="Started by"]').hidden,time:!region.querySelector('time').parentElement.hidden,
+     identity:region.querySelector('[title="Run ID"]').checkVisibility(),id:region.querySelector('[title="Run ID"]').textContent,idHeight:region.querySelector('[title="Run ID"]').getBoundingClientRect().height,idLeft:region.querySelector('[title="Run ID"]').getBoundingClientRect().left,idTop:region.querySelector('[title="Run ID"]').getBoundingClientRect().top,regionLeft:region.getBoundingClientRect().left,refBottom:rect.bottom,commit:region.querySelector('[title="Commit ID"]').checkVisibility(),origin:!region.querySelector('[aria-label="Started by"]').hidden,time:!region.querySelector('time').parentElement.hidden,
      overflow:document.documentElement.scrollWidth>innerWidth||meta.scrollWidth>meta.clientWidth,height:meta.getBoundingClientRect().height,lineHeight:parseFloat(getComputedStyle(meta).lineHeight)};
    })()`);
    const label=example.ref.replace('refs/heads/','').replace('refs/tags/','tag ');
    check(result.first==='run-ref'&&result.text===example.repo+' · '+label&&result.title===result.text&&result.width>0&&result.whole&&!result.overflow&&result.right<=result.metaRight,'repository/ref text is clipped '+JSON.stringify({width,theme,example,result}));
    check(result.height<=result.lineHeight*(result.refLines+1),'metadata exceeds its text and identity lines '+JSON.stringify({width,theme,result}));
    check(result.identity&&result.id==='run '+(await client.evaluate(`headerRuns[1].id.slice(0,8)`))&&result.idHeight>0,'run id hidden on row 2 '+JSON.stringify({width,theme,result}));
+   if(result.idTop>=result.refBottom-.5)check(Math.abs(result.idLeft-result.regionLeft)<.5,'wrapped run id has a leading separator '+JSON.stringify({width,theme,example,result}));
    if(width>=960&&['branch','tag'].includes(example.name))check(result.origin&&result.time,'author/trigger/time hidden despite available width '+JSON.stringify({width,theme,result}));
    if(width===1024&&['branch','tag'].includes(example.name))check(result.commit,'commit hidden at 1024 '+JSON.stringify({theme,result}));
    if(theme==='light'&&((example.name==='mac'&&width===420)||(example.name==='long'&&width===600))) {

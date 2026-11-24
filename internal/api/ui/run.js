@@ -33,6 +33,7 @@ function fitRunHeader(row) {
 }
 function fitRunMetadata(region) {
  const parts = Array.from(region.children), gap = parseFloat(getComputedStyle(region).columnGap);
+ const identity = region.querySelector(".identity"); identity.classList.add("same-line");
  for (const node of parts) node.hidden = false;
  const commit = region.querySelector(".commit"); commit.hidden = false;
  for (const node of [commit, ...region.querySelectorAll(".meta-extra")]) {
@@ -41,6 +42,7 @@ function fitRunMetadata(region) {
   if (width <= region.clientWidth) break;
   node.hidden = true;
  }
+ identity.classList.toggle("same-line", identity.getBoundingClientRect().top < parts[0].getBoundingClientRect().bottom - .5);
 }
 function updateSelectedStep(view, selected) {
  if (!selected || JSON.stringify(selected) === JSON.stringify(view.logStep)) return;
