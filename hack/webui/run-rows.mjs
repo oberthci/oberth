@@ -14,10 +14,10 @@ export async function runRows(client) {
    return new Response(JSON.stringify(page));
   };`});
  try {
-  for(const width of [320,339,340,359,360,400,499,500,600,759,760,768,780,798,800,839,840,899,960,1024,1280]) {
+  for(const width of [320,339,340,359,360,400,499,500,600,759,760,768,780,798,800,839,840,860,899,900,960,1024,1099,1100,1101,1199,1200,1201,1280]) {
    await client.cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
    await client.loaded('/runs','.runs a.row');
-   for(const [scene,day] of [['today',16],['yesterday',17],['older',19],['long-finished',19]])for(const theme of ['light','dark','mono','color']) {
+   for(const [scene,day] of [['older',19],['today',16],['yesterday',17],['long-finished',19]])for(const theme of ['light','dark','mono','color']) {
     const metrics=await client.evaluate(`(async()=>{
      rowScene=${JSON.stringify(scene)};Date.now=()=>Date.parse('2026-11-${day}T20:22:00Z');
      document.documentElement.dataset.theme=${JSON.stringify(theme)};await screen.read();
@@ -36,15 +36,15 @@ export async function runRows(client) {
     const context=JSON.stringify({width,scene,theme,...metrics});
     check(!metrics.pageOverflow&&metrics.inside&&metrics.tableWidth<=metrics.frameWidth+.5&&metrics.rows.every(row=>!row.overflow),'run table leaves its frame '+context);
     check(metrics.rows.some(row=>row.message.text.length===40)&&metrics.rows.every(row=>row.message.whole&&row.when.whole),'run message or date is clipped '+context);
-    check(metrics.headings.every(item=>item.whole),'runs heading crosses its column '+context);
+    check(metrics.headings.every(item=>item.whole&&item.lines===1),'run heading breaks a word or crosses its column '+context);
     if(width===1024&&['mono','color'].includes(theme))check(Math.abs(metrics.headings[1].textWidth-metrics.themeLabelWidth)<.5,'run heading differs from its theme label '+context);
     check(metrics.rows.every(row=>Math.abs(row.height-metrics.rows[0].height)<.5),'run rows have unequal heights '+context);
-    if(width>=840)check(metrics.rows.every(row=>Math.abs(row.height-37)<.5),'wide run rows wrap '+context);
+    if(width>=900)check(metrics.rows.every(row=>Math.abs(row.height-37)<.5),'wide run rows wrap '+context);
     if(width>=500)check(metrics.rows.filter(row=>row.ref==='master').every(row=>row.refTextWidth<=row.refWidth),'six-character run ref is cut '+context);
     if(width>=840)check(metrics.rows.filter(row=>row.ref==='fix-login').every(row=>row.refTextWidth<=row.refWidth),'ordinary run ref lost its space '+context);
     if(width>=1024)check(metrics.rows.every(row=>row.refTextWidth<=row.refWidth),'wide run ref is cut '+context);
     if(scene==='long-finished')check(metrics.rows[0].when.text.length>=21,'dated fixture lacks a long finished WHEN '+context);
-    if(scene==='older'&&((width===768&&theme==='light')||(width===840&&['mono','color'].includes(theme)))) {
+    if(scene==='older'&&((width===768&&theme==='light')||([840,900,1100].includes(width)&&['mono','color'].includes(theme)))) {
      const shot=await client.cdp('Page.captureScreenshot',{format:'png'});
      await writeFile(`${client.artifacts}/run-rows-dated-${width}-${theme}.png`,Buffer.from(shot.data,'base64'));
     }

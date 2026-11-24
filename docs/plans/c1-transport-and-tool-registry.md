@@ -259,7 +259,7 @@ values. Issue bodies are plain text. Imported issues show their original author,
 closer, ordered history and imported mark through the same issue view. The status
 screen shows one reason, its detail and run counts. Executor-noise lines appear
 as returned by the log read; the bundled controller disables informational executor diagnostics at their source.
-Run tables stay inside their frame from 320 px, including dated rows; headings and compact rows wrap when needed.
+Run tables stay inside their frame from 320 px, including dated rows; headings stay on one line and compact rows wrap when needed.
 The script has no folding rule. Live updates use `events_wait` to trigger reads.
 Read the first event immediately; coalesce events at the cursor while its read and one-second burst interval finish.
 Preserve open Details and log selections when their content is unchanged.

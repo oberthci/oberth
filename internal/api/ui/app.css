@@ -90,7 +90,7 @@ details pre { padding: 10px 12px; border: 1px solid var(--line); border-radius: 
 a.row:hover { background: var(--panel2); text-decoration: none; }
 a.row:focus-visible { outline-offset: -2px; }
 .row.head { padding-top: 8px; padding-bottom: 8px; background: var(--panel2); color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; border-radius: 8px 8px 0 0; }
-/* Wide run data uses one 22px line in five columns; headings may wrap.
+/* Wide run data and headings use one 22px line in five columns.
    Compact rows separate the message and, on small screens, the date. A name too long
    for its column ends in an ellipsis and keeps the whole name as its title; a
    reason is never cut: the 40-character rule always fits its column (the row's
@@ -100,7 +100,6 @@ a.row:focus-visible { outline-offset: -2px; }
 .runs .row > * { min-width: 0; white-space: nowrap; }
 .runs .row > .repo, .runs .row > .ref { overflow: hidden; text-overflow: ellipsis; }
 .runs .row > .message { white-space: normal; overflow-wrap: anywhere; }
-.runs .row.head > * { white-space: normal; overflow-wrap: anywhere; }
 .runs .row > .state { justify-self: start; align-self: center; }
 .runs > .pager, .runs > .empty { grid-column: 1 / -1; }
 .when { color: var(--muted); font-size: 12px; }
@@ -207,7 +206,7 @@ a.repo-group .chevron { visibility: hidden; }
 .server .slot > * { grid-area: 1 / 1; }
 .server .reload, .server[data-state="unreachable"] .ver { visibility: hidden; }
 .server[data-state="unreachable"] .reload { visibility: visible; }
-@media (max-width: 1099px) {
+@media (max-width: 1199px) {
  main:has(> .repo-side) { display: block; }
  .repo-side { display: none; }
  main:has(> .repo-side) .filters > label { display: flex; }
@@ -303,7 +302,7 @@ a.repo-group .chevron { visibility: hidden; }
  .filters > .issue-search { flex: 1 1 0; }
  .issue-head { padding: 12px; }
 }
-@media (max-width: 839px) {
+@media (max-width: 899px) {
  .runs { display: block; }
  .runs .row.head { display: none; }
  /* Compact rows keep the date and whole message within the available frame. */
