@@ -22,7 +22,7 @@ func TestRegistryFederationRefusesMalformedResources(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "registry")
-			_, _, err := registryIdentity([]string{"--provider", tc.provider, "--service-account", tc.account, "--identity-file", "subject", "--dir", dir})
+			_, _, _, err := registryIdentity([]string{"--provider", tc.provider, "--service-account", tc.account, "--identity-file", "subject", "--dir", dir, "--registry", "registry.example.invalid"})
 			if !errors.Is(err, federationConfig) {
 				t.Fatal("malformed federation resource was accepted", err)
 			}
@@ -48,7 +48,7 @@ func TestRegistryLoginRequiresFreshPrivateDirectory(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := writeRegistryLogin(dir, "registry-fixture"); !errors.Is(err, federationDirectory) {
+			if err := writeRegistryLogin(dir, "registry.example.invalid", "registry-fixture"); !errors.Is(err, federationDirectory) {
 				t.Fatal("existing login directory was reused", err)
 			}
 			if _, err := os.Stat(filepath.Join(existing, "config.json")); !os.IsNotExist(err) {

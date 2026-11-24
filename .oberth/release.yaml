@@ -108,13 +108,14 @@ spec:
         command: [bash, -ec]
         args:
           - |
-            "$RELEASE_SHARED/oberth-release" registry-login --provider "$RELEASE_WIF_PROVIDER" --service-account "$RELEASE_WIF_ACCOUNT" --identity-file /run/registry-identity/jwt --dir "$DOCKER_CONFIG"
-            go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth.oci" "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:$VERSION"
-            go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth-source-plugin.oci" "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin:$VERSION"
+            "$RELEASE_SHARED/oberth-release" registry-login --provider "$RELEASE_WIF_PROVIDER" --service-account "$RELEASE_WIF_ACCOUNT" --identity-file /run/registry-identity/jwt --dir "$DOCKER_CONFIG" --registry "$RELEASE_REGISTRY_HOST"
+            go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth.oci" "$RELEASE_REGISTRY_HOST/skipopsmain/oberth/oberth:$VERSION"
+            go tool -modfile=hack/tools/crane.mod crane push "$RELEASE_DIR/oberth-source-plugin.oci" "$RELEASE_REGISTRY_HOST/skipopsmain/oberth/oberth-source-plugin:$VERSION"
         env:
           - {name: RELEASE_DIR, value: /work/shared/dist}
           - {name: RELEASE_SHARED, value: /work/shared}
           - {name: DOCKER_CONFIG, value: /run/private/registry}
+          - {name: RELEASE_REGISTRY_HOST, value: europe-west4-docker.pkg.dev}
           - {name: RELEASE_WIF_PROVIDER, valueFrom: {configMapKeyRef: {name: release-config, key: registry-provider}}}
           - {name: RELEASE_WIF_ACCOUNT, valueFrom: {configMapKeyRef: {name: release-config, key: registry-account}}}
         volumeMounts:

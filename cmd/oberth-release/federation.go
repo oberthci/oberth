@@ -18,8 +18,6 @@ import (
 	"golang.org/x/oauth2/google/externalaccount"
 )
 
-const registryHost = "europe-west4-docker.pkg.dev"
-
 const (
 	federationConfig        refusal = "Registry federation config is invalid."
 	federationExchange      refusal = "Registry identity exchange failed."
@@ -30,7 +28,7 @@ const (
 // The cloud endpoints are fixed. Authored configuration selects only a provider
 // and account, never a destination to which the projected identity can be sent.
 func registryLogin(ctx context.Context, args []string) error {
-	config, dir, err := registryIdentity(args)
+	config, registry, dir, err := registryIdentity(args)
 	if errors.Is(err, flag.ErrHelp) {
 		return nil
 	}
@@ -52,7 +50,7 @@ func registryLogin(ctx context.Context, args []string) error {
 		}
 		return federationExchange
 	}
-	return writeRegistryLogin(dir, access.AccessToken)
+	return writeRegistryLogin(dir, registry, access.AccessToken)
 }
 
 // Track only the fixed request stage, never provider response bodies or errors.
@@ -82,23 +80,25 @@ func registryExchangeContext(ctx context.Context) (context.Context, *registryTra
 	return context.WithValue(ctx, oauth2.HTTPClient, &copy), transport
 }
 
-func registryIdentity(args []string) (externalaccount.Config, string, error) {
+func registryIdentity(args []string) (externalaccount.Config, string, string, error) {
 	f := flag.NewFlagSet("registry-login", flag.ContinueOnError)
 	f.SetOutput(io.Discard)
 	provider := f.String("provider", "", "workload identity provider resource")
 	account := f.String("service-account", "", "registry writer account email")
 	subject := f.String("identity-file", "", "projected identity file")
 	dir := f.String("dir", "", "new private registry configuration directory")
+	registry := f.String("registry", "", "registry host used by the image push")
 	err := f.Parse(args)
 	if errors.Is(err, flag.ErrHelp) {
 		f.SetOutput(os.Stdout)
 		f.Usage()
-		return externalaccount.Config{}, "", err
+		return externalaccount.Config{}, "", "", err
 	}
 	if err != nil || f.NArg() != 0 || *subject == "" || *dir == "" ||
+		!regexp.MustCompile(`^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]{1,5})?$`).MatchString(*registry) ||
 		!regexp.MustCompile(`^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$`).MatchString(*provider) ||
 		!regexp.MustCompile(`^[a-z0-9-]+@[a-z0-9-]+\.iam\.gserviceaccount\.com$`).MatchString(*account) {
-		return externalaccount.Config{}, "", federationConfig
+		return externalaccount.Config{}, "", "", federationConfig
 	}
 	return externalaccount.Config{
 		Audience:                       "//iam.googleapis.com/" + *provider,
@@ -108,11 +108,11 @@ func registryIdentity(args []string) (externalaccount.Config, string, error) {
 		ServiceAccountImpersonationLifetimeSeconds: 3600,
 		Scopes:           []string{"https://www.googleapis.com/auth/cloud-platform"},
 		CredentialSource: &externalaccount.CredentialSource{File: *subject},
-	}, *dir, nil
+	}, *registry, *dir, nil
 }
 
-func writeRegistryLogin(dir, access string) error {
-	config := map[string]any{"auths": map[string]any{registryHost: map[string]string{
+func writeRegistryLogin(dir, registry, access string) error {
+	config := map[string]any{"auths": map[string]any{registry: map[string]string{
 		"auth": base64.StdEncoding.EncodeToString([]byte("oauth2accesstoken:" + access)),
 	}}}
 	body, err := json.Marshal(config)

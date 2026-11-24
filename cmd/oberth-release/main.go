@@ -65,7 +65,7 @@ func (r refusal) Remedy() string {
 		return "Review the public key and rerun hack/release-pin.sh with --replace."
 	}
 	return map[refusal]string{
-		federationConfig:        "Set registry-provider and registry-account in release-config to the provider resource and writer account email.",
+		federationConfig:        "Set a registry host, provider resource and writer account email; check the registry keys in release-config.",
 		federationExchange:      "Check the projected identity grant, cluster issuer, provider audience and subject binding; then retry.",
 		federationImpersonation: "Allow the trusted subject to impersonate the registry writer account; then retry.",
 		federationDirectory:     "Choose a new private login directory on the step's memory volume; then retry.",

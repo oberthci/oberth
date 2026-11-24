@@ -86,6 +86,7 @@ func checkRegistryPushStep(t *testing.T, wf *wfv1.Workflow, failure string) {
 	dir := registryPushFixture(t)
 	values := workflowValues(dir)
 	values["DOCKER_CONFIG"] = filepath.Join(dir, "registry")
+	values["REGISTRY_LOGIN_HOST"] = filepath.Join(dir, "login-host")
 	values["PUSH_LOG"], values["PUSH_FAIL"] = filepath.Join(dir, "push.log"), failure
 	output, err := executeWorkflowTemplate(t, wf, wf.GetTemplateByName("release-images-pushed"), values)
 	if (err != nil) != (failure != "") || len(output) != 0 {
@@ -121,6 +122,11 @@ func registryPushFixture(t *testing.T) string {
 	}
 	writeFixtureCommand(t, filepath.Join(dir, "shared/oberth-release"), `[ "$1" = registry-login ] || exit 2
 [ "$PUSH_FAIL" != login ] || exit 1
+while [ "$#" -gt 0 ]; do
+  case "$1" in --registry) shift; printf '%s' "$1" > "$REGISTRY_LOGIN_HOST";; esac
+  shift
+done
+[ -s "$REGISTRY_LOGIN_HOST" ] || exit 2
 mkdir -p "$DOCKER_CONFIG"
 printf fixture-login > "$DOCKER_CONFIG/config.json"
 `)
@@ -142,10 +148,17 @@ func assertRegistryPushTargets(t *testing.T, dir string, lines []string) {
 	if len(lines) != 2 {
 		t.Fatal("did not push exactly two images", lines)
 	}
+	host, err := os.ReadFile(filepath.Join(dir, "login-host"))
+	if err != nil || len(host) == 0 {
+		t.Fatal("push did not supply the registry login host", err)
+	}
 	for i, image := range []struct{ name, field string }{{"oberth", "imageRepository"}, {"oberth-source-plugin", "sourcePluginImageRepository"}} {
 		repository, ok := chart.Values[image.field].(string)
 		if !ok || lines[i] != filepath.Join(dir, "shared/dist", image.name+".oci")+"|"+repository+":v1.2.3" {
 			t.Fatal("push differs from signed-chart repository or layout", lines[i])
+		}
+		if !strings.HasPrefix(repository, string(host)+"/") {
+			t.Fatal("registry login host differs from image push", string(host), repository)
 		}
 	}
 }

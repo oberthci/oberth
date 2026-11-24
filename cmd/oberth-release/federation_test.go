@@ -96,7 +96,8 @@ func checkFederation(t *testing.T, fail string) {
 	})}
 	ctx := context.WithValue(t.Context(), oauth2.HTTPClient, client)
 	login := filepath.Join(dir, "registry")
-	err := run(ctx, []string{"registry-login", "--provider", "projects/123/locations/global/workloadIdentityPools/pool/providers/provider", "--service-account", "writer@project.iam.gserviceaccount.com", "--identity-file", subject, "--dir", login})
+	const registry = "registry.example.invalid:5000"
+	err := run(ctx, []string{"registry-login", "--provider", "projects/123/locations/global/workloadIdentityPools/pool/providers/provider", "--service-account", "writer@project.iam.gserviceaccount.com", "--identity-file", subject, "--dir", login, "--registry", registry})
 	if fail != "" {
 		want := map[string]refusal{"sts": federationExchange, "impersonation": federationImpersonation}[fail]
 		if !errors.Is(err, want) {
@@ -110,10 +111,10 @@ func checkFederation(t *testing.T, fail string) {
 	if err != nil || calls != 2 {
 		t.Fatal("federation failed", err, calls)
 	}
-	assertRegistryConfig(t, login)
+	assertRegistryConfig(t, login, registry)
 }
 
-func assertRegistryConfig(t *testing.T, login string) {
+func assertRegistryConfig(t *testing.T, login, registry string) {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join(login, "config.json"))
 	if err != nil {
@@ -125,7 +126,7 @@ func assertRegistryConfig(t *testing.T, login string) {
 	if err := json.Unmarshal(body, &config); err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := base64.StdEncoding.DecodeString(config.Auths[registryHost].Auth)
+	decoded, err := base64.StdEncoding.DecodeString(config.Auths[registry].Auth)
 	if err != nil || string(decoded) != "oauth2accesstoken:registry-fixture" || len(config.Auths) != 1 {
 		t.Fatal("registry login differs")
 	}
