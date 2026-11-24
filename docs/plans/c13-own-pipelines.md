@@ -32,7 +32,7 @@ those definitions; they do not define rival DTOs.
   product has no promotion-file selection. The build declares no resource
   template, so admitting it needs no capability; the VM install walk is the
   separate `hack/walk-vm.yaml`, selected only by explicit push option. There is no new route or
-  special run class. `.oberth/issues.yaml` retains the
+  special run class. The walk VMI stays in its separate namespace; its host installation uses the ordinary reviewed `--egress-allow` list for cluster Pod CIDR/TCP 22 access. `.oberth/issues.yaml` retains the
   opt-in `{close_from_trailers: true}` policy; C2 owns its interpretation.
 - **Visible work.** Build has three leaves: `make test`, `make static` and
   `make release-bytes`; promotions run the same leaves. Release has build, sign,

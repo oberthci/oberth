@@ -7,12 +7,26 @@ import (
 )
 
 func (e *Engine) discoverSharedCluster(ctx context.Context, p *Plan) error {
+	if _, present := p.release.chart.Values["egressNetwork"]; present {
+		network, err := e.networkSnapshot(ctx, p)
+		if err != nil {
+			return err
+		}
+		p.request.Values["egressNetwork"] = network
+	}
 	state, err := e.namespaceSnapshot(ctx, p.choices)
 	if err != nil {
 		return err
 	}
 	p.request.Values["pipeline"].(map[string]any)["createNamespace"] = pipelineNamespaceCreation(p, state.pipeline)
 	p.request.Values["statusPodSecurity"] = namespaceSecurityLevel(state)
+	p.serverPodSecurity = "restricted (new namespace)"
+	if state.server != nil {
+		p.serverPodSecurity = state.server.Labels[podSecurityEnforce]
+		if p.serverPodSecurity == "" {
+			p.serverPodSecurity = "unlabelled (existing namespace)"
+		}
+	}
 	p.portScope, err = e.checkNodePorts(ctx, p.choices)
 	if err != nil {
 		return err
@@ -30,6 +44,9 @@ func (e *Engine) discoverSharedCluster(ctx context.Context, p *Plan) error {
 }
 
 func (e *Engine) recheckSharedCluster(ctx context.Context, p *Plan) (bool, error) {
+	if err := e.recheckNetwork(ctx, p); err != nil {
+		return false, err
+	}
 	state, err := e.namespaceSnapshot(ctx, p.choices)
 	if err != nil {
 		return false, err

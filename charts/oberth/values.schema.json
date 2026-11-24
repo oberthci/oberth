@@ -24,6 +24,48 @@
         },
         "egress": {
           "type": "boolean"
+        },
+        "allow": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cidr",
+              "port",
+              "protocol"
+            ],
+            "properties": {
+              "cidr": {
+                "type": "string",
+                "minLength": 3
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "protocol": {
+                "type": "string",
+                "enum": [
+                  "TCP",
+                  "UDP"
+                ]
+              }
+            }
+          }
+        },
+        "internet": {
+          "type": "boolean"
+        },
+        "clusterCIDRs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 3
+          },
+          "maxItems": 128
         }
       }
     },
@@ -450,6 +492,57 @@
           "chosen",
           ""
         ]
+      }
+    },
+    "egressNetwork": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "integer",
+          "enum": [
+            2
+          ]
+        },
+        "ipv6": {
+          "type": "boolean"
+        },
+        "apiServers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cidr",
+              "port"
+            ],
+            "properties": {
+              "cidr": {
+                "type": "string",
+                "minLength": 3
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            }
+          }
+        },
+        "ipv4Except": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 3
+          }
+        },
+        "ipv6Except": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 3
+          }
+        }
       }
     }
   },

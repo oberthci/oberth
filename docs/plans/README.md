@@ -81,7 +81,7 @@ C3 submission and C11 offline inspection call C4 `Prepare`; sealing stays restri
 Offline inspection separates authored refusals from installation needs and shares push commands.
 
 [C9 invariant 7](c9-install-and-upgrade.md#invariants) defines baseline Pod defaults,
-the link-local egress filter, review and opt-out.
+internal-closed/internet-open run egress, review and opt-out.
 The local hash-chained audit log is always on; verify it on reads, backup and restore, never for every mutation.
 Save audit records atomically with their state changes.
 

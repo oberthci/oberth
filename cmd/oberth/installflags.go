@@ -45,7 +45,6 @@ func installationFlags(name string) *flag.FlagSet {
 		f.Bool("verify", false, "Verify the existing installation.")
 		f.Int("parallel", 0, "Maximum concurrent runs.")
 		f.Bool("no-pod-defaults", false, "Disable Baseline Pod defaults.")
-		f.Bool("no-link-local-filter", false, "Disable the Link-local egress filter.")
 		f.String("external-store", "", "External secret-store URL.")
 	case "upgrade":
 		f.String("version", "", "Target release version.")
@@ -66,6 +65,10 @@ func installationFlags(name string) *flag.FlagSet {
 	addInstallerInputs(f, name)
 	switch name {
 	case "install", "upgrade":
+		f.Bool("no-egress", false, "Disable the run Pod egress policy entirely.")
+		f.Bool("egress-internet", true, "Allow public internet egress; false keeps only explicit destinations and required cluster services.")
+		f.Var(&egressDestinations{}, "egress-allow", "Extra CIDR, port and TCP/UDP protocol entries as JSON; [] clears the list.")
+		f.Var(&clusterCIDRs{}, "cluster-cidrs", "Cluster Pod and Service CIDRs as JSON, in addition to discovered ranges.")
 		f.Var(&sourcePinFlag{}, "source-pin", "Allow CONSUMER=PRODUCER source pins; repeatable, kept by later upgrades.")
 		f.Bool("no-source-pins", false, "Drop the saved source pins before adding --source-pin pairs.")
 	}

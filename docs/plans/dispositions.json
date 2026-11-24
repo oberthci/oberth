@@ -9392,9 +9392,9 @@
   "spec_sha256": {
     "docs/plans/c1-transport-and-tool-registry.md": "eba3b199429ff7ddd85963c2c58474fb9a6b707ec21693951baa4c78a1e271be",
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
-    "docs/plans/c11-cli-and-server-composition.md": "6aff73c851998aade33690539834c8147ab8900fd0ca591ef2cdc1b2d30746d0",
+    "docs/plans/c11-cli-and-server-composition.md": "d2a882319fe2372ad79eff0fd99dd17ab84ae32693609ce520a48ce3ebff4c0f",
     "docs/plans/c12-agent-client.md": "1839b17c036fa9a854df8097a076a712f84c9660b1945f029d5ae9efe728ddac",
-    "docs/plans/c13-own-pipelines.md": "2be0f87654a8cc52525eb7d105b4f662a8b4f21fdd899cd19e4459bda150bda0",
+    "docs/plans/c13-own-pipelines.md": "3264a0141755c9fc9b736ad06cc1589d23d855a1c0b51dced00d304a574db790",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
     "docs/plans/c2-service-actions-and-history.md": "0d1544252d63033bf5583250cc347535cb83079b9e2f4fe021119f499ca45a3c",
     "docs/plans/c3-wiring-and-submission.md": "2bda8b25776d7f78706a4f57316c82e3ccb7434a42c67f96bcb762f2c8b36a47",
@@ -9403,7 +9403,7 @@
     "docs/plans/c6-source-delivery.md": "a3846f5f32189988bc2135ff72d4db6cce88d68ed675df116e508bb84f29e113",
     "docs/plans/c7-durable-state.md": "62094b0475735bd2427ee573807cdc767a45befdaa86a0472f6587629d537361",
     "docs/plans/c8-logs.md": "e7e04d0a411011160a2f5cb9d885b7dbd6c55503452f5849a5b0557df4f67b63",
-    "docs/plans/c9-install-and-upgrade.md": "26c89719653d9c0f616fde80765a95c57d8f53f396b40fd35d81137ccac6ec7d"
+    "docs/plans/c9-install-and-upgrade.md": "39f45e5ac7d3f42393df0e930047ac078b8a235fa225cb349b440b0d5de7280b"
   },
   "deltas": [
     {
@@ -15253,7 +15253,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "7. **Delta:** **Defaults and review.** Baseline Pod defaults and the link-local egress filter are on by default and shown in review; the operator may turn either off. The Pod defaults set native main and executor containers to drop all capabilities, disable privilege escalation and use RuntimeDefault seccomp. A pipeline namespace created by this installation uses Pod Security `baseline`. The link-local egress filter permits DNS, source/store ports, same-namespace traffic and all other addresses except link-local, including a step's connection to the server's Git SSH port 2222 with a granted key. It is not a cluster-destination allowlist. Review states that the filter needs a network plugin that enforces NetworkPolicy; it never claims enforcement without proof. There is no policy probe.",
+      "basis": "7. **Delta:** **Defaults and review.** Baseline Pod defaults and run egress policy are on. Pod defaults drop capabilities, disable privilege escalation and use RuntimeDefault seccomp. New pipeline namespaces enforce Pod Security `baseline`; new server namespaces enforce `restricted`. Existing namespaces keep their labels. Review pairs server/pipeline namespaces with their labels. Run egress opens internet destinations and excludes link-local, RFC1918, CGNAT, IPv6 ULA, node/API addresses and discovered or operator-supplied cluster Pod/Service CIDRs. Exceptions admit DNS UDP/TCP 53, the API Service and backends on their exact TCP ports, same-run-namespace Pods, server ports derived from Services and the real bundled-store labels. Extra CIDR/port/TCP-or-UDP exceptions are explicit. Internet access may be narrowed to them. The installer binds discovered network facts to review and rechecks before writes. Saved egress=true uses these rules; review shows old -> new rules before upgrade confirmation. Install and upgrade both accept --no-egress; no policy remains when it is selected. Image pulls use the node network. Enforcement requires a NetworkPolicy-capable plugin; install does not claim proof or run a policy probe.",
       "rows": [],
       "predicates": [
         {
@@ -15267,7 +15267,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c9-install-and-upgrade.md:174",
+      "spec": "docs/plans/c9-install-and-upgrade.md:176",
       "markers": [
         "**Delta:**"
       ],
@@ -15291,7 +15291,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c9-install-and-upgrade.md:178",
+      "spec": "docs/plans/c9-install-and-upgrade.md:180",
       "markers": [
         "**Delta:**"
       ],
@@ -15300,7 +15300,7 @@
       "rows": []
     },
     {
-      "spec": "docs/plans/c9-install-and-upgrade.md:270",
+      "spec": "docs/plans/c9-install-and-upgrade.md:272",
       "markers": [
         "**Delta:**"
       ],
@@ -15317,7 +15317,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c9-install-and-upgrade.md:283",
+      "spec": "docs/plans/c9-install-and-upgrade.md:285",
       "markers": [
         "**Delta:**"
       ],

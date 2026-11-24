@@ -49,12 +49,22 @@ func TestRollbackToReleasedChartUsesItsDeclaredValues(t *testing.T) {
 	f := setup(t)
 	apply(t, f, prepare(t, f))
 	old := historicalStatusRelease(t)
-	// Native history from that release contains no status metadata.
+	oldChart, err := loader.LoadArchive(bytes.NewReader(old.files["oberth.tgz"].Data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Native history contains the released policy shape, without later network
+	// discovery or status metadata.
 	previous := f.charts.History.Deployed
 	previous.Version, previous.Kind = old.version, "verified"
+	previous.Values["policies"] = oldChart.Values["policies"]
+	delete(previous.Values, "egressNetwork")
 	delete(previous.Values, "statusChosen")
 	delete(previous.Values, "statusOrigins")
 	delete(previous.Values, "statusPodSecurity")
+	if _, err = installer.Render(oldChart, previous.Values, f.choices.Namespace); err != nil {
+		t.Fatal("historical revision does not validate", err)
+	}
 	f.charts.History.Deployed, f.charts.History.Latest = previous, previous
 	setInstalledMetadata(t, f, "verified", 6)
 	target := loadFixture(t, releaseFor(t, "v0.31.0", 6))
@@ -82,7 +92,7 @@ func TestRollbackToReleasedChartUsesItsDeclaredValues(t *testing.T) {
 	if _, err = installer.Render(last.Chart, last.Values, last.Namespace); err != nil {
 		t.Fatal("released chart does not validate", err)
 	}
-	for _, name := range []string{"statusChosen", "statusOrigins", "statusPodSecurity"} {
+	for _, name := range []string{"statusChosen", "statusOrigins", "statusPodSecurity", "egressNetwork"} {
 		if _, exists := last.Values[name]; exists {
 			t.Fatal("undeclared value reached the old chart", name)
 		}

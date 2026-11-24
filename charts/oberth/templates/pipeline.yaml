@@ -18,31 +18,73 @@ spec:
   policyTypes: [Egress]
   egress:
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
       ports:
         - {protocol: UDP, port: 53}
         - {protocol: TCP, port: 53}
     - to:
+        - podSelector: {}
+    {{- range .Values.egressNetwork.apiServers }}
+    - to:
+        - ipBlock:
+            cidr: {{ .cidr | quote }}
+      ports:
+        - {protocol: TCP, port: {{ .port }}}
+    {{- end }}
+    {{- range list (include "oberth.serverService" . | fromYaml) (include "oberth.sourceService" . | fromYaml) }}
+    {{- $service := . }}
+    {{- range .spec.ports }}
+    - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+              kubernetes.io/metadata.name: {{ $service.metadata.namespace }}
+          podSelector:
+            matchLabels: {{ $service.spec.selector | toJson }}
       ports:
-        - {protocol: TCP, port: 8445}
-        - {protocol: TCP, port: 8200}
+        - {protocol: {{ default "TCP" .protocol }}, port: {{ default .port .targetPort | toJson }}}
+    {{- end }}
+    {{- end }}
+    {{- if .Values.secretStore.bundled }}
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Release.Namespace }}
           podSelector:
-            matchLabels: {app: oberth}
+            matchLabels:
+              app.kubernetes.io/name: storeNative
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              component: server
       ports:
-        - {protocol: TCP, port: 2222}
-    - to: [{podSelector: {}}]
+        - {protocol: TCP, port: 8200}
+    {{- end }}
+    {{- if .Values.policies.internet }}
     - to:
         - ipBlock:
-            cidr: 0.0.0.0/0
-            except: [169.254.0.0/16]
+            cidr: "0.0.0.0/0"
+            except:
+              {{- range concat (list "169.254.0.0/16" "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "100.64.0.0/10") .Values.egressNetwork.ipv4Except | uniq }}
+              - {{ . | quote }}
+              {{- end }}
+    {{- if .Values.egressNetwork.ipv6 }}
+    - to:
         - ipBlock:
-            cidr: '::/0'
-            except: ['fe80::/10']
+            cidr: "::/0"
+            except:
+              {{- range concat (list "fe80::/10" "fc00::/7") .Values.egressNetwork.ipv6Except | uniq }}
+              - {{ . | quote }}
+              {{- end }}
+    {{- end }}
+    {{- end }}
+    {{- range .Values.policies.allow }}
+    - to:
+        - ipBlock:
+            cidr: {{ required "egress destination requires cidr" .cidr | quote }}
+      ports:
+        - protocol: {{ required "egress destination requires TCP or UDP protocol" .protocol }}
+          port: {{ required "egress destination requires port" .port }}
+    {{- end }}
 {{- end }}

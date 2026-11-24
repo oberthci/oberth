@@ -12,6 +12,15 @@ runs:
 policies:
   floor: true
   egress: true
+  internet: true
+  allow: []
+  clusterCIDRs: []
+egressNetwork:
+  version: 2
+  ipv6: false
+  apiServers: []
+  ipv4Except: []
+  ipv6Except: []
 pipeline:
   createNamespace: true
   namespace: oberth-runs

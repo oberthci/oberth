@@ -60,7 +60,7 @@ func assertLocalReviewImages(t *testing.T, output []byte) {
 }
 
 func TestInstallationChoicesPreserveUnsetAndExplicitValues(t *testing.T) {
-	for _, args := range [][]string{nil, {"--parallel", "0", "--no-link-local-filter=false", "--no-pod-defaults"}} {
+	for _, args := range [][]string{nil, {"--parallel", "0", "--no-egress=false", "--no-pod-defaults"}} {
 		flags := installationFlags("install")
 		if err := flags.Parse(args); err != nil {
 			t.Fatal(err)

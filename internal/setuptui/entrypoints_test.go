@@ -24,6 +24,7 @@ import (
 func reviewPlanContext(t *testing.T, name string) *installer.Plan {
 	t.Helper()
 	client := kfake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-system", UID: "cluster"}})
+	fake.Network(client)
 	fake.DryRunServices(client)
 	client.Discovery().(*discoveryfake.FakeDiscovery).FakedServerVersion = &version.Info{GitVersion: "v1.30.0"}
 	dir := t.TempDir()
@@ -94,7 +95,7 @@ func TestCompactReviewShowsClusterUIDAndFitsOneTerminal(t *testing.T) {
 	if rows > 24 {
 		t.Fatal("compact review exceeds one terminal", rows, out.String())
 	}
-	for _, text := range []string{"Context:", "Cluster: https://cluster.oberth.ci (UID: cluster)", "Namespaces:", "Pod Security: baseline (new namespace)", "Create/update:", "--parallel N", "--no-pod-defaults", "--no-link-local-filter", "--external-store URL", "Files:", "Apply? [y/N]"} {
+	for _, text := range []string{"Context:", "Cluster: https://cluster.oberth.ci (UID: cluster)", "Namespaces:", "Pod Security: restricted (new) / baseline (new)", "Create/update:", "--parallel N", "--no-pod-defaults", "--no-egress", "--external-store URL", "Files:", "Apply? [y/N]"} {
 		if !strings.Contains(strings.ReplaceAll(out.String(), ":\n", ": "), text) {
 			t.Fatal("missing approval fact", text, out.String())
 		}

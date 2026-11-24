@@ -197,6 +197,9 @@ func TestNodePortPermissionScopeAndFailure(t *testing.T) {
 	t.Parallel()
 	for _, fallbackFails := range []bool{false, true} {
 		f := setup(t)
+		// Isolate the node-port fallback; egress inventory needs wider reads.
+		egress := false
+		f.choices.Egress = &egress
 		f.client.PrependReactor("list", "services", func(action ktesting.Action) (bool, runtime.Object, error) {
 			if action.GetNamespace() == "" || fallbackFails {
 				return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "services"}, "", errors.New("list denied"))

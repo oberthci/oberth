@@ -96,6 +96,7 @@ func offlineInstallEngine(t *testing.T, base string) (*installer.Engine, *chartf
 		}
 	})
 	kube := kubefake.NewClientset(&core.Namespace{ObjectMeta: meta.ObjectMeta{Name: "kube-system", UID: "install-command-cluster"}})
+	chartfake.Network(kube)
 	chartfake.DryRunServices(kube)
 	kube.Discovery().(*discoveryfake.FakeDiscovery).FakedServerVersion = &kversion.Info{GitVersion: "v1.30.0"}
 	charts := &chartfake.Chart{}

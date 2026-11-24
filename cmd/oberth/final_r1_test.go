@@ -133,7 +133,7 @@ func TestRefusalRenderingIsSharedAndComplete(t *testing.T) {
 }
 
 func TestInstallFlagsUseReviewNamesWithoutAliases(t *testing.T) {
-	for _, old := range []string{"--no-pod-floor", "--no-egress"} {
+	for _, old := range []string{"--no-pod-floor", "--no-link-local-filter"} {
 		app, _, _ := fixture(t, fake.Bindings())
 		app.install = func(context.Context, installationRequest, io.Reader, io.Writer) error {
 			t.Fatal("retired flag reached owner")
@@ -144,7 +144,7 @@ func TestInstallFlagsUseReviewNamesWithoutAliases(t *testing.T) {
 		}
 	}
 	flags := installationFlags("install")
-	if flags.Lookup("no-pod-defaults") == nil || flags.Lookup("no-link-local-filter") == nil {
+	if flags.Lookup("no-pod-defaults") == nil || flags.Lookup("no-egress") == nil {
 		t.Fatal("review names absent")
 	}
 	var output bytes.Buffer

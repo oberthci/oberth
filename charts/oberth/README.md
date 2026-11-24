@@ -97,7 +97,7 @@ The bundled store starts sealed. The engine initializes it once and installs
 its static rules; after a sealed reboot, `oberth unseal` reads the local recovery
 key explicitly. The readiness endpoint accepts sealed and
 uninitialized states so chart rollout does not require an unseal operation.
-Store snapshots remain separate from database backups.
+Database-only archives exclude store data; installation archives report snapshot inclusion.
 
 Dependencies use pinned upstream archives. Controller and executor image overrides
 pin Argo v4.0.15. The release chart digest binds these archive bytes too:
@@ -204,3 +204,17 @@ bootstrap explicitly reviews reuse of its saved root token and then revokes it.
 A sealed store names manual unseal; a rejected unseal key names this profile's
 recovery file. If initialization lost its reply before saving either key file,
 the refusal names the store data PVC to delete before installing again.
+
+Run egress defaults to internet open, internal closed. DNS UDP/TCP 53, the kube API,
+all server Service target ports (including SSH), bundled store and run-namespace Pods
+are allowed. Internet CIDRs exclude link-local, RFC1918, CGNAT, IPv6 ULA, cluster
+Pod/Service ranges and node/API addresses. IPv6 internet is enabled for IPv6 clusters.
+The installer discovers API Service/backend addresses, node addresses and allocation
+ranges into `egressNetwork`; direct chart renders must supply those cluster facts.
+`policies.clusterCIDRs` adds hidden allocation ranges. Network changes require review.
+`policies.allow` adds `{cidr: 192.168.1.10/32, port: 53, protocol: UDP}` exceptions.
+Set `policies.internet: false` to keep only those and required cluster destinations.
+Install/upgrade accept `--egress-allow`, `--egress-internet=false`, `--cluster-cidrs`
+and `--no-egress`. Saved `egress: true` gets the new rules, with an upgrade review arrow.
+Node image pulls use the node network. The network plugin must enforce policies.
+New server namespaces enforce restricted Pod Security; existing namespaces retain their labels.

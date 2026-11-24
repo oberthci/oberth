@@ -16,22 +16,42 @@ func TestExactPipelineEgress(t *testing.T) {
 	raw := `podSelector: {}
 policyTypes: [Egress]
 egress:
-- to: [{namespaceSelector: {}}]
-  ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
 - to:
   - namespaceSelector:
-      matchLabels: {kubernetes.io/metadata.name: oberth}
-  ports: [{protocol: TCP, port: 8445}, {protocol: TCP, port: 8200}]
+      matchLabels: {kubernetes.io/metadata.name: kube-system}
+    podSelector:
+      matchLabels: {k8s-app: kube-dns}
+  ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+- to:
+  - podSelector: {}
 - to:
   - namespaceSelector:
       matchLabels: {kubernetes.io/metadata.name: oberth}
     podSelector:
       matchLabels: {app: oberth}
-  ports: [{protocol: TCP, port: 2222}]
-- to: [{podSelector: {}}]
+  ports: [{protocol: TCP, port: https}]
 - to:
-  - ipBlock: {cidr: 0.0.0.0/0, except: [169.254.0.0/16]}
-  - ipBlock: {cidr: '::/0', except: ['fe80::/10']}
+  - namespaceSelector:
+      matchLabels: {kubernetes.io/metadata.name: oberth}
+    podSelector:
+      matchLabels: {app: oberth}
+  ports: [{protocol: TCP, port: ssh}]
+- to:
+  - namespaceSelector:
+      matchLabels: {kubernetes.io/metadata.name: oberth}
+    podSelector:
+      matchLabels: {app: oberth}
+  ports: [{protocol: TCP, port: source}]
+- to:
+  - namespaceSelector:
+      matchLabels: {kubernetes.io/metadata.name: oberth}
+    podSelector:
+      matchLabels: {app.kubernetes.io/name: storeNative, app.kubernetes.io/instance: oberth, component: server}
+  ports: [{protocol: TCP, port: 8200}]
+- to:
+  - ipBlock:
+      cidr: 0.0.0.0/0
+      except: [169.254.0.0/16, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10]
 `
 	var want map[string]any
 	if err := yaml.Unmarshal([]byte(raw), &want); err != nil {
@@ -42,7 +62,7 @@ egress:
 	}
 }
 
-// The IP-block catch-all need not match Pod IPs on every network plugin.
+// Pod selectors permit server Git without granting other namespace peers.
 func TestStepPodsCanReachServerGitSSH(t *testing.T) {
 	t.Parallel()
 	for _, namespace := range []string{"oberth", "control"} {
@@ -63,7 +83,7 @@ func TestStepPodsCanReachServerGitSSH(t *testing.T) {
     matchLabels: {kubernetes.io/metadata.name: NAMESPACE}
   podSelector:
     matchLabels: {app: oberth}
-ports: [{protocol: TCP, port: 2222}]`
+ports: [{protocol: TCP, port: ssh}]`
 			if err := yaml.Unmarshal([]byte(strings.ReplaceAll(raw, "NAMESPACE", namespace)), &want); err != nil {
 				t.Fatal(err)
 			}

@@ -75,7 +75,7 @@ func TestInstallRulingFlagsReachOwner(t *testing.T) {
 	called := false
 	app.install = func(_ context.Context, request installationRequest, _ io.Reader, _ io.Writer) error {
 		called = true
-		for name, want := range map[string]string{"parallel": "3", "no-pod-defaults": "true", "no-link-local-filter": "true", "external-store": "https://store.example.test"} {
+		for name, want := range map[string]string{"parallel": "3", "no-pod-defaults": "true", "no-egress": "true", "external-store": "https://store.example.test"} {
 			if request.flags.Lookup(name).Value.String() != want {
 				t.Fatalf("%s lost", name)
 			}
@@ -87,10 +87,10 @@ func TestInstallRulingFlagsReachOwner(t *testing.T) {
 		}
 		return nil
 	}
-	if code := app.run(t.Context(), []string{"install", "--parallel", "3", "--no-pod-defaults", "--no-link-local-filter", "--external-store", "https://store.example.test"}); code != 0 || !called {
+	if code := app.run(t.Context(), []string{"install", "--parallel", "3", "--no-pod-defaults", "--no-egress", "--external-store", "https://store.example.test"}); code != 0 || !called {
 		t.Fatalf("install ruling flags failed: %d %s", code, diagnostic.String())
 	}
-	for _, name := range []string{"--parallel", "--no-pod-defaults", "--no-link-local-filter", "--external-store"} {
+	for _, name := range []string{"--parallel", "--no-pod-defaults", "--no-egress", "--external-store"} {
 		if _, ok := commandCatalogue()["install"].Flags[name]; !ok {
 			t.Fatalf("%s missing from command tree", name)
 		}

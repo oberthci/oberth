@@ -82,6 +82,7 @@ type Plan struct {
 	choices                    Choices
 	definitions                definitionReview
 	podSecurity                string
+	serverPodSecurity          string
 	portScope                  string
 	address, directory, plugin string
 	release                    Release

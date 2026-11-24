@@ -2,7 +2,21 @@
 # need none of them. Apply after .oberth/pipeline-resources.yaml, replacing every
 # REPLACE_WITH_* value. Import the reviewed guest disk into its prepared volume
 # separately (hack/vm-image/README.txt); this file binds that existing volume and
-# does not create or populate a guest disk. The walk also needs the VM API, an
+# does not create or populate a guest disk.
+# Before dispatching the walk, install its HOST installation with this explicit
+# operator exception, or add it through upgrade on an existing installation:
+# oberth install --egress-allow '[{"cidr":"REPLACE_WITH_CLUSTER_POD_CIDR","port":22,"protocol":"TCP"}]'
+# oberth upgrade --egress-allow '[{"cidr":"REPLACE_WITH_CLUSTER_POD_CIDR","port":22,"protocol":"TCP"}]'
+# Supply the usual context/profile and release options. Replace the CIDR with
+# the host cluster Pod range containing the VM; include further ranges as JSON
+# entries if needed. Keep any other operator exceptions in the same list:
+# --egress-allow replaces the saved list. Review must show:
+# Egress allow: REPLACE_WITH_CLUSTER_POD_CIDR TCP/22
+# Check with --dry-run before confirming. This permits SSH to every Pod in the
+# chosen range, including oberth-walk; it grants no other port or protocol.
+# The install INSIDE the guest cannot grant this host-to-VM access. The VMI and
+# its volume stay in oberth-walk, under the normal resource capability rules.
+# The walk also needs the VM API, an
 # executor account in the pipeline namespace with RBAC for VirtualMachineInstances
 # in oberth-walk, and this capability, granted as admin:
 # oberth workflow capability grant --repo '<repo>' --capability '{

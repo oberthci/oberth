@@ -42,6 +42,7 @@ type fixture struct {
 func setup(t *testing.T) fixture {
 	t.Helper()
 	client := kfake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-system", UID: "cluster-one"}})
+	fake.Network(client)
 	fake.DryRunServices(client)
 	client.Discovery().(*discoveryfake.FakeDiscovery).FakedServerVersion = &version.Info{GitVersion: "v1.30.0"}
 	dir := t.TempDir()

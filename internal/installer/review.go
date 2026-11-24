@@ -41,7 +41,7 @@ func review(p *Plan, release string) []string {
 	lines := []string{
 		"Context: " + p.choices.Context,
 		"Cluster: " + p.address + " (UID: " + p.uid + ")",
-		"Namespaces: " + p.choices.Namespace + " / " + p.choices.PipelineNamespace + "; Pod Security: " + p.podSecurity,
+		"Namespaces: " + p.choices.Namespace + " / " + p.choices.PipelineNamespace + "; Pod Security: " + strings.ReplaceAll(p.serverPodSecurity, " (new namespace)", " (new)") + " / " + strings.ReplaceAll(p.podSecurity, " (new namespace)", " (new)"),
 		https, ssh,
 		"Release: " + release,
 		reviewResources(p, values),
@@ -61,7 +61,6 @@ func review(p *Plan, release string) []string {
 	for _, setting := range []struct{ label, section, key, flag string }{
 		{"Parallel runs", "runs", "parallel", "--parallel N"},
 		{"Baseline Pod defaults", "policies", "floor", "--no-pod-defaults"},
-		{"Link-local egress filter", "policies", "egress", "--no-link-local-filter"},
 		{"Bundled store", "secretStore", "bundled", "--external-store URL"},
 	} {
 		value := settingText(values, setting.section, setting.key)
@@ -71,6 +70,7 @@ func review(p *Plan, release string) []string {
 		}
 		lines = append(lines, setting.label+": "+value+" ("+setting.flag+")")
 	}
+	lines = append(lines, reviewEgress(p, values)...)
 	lines = append(lines, reviewSourcePins(p.history.Choices.Values, values, p.history.Deployed.Number > 0)...)
 	lines = append(lines, "Profile: "+p.directory,
 		"Files: installation.json, admin key/cert, CA, known_hosts, age/unseal keys",

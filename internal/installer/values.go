@@ -28,7 +28,11 @@ func values(r Release, c Choices, stored map[string]any) (map[string]any, error)
 	if !allowedOverrides(c.Values) {
 		return nil, problem("choices", nil)
 	}
-	v := chosenValues(merge(operatorValues(stored), c.Values), c)
+	saved := operatorValues(stored)
+	if c.replaceValues {
+		saved = nil
+	}
+	v := chosenValues(merge(saved, c.Values), c)
 	runtime := map[string]any{
 		"controller_namespace": c.Namespace,
 		"controller_configmap": "oberth-controller-config",

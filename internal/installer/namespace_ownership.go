@@ -11,6 +11,7 @@ import (
 
 type namespaceState struct {
 	serverAbsent bool
+	server       *corev1.Namespace
 	pipeline     *corev1.Namespace
 }
 
@@ -32,6 +33,8 @@ func (e *Engine) namespaceSnapshot(ctx context.Context, c Choices) (namespaceSta
 		}
 		if name == c.PipelineNamespace {
 			state.pipeline = ns
+		} else {
+			state.server = ns
 		}
 	}
 	if err := e.checkNamespaceReleases(ctx, c); err != nil {
@@ -71,7 +74,7 @@ func (e *Engine) beginInstallation(ctx context.Context, p *Plan, absent bool) er
 	}
 	name := p.choices.Namespace
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name,
-		Labels:      map[string]string{"app.kubernetes.io/managed-by": "Helm"},
+		Labels:      map[string]string{"app.kubernetes.io/managed-by": "Helm", podSecurityEnforce: "restricted"},
 		Annotations: map[string]string{"meta.helm.sh/release-name": "oberth", "meta.helm.sh/release-namespace": name},
 	}}
 	_, err := e.Cluster.Client.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})

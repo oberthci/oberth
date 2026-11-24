@@ -15,6 +15,7 @@ import (
 // Choices distinguishes unset values from explicit false and zero. Values uses
 // JSON containers; preparation takes an owned snapshot of nested maps and lists.
 type Choices struct {
+	replaceValues     bool
 	statusSelected    []string
 	statusOrigins     map[string]string
 	StoreAddress      string

@@ -89,13 +89,13 @@ func TestPipelinePodSecurityReviewAndVerification(t *testing.T) {
 	for _, level := range []string{"", "baseline", "restricted"} {
 		t.Run(level, func(t *testing.T) {
 			f := setup(t)
-			want := "baseline (new namespace)"
+			want := "baseline (new)"
 			if level != "" {
 				pipelineNamespaceLevel(t, f, level)
 				want = level
 			}
 			plan := prepare(t, f)
-			if !strings.Contains(strings.Join(plan.Review(), "\n"), "Pod Security: "+want) {
+			if !strings.Contains(strings.Join(plan.Review(), "\n"), "Pod Security: restricted (new) / "+want) {
 				t.Fatal(plan.Review())
 			}
 			if level != "" {

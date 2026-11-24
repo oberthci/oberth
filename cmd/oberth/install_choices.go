@@ -33,7 +33,7 @@ func (r installationRequest) choices() installer.Choices {
 		case "no-pod-defaults":
 			value := !r.enabled(f.Name)
 			c.PodFloor = &value
-		case "no-link-local-filter":
+		case "no-egress":
 			value := !r.enabled(f.Name)
 			c.Egress = &value
 		case "external-store":
@@ -43,6 +43,19 @@ func (r installationRequest) choices() installer.Choices {
 			c.ClearSourcePins = r.enabled(f.Name)
 		case "source-pin":
 			c.SourcePins = sourcePins(f.Value.(*sourcePinFlag).pairs)
+		case "egress-allow", "egress-internet", "cluster-cidrs":
+			if c.Values == nil {
+				c.Values = map[string]any{"policies": map[string]any{}}
+			}
+			policy := c.Values["policies"].(map[string]any)
+			switch f.Name {
+			case "egress-allow":
+				policy["allow"] = f.Value.(*egressDestinations).entries
+			case "egress-internet":
+				policy["internet"] = r.enabled(f.Name)
+			case "cluster-cidrs":
+				policy["clusterCIDRs"] = f.Value.(*clusterCIDRs).entries
+			}
 		}
 	})
 	return c

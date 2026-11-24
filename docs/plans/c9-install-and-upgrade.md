@@ -125,7 +125,7 @@ no service, wiring, native executor, source implementation or concrete Store.
 2. **Exact target.** Every child command and SDK call uses the selected context
    and verified cluster identity. Never change current-context or the user's
    kubeconfig. Private merged copies have owner-only permissions, cancellation
-   cleanup and conservative recovery. There is no cluster-type trust bypass. Enter selects a shown single-context default; multiple contexts require an explicit choice. A URL derived from a loopback API host requires a reachable URL prompt or --url. Choice markers record explicit input; rollback restores source provenance. Generated chart inputs use only the target schema's declared keys.
+   cleanup and conservative recovery. There is no cluster-type trust bypass. Enter selects a shown single-context default; multiple contexts require an explicit choice. A URL derived from a loopback API host requires a reachable URL prompt or --url. Choice markers record explicit input; rollback restores source provenance and replaces current settings with the recorded source settings and source chart defaults. Generated chart inputs use only the target schema's declared keys.
 3. **Current identities.** Clear private buffers and require explicit rotation
    review. Keep server, SSH, audit and store identities across
    reruns and upgrades. Added names preserve the served certificate's names;
@@ -159,18 +159,20 @@ no service, wiring, native executor, source implementation or concrete Store.
    within their size limits. Missing, empty, oversized or non-regular targets
    refuse. Replacing a projected-volume link is supported rotation, not a reason
    to reuse stale bytes; this does not relax custody of generated client keys.
-7. **Delta:** **Defaults and review.** Baseline Pod defaults and the link-local
-   egress filter are on by default and shown in review; the operator may turn
-   either off. The Pod defaults set native main and executor containers to drop
-   all capabilities, disable privilege escalation and use RuntimeDefault seccomp.
-   A pipeline namespace created by this installation uses Pod Security `baseline`.
-   The link-local egress filter permits DNS, source/store ports, same-namespace
-   traffic and all other addresses except link-local, including a step's
-   connection to the server's Git
-   SSH port 2222 with a granted key. It is not a cluster-destination allowlist.
-   Review states that the filter needs a network
-   plugin that enforces NetworkPolicy; it never claims enforcement without proof.
-   There is no policy probe.
+7. **Delta:** **Defaults and review.** Baseline Pod defaults and run egress policy are on.
+   Pod defaults drop capabilities, disable privilege escalation and use RuntimeDefault seccomp.
+   New pipeline namespaces enforce Pod Security `baseline`; new server namespaces enforce `restricted`.
+   Existing namespaces keep their labels. Review pairs server/pipeline namespaces with their labels.
+   Run egress opens internet destinations and excludes link-local, RFC1918, CGNAT, IPv6 ULA,
+   node/API addresses and discovered or operator-supplied cluster Pod/Service CIDRs.
+   Exceptions admit DNS UDP/TCP 53, the API Service and backends on their exact TCP ports,
+   same-run-namespace Pods, server ports derived from Services and the real bundled-store labels.
+   Extra CIDR/port/TCP-or-UDP exceptions are explicit. Internet access may be narrowed to them.
+   The installer binds discovered network facts to review and rechecks before writes.
+   Saved egress=true uses these rules; review shows old -> new rules before upgrade confirmation.
+   Install and upgrade both accept --no-egress; no policy remains when it is selected.
+   Image pulls use the node network. Enforcement requires a NetworkPolicy-capable plugin;
+   install does not claim proof or run a policy probe.
 8. **Delta:** **Bound calls.** Planning and verification have a two-minute total budget.
    Every blocking command, read and status poll inherits cancellation and its advertised deadline.
    Apply announces a ten-minute readiness wait; ten-second attempts retry unavailable or other-version servers. Expiry names a last version mismatch.

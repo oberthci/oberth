@@ -28,10 +28,15 @@ Branch code can poison a shared cache; use a separate release cache. Source deli
 Revocation cannot recover material already read.
 
 Pod defaults are on: no privilege escalation, dropped capabilities and RuntimeDefault seccomp.
-Link-local filtering needs an enforcing plugin; rules and install success do not prove enforcement.
-Review shows `--no-pod-defaults` and `--no-link-local-filter`; all six checks apply without them.
+Internet egress is open; link-local, RFC1918, CGNAT, IPv6 ULA, cluster and node IPs are closed.
+Exceptions: DNS UDP/TCP 53, kube API, server Service ports (SSH too), store and run-namespace Pods.
+Use `--egress-allow` for JSON CIDR/port/protocol (`TCP` or `UDP`) exceptions, including LAN mirrors.
+`--egress-internet=false` limits internet to that list; `--cluster-cidrs` adds hidden ranges.
+Install/upgrade review old -> new rules; `--no-egress` removes policy. Re-review network changes.
+A NetworkPolicy-capable plugin must enforce it. Pod defaults use `--no-pod-defaults`.
 Install, upgrade and `install --verify` require `pod-security.kubernetes.io/enforce=baseline` or
-`restricted` on existing pipeline namespaces; the installer labels only namespaces it creates.
+`restricted` on existing pipeline namespaces. New server namespaces enforce `restricted`.
+Existing namespaces retain their labels, shown in review.
 
 ## Keys, recovery and trust
 

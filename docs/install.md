@@ -20,8 +20,8 @@ oberth install --context <context> --dry-run
 oberth install --context <context> --yes
 ```
 `--yes` skips confirmation; keep choices identical between review and apply, including
-`--url <https-url> --ssh-port <port>` for mapped ports. Baseline Pod defaults and the link-local
-egress filter default on ([boundary flags](security.md#what-this-does-not-protect)). Compact review
+`--url <https-url> --ssh-port <port>` for mapped ports. Pod defaults and run
+egress default on ([boundary flags](security.md#what-this-does-not-protect)). Compact review
 names context, cluster UID, namespaces, version, endpoints, run cap, store, policies and files.
 Images are in `oberth install --dry-run --output json` and `oberth install --dry-run --detail`.
 Cluster UID prevents cross-cluster recovery; signatures and digests are checked first.
