@@ -30,7 +30,7 @@ def command(args, data=None, binary=False, env=None):
     return result
 
 def grep(args, data=None, program=("git", "grep")):
-    result = command([*program, *args], data)
+    result = command([program[0], "--attr-source="+checked_bytes(["git", "hash-object", "-t", "tree", os.devnull]).decode().strip(), *program[1:], "--no-textconv", *args], data)
     if result.returncode not in (0, 1): raise ValueError(result.stdout.strip())
     return result.stdout.splitlines()
 

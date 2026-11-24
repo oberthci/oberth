@@ -96,7 +96,7 @@ tool_paths=(
     hack/guards/test_run.py
 )
 changed=$({
-    git diff --name-only main "$head" -- "${tool_paths[@]}" docs/plans hack/guards hack/plans hack/devloop hack/base-image go.mod go.sum go.work go.work.sum vendor ':(top,glob)**/vendor/modules.txt'
+    git diff --name-only main "$head" -- "${tool_paths[@]}" docs/plans hack/guards hack/plans hack/devloop hack/base-image go.mod go.sum go.work go.work.sum vendor ':(top,glob)**/vendor/modules.txt' ':(top,glob)**/.gitattributes'
     git diff --no-renames --diff-filter=A --name-only main "$head" -- hack ':(top,glob)**/*.py' ':(top,glob)**/*.pth'
 } | LC_ALL=C sort -u | paste -sd ' ' -)
 for file in "${tool_paths[@]}"; do

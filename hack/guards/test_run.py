@@ -335,6 +335,23 @@ class TextGuards(RepositoryFixture):
         self.write("cases_test.go", "\n".join(cases + ['t.Skip("platform prerequisite missing")']))
         self.assertEqual(4, len(GUARDS.grep(["-nIE", pattern, "--", "*_test.go"])))
 
+    def test_branch_attributes_cannot_silence_text_guards(self):
+        term, marker = "retired_fixture_word", "TO" + "DO"
+        self.register([term])
+        self.write("nested/words.txt", term)
+        self.write("nested/unfinished.txt", marker)
+        self.write("nested/cases_test.go", "t.Skip()")
+        self.write("nested/binary.txt", "\0" + term + " " + marker)
+        self.write("nested/binary_test.go", "\0t.Skip()")
+        for attributes in (None, ".gitattributes", "nested/.gitattributes"):
+            with self.subTest(attributes=attributes):
+                self.write(".gitattributes", "# defaults\n")
+                if attributes:
+                    self.write(attributes, "* -diff\n")
+                self.assertEqual(1, len(GUARDS.vocabulary()))
+                self.assertEqual(1, len(GUARDS.hits(["-nIwE", marker, "--", *self.paths, ":!*.go"], "LEFTOVER")))
+                self.assertEqual(1, len(GUARDS.hits(["-nIE", GUARDS.SKIPS, "--", "*_test.go"], "SKIP")))
+
 
     def test_array_indices_are_not_rule_ids(self):
         self.assertIsNone(GUARDS.RULE.search("bindings[0] is a source expression"))

@@ -32,6 +32,19 @@ class GateVerdicts(VendorGateTests, GoGateTests, GateFixture, unittest.TestCase)
         self.assertEqual([f"unset {vm / 'trusted.mod'}"] * 2 + ["unset unset"],
                          (vm / "checks.tools").read_text().splitlines())
 
+    def test_attributes_changes_are_listed(self):
+        files = (".gitattributes", "internal/.gitattributes")
+        for name in files:
+            path = self.fixture / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("* -diff\n")
+        self.git("add", *files)
+        self.git("commit", "-qm", "Change text classification")
+        result = self.run_gate()
+        self.assertEqual(0, result.returncode, result.stdout)
+        changed = next(line for line in result.stdout.splitlines() if line.startswith("GATE FILES CHANGED:"))
+        for name in files:
+            self.assertIn(name, changed.split())
 
 
     def test_root_python_cannot_replace_trusted_entries(self):
