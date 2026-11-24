@@ -195,7 +195,7 @@ func TestUINeverTruncates(t *testing.T) {
 	if regexp.MustCompile(`(?i)(?:max-height|line-clamp)\s*:`).MatchString(css) {
 		t.Fatal("CSS clips text")
 	}
-	for _, room := range []string{"minmax(calc(40ch", ".runs .row > .message { white-space: normal; }", "pre-wrap", "overflow-wrap: anywhere"} {
+	for _, room := range []string{"minmax(calc(40ch", ".runs .row > .message { white-space: normal; overflow-wrap: anywhere; }", "pre-wrap", "overflow-wrap: anywhere"} {
 		if !strings.Contains(css, room) {
 			t.Fatal("full reasons/logs cannot wrap", room)
 		}

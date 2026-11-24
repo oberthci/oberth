@@ -90,15 +90,17 @@ details pre { padding: 10px 12px; border: 1px solid var(--line); border-radius: 
 a.row:hover { background: var(--panel2); text-decoration: none; }
 a.row:focus-visible { outline-offset: -2px; }
 .row.head { padding-top: 8px; padding-bottom: 8px; background: var(--panel2); color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; border-radius: 8px 8px 0 0; }
-/* Every run is one 22px line of five columns. A repository or ref name too long
+/* Wide run data uses one 22px line in five columns; headings may wrap.
+   Compact rows separate the message and, on small screens, the date. A name too long
    for its column ends in an ellipsis and keeps the whole name as its title; a
    reason is never cut: the 40-character rule always fits its column (the row's
    12px inset comes out of the first and last columns). */
-.runs { font-family: var(--mono); display: grid; grid-template-columns: calc(12ch + 12px) minmax(10ch, 18ch) minmax(4ch, 24ch) max-content minmax(calc(40ch + 13px), 1fr); column-gap: 12px; }
+.runs { font-family: var(--mono); display: grid; grid-template-columns: calc(12ch + 12px) minmax(4ch, 18ch) minmax(4ch, 24ch) max-content minmax(calc(40ch + 13px), 1fr); column-gap: 12px; }
 .runs .row { grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; padding-block: 7px; line-height: 22px; overflow-wrap: normal; }
 .runs .row > * { min-width: 0; white-space: nowrap; }
 .runs .row > .repo, .runs .row > .ref { overflow: hidden; text-overflow: ellipsis; }
-.runs .row > .message { white-space: normal; }
+.runs .row > .message { white-space: normal; overflow-wrap: anywhere; }
+.runs .row.head > * { white-space: normal; overflow-wrap: anywhere; }
 .runs .row > .state { justify-self: start; align-self: center; }
 .runs > .pager, .runs > .empty { grid-column: 1 / -1; }
 .when { color: var(--muted); font-size: 12px; }
@@ -266,18 +268,6 @@ a.repo-group .chevron { visibility: hidden; }
  #notice { margin: 12px 12px 0; }
  .filters label { flex: 1 1 100%; }
  .filters select { flex: 1; }
- .runs { display: block; }
- .runs .row.head { display: none; }
- /* A phone keeps status, repository, ref and time on the first line and
-    reserves a second line for the message, even when it is empty. */
- .runs .row { grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr) auto; grid-template-areas: "state repo ref when" "message message message message"; gap: 0 6px; padding: 7px 8px; font-size: 12px; }
- .runs .row:first-of-type { border-radius: 8px 8px 0 0; }
- .runs .row > .state { grid-area: state; padding: 0 6px; gap: 5px; }
- .runs .row > .repo { grid-area: repo; }
- .runs .row > .ref { grid-area: ref; }
- .runs .row > .when { grid-area: when; }
- .runs .row > .message { grid-area: message; min-height: 1lh; }
- .runs .ref::before { content: "\00B7"; margin-right: 6px; color: var(--muted); }
  .server-name { display: none; }
  /* A phone header has no room for the version or a reload word: the light alone
     shows the state, and when unreachable the light itself is the reload link. */
@@ -311,6 +301,25 @@ a.repo-group .chevron { visibility: hidden; }
  .issue-id small.manual { display: none; }
  .filters > .issue-search { flex: 1 1 0; }
  .issue-head { padding: 12px; }
+}
+@media (max-width: 839px) {
+ .runs { display: block; }
+ .runs .row.head { display: none; }
+ /* Compact rows keep the date and whole message within the available frame. */
+ .runs .row { grid-template-columns: auto minmax(0, max-content) minmax(calc(7ch + 6px), 1fr) auto; grid-template-areas: "state repo ref when" "message message message message"; gap: 0 6px; padding: 7px 8px; font-size: 12px; }
+ .runs .row:first-of-type { border-radius: 8px 8px 0 0; }
+ .runs .row > .state { grid-area: state; padding: 0 6px; gap: 5px; }
+ .runs .row > .repo { grid-area: repo; }
+ .runs .row > .ref { grid-area: ref; }
+ .runs .row > .when { grid-area: when; }
+ .runs .row > .message { grid-area: message; min-height: 1lh; }
+ .runs .ref::before { content: "\00B7"; margin-right: 6px; color: var(--muted); }
+}
+@media (max-width: 499px) {
+ .runs .row { grid-template-columns: auto minmax(0, max-content) minmax(calc(7ch + 6px), 1fr); grid-template-areas: "state repo ref" "when when when" "message message message"; }
+}
+@media (max-width: 359px) {
+ .runs .row > .message { min-height: 2lh; }
 }
 /* The default themes use a 1440px list, lowercase tabs, 22px status chips,
    and a full-width run view. */

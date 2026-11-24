@@ -27,13 +27,17 @@ const results=[];
     if(page==='runs'&&width===360){check(metrics.reason&&metrics.reason.height<=parseFloat(metrics.reason.lineHeight),'40-character reason wrapped '+JSON.stringify(metrics));}
     metrics.rowHeights=await evaluate(`Array.from(document.querySelectorAll('.runs a.row')).map(row=>{const style=getComputedStyle(row),height=row.getBoundingClientRect().height;const lineHeight=parseFloat(style.lineHeight);return {height,lineHeight,content:height-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)-parseFloat(style.borderBottomWidth)-parseFloat(style.borderTopWidth),when:Array.from(row.querySelector('.when').children).map(node=>node.textContent).join('|'),title:row.querySelector('.when').title,message:Boolean(row.querySelector('.message').textContent),cells:Array.from(row.children).filter(cell=>!cell.matches('.state')).map(cell=>{const walker=document.createTreeWalker(cell,NodeFilter.SHOW_TEXT,{acceptNode:node=>node.textContent.trim()&&node.parentElement.checkVisibility()?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_SKIP}),text=walker.nextNode(),range=document.createRange();if(text)range.selectNodeContents(text);const box=text?range.getBoundingClientRect():{bottom:0,height:0},all=document.createRange();all.selectNodeContents(cell);return {name:cell.className,size:getComputedStyle(cell).fontSize,bottom:box.bottom,height:all.getBoundingClientRect().height,cut:cell.scrollWidth>cell.clientWidth+0.5};})};})`);
     // One line per run on a wide screen, every cell at one size on one baseline and nothing cut in the
-    // example; a phone reserves a second line even when the message is empty.
+    // example; a phone reserves separate date and message lines, including an empty message.
     if(page==='runs')check(metrics.rowHeights.some(row=>row.message)&&metrics.rowHeights.some(row=>!row.message),'run-list fixture must mix empty and specific reasons');
     if(page==='runs')for(const row of metrics.rowHeights){
-     const lines=width===1280?1:2;
+     const lines=width===1280?1:3;
      check(Math.abs(row.content-lines*row.lineHeight)<0.5&&Math.abs(row.height-metrics.rowHeights[0].height)<0.5,'run row is not '+lines+' line(s) or rows not uniform '+JSON.stringify({width,...row}));
-     const first=row.cells.filter(cell=>cell.height>0&&(width===1280||!cell.name.includes('message')));
+     const first=row.cells.filter(cell=>cell.height>0&&(width===1280||(!cell.name.includes('message')&&!cell.name.includes('when'))));
      check(row.cells.every(cell=>cell.size===row.cells[0].size&&cell.height<=row.lineHeight+0.5)&&first.every(cell=>Math.abs(cell.bottom-first[0].bottom)<1),'run cells differ in size or baseline '+JSON.stringify({width,...row}));
+     if(width===360){
+      const date=row.cells.find(cell=>cell.name==='when'),message=row.cells.find(cell=>cell.name==='message');
+      check(Math.abs(date.bottom-first[0].bottom-row.lineHeight)<1&&(!message.height||Math.abs(message.bottom-date.bottom-row.lineHeight)<1),'phone date and message do not have separate lines '+JSON.stringify(row));
+     }
      if(width===1280)check(row.cells.every(cell=>!cell.cut),'example run cell cut at 1280 '+JSON.stringify(row.cells));
      check(!/AM|PM|0m \d+s|\d{3}m/.test(row.when),'long time form '+row.when);
     }
@@ -110,8 +114,8 @@ const results=[];
  check(JSON.stringify(formats.durations)===JSON.stringify(['0s','48s','59s','1m 0s','6m 12s','59m 59s','1h 0m','6h 22m'])&&formats.today==='15:00'&&formats.older==='Nov 15 15:00'&&formats.fullTimestamp.includes('2026-11-16T14:00:00.123456789Z')&&formats.fullTimestamp.includes('GMT+0100'),'time formats failed '+JSON.stringify(formats));
  await cdp('Emulation.setDeviceMetricsOverride',{width:760,height:900,deviceScaleFactor:1,mobile:false});
  await loaded('/runs','.runs a.row');
- const intermediate=await evaluate(`({width:innerWidth,scroll:document.documentElement.scrollWidth,columns:getComputedStyle(document.querySelector('.runs')).gridTemplateColumns.split(' ').length,heights:Array.from(document.querySelectorAll('.runs a.row')).map(row=>row.getBoundingClientRect().height),reason:Array.from(document.querySelectorAll('.runs a.row .message')).every(node=>node.textContent.length>40||node.scrollWidth<=node.clientWidth)})`);
- check(intermediate.columns===5&&intermediate.scroll<=760&&intermediate.heights.every(height=>height===intermediate.heights[0])&&intermediate.reason,'tablet layout lost five one-line columns or cut a reason '+JSON.stringify(intermediate));
+ const intermediate=await evaluate(`({width:innerWidth,scroll:document.documentElement.scrollWidth,columns:getComputedStyle(document.querySelector('.runs a.row')).gridTemplateColumns.split(' ').length,heading:getComputedStyle(document.querySelector('.runs .head')).display,messageRow:Array.from(document.querySelectorAll('.runs a.row')).every(row=>row.querySelector('.message').getBoundingClientRect().top>=row.getBoundingClientRect().top+parseFloat(getComputedStyle(row).lineHeight)),heights:Array.from(document.querySelectorAll('.runs a.row')).map(row=>row.getBoundingClientRect().height),reason:Array.from(document.querySelectorAll('.runs a.row .message')).every(node=>node.textContent.length>40||node.scrollWidth<=node.clientWidth)})`);
+ check(intermediate.columns===4&&intermediate.heading==='none'&&intermediate.messageRow&&intermediate.scroll<=760&&intermediate.heights.every(height=>height===intermediate.heights[0])&&intermediate.reason,'tablet compact rows overflowed, lost their message line or cut a reason '+JSON.stringify(intermediate));
  await loaded('/runs/22222222','.steps a.row');
  const rerun=await evaluate(`(async()=>{
   const original=window.fetch,calls=[];
