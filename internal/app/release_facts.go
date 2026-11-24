@@ -136,6 +136,9 @@ func buildResult(ctx context.Context, row stateport.Run, runs ReleaseRuns) (bool
 		return false, nil
 	}
 	if !row.HasAdmission {
+		if row.Origin.Trigger != model.TriggerBranch {
+			return false, nil
+		}
 		return true, refusal("release_build", nil)
 	}
 	full, err := runs.Run(ctx, row.ID)
