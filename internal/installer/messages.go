@@ -150,6 +150,7 @@ func problems() map[string]Problem {
 
 func operationProblems() map[string]Problem {
 	return map[string]Problem{
+		"loopback-url":           {Reason: "The API host is loopback; choose a reachable server URL.", Remedy: "Run oberth install with --url set to an HTTPS address clients can reach."},
 		"address":                {Reason: "The server address is unspecified.", Remedy: "Run oberth install with --url and --ssh-port clients can reach."},
 		"url-host":               {Reason: "Public URL host must use ASCII.", Remedy: "Set --url to the punycode address shown below and review again."},
 		"store-health":           {Reason: "Secret store health is unexpected.", Remedy: "Check the store's health response, then rerun oberth install."},

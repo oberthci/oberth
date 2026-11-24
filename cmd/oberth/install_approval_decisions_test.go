@@ -14,7 +14,7 @@ import (
 )
 
 func TestInstallationAutomaticApprovalObservesCancellation(t *testing.T) {
-	s, release := addressSession(t, "localhost")
+	s, release := addressSession(t, "cluster.oberth.ci")
 	plan, err := s.engine.Prepare(t.Context(), release, s.choices)
 	if err != nil {
 		t.Fatal(err)

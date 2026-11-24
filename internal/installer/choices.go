@@ -69,6 +69,9 @@ func resolve(c Choices, host string) (Choices, error) {
 		c.SSHPort = c.SSHNodePort
 	}
 	if c.URL == "" {
+		if loopbackHost(host) {
+			return c, problem("loopback-url", nil)
+		}
 		c.URL = (&url.URL{Scheme: "https", Host: net.JoinHostPort(host, strconv.Itoa(c.HTTPSNodePort))}).String()
 	}
 	if err := checkNamespaceChoices(c); err != nil {
@@ -204,4 +207,9 @@ func checkNamespaceChoices(c Choices) error {
 		return problem("namespaces", nil)
 	}
 	return nil
+}
+
+func loopbackHost(host string) bool {
+	address, err := netip.ParseAddr(host)
+	return err == nil && address.WithZone("").Unmap().IsLoopback() || strings.EqualFold(strings.TrimSuffix(host, "."), "localhost")
 }

@@ -50,8 +50,9 @@ func TestInstallationAddressPromptPreservesApproval(t *testing.T) {
 }
 
 func TestInstallationAddressReviewKeepsLoopback(t *testing.T) {
-	for _, host := range []string{"127.0.0.1", "[::1]", "localhost", "localhost.", "LOCALHOST."} {
+	for _, host := range []string{"127.0.0.1", "[::1]", "[::1%25lo]", "localhost", "localhost.", "LOCALHOST."} {
 		s, release := addressSession(t, host)
+		s.choices.URL = "https://" + host + ":30443"
 		var out bytes.Buffer
 		plan, err := s.prepareReachableInstallation(t.Context(), release, &out)
 		if err != nil {

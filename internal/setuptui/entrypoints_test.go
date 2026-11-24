@@ -43,7 +43,7 @@ func reviewPlanContext(t *testing.T, name string) *installer.Plan {
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine := installer.Engine{Definitions: &fake.Definitions{}, Cluster: kubeconfig.Target{Context: name, Config: &rest.Config{Host: "https://127.0.0.1"}, Client: client}, Charts: &fake.Chart{}, Credentials: credentials, Random: rand.Reader, Now: func() time.Time { return time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC) }, CheckEndpoint: func(context.Context, installer.Profile) error { return nil }}
+	engine := installer.Engine{Definitions: &fake.Definitions{}, Cluster: kubeconfig.Target{Context: name, Config: &rest.Config{Host: "https://cluster.oberth.ci"}, Client: client}, Charts: &fake.Chart{}, Credentials: credentials, Random: rand.Reader, Now: func() time.Time { return time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC) }, CheckEndpoint: func(context.Context, installer.Profile) error { return nil }}
 	plan, err := engine.Prepare(t.Context(), release, installer.Choices{Context: name})
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func TestCompactReviewShowsClusterUIDAndFitsOneTerminal(t *testing.T) {
 	if rows > 24 {
 		t.Fatal("compact review exceeds one terminal", rows, out.String())
 	}
-	for _, text := range []string{"Context:", "Cluster: https://127.0.0.1 (UID: cluster)", "Namespaces:", "Pod Security: baseline (new namespace)", "Create/update:", "--parallel N", "--no-pod-defaults", "--no-link-local-filter", "--external-store URL", "Files:", "Apply? [y/N]"} {
+	for _, text := range []string{"Context:", "Cluster: https://cluster.oberth.ci (UID: cluster)", "Namespaces:", "Pod Security: baseline (new namespace)", "Create/update:", "--parallel N", "--no-pod-defaults", "--no-link-local-filter", "--external-store URL", "Files:", "Apply? [y/N]"} {
 		if !strings.Contains(strings.ReplaceAll(out.String(), ":\n", ": "), text) {
 			t.Fatal("missing approval fact", text, out.String())
 		}

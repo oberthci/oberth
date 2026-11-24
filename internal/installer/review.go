@@ -3,7 +3,6 @@ package installer
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/url"
 	"strings"
 )
@@ -151,7 +150,7 @@ func changedAnswer(old, next any) string {
 
 func reviewReachability(address string) []string {
 	host := publicHost(address)
-	if net.ParseIP(host).IsLoopback() || strings.EqualFold(strings.TrimSuffix(host, "."), "localhost") {
+	if loopbackHost(host) {
 		return []string{"Loopback address: only this machine can reach it."}
 	}
 	return nil

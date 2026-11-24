@@ -99,7 +99,7 @@ func offlineInstallEngine(t *testing.T, base string) (*installer.Engine, *chartf
 	chartfake.DryRunServices(kube)
 	kube.Discovery().(*discoveryfake.FakeDiscovery).FakedServerVersion = &kversion.Info{GitVersion: "v1.30.0"}
 	charts := &chartfake.Chart{}
-	config := &rest.Config{Host: "https://127.0.0.1:6443"}
+	config := &rest.Config{Host: "https://cluster.oberth.ci:6443"}
 	config.WrapTransport = func(http.RoundTripper) http.RoundTripper {
 		return testTransport(func(*http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"apiVersion":"argoproj.io/v1alpha1","kind":"WorkflowList","items":[]}`))}, nil

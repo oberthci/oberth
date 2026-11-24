@@ -62,7 +62,7 @@ func setup(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	charts := &fake.Chart{}
-	e := &installer.Engine{Definitions: &fake.Definitions{}, Cluster: kubeconfig.Target{Context: "test", Config: &rest.Config{Host: "https://127.0.0.1:6443"}, Client: client}, Charts: charts, Credentials: credentials, Random: rand.Reader, Now: func() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC) }, CheckEndpoint: func(context.Context, installer.Profile) error { return nil }}
+	e := &installer.Engine{Definitions: &fake.Definitions{}, Cluster: kubeconfig.Target{Context: "test", Config: &rest.Config{Host: "https://cluster.oberth.ci:6443"}, Client: client}, Charts: charts, Credentials: credentials, Random: rand.Reader, Now: func() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC) }, CheckEndpoint: func(context.Context, installer.Profile) error { return nil }}
 	backend := &storefake.Store{}
 	e.OpenStore = func(context.Context, secretstore.Config) (*secretstore.Client, func(), error) {
 		c, err := secretstore.New(secretstore.Connection{URL: "https://store.oberth.svc", Transport: backend})

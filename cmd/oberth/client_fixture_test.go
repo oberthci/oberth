@@ -95,7 +95,7 @@ func installComposedProfile(ctx context.Context, t *testing.T, f *composedFixtur
 	f.kube.Discovery().(*discoveryfake.FakeDiscovery).FakedServerVersion = &kversion.Info{GitVersion: "v1.30.0"}
 	backend := &storefake.Store{}
 	installfake.DryRunServices(f.kube)
-	e := &installer.Engine{Definitions: &installfake.Definitions{}, Cluster: kubeconfig.Target{Context: "installed", Config: &rest.Config{Host: "https://127.0.0.1:6443"}, Client: f.kube}, Charts: &installfake.Chart{}, Credentials: credentials, Random: rand.Reader, Now: f.deps.clock.Now, CheckEndpoint: func(context.Context, installer.Profile) error { return nil }}
+	e := &installer.Engine{Definitions: &installfake.Definitions{}, Cluster: kubeconfig.Target{Context: "installed", Config: &rest.Config{Host: "https://cluster.oberth.ci:6443"}, Client: f.kube}, Charts: &installfake.Chart{}, Credentials: credentials, Random: rand.Reader, Now: f.deps.clock.Now, CheckEndpoint: func(context.Context, installer.Profile) error { return nil }}
 	e.OpenStore = func(context.Context, secretstore.Config) (*secretstore.Client, func(), error) {
 		c, err := secretstore.New(secretstore.Connection{URL: "https://store.oberth.svc", Transport: backend})
 		return c, func() {}, err

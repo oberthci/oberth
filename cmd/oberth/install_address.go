@@ -17,7 +17,7 @@ import (
 func (s *installationSession) prepareReachableInstallation(ctx context.Context, release installer.Release, out io.Writer) (*installer.Plan, error) {
 	plan, err := s.prepareInstallation(ctx, release, out)
 	var problem *installer.Problem
-	if !errors.As(err, &problem) || problem.Code != "address" {
+	if !errors.As(err, &problem) || (problem.Code != "address" && problem.Code != "loopback-url") {
 		return plan, err
 	}
 	if !s.interactivePrompt || s.request.enabled("yes") || s.request.enabled("dry-run") || s.request.text("output") == "json" {
