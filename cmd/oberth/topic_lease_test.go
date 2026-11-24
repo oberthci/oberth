@@ -86,7 +86,7 @@ func checkTopicSyncUnseenCommit(t *testing.T, refresh bool) {
 		t.Fatal(err)
 	}
 	publication := settledTopicPublication(t, f)
-	if publication.Status == model.PublicationDelivered || publication.ReceivedSHA == nil || *publication.ReceivedSHA != base {
+	if publication.Status == model.PublicationDelivered || publication.ReceivedHeads == nil || publication.ReceivedHeads[0] != base {
 		t.Fatal("sync lost its original receive head", publication)
 	}
 	if actual := f.git.Git(t, f.git.Bare, "rev-parse", "refs/heads/topic"); actual != external {

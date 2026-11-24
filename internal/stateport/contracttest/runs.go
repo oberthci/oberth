@@ -16,7 +16,7 @@ import (
 
 // RunPort is the narrow owner contract exercised by service stores and fakes.
 type RunPort interface {
-	ReceivedHead(context.Context, stateport.ReceivedRef) (*string, error)
+	ReceivedHeads(context.Context, stateport.ReceivedRef) ([]string, error)
 	AcceptBatch(context.Context, stateport.BatchAcceptance) (stateport.AcceptanceResult, error)
 	AcceptedRuns(context.Context, string) ([]stateport.Run, error)
 	Run(context.Context, string) (stateport.Run, error)
@@ -92,6 +92,7 @@ func RunSuite(t *testing.T, factory func(*testing.T) RunFixture) {
 		"events":               checkRunEvents,
 		"mixed_receive":        checkMixedReceive,
 		"received_heads":       checkReceivedHeads,
+		"received_chain":       checkReceivedChain,
 	} {
 		t.Run(name, func(t *testing.T) { check(t, factory(t)) })
 	}

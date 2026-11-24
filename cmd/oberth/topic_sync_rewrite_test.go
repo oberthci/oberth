@@ -39,7 +39,7 @@ func TestTopicSyncPublishesThePushersAmendedCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := settledTopicPublication(t, f)
-	if p.Status != model.PublicationDelivered || p.ReceivedSHA == nil || *p.ReceivedSHA != base {
+	if p.Status != model.PublicationDelivered || p.ReceivedHeads == nil || p.ReceivedHeads[0] != base {
 		t.Fatal("parked rewrite lost its original receive evidence", p)
 	}
 	if head := f.git.Git(t, f.git.Bare, "rev-parse", "refs/heads/topic"); head != amended {

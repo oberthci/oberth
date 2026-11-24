@@ -9396,12 +9396,12 @@
     "docs/plans/c12-agent-client.md": "1839b17c036fa9a854df8097a076a712f84c9660b1945f029d5ae9efe728ddac",
     "docs/plans/c13-own-pipelines.md": "3264a0141755c9fc9b736ad06cc1589d23d855a1c0b51dced00d304a574db790",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
-    "docs/plans/c2-service-actions-and-history.md": "d3700745909731a4967583b8ab4e8010e1a41f3212c5805d289e428ea5015cac",
+    "docs/plans/c2-service-actions-and-history.md": "7062a2fc082fb0142857e2692dbe06247cec23a59a34416dca9b926581436298",
     "docs/plans/c3-wiring-and-submission.md": "94055286b7031b1604f326ca42b51240445b1a8b875384478f859cd68c688db7",
     "docs/plans/c4-admission-rules-and-plan.md": "d7c2a5a09ea28c71d5aa853d41db1e0f952cf1701ef8011e4d5db7b9b49f042a",
     "docs/plans/c5-native-execution.md": "f3ad4a361270e5fd47078a07a6e4e55dd99f76a8686c5e6f5b988092a24a8c38",
-    "docs/plans/c6-source-delivery.md": "5bafdc0bbacd7601f7553b8d485e1f864a45e66ef9f9a29b6f401f59cc0d977b",
-    "docs/plans/c7-durable-state.md": "ab9d5915ede2d379bdb5a5af7db7a74f4a0c3aca82fad4029c3eb6f21973b75b",
+    "docs/plans/c6-source-delivery.md": "b234c97f1365905d824a38e469b96433370dfb7ff038f78d3e5efd26a2dac41f",
+    "docs/plans/c7-durable-state.md": "e95614a09cd04f0aead014de20bdf0e858637b123c825c9bfc64c611d983380c",
     "docs/plans/c8-logs.md": "e7e04d0a411011160a2f5cb9d885b7dbd6c55503452f5849a5b0557df4f67b63",
     "docs/plans/c9-install-and-upgrade.md": "39f45e5ac7d3f42393df0e930047ac078b8a235fa225cb349b440b0d5de7280b"
   },
@@ -10929,7 +10929,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "| **Delta:** Sync | Publish only the exact current mirror head of one named non-default branch, including parked branches. Validate the branch first; copy its original accepted receive's old head into the durable intent, never a tracking ref sampled at sync. Refuse default, internal promotion/release refs and ambiguous selectors. |",
+      "basis": "| **Delta:** Sync | Publish only the exact current mirror head of one named non-default branch, including parked branches. Validate the branch first; copy its original accepted receive's capped head set into the durable intent, never a tracking ref sampled at sync. Refuse default, internal promotion/release refs and ambiguous selectors. |",
       "rows": [
         {
           "category": "MCP tools",

@@ -6,7 +6,7 @@ imageRepository: europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth
 imageDigest: unset
 sourcePluginImageRepository: europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin
 sourcePluginImageDigest: unset
-targetSchema: 7
+targetSchema: 6
 runs:
   parallel: 4
 policies:

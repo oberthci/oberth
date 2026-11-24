@@ -5,15 +5,16 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/stateport"
 )
 
-// ReceivedHead reads receive evidence, never mutable Git tracking state.
-func (s *Store) ReceivedHead(ctx context.Context, q stateport.ReceivedRef) (*string, error) {
+// ReceivedHeads reads immutable receive evidence, never Git tracking state.
+func (s *Store) ReceivedHeads(ctx context.Context, q stateport.ReceivedRef) ([]string, error) {
 	if q.RunID == "" {
-		return s.lastReceivedHead(ctx, q)
+		return s.lastReceivedHeads(ctx, q)
 	}
 	seen := map[string]bool{}
 	for q.RunID != "" && !seen[q.RunID] {
@@ -31,32 +32,19 @@ JOIN receive_runs rr ON rr.receive_id=r.id WHERE rr.run_id=?`, q.RunID).Scan(&bo
 		if err := json.Unmarshal(body, &binding); err != nil {
 			return nil, refuse(corrupt, err)
 		}
-		head, previous := bindingReceivedHead(q, binding)
-		if head != nil {
-			return head, nil
+		heads, previous := bindingReceivedHeads(q, binding)
+		if heads != nil {
+			return heads, nil
 		}
 		q.RunID = previous
 	}
 	return nil, nil
 }
 
-func (s *Store) lastReceivedHead(ctx context.Context, q stateport.ReceivedRef) (*string, error) {
-	var previous string
-	err := s.readers.QueryRowContext(ctx, `SELECT h.previous_sha FROM receive_heads h
-JOIN repositories r ON r.id=h.repo_id WHERE r.canonical=? AND h.ref=? AND h.object_sha=?`, q.Repo, q.Ref, q.ObjectSHA).Scan(&previous)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, databaseError(err)
-	}
-	return &previous, nil
-}
-
-func bindingReceivedHead(q stateport.ReceivedRef, binding receiveBinding) (*string, string) {
+func bindingReceivedHeads(q stateport.ReceivedRef, binding receiveBinding) ([]string, string) {
 	for _, received := range binding.Received {
 		if received.Repo == q.Repo && received.Ref == q.Ref && received.ObjectSHA == q.ObjectSHA {
-			return new(received.PreviousSHA), ""
+			return receiptHeads(binding, received), ""
 		}
 	}
 	for _, run := range binding.Runs {
@@ -65,6 +53,23 @@ func bindingReceivedHead(q stateport.ReceivedRef, binding receiveBinding) (*stri
 		}
 	}
 	return nil, ""
+}
+
+func receiptHeads(binding receiveBinding, r model.CIRequest) []string {
+	if heads := binding.Heads[r.Ref]; len(heads) > 0 {
+		return slices.Clone(heads)
+	}
+	return []string{r.PreviousSHA}
+}
+
+// Derived evidence is not part of the caller's replay identity.
+func receivedRequest(body []byte) ([]byte, error) {
+	var binding receiveBinding
+	if err := json.Unmarshal(body, &binding); err != nil {
+		return nil, refuse(corrupt, err)
+	}
+	binding.Heads = nil
+	return json.Marshal(binding)
 }
 
 func prepareReceived(input stateport.BatchAcceptance) ([]model.CIRequest, error) {
@@ -89,16 +94,6 @@ func prepareReceived(input stateport.BatchAcceptance) ([]model.CIRequest, error)
 func validateReceived(input stateport.BatchAcceptance, r model.CIRequest) error {
 	if r.ReceiveID != input.ReceiveID || r.Repo != input.Repository || encode(r.Actor) != encode(input.Actor) || !stateport.ValidReceivedRef(r) {
 		return refuse(invalid, nil)
-	}
-	return nil
-}
-
-func writeReceivedHeads(ctx context.Context, tx *sql.Tx, repoID int64, received []model.CIRequest) error {
-	for _, r := range received {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO receive_heads VALUES(?,?,?,?)
-ON CONFLICT(repo_id,ref) DO UPDATE SET object_sha=excluded.object_sha,previous_sha=excluded.previous_sha`, repoID, r.Ref, r.ObjectSHA, r.PreviousSHA); err != nil {
-			return databaseError(err)
-		}
 	}
 	return nil
 }

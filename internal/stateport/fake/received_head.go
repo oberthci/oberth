@@ -10,16 +10,21 @@ import (
 	"github.com/oberthci/oberth/internal/stateport"
 )
 
-func (f *Runs) ReceivedHead(ctx context.Context, q stateport.ReceivedRef) (*string, error) {
+type receivedEvidence struct {
+	ObjectSHA string
+	Heads     []string
+}
+
+func (f *Runs) ReceivedHeads(ctx context.Context, q stateport.ReceivedRef) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.before(ctx, "ReceivedHead", false); err != nil {
+	if err := f.before(ctx, "ReceivedHeads", false); err != nil {
 		return nil, err
 	}
 	if q.RunID == "" {
 		r, ok := f.data.receivedHeads[q.Repo+"\x00"+q.Ref]
 		if ok && r.ObjectSHA == q.ObjectSHA {
-			return new(r.PreviousSHA), nil
+			return slices.Clone(r.Heads), nil
 		}
 		return nil, nil
 	}
@@ -38,7 +43,7 @@ func (f *Runs) ReceivedHead(ctx context.Context, q stateport.ReceivedRef) (*stri
 	return nil, nil
 }
 
-func (m *runMemory) receivedRunHead(q stateport.ReceivedRef) (*string, string, error) {
+func (m *runMemory) receivedRunHead(q stateport.ReceivedRef) ([]string, string, error) {
 	for _, receipt := range m.receipts {
 		if !slices.Contains(receipt.IDs, q.RunID) {
 			continue
@@ -52,7 +57,7 @@ func (m *runMemory) receivedRunHead(q stateport.ReceivedRef) (*string, string, e
 		}
 		for _, r := range binding.Received {
 			if r.Repo == q.Repo && r.Ref == q.Ref && r.ObjectSHA == q.ObjectSHA {
-				return new(r.PreviousSHA), "", nil
+				return slices.Clone(receipt.Heads[r.Ref]), "", nil
 			}
 		}
 		for _, r := range binding.Runs {
@@ -64,22 +69,26 @@ func (m *runMemory) receivedRunHead(q stateport.ReceivedRef) (*string, string, e
 	return nil, "", nil
 }
 
-func (m *runMemory) recordReceived(b stateport.BatchAcceptance) error {
+func (m *runMemory) recordReceived(b stateport.BatchAcceptance) (map[string][]string, error) {
 	if len(b.Received) > stateport.MaxReceivedRefs {
-		return runProblem(publicerr.InvalidInput)
+		return nil, runProblem(publicerr.InvalidInput)
 	}
 	refs := map[string]bool{}
+	heads := map[string][]string{}
 	for _, r := range b.Received {
 		if refs[r.Ref] {
-			return runProblem(publicerr.InvalidInput)
+			return nil, runProblem(publicerr.InvalidInput)
 		}
 		refs[r.Ref] = true
 		if err := fakeReceived(b, r); err != nil {
-			return err
+			return nil, err
 		}
-		m.receivedHeads[r.Repo+"\x00"+r.Ref] = r.Clone()
+		key := r.Repo + "\x00" + r.Ref
+		previous := m.receivedHeads[key]
+		heads[r.Ref] = stateport.InheritReceivedHeads(r.PreviousSHA, previous.ObjectSHA, previous.Heads)
+		m.receivedHeads[key] = receivedEvidence{ObjectSHA: r.ObjectSHA, Heads: heads[r.Ref]}
 	}
-	return nil
+	return heads, nil
 }
 
 func fakeReceived(b stateport.BatchAcceptance, r model.CIRequest) error {

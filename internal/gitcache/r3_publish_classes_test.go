@@ -43,7 +43,7 @@ func newPublishFixture(t *testing.T) *publishFixture {
 	p.oldTag = f.Git(t, f.Work, "rev-parse", "old-release")
 	f.Git(t, f.Store(), "fetch", f.Work, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
 	p.intent = publicationFor(f, "refs/heads/topic", p.next, "")
-	p.intent.ReceivedSHA = new("")
+	p.intent.ReceivedHeads = []string{""}
 	return p
 }
 func (p *publishFixture) upstream(t *testing.T, oid string) {
@@ -57,7 +57,7 @@ func (p *publishFixture) object(oid string) {
 }
 func (p *publishFixture) predecessor(oid string) {
 	p.intent.PreviousSHA = &oid
-	p.intent.ReceivedSHA = new(oid)
+	p.intent.ReceivedHeads = []string{oid}
 }
 func (p *publishFixture) releaseTag() {
 	p.intent.Ref = "refs/tags/release"

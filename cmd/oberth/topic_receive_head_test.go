@@ -28,7 +28,7 @@ func checkTopicRunReceiveHead(t *testing.T, change string) {
 	f.sourcePod(t, run)
 	f.finishNative(t, run)
 	p := settledTopicPublication(t, f)
-	if p.Status != model.PublicationAbandoned || p.ReceivedSHA == nil || *p.ReceivedSHA != base {
+	if p.Status != model.PublicationAbandoned || p.ReceivedHeads == nil || p.ReceivedHeads[0] != base {
 		t.Fatal("refresh changed the run's receive head", p)
 	}
 	if refs := f.git.Git(t, f.git.Bare, "for-each-ref", "--format=%(refname) %(objectname)"); refs != before {

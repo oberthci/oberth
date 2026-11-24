@@ -25,15 +25,17 @@ type acceptedBinding struct {
 type receiveBinding struct {
 	Repository string
 	Actor      actor.Actor
-	Received   []model.CIRequest
+	Received   []model.CIRequest   `json:",omitempty"`
+	Heads      map[string][]string `json:",omitempty"`
 	Runs       []acceptedBinding
 	Deletions  []stateport.BranchDeletion
 }
 type preparedBatch struct {
 	stateport.BatchAcceptance
 
-	body   []byte
-	events []stateport.EventWrite
+	body    []byte
+	binding receiveBinding
+	events  []stateport.EventWrite
 }
 
 func prepareBatch(input stateport.BatchAcceptance) (preparedBatch, error) {
@@ -59,6 +61,7 @@ func prepareBatch(input stateport.BatchAcceptance) (preparedBatch, error) {
 	}
 	body, err := json.Marshal(receipt)
 	batch.body = body
+	batch.binding = receipt
 	return batch, err
 }
 
@@ -85,7 +88,11 @@ func (s *Store) acceptBatch(ctx context.Context, tx *sql.Tx, batch preparedBatch
 	var stored []byte
 	err := tx.QueryRowContext(ctx, `SELECT binding FROM receives WHERE id=?`, batch.ReceiveID).Scan(&stored)
 	if err == nil {
-		if string(stored) != string(batch.body) {
+		request, err := receivedRequest(stored)
+		if err != nil {
+			return stateport.AcceptanceResult{}, err
+		}
+		if string(request) != string(batch.body) {
 			return stateport.AcceptanceResult{}, refuse(receiveChanged, nil)
 		}
 		runs, err := loadReceivedRuns(ctx, tx, batch.ReceiveID)
@@ -106,11 +113,12 @@ func (s *Store) writeBatch(ctx context.Context, tx *sql.Tx, batch preparedBatch)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO receives VALUES(?,?,?)`, batch.ReceiveID, repoID, batch.body); err != nil {
-		return nil, databaseError(err)
-	}
-	if err := writeReceivedHeads(ctx, tx, repoID, batch.Received); err != nil {
+	body, err := captureReceivedHeads(ctx, tx, repoID, batch)
+	if err != nil {
 		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO receives VALUES(?,?,?)`, batch.ReceiveID, repoID, body); err != nil {
+		return nil, databaseError(err)
 	}
 	if len(batch.Runs) == 0 && len(batch.Deletions) == 0 {
 		if err := s.appendAudit(ctx, tx, mutation{batch.Actor.Identity, "receive.accept", "receive", batch.ReceiveID, nil}); err != nil {

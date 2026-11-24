@@ -29,6 +29,7 @@ type Runs struct {
 type runReceipt struct {
 	Binding string
 	IDs     []string
+	Heads   map[string][]string
 }
 type runMemory struct {
 	now           time.Time
@@ -41,7 +42,7 @@ type runMemory struct {
 	issueID       int64
 	runs          map[string]stateport.Run
 	receipts      map[string]runReceipt
-	receivedHeads map[string]model.CIRequest
+	receivedHeads map[string]receivedEvidence
 	repos         map[string]stateport.Repository
 	obligations   map[string]stateport.Obligation
 
@@ -57,7 +58,7 @@ type runMemory struct {
 }
 
 func NewRuns(clock func() time.Time) *Runs {
-	return &Runs{clock: clock, changed: make(chan struct{}), data: runMemory{upstreams: map[string]stateport.Upstream{}, grants: map[string]stateport.GrantChange{}, issues: map[int64]model.Issue{}, ciSequences: map[string]int64{}, ciCounted: map[string]bool{}, runs: map[string]stateport.Run{}, receipts: map[string]runReceipt{}, receivedHeads: map[string]model.CIRequest{},
+	return &Runs{clock: clock, changed: make(chan struct{}), data: runMemory{upstreams: map[string]stateport.Upstream{}, grants: map[string]stateport.GrantChange{}, issues: map[int64]model.Issue{}, ciSequences: map[string]int64{}, ciCounted: map[string]bool{}, runs: map[string]stateport.Run{}, receipts: map[string]runReceipt{}, receivedHeads: map[string]receivedEvidence{},
 		repos: map[string]stateport.Repository{}, obligations: map[string]stateport.Obligation{}, promotions: map[string]model.Promotion{},
 		native: map[string]nativeEvidence{}, pruned: map[string]int64{}, purges: map[string]stateport.PurgeReceipt{}, publications: map[string]model.Publication{}, dedupe: map[string]model.AgentEvent{}}}
 }

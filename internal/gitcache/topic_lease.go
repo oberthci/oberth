@@ -2,6 +2,7 @@ package gitcache
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/gitport"
@@ -9,7 +10,7 @@ import (
 )
 
 // A topic can replace the live forge head only by extending it or by replacing
-// the exact head recorded at receive. Refresh never changes that evidence.
+// a head recorded in its receive chain. Refresh never changes that evidence.
 func (c *Cache) topicLease(ctx context.Context, p string, remote Remote, r model.Publication) (model.Publication, error) {
 	if !ordinaryTopic(r, remote.DefaultBranch) {
 		return r, nil
@@ -18,7 +19,7 @@ func (c *Cache) topicLease(ctx context.Context, p string, remote Remote, r model
 	if err != nil && !isAbsent(err) {
 		return r, err
 	}
-	if r.ReceivedSHA != nil && live.ObjectSHA == *r.ReceivedSHA {
+	if slices.Contains(r.ReceivedHeads, live.ObjectSHA) {
 		r.PreviousSHA = new(live.ObjectSHA)
 		return r, nil
 	}
@@ -37,8 +38,8 @@ func (c *Cache) topicLease(ctx context.Context, p string, remote Remote, r model
 		}
 	}
 	expected := ""
-	if r.ReceivedSHA != nil {
-		expected = *r.ReceivedSHA
+	if len(r.ReceivedHeads) > 0 {
+		expected = r.ReceivedHeads[0]
 	}
 	return r, &gitport.RefMovedError{Repository: r.Repo, Ref: r.Ref, Location: "upstream", Expected: expected, Actual: live.ObjectSHA}
 }

@@ -168,7 +168,8 @@ func (m *runMemory) writeReceive(b stateport.BatchAcceptance, at time.Time) ([]s
 	if _, ok := m.repos[b.Repository]; !ok {
 		return nil, runProblem(publicerr.NotFound)
 	}
-	if err := m.recordReceived(b); err != nil {
+	heads, err := m.recordReceived(b)
+	if err != nil {
 		return nil, err
 	}
 	for _, d := range b.Deletions {
@@ -190,7 +191,7 @@ func (m *runMemory) writeReceive(b stateport.BatchAcceptance, at time.Time) ([]s
 	if len(b.Runs) == 0 && len(b.Deletions) == 0 {
 		m.record(b.Actor.Identity, "receive.accept", b.ReceiveID, "")
 	}
-	m.receipts[b.ReceiveID] = runReceipt{receiptBinding(b), ids}
+	m.receipts[b.ReceiveID] = runReceipt{Binding: receiptBinding(b), IDs: ids, Heads: heads}
 	return out, nil
 }
 

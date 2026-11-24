@@ -17,12 +17,12 @@ import (
 
 func publicationFor(f *gittest.Fixture, ref, object, previous string) model.Publication {
 	r := model.Publication{ID: "publish",
-		Repo:        gittest.Repository,
-		Ref:         ref,
-		ObjectSHA:   object,
-		PreviousSHA: &previous,
-		ReceivedSHA: new(previous),
-		Actor:       "actor"}
+		Repo:          gittest.Repository,
+		Ref:           ref,
+		ObjectSHA:     object,
+		PreviousSHA:   &previous,
+		ReceivedHeads: []string{previous},
+		Actor:         "actor"}
 	if object != "" {
 		r.CommitSHA = &object
 	}

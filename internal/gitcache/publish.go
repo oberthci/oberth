@@ -66,9 +66,10 @@ func validatePublication(r model.Publication) error {
 		return refuse("publication predecessor")
 	}
 	objects := []string{r.ObjectSHA, *r.PreviousSHA}
-	if r.ReceivedSHA != nil {
-		objects = append(objects, *r.ReceivedSHA)
+	if len(r.ReceivedHeads) > model.MaxReceivedHeads {
+		return refuse("publication receive heads")
 	}
+	objects = append(objects, r.ReceivedHeads...)
 	for _, oid := range objects {
 		if oid != "" && !gitoid.Valid(oid) {
 			return refuse("publication object")

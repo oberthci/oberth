@@ -42,7 +42,7 @@ func (s *Service) syncIntent(ctx context.Context, a actor.Actor, q apicontract.S
 		return model.Publication{}, err
 	}
 	ref := head.Name
-	previous, err := s.c.Runs.ReceivedHead(ctx, stateport.ReceivedRef{Repo: r.Canonical, Ref: ref, ObjectSHA: q.SHA})
+	previous, err := s.c.Runs.ReceivedHeads(ctx, stateport.ReceivedRef{Repo: r.Canonical, Ref: ref, ObjectSHA: q.SHA})
 	if err != nil {
 		return model.Publication{}, err
 	}
@@ -53,7 +53,7 @@ func (s *Service) syncIntent(ctx context.Context, a actor.Actor, q apicontract.S
 	if len(rows) > 0 && (rows[0].Release || rows[0].Origin.Trigger != model.TriggerBranch || (rows[0].Origin.HasAssistance())) {
 		return model.Publication{}, refuse(syncProtected)
 	}
-	p := model.Publication{ID: s.c.NewID(), Repo: r.Canonical, Ref: ref, ObjectSHA: q.SHA, CommitSHA: new(q.SHA), ReceivedSHA: previous, Actor: a.Identity}
+	p := model.Publication{ID: s.c.NewID(), Repo: r.Canonical, Ref: ref, ObjectSHA: q.SHA, CommitSHA: new(q.SHA), ReceivedHeads: previous, Actor: a.Identity}
 	return p, nil
 }
 

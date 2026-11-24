@@ -22,7 +22,7 @@ func (s *Service) finishIntent(ctx context.Context, r stateport.Run, o FinishedR
 		p.PreviousSHA = new("")
 	} else {
 		var err error
-		p.ReceivedSHA, err = s.c.Runs.ReceivedHead(ctx, stateport.ReceivedRef{Repo: r.Repo, Ref: r.Ref, ObjectSHA: r.ObjectSHA, RunID: r.ID})
+		p.ReceivedHeads, err = s.c.Runs.ReceivedHeads(ctx, stateport.ReceivedRef{Repo: r.Repo, Ref: r.Ref, ObjectSHA: r.ObjectSHA, RunID: r.ID})
 		if err != nil {
 			return nil, nil, err
 		}

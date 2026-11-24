@@ -1,6 +1,6 @@
 package store
 
-const Schema = 7
+const Schema = 6
 
 // Open and archive verification compare the complete baseline, including indexes.
 const baseline = `
@@ -134,13 +134,6 @@ CREATE TABLE receive_runs(
  position INTEGER NOT NULL,
  run_id TEXT NOT NULL UNIQUE REFERENCES runs(id),
  PRIMARY KEY(receive_id,position)
-);
-CREATE TABLE receive_heads(
- repo_id INTEGER NOT NULL REFERENCES repositories(id),
- ref TEXT NOT NULL,
- object_sha TEXT NOT NULL,
- previous_sha TEXT NOT NULL,
- PRIMARY KEY(repo_id,ref)
 );
 CREATE TABLE obligations(
   run_id TEXT NOT NULL REFERENCES runs(id),

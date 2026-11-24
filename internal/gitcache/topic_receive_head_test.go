@@ -14,7 +14,7 @@ func TestTopicPublicationKeepsReceiveHeadAcrossFetch(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.f.Git(t, p.f.Store(), "update-ref", p.intent.Ref, p.next)
-	p.intent.ReceivedSHA = new(p.f.Commit)
+	p.intent.ReceivedHeads = []string{p.f.Commit}
 	p.upstream(t, p.unrelated)
 	gittest.ExpireRefresh(t, p.f.Store())
 	if err := p.cache.Fetch(t.Context(), gittest.Repository); err != nil {

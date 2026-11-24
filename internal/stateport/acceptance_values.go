@@ -1,6 +1,8 @@
 package stateport
 
 import (
+	"slices"
+
 	"github.com/oberthci/oberth/internal/actor"
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/model"
@@ -41,6 +43,26 @@ type BatchAcceptance struct {
 type ReceivedRef struct{ Repo, Ref, ObjectSHA, RunID string }
 
 const MaxReceivedRefs = 256
+
+const MaxReceivedHeads = model.MaxReceivedHeads
+
+// InheritReceivedHeads retains only evidence from an immediately preceding
+// local receive. The newest replaced head comes first; older heads age out.
+func InheritReceivedHeads(old, previousObject string, previous []string) []string {
+	heads := []string{old}
+	if old != previousObject {
+		return heads
+	}
+	for _, head := range previous {
+		if len(heads) == MaxReceivedHeads {
+			break
+		}
+		if !slices.Contains(heads, head) {
+			heads = append(heads, head)
+		}
+	}
+	return heads
+}
 
 // ValidReceivedRef checks the public ref and both optional complete object IDs.
 func ValidReceivedRef(r model.CIRequest) bool {
