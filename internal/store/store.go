@@ -85,8 +85,12 @@ func Create(ctx context.Context, path string, options Options) (_ *Store, result
 	return Open(ctx, path, options)
 }
 
-// Open requires an existing exact baseline and never creates or migrates it.
+// Open requires an existing database and applies supported forward migrations.
 func Open(ctx context.Context, path string, options Options) (*Store, error) {
+	return open(ctx, path, options, currentSchema())
+}
+
+func open(ctx context.Context, path string, options Options, definition schemaDefinition) (*Store, error) {
 	path, options, err := configuration(path, options)
 	if err != nil {
 		return nil, err
@@ -109,10 +113,7 @@ func Open(ctx context.Context, path string, options Options) (*Store, error) {
 	s.readiness = pool(path, "ro", options, 1)
 	s.idle = pool(path, "ro", options, 1)
 	s.protocols = [2]chan struct{}{make(chan struct{}, 3), make(chan struct{}, 3)}
-	if err := checkProtocol(ctx, s.readers, stateport.Options{Protocol: options.Protocol, Schema: Schema}); err != nil {
-		return nil, errors.Join(err, s.Close())
-	}
-	if err := checkSchema(ctx, s.readers); err != nil {
+	if err := s.prepareSchema(ctx, definition); err != nil {
 		return nil, errors.Join(err, s.Close())
 	}
 	if err := s.loadLastBackup(ctx); err != nil {
@@ -183,18 +184,10 @@ func (s *Store) Close() error {
 	return errors.Join(errs...)
 }
 
-func checkProtocol(ctx context.Context, db *sql.DB, o stateport.Options) error {
-	var number int
-	var identity, domain string
-	err := db.QueryRowContext(ctx, `SELECT schema_number,identity,domain FROM protocol WHERE singleton=1`).Scan(&number, &identity, &domain)
-	if errors.Is(err, sql.ErrNoRows) {
-		return refuse(schema, err)
-	}
+func checkProtocol(ctx context.Context, db protocolReader, o stateport.Options) error {
+	number, err := readBoundProtocol(ctx, db, o.Protocol)
 	if err != nil {
-		return databaseError(err)
-	}
-	if identity != o.Protocol.SchemaIdentity || domain != o.Protocol.AuditDomain {
-		return refuse(foreignProtocol, &ProtocolMismatchError{})
+		return err
 	}
 	if number > o.Schema {
 		return refuse(newerSchema, nil)
@@ -203,6 +196,26 @@ func checkProtocol(ctx context.Context, db *sql.DB, o stateport.Options) error {
 		return refuse(schema, nil)
 	}
 	return nil
+}
+
+type protocolReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func readBoundProtocol(ctx context.Context, db protocolReader, protocol stateport.Protocol) (int, error) {
+	var number int
+	var identity, domain string
+	err := db.QueryRowContext(ctx, `SELECT schema_number,identity,domain FROM protocol WHERE singleton=1`).Scan(&number, &identity, &domain)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, refuse(schema, err)
+	}
+	if err != nil {
+		return 0, databaseError(err)
+	}
+	if identity != protocol.SchemaIdentity || domain != protocol.AuditDomain {
+		return 0, refuse(foreignProtocol, &ProtocolMismatchError{})
+	}
+	return number, nil
 }
 
 // DefaultOptions selects the explicit protocol for a fresh installation.

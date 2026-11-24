@@ -50,13 +50,21 @@ func verifyDatabase(ctx context.Context, path string, options stateport.Options)
 }
 
 func checkSchema(ctx context.Context, db *sql.DB) (resultErr error) {
+	return checkLayout(ctx, db, baseline)
+}
+
+type schemaReader interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func checkLayout(ctx context.Context, db schemaReader, layout string) (resultErr error) {
 	expected, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		return databaseError(err)
 	}
 	expected.SetMaxOpenConns(1)
 	defer func() { resultErr = errors.Join(resultErr, expected.Close()) }()
-	if _, err := expected.ExecContext(ctx, baseline); err != nil {
+	if _, err := expected.ExecContext(ctx, layout); err != nil {
 		return databaseError(err)
 	}
 	want, err := schemaObjects(ctx, expected)
@@ -73,7 +81,7 @@ func checkSchema(ctx context.Context, db *sql.DB) (resultErr error) {
 	return nil
 }
 
-func schemaObjects(ctx context.Context, db *sql.DB) (string, error) {
+func schemaObjects(ctx context.Context, db schemaReader) (string, error) {
 	rows, err := db.QueryContext(ctx, `SELECT type,name,tbl_name,coalesce(sql,'') FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,
 name`)
 	if err != nil {

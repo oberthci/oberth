@@ -1,0 +1,242 @@
+{
+  "audit": [
+    {
+      "id": 1,
+      "actor": "operator",
+      "action": "upstream.register",
+      "resource_type": "upstream",
+      "resource_id": "origin",
+      "details": "{\"Name\":\"origin\",\"Org\":\"team\",\"Kind\":\"git\",\"BaseURL\":\"https://oberth.ci\",\"KeyName\":\"source\",\"Removed\":false}",
+      "created_at": "2026-11-16T12:00:00Z"
+    },
+    {
+      "id": 2,
+      "actor": "operator",
+      "action": "repository.register",
+      "resource_type": "repository",
+      "resource_id": "origin/team/repo",
+      "details": "null",
+      "created_at": "2026-11-16T12:00:00Z"
+    },
+    {
+      "id": 3,
+      "actor": "operator",
+      "action": "run.accept",
+      "resource_type": "run",
+      "resource_id": "migration-run",
+      "details": "{\"admission_digest\":\"d2d3d60b901a8b33bc58b1b1b0316da2abc4ab3430244a7bcf96fb42be5592c6\",\"plan_digest\":\"1d89b2902e0b1971ac5fe36aa3e813b8ee82c32aec8d024b0564cbeed2c82c61\",\"promotion_id\":\"\"}",
+      "created_at": "2026-11-16T12:00:00Z"
+    },
+    {
+      "id": 4,
+      "actor": "administrator",
+      "action": "issue.import",
+      "resource_type": "issue",
+      "resource_id": "",
+      "details": "{\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"count\":2}",
+      "created_at": "2026-11-16T12:00:00Z"
+    },
+    {
+      "id": 5,
+      "actor": "operator",
+      "action": "authority.changed",
+      "resource_type": "authority",
+      "resource_id": "origin/team/repo",
+      "details": "{\"grant\":{\"Kind\":\"secret\",\"Repository\":\"origin/team/repo\",\"File\":\".oberth/build.yaml\",\"Step\":\"build\",\"Path\":\"fixture/value\",\"Tier\":\"\",\"Capability\":null,\"Revoke\":false,\"Dismiss\":false},\"reason\":\"\"}",
+      "created_at": "2026-11-16T12:00:00Z"
+    }
+  ],
+  "grants": {
+    "Revision": 1,
+    "Grants": [
+      {
+        "Kind": "secret",
+        "Repository": "origin/team/repo",
+        "File": ".oberth/build.yaml",
+        "Step": "build",
+        "Path": "fixture/value",
+        "Tier": "",
+        "Capability": null,
+        "Revoke": false,
+        "Dismiss": false
+      }
+    ]
+  },
+  "issues": [
+    {
+      "imported": {
+        "set_sha256": "52fcddcbe183dbdac0c2ddda6511a3c14d92f5d6280983f9c17e9edb9461033d",
+        "count": 2
+      },
+      "author": "source author",
+      "history": [
+        {
+          "kind": "append",
+          "at": "2022-01-02T03:04:05.987654321+02:00",
+          "author": "source author",
+          "text": "source private comment"
+        }
+      ],
+      "id": 90,
+      "revision": 1,
+      "kind": "manual",
+      "title": "source private title",
+      "body": "source private body",
+      "state": "open",
+      "work_status": "todo",
+      "upstream": "origin",
+      "repo": "origin/team/repo",
+      "branch": "",
+      "occurrences": 1,
+      "ci_origin": "",
+      "ci_work_id": "",
+      "stale": false,
+      "lock": null,
+      "created_at": "2022-01-02T03:04:05.987654321+02:00",
+      "updated_at": "2022-01-02T03:04:05.987654321+02:00",
+      "closed_at": null
+    },
+    {
+      "imported": {
+        "set_sha256": "52fcddcbe183dbdac0c2ddda6511a3c14d92f5d6280983f9c17e9edb9461033d",
+        "count": 2
+      },
+      "author": "source author",
+      "history": [
+        {
+          "kind": "append",
+          "at": "2022-01-02T03:04:05.987654321+02:00",
+          "author": "source author",
+          "text": "source private comment"
+        }
+      ],
+      "id": 50,
+      "revision": 1,
+      "kind": "manual",
+      "title": "source private title",
+      "body": "source private body",
+      "state": "open",
+      "work_status": "todo",
+      "upstream": "origin",
+      "repo": "origin/team/repo",
+      "branch": "",
+      "occurrences": 1,
+      "ci_origin": "",
+      "ci_work_id": "",
+      "stale": false,
+      "lock": null,
+      "created_at": "2022-01-02T03:04:05.987654321+02:00",
+      "updated_at": "2022-01-02T03:04:05.987654321+02:00",
+      "closed_at": null
+    }
+  ],
+  "repository": {
+    "ID": 1,
+    "Upstream": "origin",
+    "Name": "repo",
+    "Canonical": "origin/team/repo",
+    "Archived": false
+  },
+  "run": {
+    "HasAdmission": true,
+    "Findings": null,
+    "RepositoryID": 1,
+    "id": "migration-run",
+    "repo": "origin/team/repo",
+    "ref": "refs/heads/main",
+    "object_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "status": "queued",
+    "display_reason": "",
+    "created_at": "2026-11-16T12:00:00Z",
+    "started_at": null,
+    "finished_at": null,
+    "step_count": 1,
+    "steps_planned_exact": true,
+    "pending": 1,
+    "queued": 0,
+    "running": 0,
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0,
+    "unknown": 0,
+    "Origin": {
+      "actor": "operator",
+      "trigger": "branch",
+      "schedule_entry": "",
+      "assist_requested": false,
+      "rerun_of": "",
+      "assisted": false,
+      "workflow_name": "",
+      "workflow_uid": ""
+    },
+    "Sequence": 1,
+    "Revision": 1,
+    "Admission": {
+      "workflow": {
+        "metadata": {},
+        "spec": {
+          "arguments": {}
+        },
+        "status": {
+          "startedAt": null,
+          "finishedAt": null
+        }
+      },
+      "spec_digest": "c5d4cad8762cddc7956e3105f2d6febe30aa92ea8aecdabfa91f53bb82401700",
+      "digest": "d2d3d60b901a8b33bc58b1b1b0316da2abc4ab3430244a7bcf96fb42be5592c6",
+      "repo": "origin/team/repo",
+      "run_id": "migration-run",
+      "ref": "refs/heads/main",
+      "object_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "trigger": "branch",
+      "schedule_entry": "",
+      "selected_file": "",
+      "file_blob": "",
+      "source_receipt": {
+        "version": 0,
+        "revision": {
+          "repository": "",
+          "commit": ""
+        },
+        "object_sha": "",
+        "file": "",
+        "blob": "",
+        "document_digest": ""
+      },
+      "source_bindings": null,
+      "defaults": {
+        "workflow_defaults": null,
+        "digest": ""
+      },
+      "templates": null,
+      "identity": {
+        "namespace": "",
+        "pipeline": {
+          "name": "",
+          "uid": ""
+        },
+        "state": ""
+      },
+      "grants": null,
+      "plan": {
+        "entries": [
+          {
+            "plan_path": "build",
+            "name": "build",
+            "dynamic": false,
+            "credential_intent": false
+          }
+        ],
+        "exact": true
+      },
+      "findings": null
+    },
+    "EvidenceComplete": false,
+    "Release": false
+  },
+  "schema": 6,
+  "source_commit": "547a35c720ccc699b01b7b46cbdef8045abaa6e2",
+  "sha256": "0b90d8ad221ec47b202b34f8966059e17bb942fc2a195bddfe3287f77aa91f45"
+}

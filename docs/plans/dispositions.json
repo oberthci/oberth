@@ -9401,7 +9401,7 @@
     "docs/plans/c4-admission-rules-and-plan.md": "d7c2a5a09ea28c71d5aa853d41db1e0f952cf1701ef8011e4d5db7b9b49f042a",
     "docs/plans/c5-native-execution.md": "f3ad4a361270e5fd47078a07a6e4e55dd99f76a8686c5e6f5b988092a24a8c38",
     "docs/plans/c6-source-delivery.md": "b234c97f1365905d824a38e469b96433370dfb7ff038f78d3e5efd26a2dac41f",
-    "docs/plans/c7-durable-state.md": "2bf907b1aab4a79874e8249dfdff2e15d52a82ff06c2dd86352d920ffafe17d3",
+    "docs/plans/c7-durable-state.md": "5a4065046ceaebf97e9e69b096c36727581586687193ed600efa174a1363ba19",
     "docs/plans/c8-logs.md": "e7e04d0a411011160a2f5cb9d885b7dbd6c55503452f5849a5b0557df4f67b63",
     "docs/plans/c9-install-and-upgrade.md": "78a73528a66ebba6fb1a8795f3943f416a17f761c55ec9f486a0517330ad1666"
   },
@@ -14104,7 +14104,7 @@
         "**Delta:**"
       ],
       "spec": "docs/plans/c7-durable-state.md:252",
-      "basis": "**Delta:** Source custody tables → stored admission and write-once native identity; migration catalog → one current baseline; per-mutation audit verification → read/backup/restore checks."
+      "basis": "**Delta:** Source custody tables → stored admission and write-once native identity; transplanted migration catalog → numbered forward steps; per-mutation audit verification → read/backup/restore checks."
     },
     {
       "spec": "docs/plans/c8-logs.md:23",

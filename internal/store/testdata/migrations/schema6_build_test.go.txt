@@ -1,0 +1,42 @@
+package store
+
+import (
+	"os"
+	"testing"
+
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/stateport"
+)
+
+// Run only in an archive of the source commit recorded in schema6.json.
+func TestBuildMigrationFixture(t *testing.T) {
+	path := os.Getenv("OBERTH_SCHEMA_FIXTURE")
+	s, err := Create(t.Context(), path, testOptions())
+	requireOK(t, err)
+	run, _ := accepted(t, s, "migration-run")
+	batch := importedBatch()
+	for i := range batch.Records {
+		batch.Records[i].Upstream = "origin"
+		batch.Records[i].Repo = run.Repo
+	}
+	_, err = s.ImportIssues(t.Context(), importAdmin(), batch)
+	requireOK(t, err)
+	_, err = s.ChangeGrant(t.Context(), stateport.Action{Actor: "operator"}, stateport.GrantChange{
+		Kind: stateport.GrantSecret, Repository: run.Repo, File: ".oberth/build.yaml", Step: "build", Path: "fixture/value",
+	})
+	requireOK(t, err)
+	repository, err := s.Repository(t.Context(), run.Repo, nil)
+	requireOK(t, err)
+	issues, err := s.Issues(t.Context(), nil, model.IssueFilter{Limit: 100})
+	requireOK(t, err)
+	grants, err := s.Grants(t.Context(), nil)
+	requireOK(t, err)
+	audit, _, err := s.Audit(t.Context(), 0, 100)
+	requireOK(t, err)
+	body := encode(map[string]any{
+		"source_commit": os.Getenv("OBERTH_FIXTURE_COMMIT"), "schema": Schema,
+		"run": run, "repository": repository, "issues": issues, "grants": grants, "audit": audit,
+	})
+	requireOK(t, os.WriteFile(path+".json", []byte(body+"\n"), 0600))
+	requireOK(t, s.Close())
+}

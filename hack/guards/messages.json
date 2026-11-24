@@ -24,5 +24,6 @@
   "DEP-TEST": ["Test-support package imported from production.", "Move the import into a test file."],
   "REQ-WALK": ["Walk requirement cannot be proved by a Go marker.", "Remove the marker and use the planned walk step."],
   "PIN-POLICY": ["Pinned contracts changed alongside code.", "Change pinned contracts in a separate commit containing only plan data."],
-  "CREDIT": ["Contributor credit is forbidden.", "Remove the authorship credit; plugin host names do not grant a credit exemption."]
+  "CREDIT": ["Contributor credit is forbidden.", "Remove the authorship credit; plugin host names do not grant a credit exemption."],
+  "SCHEMA": ["Store migration coverage failed.", "Add each numbered migration and its previous-release database fixture."]
 }

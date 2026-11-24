@@ -383,6 +383,27 @@ class TextGuards(RepositoryFixture):
         self.assertEqual(".:1: [TOOL] Guard command failed. Fix the guard input and rerun the guards.", row)
         self.assertNotIn("Detail:", row)
 
+    def test_full_guards_run_the_compiled_migration_check(self):
+        self.write(".golangci.yml", "godox: {keywords: [UNFINISHED]}\n")
+        def result(args):
+            if "^TestMigrationReleaseCoverage$" in args:
+                return subprocess.CompletedProcess(args, 1, stdout="schema 7 requires a 6 to 7 step\n")
+            return subprocess.CompletedProcess(args, 0, stdout="")
+        with patch.object(GUARDS, "command", side_effect=result) as tool, \
+                patch.object(GUARDS, "analysis", return_value=("module", {})), \
+                patch.object(GUARDS, "pins", return_value=[]), \
+                patch.object(GUARDS, "vocabulary", return_value=[]), \
+                patch.object(GUARDS, "names", return_value=[]), \
+                patch.object(GUARDS, "hits", return_value=[]), \
+                patch.object(GUARDS, "text_paths", return_value=[]), \
+                patch.object(GUARDS, "deadcode", return_value=[]):
+            rows = GUARDS.checks()
+        calls = [call.args[0] for call in tool.call_args_list if "^TestMigrationReleaseCoverage$" in call.args[0]]
+        self.assertEqual(1, len(calls))
+        self.assertIn("./internal/store", calls[0])
+        self.assertIn("[SCHEMA]", rows[0])
+        self.assertIn("schema 7 requires", rows[0])
+
     def test_non_names_tool_errors_keep_their_detail(self):
         self.write("hack/plans/parity.py", "")
         self.write("test/walk/walklib.py", "STEPS = generate_steps()\n")

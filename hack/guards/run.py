@@ -226,7 +226,7 @@ def checks():
     policy = command(["python3", "-I", "hack/plans/parity.py", "--check"])
     if policy.returncode: return tool_output("POLICY", policy)
     module, report = analysis()
-    rows = pins() + vocabulary() + names()
+    rows = pins() + vocabulary() + names() + tool_output("SCHEMA", command(GO.args(ROOT, *"test -p=2 -buildvcs=false -count=1 -timeout=120s ./internal/store -run ^TestMigrationReleaseCoverage$".split())))
     markers = "|".join(s.strip() for s in KEYWORDS.search(Path(".golangci.yml").read_text())[1].split(","))
     rows.extend(hits(["-nIwE", markers, "--", *text_paths("leftovers"), ":!*.go", ":!.golangci.yml"], "LEFTOVER"))
     rows.extend(hits(["-nIE", SKIPS, "--", "*_test.go", *text_paths("leftovers")[1:]], "SKIP"))

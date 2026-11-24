@@ -99,12 +99,12 @@ these limits. C2 owns the
 ### Baseline and backup
 
 **Delta:** The current baseline is schema 6, with only current records, constraints
-and query indexes and no configured release-role records. Open adds no persistent schema objects. Existing receive receipt JSON retains all accepted old/new ref values and at most 16 replaced heads, including parked and no-pipeline pushes; inherit only when the old object equals the previous accepted new object. A disposable connection-local index rebuilds from those receipts for sync. Run publications copy their original receive's set into private durable evidence, separate from the live lease; the durable schema stays unchanged. A layout pin for each
+and query indexes and no configured release-role records. Current-schema opens add no persistent schema objects. Existing receive receipt JSON retains all accepted old/new ref values and at most 16 replaced heads, including parked and no-pipeline pushes; inherit only when the old object equals the previous accepted new object. A disposable connection-local index rebuilds from those receipts for sync. Run publications copy their original receive's set into private durable evidence, separate from the live lease; the durable schema stays unchanged. A layout pin for each
 schema number preserves its baseline digest; changing the layout requires a new
-number. Do not transplant the migration catalog. Future migrations keep immutable IDs,
-transactional receipts and unknown-ID refusal, including when numeric counts match.
-Daemon/admin open requires the exact supported schema; explicit creation and maintenance
-remain distinct. Opening a missing admin database must never create one.
+number. Open applies numbered forward steps in one transaction, preserving immutable IDs,
+receipts, grants and audit; a gap or newer schema refuses. Each step has a previous-code
+fixture proving complete record reads and unknown-ID refusal; the release guard requires
+both. Current-schema opens only verify; creation and maintenance stay distinct. A missing admin database is never created.
 
 Database snapshots pin a committed read-only view, include committed WAL state, verify
 schema, integrity, foreign keys and audit before emission, and stream a bounded
@@ -250,5 +250,5 @@ competition.
 ## Retired terms
 
 **Delta:** Source custody tables → stored admission and write-once native identity;
-migration catalog → one current baseline; per-mutation audit verification →
+transplanted migration catalog → numbered forward steps; per-mutation audit verification →
 read/backup/restore checks.
