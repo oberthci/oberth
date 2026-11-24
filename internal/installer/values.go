@@ -45,7 +45,7 @@ func values(r Release, c Choices, stored map[string]any) (map[string]any, error)
 		"runtime": runtime,
 	}
 	v = merge(v, map[string]any{
-		"pipeline": map[string]any{apicontract.SettingNamespace: c.PipelineNamespace},
+		"pipeline": map[string]any{"namespace": c.PipelineNamespace},
 		"server":   server,
 	})
 	v, err = storeAddress(v, c)
@@ -67,11 +67,14 @@ func operatorValues(stored map[string]any) map[string]any {
 	}
 	return result
 }
+
+func allowedOverrideNames() []string {
+	return []string{"runs", "policies", "storage", "database", "logs", "schedules", "assist", "secretStore"}
+}
+
 func allowedOverrides(v map[string]any) bool {
 	for k := range v {
-		switch k {
-		case "runs", "policies", "storage", "database", "logs", "schedules", "assist", "secretStore":
-		default:
+		if !slices.Contains(allowedOverrideNames(), k) {
 			return false
 		}
 	}
