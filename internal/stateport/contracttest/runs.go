@@ -20,6 +20,7 @@ type RunPort interface {
 	AcceptBatch(context.Context, stateport.BatchAcceptance) (stateport.AcceptanceResult, error)
 	AcceptedRuns(context.Context, string) ([]stateport.Run, error)
 	Run(context.Context, string) (stateport.Run, error)
+	LookupRun(context.Context, []string, string) (stateport.Run, error)
 	RunState(context.Context, string) (stateport.RunState, error)
 	ResolveRun(context.Context, []string, string) (stateport.Run, error)
 	RunByCommit(context.Context, []string, string) (stateport.Run, error)
@@ -63,6 +64,7 @@ type RunCase struct {
 // RunSuite runs unchanged against each real or in-memory consumer store.
 func RunSuite(t *testing.T, factory func(*testing.T) RunFixture) {
 	for name, check := range map[string]func(*testing.T, RunFixture){
+		"lookup_record":        checkLookupRecord,
 		"plan_step_shape":      checkPlanStepShape,
 		"native_step_shape":    checkNativeStepShape,
 		"run_start":            checkRunStart,

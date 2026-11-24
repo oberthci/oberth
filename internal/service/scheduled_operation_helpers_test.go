@@ -18,6 +18,11 @@ type countedScheduledReads struct {
 	calls *int
 }
 
+func (r countedScheduledReads) LookupRun(ctx context.Context, scope []string, id string) (stateport.Run, error) {
+	*r.calls++
+	return r.RunStore.LookupRun(ctx, scope, id)
+}
+
 func (r countedScheduledReads) ResolveRun(ctx context.Context, scope []string, id string) (stateport.Run, error) {
 	*r.calls++
 	return r.RunStore.ResolveRun(ctx, scope, id)

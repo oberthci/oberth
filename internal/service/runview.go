@@ -18,6 +18,7 @@ type runQuery struct {
 	Repo, ID, SHA, Ref, Action string
 	Offset, Limit              int
 	Helpers                    bool
+	View                       bool
 	Before, RefGlob            string
 	Status                     stepmodel.RunStatus
 	Latest, Own, Held          bool
@@ -32,6 +33,7 @@ func (s *Service) prepareRunGet(ctx context.Context, a actor.Actor, q runQuery) 
 	if err != nil {
 		return nil, err
 	}
+	q.View = true
 	r, err := s.resolveRun(ctx, a, q)
 	if err != nil {
 		return nil, err

@@ -37,6 +37,10 @@ func (f *Runs) RunState(ctx context.Context, id string) (stateport.RunState, err
 }
 
 func (f *Runs) ResolveRun(ctx context.Context, scope []string, prefix string) (stateport.Run, error) {
+	return f.resolveRun(ctx, scope, prefix, false)
+}
+
+func (f *Runs) resolveRun(ctx context.Context, scope []string, prefix string, record bool) (stateport.Run, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.before(ctx, "ResolveRun", false); err != nil {
@@ -51,7 +55,7 @@ func (f *Runs) ResolveRun(ctx context.Context, scope []string, prefix string) (s
 		if visibleRun(scope, r.Repo) && strings.HasPrefix(id, prefix) {
 			if id == prefix {
 
-				return r.Clone(), nil
+				return queryProjection(r, record), nil
 			}
 			out = r
 			count++
@@ -64,7 +68,18 @@ func (f *Runs) ResolveRun(ctx context.Context, scope []string, prefix string) (s
 		return out, runProblem(publicerr.Ambiguous)
 	}
 
-	return out.Clone(), nil
+	return queryProjection(out, record), nil
+}
+
+func (f *Runs) LookupRun(ctx context.Context, scope []string, prefix string) (stateport.Run, error) {
+	return f.resolveRun(ctx, scope, prefix, true)
+}
+
+func queryProjection(r stateport.Run, record bool) stateport.Run {
+	if record {
+		r.Admission = stateport.Run{}.Admission
+	}
+	return r.Clone()
 }
 
 func (f *Runs) RunByRef(ctx context.Context, scope []string, ref string) (stateport.Run, error) {

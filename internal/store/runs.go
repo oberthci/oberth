@@ -92,20 +92,34 @@ func repositoryNumber(ctx context.Context, tx *sql.Tx, canonical string) (int64,
 }
 
 func loadRun(ctx context.Context, tx *sql.Tx, id string) (stateport.Run, error) {
+	return readRun(ctx, tx, id, true)
+}
+
+func loadRunRecord(ctx context.Context, tx *sql.Tx, id string) (stateport.Run, error) {
+	return readRun(ctx, tx, id, false)
+}
+
+func readRun(ctx context.Context, tx *sql.Tx, id string, admissionBody bool) (stateport.Run, error) {
 	var r stateport.Run
 	var summary, origin, findings string
 	var admission []byte
-	err := tx.QueryRowContext(ctx, `SELECT repo_id,sequence,revision,summary,origin,admission,evidence_complete,release,step_count,
+	column := "NULL"
+	if admissionBody {
+		column = "admission"
+	}
+	err := tx.QueryRowContext(ctx, `SELECT repo_id,sequence,revision,summary,origin,`+column+`,admission IS NOT NULL,evidence_complete,release,step_count,
 steps_planned_exact,steps_pending,steps_queued,steps_running,steps_passed,steps_failed,steps_skipped,
 steps_unknown,findings
-FROM runs WHERE id=?`, id).Scan(&r.RepositoryID, &r.Sequence, &r.Revision, &summary, &origin, &admission, &r.EvidenceComplete,
+FROM runs WHERE id=?`, id).Scan(&r.RepositoryID, &r.Sequence, &r.Revision, &summary, &origin, &admission, &r.HasAdmission, &r.EvidenceComplete,
 		&r.Release, &r.Total, &r.Exact, &r.Pending, &r.Queued, &r.Running, &r.Passed, &r.Failed, &r.Skipped, &r.Unknown, &findings)
 	if err != nil {
 		return r, databaseError(err)
 	}
 	counts := r.LogicalStepCounts
-	r.HasAdmission = len(admission) > 0
-	if !r.HasAdmission {
+	if admissionBody {
+		r.HasAdmission = len(admission) > 0
+	}
+	if len(admission) == 0 {
 		admission = []byte(`{}`)
 	}
 	for _, pair := range []struct {

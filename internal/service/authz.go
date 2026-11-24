@@ -105,7 +105,7 @@ func (s *Service) resolveSelector(ctx context.Context, scope []string, q runQuer
 		if !validRunID(q.ID) {
 			return stateport.Run{}, bad("id")
 		}
-		r, err := s.c.Runs.ResolveRun(ctx, scope, q.ID)
+		r, err := s.selectRunID(ctx, scope, q)
 		// Hex IDs allow prefixes; native child names must match in full.
 		if err == nil && r.ID != q.ID && !validID(q.ID) {
 			return stateport.Run{}, refuse(missing)
@@ -131,6 +131,13 @@ func (s *Service) resolveSelector(ctx context.Context, scope []string, q runQuer
 	default:
 		return stateport.Run{}, bad("id/sha/ref")
 	}
+}
+
+func (s *Service) selectRunID(ctx context.Context, scope []string, q runQuery) (stateport.Run, error) {
+	if q.View {
+		return s.c.Runs.LookupRun(ctx, scope, q.ID)
+	}
+	return s.c.Runs.ResolveRun(ctx, scope, q.ID)
 }
 
 type runSelection struct {

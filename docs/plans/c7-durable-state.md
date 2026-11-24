@@ -54,8 +54,8 @@ scheduled-child admission commits the plan with its parent/child proof and run r
 **Delta:** Store `step_count`, `steps_planned_exact`, `steps_pending`, `steps_queued`,
 `steps_running`, `steps_passed`, `steps_failed`, `steps_skipped`, `steps_unknown` as
 columns, updated atomically with the evidence that changes them. Lists omit plan bytes
-and never decode all plans/nodes for counts. Detail reads use one consistent
-plan/evidence snapshot. Dynamic expansion changes the projection, not the immutable
+and never decode all plans/nodes for counts. Detail reads omit the sealed Workflow and use one consistent
+plan/evidence snapshot; observed steps use their saved projection. Dynamic expansion changes the projection, not the immutable
 admitted plan. Unreached entries create no execution rows. Finished runs resolve the
 dynamic remainder rather than leaving it pending. Store C4’s capped result; C4 owns
 collapse-to-placeholder behavior and never refuses admission for plan expansion.

@@ -175,10 +175,7 @@ func TestScheduledRunIDsRejectMalformedAndNeverExpandNativePrefixes(t *testing.T
 			finishScheduledOperation(t, f, op.name, r.ID)
 			real := f.c.Runs
 			calls := 0
-			f.c.Runs = resolveHook{real, func(ctx context.Context, scope []string, id string) (stateport.Run, error) {
-				calls++
-				return real.ResolveRun(ctx, scope, id)
-			}}
+			f.c.Runs = countedScheduledReads{RunStore: real, calls: &calls}
 			f.restart(t)
 			for _, id := range []string{strings.TrimSuffix(r.ID, "1795012440"), r.ID + "/other", r.ID + "-extra", strings.Replace(r.ID, "-1795012440", "-01795012440", 1)} {
 				_, err := op.run(t, f, apicontract.Caller{Actor: admin()}, id)

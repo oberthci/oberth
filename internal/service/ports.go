@@ -31,6 +31,7 @@ type RunStore interface {
 	RunCounts(context.Context, []string) (map[stepmodel.RunStatus]int, error)
 	AcceptBatch(context.Context, stateport.BatchAcceptance) (stateport.AcceptanceResult, error)
 	Run(context.Context, string) (stateport.Run, error)
+	LookupRun(context.Context, []string, string) (stateport.Run, error)
 	RunState(context.Context, string) (stateport.RunState, error)
 	ResolveRun(context.Context, []string, string) (stateport.Run, error)
 	RunByCommit(context.Context, []string, string) (stateport.Run, error)

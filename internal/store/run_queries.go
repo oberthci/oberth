@@ -29,6 +29,10 @@ func (s *Store) RunByRef(ctx context.Context, repositories []string, ref string)
 
 // ResolveRun applies canonical repository scope before testing prefix uniqueness.
 func (s *Store) ResolveRun(ctx context.Context, repositories []string, selector string) (stateport.Run, error) {
+	return s.resolveRun(ctx, repositories, selector, true)
+}
+
+func (s *Store) resolveRun(ctx context.Context, repositories []string, selector string, admissionBody bool) (stateport.Run, error) {
 	if selector == "" || !utf8.ValidString(selector) {
 		return stateport.Run{}, refuse(invalid, nil)
 	}
@@ -64,7 +68,12 @@ func (s *Store) ResolveRun(ctx context.Context, repositories []string, selector 
 	if ids[0] != selector && len(ids) > 1 {
 		return stateport.Run{}, refuse(ambiguous, nil)
 	}
-	return loadRun(ctx, tx, ids[0])
+	return readRun(ctx, tx, ids[0], admissionBody)
+}
+
+// LookupRun resolves scoped history metadata without the sealed admission payload.
+func (s *Store) LookupRun(ctx context.Context, repositories []string, selector string) (stateport.Run, error) {
+	return s.resolveRun(ctx, repositories, selector, false)
 }
 
 // SQLite's BINARY collation orders UTF-8 IDs by bytes.

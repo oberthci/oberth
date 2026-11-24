@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/stateport"
@@ -74,21 +73,27 @@ func (s *Store) Steps(ctx context.Context, id string) ([]stepmodel.RunStep, erro
 		return nil, databaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	r, err := loadRun(ctx, tx, id)
+	var body sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT n.value FROM runs r LEFT JOIN native_steps n ON n.run_id=r.id WHERE r.id=?`, id).Scan(&body)
 	if err != nil {
-		return nil, err
+		return nil, databaseError(err)
 	}
-	var body string
-	err = tx.QueryRowContext(ctx, `SELECT value FROM native_steps WHERE run_id=?`, id).Scan(&body)
-	if err == nil {
+	if body.Valid {
 		var steps []stepmodel.RunStep
-		if err = json.Unmarshal([]byte(body), &steps); err != nil {
+		if err = json.Unmarshal([]byte(body.String), &steps); err != nil {
 			return nil, refuse(corrupt, err)
 		}
 		return steps, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, databaseError(err)
+	r, err := loadRunRecord(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+	if r.HasAdmission {
+		r.Admission.Plan, err = readPlan(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
 	}
 	nodes, err := readNodes(ctx, tx, id)
 	if err != nil {
