@@ -1,5 +1,5 @@
 "use strict";
-function runMessage(run) { return [run.selected_file, run.display_reason].filter(Boolean).join(" · "); }
+function runMessage(run) { return [run.selected_file ? run.selected_file + " selected" : "", run.display_reason].filter(Boolean).join(" · "); }
 function runIdentity(run) {
  return h("p", {class: "identity", "aria-label": "Run and commit"}, h("span", {title: "Run ID"}, "run " + run.id.slice(0, 8)), " · ", h("span", {title: "Commit ID"}, "commit " + (run.commit_sha ? run.commit_sha.slice(0, 12) : "unknown")));
 }

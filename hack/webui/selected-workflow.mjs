@@ -15,10 +15,12 @@ export async function selectedWorkflow(client) {
    const listed=document.querySelector('.runs a.row .message').textContent;
    const run=await get('/api/runs/11111111');run.selected_file=file;
    const box=h('section');box.append(...runHeader(run,h('div'),false));
-   return {listed,detail:box.querySelector('.run-file')?.textContent};
+   return {listed,detail:box.querySelector('.run-file')?.textContent,
+    plain:runMessage({display_reason:'step failed'}),selected:runMessage({selected_file:file,display_reason:'step failed'})};
   }finally{window.fetch=original;}
  })()`);
- check(result.listed.includes('hack/walk-vm.yaml'),'run list hides the selected workflow');
+ check(result.listed.includes('hack/walk-vm.yaml selected'),'run list hides the selected workflow');
+ check(result.plain==='step failed' && result.selected==='hack/walk-vm.yaml selected · step failed','selection changed the existing run reason');
  check(result.detail==='Workflow: hack/walk-vm.yaml','run detail hides the selected workflow');
  return result;
 }

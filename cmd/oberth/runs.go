@@ -32,17 +32,7 @@ func renderRuns(out io.Writer, runs []any, page map[string]any, detail bool) err
 }
 
 func runTableRows(runs []any) ([][]string, error) {
-	files := false
-	for _, row := range runs {
-		if run, ok := row.(map[string]any); ok && publicText(run["selected_file"]) != "" {
-			files = true
-		}
-	}
-	header := []string{"ID", "STATUS", "REF"}
-	if files {
-		header = append(header, "FILE")
-	}
-	rows := [][]string{append(header, "REASON")}
+	rows := [][]string{{"ID", "STATUS", "REF", "REASON"}}
 	for _, row := range runs {
 		run, ok := row.(map[string]any)
 		if !ok {
@@ -50,11 +40,11 @@ func runTableRows(runs []any) ([][]string, error) {
 		}
 		id := publicText(run["id"])
 		ref := strings.TrimPrefix(publicText(run["ref"]), "refs/heads/")
-		values := []string{id, publicText(run["status"]), ref}
-		if files {
-			values = append(values, publicText(run["selected_file"]))
+		reason := publicText(run["display_reason"])
+		if file := publicText(run["selected_file"]); file != "" {
+			reason = strings.TrimSuffix(file+" selected · "+reason, " · ")
 		}
-		rows = append(rows, append(values, publicText(run["display_reason"])))
+		rows = append(rows, []string{id, publicText(run["status"]), ref, reason})
 
 	}
 	return rows, nil

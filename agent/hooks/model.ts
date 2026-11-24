@@ -151,20 +151,20 @@ function rows(runs: Run[], now: number, width: number, last: Last): string[] {
   ].map(clean))], width, last.first)
 }
 
-// The box ends a row with ● for a watched run and the failed step's name; both give way
-// before the names.
+const selected = (run: Run) => run.selected_file ? `${run.selected_file} selected` : ''
+
+// The box's watched mark, selection and failed step give way before the names.
 export function boxRows(state: Snapshot, count: number, width: number): string[] {
   const runs = visible(state, count)
   const watched = (run: Run) => state.pins.some(pin => pin.run.id === run.id) ? '●' : ''
-  const files = runs.some(run => run.selected_file)
-  const text = (run: Run) => [watched(run), run.selected_file, failedStep(run)].filter(Boolean).join(' ')
-  return runs.length ? rows(runs, state.now, width, { label: files ? 'FILE' : '', text, first: !files }) : []
+  const text = (run: Run) => [watched(run), selected(run), failedStep(run)].filter(Boolean).join(' ')
+  return runs.length ? rows(runs, state.now, width, { label: '', text, first: true }) : []
 }
 
 // /oberth-runs ends a failed row with its failed step and reason and a cancelled row with
 // its reason, kept before the names; other reasons only repeat the status word.
 const explained = (run: Run) => run.status === 'failed' || run.status === 'cancelled'
-const reason = (run: Run) => [run.selected_file, explained(run) ? [failedStep(run), run.display_reason].filter(Boolean).join(': ') : ''].filter(Boolean).join(' · ')
+const reason = (run: Run) => [selected(run), explained(run) ? [failedStep(run), run.display_reason].filter(Boolean).join(': ') : ''].filter(Boolean).join(' · ')
 
 export function table(runs: Run[], now: number, width: number): string {
   return runs.length ? rows(runs, now, width, { label: 'REASON', text: reason, first: false }).join('\n') : 'No runs.'

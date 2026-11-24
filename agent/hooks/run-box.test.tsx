@@ -387,9 +387,22 @@ test('selected workflow is visible beside a passing run in the box and list', { 
   const selected = { ...run(undefined, 'passed'), finished_at: '2026-11-18T00:00:45Z', selected_file: 'hack/walk-vm.yaml' }
   cli(on, () => [selected])
   await startSession($, on)
-  expect((await boxLines($, 'terminal', 80)).join('\n')).toContain(selected.selected_file)
-  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain(selected.selected_file)
+  const lines = await boxLines($, 'terminal', 80)
+  expect(lines[0]).toMatch(HEADER)
+  expect(lines.join('\n')).toContain(selected.selected_file + ' selected')
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain(selected.selected_file + ' selected')
   expect(() => decodeRun({ ...selected, selected_file: 1 })).toThrow('Invalid workflow file.')
+})
+
+test('selected workflow message gives way before box names without changing columns', () => {
+  const selected = { ...run(), repo: 'repository-with-a-long-name', ref: 'branch-with-a-long-name', selected_file: 'hack/walk-vm.yaml' }
+  const state: Snapshot = { recent: [selected], pins: [], now: Date.parse('2026-11-18T00:01:00Z'), reachable: true, singleProfile: true }
+  const plain = { ...state, recent: [{ ...selected, selected_file: undefined }] }
+  const ordinary = boxRows(plain, 3, 200)
+  const wide = boxRows(state, 3, 200)
+  expect(wide[0]).toBe(ordinary[0])
+  expect(wide[1]).toContain(selected.selected_file + ' selected')
+  expect(boxRows(state, 3, ordinary[1]!.length)).toEqual(boxRows(plain, 3, ordinary[1]!.length))
 })
 
 test('/oberth-runs prints the box rows and a reason for failed rows', { options }, async ($, on) => {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -8,6 +9,27 @@ import (
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
+
+func TestRunListKeepsSelectionInExistingReasonColumn(t *testing.T) {
+	for _, file := range []string{"", "hack/walk-vm.yaml"} {
+		for _, reason := range []string{"", "step failed"} {
+			rows, err := runTableRows([]any{map[string]any{"id": "deadbeef", "status": "passed", "ref": "refs/heads/topic", "selected_file": file, "display_reason": reason}})
+			if err != nil || len(rows) != 2 || !slices.Equal(rows[0], []string{"ID", "STATUS", "REF", "REASON"}) || len(rows[1]) != 4 {
+				t.Fatal("workflow selection changed the list columns", rows, err)
+			}
+			want := reason
+			if file != "" {
+				want = file + " selected"
+				if reason != "" {
+					want += " · " + reason
+				}
+			}
+			if rows[1][3] != want {
+				t.Fatal("workflow selection lost the existing reason", rows[1])
+			}
+		}
+	}
+}
 
 func TestRunGetAndListNameSelectedWorkflow(t *testing.T) {
 	for _, args := range [][]string{{"run", "get", "deadbeef"}, {"run", "list"}, {"run", "get", "deadbeef", "-o", "json"}, {"run", "list", "-o", "json"}} {
