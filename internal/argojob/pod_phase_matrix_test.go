@@ -115,7 +115,7 @@ func assertPodPhase(t *testing.T, step stepmodel.RunStep, phase wf.NodePhase, st
 	if step.Status != status {
 		t.Fatal("status disagrees with native phase", step)
 	}
-	reason := map[wf.NodePhase]string{"": "unknown", wf.NodeSucceeded: "passed",
+	reason := map[wf.NodePhase]string{"": "unknown", wf.NodeRunning: "running", wf.NodeSucceeded: "passed",
 		wf.NodeSkipped: "skipped by condition", wf.NodeOmitted: "omitted"}[phase]
 	if phase == wf.NodePending {
 		reason = map[string]string{"absent": "waiting to start", "image": "image pull failed", "unschedulable": "waiting for a node"}[state]

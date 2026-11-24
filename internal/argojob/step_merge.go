@@ -10,9 +10,10 @@ import (
 )
 
 func alignStepReason(step *stepmodel.RunStep) {
-	if step.Status == stepmodel.StepUnknown {
+	switch step.Status {
+	case stepmodel.StepUnknown:
 		step.DisplayReason = reasonUnknown
-	} else if step.Status == stepmodel.StepRunning && (step.DisplayReason == reasonStarting || step.DisplayReason == reasonWaiting) {
+	case stepmodel.StepRunning:
 		step.DisplayReason = reasonRunning
 	}
 }
