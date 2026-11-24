@@ -1,0 +1,13 @@
+schema6.sqlite.gz is a synthetic database built with main at
+e1d15af57c0a81f0092a6f1acf3889f137f4715f. It contains the accepted
+schema-six-run, two imported issues (50 and 90), and their audit history.
+It has neither issue_totals nor issue_ci. It contains no deployment data.
+
+Reproduction: archive that revision into a scratch directory, copy
+schema6_fixture_test.go.txt to internal/store/perf_fixture_build_test.go
+there, and run only TestBuildSchema6Fixture in internal/store. Set
+OBERTH_SCHEMA_FIXTURE to a fresh absolute output path. Use the shared gate,
+a capped memory scope, Go 1.26.10, and a physical GOTMPDIR/TMPDIR. Close
+the store before gzip compression with mtime=0.
+
+Uncompressed SHA256: beaa6530061ad4e710fef05778e286e8eeaaefb9b8c23b17ba22a9df978f5abb

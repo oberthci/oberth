@@ -157,6 +157,14 @@ func (l issueList) rows(ctx context.Context) ([]model.Issue, error) {
 // and how many of those are newer than the page. The set is materialized
 // without bodies, so each issue's record is decoded once.
 func (l issueList) totals(ctx context.Context, page *stateport.IssuePage) error {
+	query, args := l.totalsQuery(page.Issues)
+	c := &page.Counts
+	err := l.tx.QueryRowContext(ctx, query, args...).
+		Scan(&c.Open, &c.Closed, &c.Todo, &c.Active, &c.Waiting, &c.Review, &c.Stale, &page.Total, &page.Offset)
+	return databaseError(err)
+}
+
+func (l issueList) totalsQuery(rows []model.Issue) (string, []any) {
 	where, args := l.selection()
 	query := `WITH listed AS MATERIALIZED (SELECT id, state, work_status, stale FROM (` + l.set + `))` +
 		` SELECT count(*) FILTER (WHERE state='open'), count(*) FILTER (WHERE state='closed'),` +
@@ -164,10 +172,7 @@ func (l issueList) totals(ctx context.Context, page *stateport.IssuePage) error 
 		` count(*) FILTER (WHERE state='open' AND work_status='waiting'), count(*) FILTER (WHERE state='open' AND work_status='review'),` +
 		` count(*) FILTER (WHERE stale), count(*) FILTER (WHERE ` + where + `), count(*) FILTER (WHERE ` + where + ` AND id>?)` +
 		` FROM listed`
-	c := &page.Counts
-	err := l.tx.QueryRowContext(ctx, query, slices.Concat(l.args, args, args, []any{newerThan(page.Issues, l.filter)})...).
-		Scan(&c.Open, &c.Closed, &c.Todo, &c.Active, &c.Waiting, &c.Review, &c.Stale, &page.Total, &page.Offset)
-	return databaseError(err)
+	return query, slices.Concat(l.args, args, args, []any{newerThan(rows, l.filter)})
 }
 
 // newerThan is the ID above which an issue is newer than the page: its newest

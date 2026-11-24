@@ -1,0 +1,22 @@
+package store
+
+import (
+    "os"
+    "testing"
+)
+
+func TestBuildSchema6Fixture(t *testing.T) {
+    s, err := Create(t.Context(), os.Getenv("OBERTH_SCHEMA_FIXTURE"), testOptions())
+    requireOK(t, err)
+    r, _ := accepted(t, s, "schema-six-run")
+    batch := importedBatch()
+    for i := range batch.Records {
+        batch.Records[i].Upstream = "origin"
+        batch.Records[i].Repo = r.Repo
+        batch.Records[i].Title = "Schema six issue"
+        batch.Records[i].Body = "Recorded before optional query indexes"
+    }
+    _, err = s.ImportIssues(t.Context(), importAdmin(), batch)
+    requireOK(t, err)
+    requireOK(t, s.Close())
+}
