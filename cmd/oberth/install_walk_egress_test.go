@@ -20,35 +20,40 @@ func TestWalkInstallReviewsVMSSHAllowance(t *testing.T) {
 	for _, cidr := range []string{"10.42.0.0/24", "fd00:42::/64"} {
 		for _, format := range []string{"text", "json"} {
 			t.Run(cidr+"/"+format, func(t *testing.T) {
-				engine, charts := offlineInstallEngine(t, t.TempDir())
-				node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "walk-node"}, Spec: corev1.NodeSpec{PodCIDRs: []string{cidr}}}
-				if _, err := engine.Cluster.Client.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
-					t.Fatal(err)
-				}
-				flags := installationFlags("install")
-				args := append(walkInstallEgress(t, cidr), "--context=chosen", "--chart=../../charts/oberth", "--dry-run", "--output="+format)
-				if err := flags.Parse(args); err != nil {
-					t.Fatal(err)
-				}
-				request := installationRequest{name: "install", flags: flags}
-				session := installationSession{engine: engine, request: request, choices: request.choices()}
-				var out bytes.Buffer
-				if err := session.applyInstallation(t.Context(), strings.NewReader(""), &out); err != nil {
-					t.Fatal(err)
-				}
-				visible := strings.Join(strings.Fields(out.String()), " ")
-				for _, want := range []string{"Egress allow: " + cidr + " TCP/22", "Run egress: internet open, internal closed"} {
-					if !strings.Contains(visible, want) {
-						t.Fatal("walk install hid its operator exception from Review", out.String())
-					}
-				}
-				if len(charts.Previews) != 1 || len(charts.Applies) != 0 {
-					t.Fatal("walk review skipped preparation or applied changes")
-				}
-				assertWalkSSHRule(t, charts.Previews[0], cidr)
+				checkWalkInstallSSHAllowance(t, cidr, format)
 			})
 		}
 	}
+}
+
+func checkWalkInstallSSHAllowance(t *testing.T, cidr, format string) {
+	t.Helper()
+	engine, charts := offlineInstallEngine(t, t.TempDir())
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "walk-node"}, Spec: corev1.NodeSpec{PodCIDRs: []string{cidr}}}
+	if _, err := engine.Cluster.Client.CoreV1().Nodes().Create(t.Context(), node, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	flags := installationFlags("install")
+	args := append(walkInstallEgress(t, cidr), "--context=chosen", "--chart=../../charts/oberth", "--dry-run", "--output="+format)
+	if err := flags.Parse(args); err != nil {
+		t.Fatal(err)
+	}
+	request := installationRequest{name: "install", flags: flags}
+	session := installationSession{engine: engine, request: request, choices: request.choices()}
+	var out bytes.Buffer
+	if err := session.applyInstallation(t.Context(), strings.NewReader(""), &out); err != nil {
+		t.Fatal(err)
+	}
+	visible := strings.Join(strings.Fields(out.String()), " ")
+	for _, want := range []string{"Egress allow: " + cidr + " TCP/22", "Run egress: internet open, internal closed"} {
+		if !strings.Contains(visible, want) {
+			t.Fatal("walk install hid its operator exception from Review", out.String())
+		}
+	}
+	if len(charts.Previews) != 1 || len(charts.Applies) != 0 {
+		t.Fatal("walk review skipped preparation or applied changes")
+	}
+	assertWalkSSHRule(t, charts.Previews[0], cidr)
 }
 
 // Exercise the operator commands beside the walk's VM resources, so omitting
@@ -115,13 +120,17 @@ func assertWalkSSHPeers(t *testing.T, policy networkingv1.NetworkPolicy, cidr st
 			if len(rule.To) != 1 || len(peer.IPBlock.Except) != 0 || len(rule.Ports) != 1 {
 				t.Fatal("walk SSH exception changed its destination or ports", rule)
 			}
-			port := rule.Ports[0]
-			if port.Protocol == nil || *port.Protocol != corev1.ProtocolTCP || port.Port == nil || *port.Port != intstr.FromInt32(22) || port.EndPort != nil {
-				t.Fatal("walk SSH exception is not exactly TCP 22", port)
-			}
+			assertWalkSSHPort(t, rule.Ports[0])
 		}
 	}
 	if count != 1 {
 		t.Fatal("walk Pod CIDR has no unique explicit SSH rule", count)
+	}
+}
+
+func assertWalkSSHPort(t *testing.T, port networkingv1.NetworkPolicyPort) {
+	t.Helper()
+	if port.Protocol == nil || *port.Protocol != corev1.ProtocolTCP || port.Port == nil || *port.Port != intstr.FromInt32(22) || port.EndPort != nil {
+		t.Fatal("walk SSH exception is not exactly TCP 22", port)
 	}
 }
