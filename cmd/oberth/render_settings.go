@@ -11,10 +11,10 @@ func renderSettings(out io.Writer, status map[string]any, detail bool) error {
 	if err := renderObject(out, "", metadata, detail); err != nil {
 		return err
 	}
-	rows := [][]string{{"SETTING", "VALUE", "SOURCE"}}
+	rows := [][]string{{"SETTING", "SOURCE", "VALUE"}}
 	for _, value := range status["settings"].([]any) {
 		setting := value.(map[string]any)
-		rows = append(rows, []string{publicText(setting["name"]), publicText(setting["value"]), publicText(setting["source"])})
+		rows = append(rows, []string{publicText(setting["name"]), publicText(setting["source"]), publicText(setting["value"])})
 	}
 	return renderTable(out, rows)
 }
