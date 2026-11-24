@@ -65,19 +65,19 @@ func (s *settingsRows) server(c serverConfig, r serverRuntime) {
 	s.add("commit", commit)
 	s.add("build date", date)
 	s.add("Git binary", r.GitBinary)
-	s.add("database file", c.DatabaseFile)
-	s.add("namespace", c.Namespace)
-	s.add("pipeline namespace", c.PipelineNamespace)
+	s.add(apicontract.SettingDatabaseFile, c.DatabaseFile)
+	s.add(apicontract.SettingNamespace, c.Namespace)
+	s.add(apicontract.SettingPipelineNamespace, c.PipelineNamespace)
 	s.add("controller namespace", c.ArgoNamespace)
-	s.add("server URL", c.Public.URL)
-	s.add("SSH port", c.Public.SSHPort)
+	s.add(apicontract.SettingServerURL, c.Public.URL)
+	s.add(apicontract.SettingSSHPort, c.Public.SSHPort)
 	s.add("HTTPS listen", c.Listen.HTTPS)
 	s.add("SSH listen", c.Listen.SSH)
 	s.add("source listen", c.Listen.Source)
 	s.add("health listen", c.Listen.Health)
-	s.add("log bytes per run", c.Logs.RunLimitBytes)
-	s.add("schedule entries", c.Schedules.MaxEntries)
-	s.add("assist TTL seconds", c.Assist.TTLSeconds)
+	s.add(apicontract.SettingLogBytes, c.Logs.RunLimitBytes)
+	s.add(apicontract.SettingScheduleEntries, c.Schedules.MaxEntries)
+	s.add(apicontract.SettingAssistTTL, c.Assist.TTLSeconds)
 	s.add("source timeout seconds", r.SourceTimeoutSeconds)
 	s.add("admission timeout seconds", r.AdmissionTimeoutSeconds)
 	s.add("source client burst", r.SourceClientBurst)
@@ -97,9 +97,9 @@ func (s *settingsRows) pins(policy json.RawMessage) {
 		for _, producers := range pins {
 			count += len(producers)
 		}
-		s.add("source pins", count)
+		s.add(apicontract.SettingSourcePins, count)
 	} else {
-		s.add("source pins", "unavailable")
+		s.add(apicontract.SettingSourcePins, "unavailable")
 	}
 }
 
@@ -117,15 +117,15 @@ func (s *settingsRows) observations(ctx context.Context, a serverAdministration,
 	if a.owner.c.store != nil {
 		stats, err := a.owner.c.store.InstallationStats(ctx)
 		if err == nil {
-			s.observe("registered upstreams", stats.Upstreams)
-			s.observe("registered repositories", stats.Repositories)
+			s.observe(apicontract.SettingRegisteredUpstreams, stats.Upstreams)
+			s.observe(apicontract.SettingRegisteredRepositories, stats.Repositories)
 			last := "never"
 			if !stats.LastBackup.IsZero() {
 				last = stats.LastBackup.UTC().Format(time.RFC3339Nano)
 			}
 			s.observe("last backup", last)
 		} else {
-			for _, name := range []string{"registered upstreams", "registered repositories", "last backup"} {
+			for _, name := range []string{apicontract.SettingRegisteredUpstreams, apicontract.SettingRegisteredRepositories, "last backup"} {
 				s.observe(name, "unavailable")
 			}
 		}
@@ -133,16 +133,16 @@ func (s *settingsRows) observations(ctx context.Context, a serverAdministration,
 }
 
 func (rows *settingsRows) installation(s installationSettings) {
-	rows.add("Pod defaults", onOff(s.PodDefaults))
-	rows.add("link-local egress filter", onOff(s.LinkLocalFilter))
+	rows.add(apicontract.SettingPodDefaults, onOff(s.PodDefaults))
+	rows.add(apicontract.SettingLinkLocalFilter, onOff(s.LinkLocalFilter))
 	rows.add("Pod Security", s.PodSecurity)
 	mode := "external"
 	if s.BundledStore {
 		mode = "bundled"
 	}
-	rows.add("store mode", mode)
-	rows.add("HTTPS node port", s.HTTPSNodePort)
-	rows.add("SSH node port", s.SSHNodePort)
+	rows.add(apicontract.SettingStoreMode, mode)
+	rows.add(apicontract.SettingHTTPSNodePort, s.HTTPSNodePort)
+	rows.add(apicontract.SettingSSHNodePort, s.SSHNodePort)
 	rows.add("source plugin image", s.SourceImage)
 	rows.add("Argo controller image", s.ControllerImage)
 	image, _, _ := strings.Cut(s.ControllerImage, "@")
@@ -154,8 +154,8 @@ func (rows *settingsRows) installation(s installationSettings) {
 	} else {
 		rows.add("store image", "external")
 	}
-	rows.add("data volume size", s.DataSize)
-	rows.add("temporary volume size", s.TmpSize)
+	rows.add(apicontract.SettingDataSize, s.DataSize)
+	rows.add(apicontract.SettingTmpSize, s.TmpSize)
 }
 
 func onOff(value bool) string {

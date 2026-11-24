@@ -5,6 +5,8 @@ import (
 	"maps"
 	"net/url"
 	"slices"
+
+	"github.com/oberthci/oberth/internal/apicontract"
 )
 
 func merge(base, over map[string]any) map[string]any {
@@ -43,7 +45,7 @@ func values(r Release, c Choices, stored map[string]any) (map[string]any, error)
 		"runtime": runtime,
 	}
 	v = merge(v, map[string]any{
-		"pipeline": map[string]any{"namespace": c.PipelineNamespace},
+		"pipeline": map[string]any{apicontract.SettingNamespace: c.PipelineNamespace},
 		"server":   server,
 	})
 	v, err = storeAddress(v, c)
@@ -170,7 +172,7 @@ func inheritedStatusOrigins(stored map[string]any) map[string]string {
 	if len(stored) > 0 {
 		baseline = ""
 	}
-	for _, name := range configurableSettings() {
+	for _, name := range apicontract.InstallationChoiceNames() {
 		if _, known := origins[name]; !known {
 			origins[name] = baseline
 		}
@@ -178,17 +180,13 @@ func inheritedStatusOrigins(stored map[string]any) map[string]string {
 	return origins
 }
 
-func configurableSettings() []string {
-	return []string{"namespace", "pipeline namespace", "HTTPS node port", "SSH node port", "SSH port", "server URL", "parallel runs", "Pod defaults", "link-local egress filter", "source pins", "store mode", "log bytes per run", "schedule entries", "assist TTL seconds", "data volume size", "temporary volume size", "database file"}
-}
-
 func explicitStatusChoices(c Choices) []string {
 	chosen := scalarStatusChoices(c)
 	for name, selected := range map[string]bool{
-		"parallel runs": c.Parallel != nil, "Pod defaults": c.PodFloor != nil,
-		"link-local egress filter": c.Egress != nil,
-		"source pins":              c.ClearSourcePins || c.SourcePins != nil,
-		"server URL":               c.URL != "", "store mode": c.Store != nil || c.StoreAddress != "",
+		apicontract.SettingParallelRuns: c.Parallel != nil, apicontract.SettingPodDefaults: c.PodFloor != nil,
+		apicontract.SettingLinkLocalFilter: c.Egress != nil,
+		apicontract.SettingSourcePins:      c.ClearSourcePins || c.SourcePins != nil,
+		apicontract.SettingServerURL:       c.URL != "", apicontract.SettingStoreMode: c.Store != nil || c.StoreAddress != "",
 	} {
 		if selected {
 			chosen = append(chosen, name)
@@ -207,13 +205,13 @@ func (c *Choices) captureStatusChoices() {
 func explicitValueSettings(c Choices) []string {
 	chosen := []string{}
 	for name, path := range map[string][2]string{
-		"parallel runs": {"runs", "parallel"}, "Pod defaults": {"policies", "floor"}, "link-local egress filter": {"policies", "egress"},
-		"log bytes per run": {"logs", "run_limit_bytes"}, "schedule entries": {"schedules", "max_entries"}, "assist TTL seconds": {"assist", "ttl_seconds"},
-		"store mode": {"secretStore", "bundled"}, "database file": {"database", "file"},
-		"data volume size": {"storage", "size"}, "temporary volume size": {"storage", "tmp"},
+		apicontract.SettingParallelRuns: {"runs", "parallel"}, apicontract.SettingPodDefaults: {"policies", "floor"}, apicontract.SettingLinkLocalFilter: {"policies", "egress"},
+		apicontract.SettingLogBytes: {"logs", "run_limit_bytes"}, apicontract.SettingScheduleEntries: {"schedules", "max_entries"}, apicontract.SettingAssistTTL: {"assist", "ttl_seconds"},
+		apicontract.SettingStoreMode: {"secretStore", "bundled"}, apicontract.SettingDatabaseFile: {"database", "file"},
+		apicontract.SettingDataSize: {"storage", "size"}, apicontract.SettingTmpSize: {"storage", "tmp"},
 	} {
 		if object, ok := c.Values[path[0]].(map[string]any); ok {
-			if _, selected := object[path[1]]; selected && !slices.Contains(chosen, name) {
+			if _, selected := object[path[1]]; selected {
 				chosen = append(chosen, name)
 			}
 		}
@@ -224,8 +222,8 @@ func explicitValueSettings(c Choices) []string {
 func scalarStatusChoices(c Choices) []string {
 	names := []string{}
 	for name, selected := range map[string]bool{
-		"namespace": c.Namespace != "", "pipeline namespace": c.PipelineNamespace != "",
-		"HTTPS node port": c.HTTPSNodePort != 0, "SSH node port": c.SSHNodePort != 0, "SSH port": c.SSHPort != 0,
+		apicontract.SettingNamespace: c.Namespace != "", apicontract.SettingPipelineNamespace: c.PipelineNamespace != "",
+		apicontract.SettingHTTPSNodePort: c.HTTPSNodePort != 0, apicontract.SettingSSHNodePort: c.SSHNodePort != 0, apicontract.SettingSSHPort: c.SSHPort != 0,
 	} {
 		if selected {
 			names = append(names, name)

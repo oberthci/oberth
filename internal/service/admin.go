@@ -87,7 +87,7 @@ func publicStatusSettings(settings *[]apicontract.EffectiveSetting) *[]apicontra
 	}
 	rows := make([]apicontract.EffectiveSetting, 0, len(*settings))
 	for _, row := range *settings {
-		if row.Name != "registered upstreams" && row.Name != "registered repositories" {
+		if row.Name != apicontract.SettingRegisteredUpstreams && row.Name != apicontract.SettingRegisteredRepositories {
 			rows = append(rows, row)
 		}
 	}
