@@ -49,12 +49,19 @@ func sweepStaging(parent string) error {
 	if err != nil {
 		return databaseError(err)
 	}
+	return sweepStagingEntries(parent, entries)
+}
+
+func sweepStagingEntries(parent string, entries []os.DirEntry) error {
 	for _, entry := range entries {
 		if !strings.HasPrefix(entry.Name(), stagePrefix) {
 			continue
 		}
 		path := filepath.Join(parent, entry.Name())
 		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return databaseError(err)
 		}
