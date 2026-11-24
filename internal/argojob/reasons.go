@@ -94,17 +94,15 @@ func phaseDiagnosis(d diagnosis, phase wf.NodePhase) diagnosis {
 	switch phase {
 	case wf.NodeFailed, wf.NodeError:
 		return d
-	case wf.NodePending, wf.NodeRunning:
-		if phase == wf.NodePending && d.exit != nil {
-			d.reason, d.class = reasonStarting, stepmodel.FailureUnknown
-			return d
-		}
+	case wf.NodePending:
 		switch d.reason {
-		case reasonWaiting, reasonRunning, reasonNode, reasonImage, reasonStarting, reasonUnknown:
+		case reasonWaiting, reasonNode, reasonImage, reasonStarting:
 			return d
 		}
+		d.reason = reasonStarting
+		return d
 	}
-	d.reason, d.class = nodeReason(phase), stepmodel.FailureUnknown
+	d.reason = nodeReason(phase)
 	return d
 }
 

@@ -154,11 +154,11 @@ func TestWorkflowLevelLockNamesTheMutex(t *testing.T) {
 	}
 }
 
-// A queued run whose Pod waits gives that wait as its reason, except a wait
-// with no typed reason, which says nothing: the run is waiting to start.
+// A queued run gives the Pod's typed wait as its reason. Other container waits
+// still mean starting containers; a running sidecar alone does not start them.
 func TestQueuedRunGivesItsPodsWait(t *testing.T) {
 	t.Parallel()
-	for waiting, reason := range map[string]string{"ImagePullBackOff": "image pull failed", "ContainerCreating": "starting containers", "CreateContainerConfigError": "waiting to start", "running": "starting containers", "sidecar running": "waiting to start"} {
+	for waiting, reason := range map[string]string{"ImagePullBackOff": "image pull failed", "ContainerCreating": "starting containers", "CreateContainerConfigError": "starting containers", "running": "starting containers", "sidecar running": "waiting to start"} {
 		w := nativeWorkflow()
 		n := nativeNode("a", ".build", wf.NodePending, 1)
 		w.Status.Nodes[n.ID] = n
@@ -172,9 +172,6 @@ func TestQueuedRunGivesItsPodsWait(t *testing.T) {
 		}
 		out := project(t, argojob.Projection{Plan: queuedPlan(), Workflow: w, Pods: []*core.Pod{p}})
 		stepReason := reason
-		if waiting == "CreateContainerConfigError" {
-			stepReason = "unknown"
-		}
 		if out.Status != stepmodel.RunQueued || out.Reason != reason || out.Steps[0].DisplayReason != stepReason {
 			t.Fatalf("%s: %s %q step %q, want queued %q step %q", waiting, out.Status, out.Reason, out.Steps[0].DisplayReason, reason, stepReason)
 		}
