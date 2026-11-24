@@ -1,6 +1,6 @@
 {
   "name": "oberth",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "Connect to Oberth with the verified CLI and register the bridge printed by join.",
   "skills": "./skills/",
   "hooks": []

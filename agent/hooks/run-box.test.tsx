@@ -105,7 +105,7 @@ async function text($: Engine, expression: RegExp) {
 test('unset executable refuses both commands without spawning', async ($, on) => {
   bottom(on)
   let stored: { value: { shape: string; value: Snapshot }; version: number } = {
-    value: { shape: 'runs-1', value: { recent: [run()], pins: [], reachable: true, now: 0 } }, version: 1,
+    value: { shape: 'runs-1', value: { recent: [run()], pins: [], reachable: true, now: 0, singleProfile: false } }, version: 1,
   }
   on('state.get', { plugin: 'oberth', key: 'snapshot' }, () => ({ value: stored }))
   on('state.set', { plugin: 'oberth', key: 'snapshot' }, (_, e) => {
@@ -540,14 +540,13 @@ test('unreachable and truncated responses hide stale rows and name the unreadabl
   const ui = await $.ui.mount({ ...band, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /cad7d9ec/ })).toBeUndefined()
   await ui.unmount()
-  const message = `No runs.\nProfile "joined-uplink": ${PROFILE_REASON} ${PROFILE_REMEDY}`
-  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toBe(message)
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toBe(stderr)
   truncatedDiagnostic = true
-  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toBe(message)
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toBe('Run output exceeded the host output limit.')
   truncatedDiagnostic = false
   exitCode = 0
   truncated = true
-  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toBe(message)
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toBe('Run output exceeded the host output limit.')
 })
 
 test('table command shows the status word and no native names', { options }, async ($, on) => {
@@ -581,7 +580,7 @@ test('short IDs disambiguate and non-hex IDs stay whole; unknown plans remain in
   expect(progress({ ...first, steps_planned_exact: false })).toBe('6/≥11')
   expect(progress({ ...first, failed: 2, skipped: 1 })).toBe('9/11')
   expect(() => decodeRun({ ...first, step_count: undefined })).toThrow()
-  expect(visible({ recent: [first], pins: [], now: 0, reachable: false }, 3)).toEqual([])
+  expect(visible({ recent: [first], pins: [], now: 0, reachable: false, singleProfile: false }, 3)).toEqual([])
   expect(table([{ ...first, ref: 'ref\u001b\u200b' }], 0, 100)).not.toContain('\u001b')
   expect(table([{ ...first, ref: 'ref\u001b\u200b' }], 0, 100)).not.toContain('\u200b')
 })
@@ -653,7 +652,7 @@ test('a competing state write cannot duplicate a completion toast', { options },
   const clock = mock.clock(on)
   let item = run()
   let stored: { value: { shape: string; value: Snapshot }; version: number } = {
-    value: { shape: 'runs-1', value: { recent: [], pins: [], reachable: false, now: 0 } }, version: 0,
+    value: { shape: 'runs-1', value: { recent: [], pins: [], reachable: false, now: 0, singleProfile: false } }, version: 0,
   }
   let conflict = true
   const toasts: string[] = []
@@ -806,6 +805,59 @@ for (const rows of [[], [{ ...run(), status: 'passed' as const, finished_at: '20
 }
 
 const multiple = { executable: options.executable, profile: ' first, second, first ', runs: 2 }
+
+test('a single unreadable profile uses one fitting prompt line after a successful read', { options }, async ($, on) => {
+  bottom(on)
+  const clock = mock.clock(on)
+  let failed = false
+  on('process.run', () => ({ value: { exitCode: failed ? 1 : 0, stdout: JSON.stringify({ runs: [] }),
+    stderr: failed ? 'Identity expired. Run oberth join again.' : '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  await startSession($, on)
+  failed = true
+  await clock.advance(REFRESH_MS)
+  expect(PROFILE_REASON.length).toBeLessThanOrEqual(40)
+  for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
+    for (const columns of [100, 24, 20]) {
+      const ui = await $.ui.mount({ ...band, props: { ...band.props, bodyColumns: columns }, surface })
+      const lines = await ui.findAll({ type: 'Text' })
+      expect(lines).toHaveLength(1)
+      expect(lines[0]?.text).toBe(PROFILE_REASON)
+      expect(lines[0]?.props.wrap).toBe('truncate-end')
+      expect(lines[0]!.text.length).toBeLessThanOrEqual(columns)
+      expect((await ui.findAll({ type: 'Box' })).some(box => box.props.borderStyle === 'round')).toBe(false)
+      await ui.unmount()
+    }
+    const narrow = await $.ui.mount({ ...band, props: { ...band.props, bodyColumns: 19 }, surface })
+    expect(await narrow.findAll({ type: 'Text' })).toHaveLength(0)
+    await narrow.unmount()
+  }
+})
+
+for (const selection of [options, multiple]) {
+  test(`/oberth-runs keeps the CLI refusal with ${selection === options ? 'one profile' : 'a healthy empty peer'}`, { options: selection }, async ($, on) => {
+    bottom(on)
+    mock.clock(on)
+    let reason = 'Identity expired. Run oberth join again.'
+    on('process.run', (_, e) => {
+      const failed = selection === options || e.init?.env?.OBERTH_PROFILE === 'second'
+      return { value: { exitCode: failed ? 1 : 0, stdout: JSON.stringify({ runs: [] }), stderr: failed ? reason : '',
+        isStdoutTruncated: false, isStderrTruncated: false } }
+    })
+    await startSession($, on)
+    const reply = (await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text!
+    expect(reply).toBe(selection === options ? reason : `Profile "second": ${reason}`)
+    expect(reply).not.toContain('No runs.')
+    if (selection === multiple) expect((await boxLines($)).join('\n')).toContain('Profile "second": Could not read runs.')
+    reason = 'x'.repeat(80)
+    const full = (await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text!
+    expect(full).toBe(selection === options ? reason : `Profile "second": ${reason}`)
+    reason = 'x'.repeat(81)
+    const bounded = (await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text!
+    const fallback = `${PROFILE_REASON} ${PROFILE_REMEDY}`
+    expect(fallback.length).toBeLessThanOrEqual(80)
+    expect(bounded).toBe(selection === options ? fallback : `Profile "second": ${fallback}`)
+  })
+}
 
 test('a live unlisted watch keeps its profile clock and other profile warnings during change waits', { options: multiple }, async ($, on) => {
   bottom(on)
@@ -1019,12 +1071,12 @@ test('unreadable profiles are named in the box and table until recovery', { opti
   }
   let output = (await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text!
   expect(output).toContain('cad7d9ec')
-  expect(output).toContain(message)
+  expect(output).toContain('Profile "second": The profile could not connect.')
   firstFails = true
   await clock.advance(REFRESH_MS)
   output = (await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text!
-  expect(output).toContain('Profile "first": Could not read runs.')
-  expect(output).toContain(message)
+  expect(output).toContain('Profile "first": The profile could not connect.')
+  expect(output).toContain('Profile "second": The profile could not connect.')
   expect(output).not.toContain('cad7d9ec')
   firstFails = secondFails = false
   await clock.advance(REFRESH_MS)
@@ -1048,7 +1100,7 @@ test('a watch detail cannot clear a failed profile list or invent its clock', { 
   await $.command.run({ ...commandInput, command: 'oberth-watch', args: watched.id })
   await advance()
   const unavailable = await boxLines($)
-  expect(unavailable.join('\n')).toContain('Profile "joined-uplink": Could not read runs.')
+  expect(unavailable).toEqual([PROFILE_REASON])
   expect(unavailable.some(line => line.startsWith('dddddddd'))).toBe(false)
   listFails = false
   await advance()

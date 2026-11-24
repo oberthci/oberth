@@ -1,5 +1,5 @@
 import type { EngineInterface, PluginOptions } from 'claude-code'
-import { decodeRun } from './model'
+import { decodeRun, PROFILE_REASON, PROFILE_REMEDY } from './model'
 import type { ObservedRun } from '../types'
 
 export const SETUP = 'Set executable to the absolute verified path printed by oberth join.'
@@ -66,6 +66,11 @@ async function json($: EngineInterface, connection: Connection, args: string[]):
   return JSON.parse(out.stdout)
 }
 
+function readFailure(error: unknown): string {
+  const text = error instanceof Error ? error.message.trim() : ''
+  return text && text.length <= 80 ? text : `${PROFILE_REASON} ${PROFILE_REMEDY}`
+}
+
 // Read each selected profile, then merge before applying the total row limit.
 export async function list($: EngineInterface, options: PluginOptions, count: number) {
   const peers = await connections($, options)
@@ -74,9 +79,10 @@ export async function list($: EngineInterface, options: PluginOptions, count: nu
   const created = (run: ObservedRun) => Date.parse(run.created_at) + (run.clockOffset ?? 0)
   const runs = successful.flatMap(page => page.runs).sort((a, b) => created(b) - created(a))
   const unique = runs.filter((run, index) => runs.findIndex(row => row.id === run.id) === index)
-  const unavailable = peers.filter((_, index) => pages[index]!.status === 'rejected').map(peer => peer.profile)
+  const errors = pages.flatMap((page, index) => page.status === 'rejected'
+    ? [{ profile: peers[index]!.profile, reason: readFailure(page.reason) }] : [])
   const clocks = pages.flatMap((page, index) => page.status === 'fulfilled' ? [{ profile: peers[index]!.profile, offset: page.value.clockOffset }] : [])
-  return { runs: unique.slice(0, count), clocks, unavailable }
+  return { runs: unique.slice(0, count), clocks, errors }
 }
 
 async function listProfile($: EngineInterface, connection: Connection, count: number) {

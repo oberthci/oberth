@@ -2,9 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Register, Timer } from 'claude-code'
 import type { Snapshot } from '../types'
 import { checkedExecutable, get, list, profiles, SETUP, waitForChange } from './client'
-import { active, boxRows, limit, outcome, profileProblems, REFRESH_MS, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
+import { active, boxRows, limit, outcome, profileProblems, PROFILE_REASON, REFRESH_MS, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
 
-const empty: Snapshot = { recent: [], pins: [], reachable: false, now: 0 }
+const empty: Snapshot = { recent: [], pins: [], reachable: false, now: 0, singleProfile: false }
 const snapshot = atom({ plugin: 'oberth', key: 'snapshot' } as const, empty, { shape: 'runs-1' })
 // The box's round border and one cell of padding on each side.
 const FRAME = 4
@@ -41,13 +41,13 @@ async function follow($: EngineInterface, options: PluginOptions, loop: Loop) {
 
 async function refresh($: EngineInterface, options: PluginOptions, loop: Loop) {
   try {
-    const page = loop.count ? await list($, options, loop.count) : { runs: [], clocks: [], unavailable: [] }
+    const page = loop.count ? await list($, options, loop.count) : { runs: [], clocks: [], errors: [] }
     const recent = page.runs
     const before = await read($, snapshot)
     const clocks = [...page.clocks, ...(before.clocks ?? [])].filter((clock, index, all) => all.findIndex(row => row.profile === clock.profile) === index)
     const missing = before.pins.filter(pin => active(pin.run) && !recent.some(run => run.id === pin.run.id))
     const details = await Promise.allSettled(missing.map(pin => get($, options, pin.run.id, pin.run.profile)))
-    const unavailable = new Set(page.unavailable)
+    const unavailable = new Set(page.errors.map(error => error.profile))
     details.forEach((detail, index) => {
       const source = missing[index]!.run.profile
       if (source && detail.status === 'rejected') unavailable.add(source)
@@ -61,17 +61,19 @@ async function refresh($: EngineInterface, options: PluginOptions, loop: Loop) {
       finished.length = 0
       if (loop.stopped) return state
       // Rows age on the server's clock, which stamped them; watches expire on this one.
+      const pins = state.pins.map(pin => {
+        const observedRun = observed.find(run => run.id === pin.run.id) ?? pin.run
+        const clockOffset = clocks.find(clock => clock.profile === observedRun.profile)?.offset
+        const run = { ...observedRun, clockOffset }
+        if (pin.doneAt !== null) return { ...pin, run }
+        const doneAt = active(run) ? null : now
+        if (doneAt !== null) finished.push(outcome(run))
+        return { run, doneAt }
+      }).filter(pin => pin.doneAt === null || now - pin.doneAt < 180000)
+      const profiles = new Set([...page.clocks.map(clock => clock.profile), ...page.errors.map(error => error.profile),
+        ...pins.flatMap(pin => pin.run.profile ? [pin.run.profile] : [])])
       return {
-        recent, reachable: true, now, clocks, unavailable: [...unavailable],
-        pins: state.pins.map(pin => {
-          const observedRun = observed.find(run => run.id === pin.run.id) ?? pin.run
-          const clockOffset = clocks.find(clock => clock.profile === observedRun.profile)?.offset
-          const run = { ...observedRun, clockOffset }
-          if (pin.doneAt !== null) return { ...pin, run }
-          const doneAt = active(run) ? null : now
-          if (doneAt !== null) finished.push(outcome(run))
-          return { run, doneAt }
-        }).filter(pin => pin.doneAt === null || now - pin.doneAt < 180000),
+        recent, reachable: true, now, clocks, unavailable: [...unavailable], pins, singleProfile: profiles.size === 1,
       }
     })
     for (const text of finished) await $.ui.toast(`Oberth ${text}`)
@@ -101,7 +103,10 @@ function commands(on: On, options: PluginOptions, current: () => Loop) {
       const match = /^(?:--limit[= ](\d+))?$/.exec(arg)
       if (!match) throw new Error('Use /oberth-runs [--limit=N].')
       const page = await list($, options, limit(match[1]))
-      return { text: [table(page.runs, await $.clock.now(), e.presentation.columns), ...profileProblems(page.unavailable)].join('\n') }
+      const single = page.clocks.length + page.errors.length === 1
+      const problems = page.errors.map(error => single ? error.reason : `Profile ${JSON.stringify(error.profile)}: ${error.reason}`)
+      const rows = page.runs.length || !problems.length ? table(page.runs, await $.clock.now(), e.presentation.columns) : ''
+      return { text: [rows, ...problems].filter(Boolean).join('\n') }
     } catch (error) { return { text: errorText(error) } }
   })
   on('command.run', { command: 'oberth-watch' }, async ($, e) => {
@@ -163,17 +168,21 @@ export const register: Register = (on, options) => {
     if (e.props.hasSurvey) return next(e)
     const state = await read($, snapshot)
     const rows = visible(state, loop.count)
-    const problems = loop.count ? profileProblems(state.unavailable ?? []) : []
-    if (!rows.length && !problems.length) return next(e)
     const columns = e.props.bodyColumns
-    const problemWidth = Number.isFinite(columns) && columns > FRAME ? Math.floor(columns) : 84
+    const width = Number.isFinite(columns) ? Math.max(0, Math.floor(columns)) : 84
+    const unavailable = loop.count ? state.unavailable ?? [] : []
+    const compact = state.singleProfile && unavailable.length > 0
+    const problems = compact ? (PROFILE_REASON.length <= width - (rows.length ? FRAME : 0) ? [PROFILE_REASON] : []) : profileProblems(unavailable)
+    if (!rows.length && !problems.length) return next(e)
+    const problemWidth = width > FRAME ? width : 84
     const [header, ...lines] = boxRows(state, loop.count, e.props.bodyColumns - FRAME)
     const { Box, Text } = $.ui.resolve(e)
+    if (compact && !rows.length) return <Text wrap="truncate-end" color="yellow">{PROFILE_REASON}</Text>
     const color = (status: string) => status === 'passed' ? 'green' : status === 'failed' ? 'red' : status === 'cancelled' ? 'gray' : 'yellow'
-    return <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor="gray" paddingX={1} width={problems.length ? problemWidth : undefined}>
+    return <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor="gray" paddingX={1} width={problems.length && !compact ? problemWidth : undefined}>
       {rows.length > 0 && <Text wrap="truncate-end" dimColor>{header}</Text>}
       {rows.map((run, index) => <Text wrap="truncate-end" color={color(run.status)}>{lines[index]}</Text>)}
-      {problems.map(problem => <Text wrap="wrap" color="yellow">{problem}</Text>)}
+      {problems.map(problem => <Text wrap={compact ? 'truncate-end' : 'wrap'} color="yellow">{problem}</Text>)}
     </Box>
   })
 }

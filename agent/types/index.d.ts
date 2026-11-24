@@ -25,7 +25,7 @@ export type Run = {
 export type ObservedRun = Run & { profile?: string; clockOffset?: number }
 export type Pin = { run: ObservedRun; doneAt: number | null }
 export type ProfileClock = { profile: string; offset: number }
-export type Snapshot = { recent: ObservedRun[]; pins: Pin[]; reachable: boolean; now: number; unavailable?: string[]; clocks?: ProfileClock[] }
+export type Snapshot = { recent: ObservedRun[]; pins: Pin[]; reachable: boolean; now: number; singleProfile: boolean; unavailable?: string[]; clocks?: ProfileClock[] }
 
 declare module 'claude-code' {
   interface PluginState {
