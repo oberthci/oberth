@@ -132,8 +132,11 @@ func retainedReleaseFacts(ctx context.Context, r Request, file string, runs Rele
 }
 
 func buildResult(ctx context.Context, row stateport.Run, runs ReleaseRuns) (bool, error) {
-	if row.Release || !row.HasAdmission || row.Origin.RequestedFile != "" && row.Origin.RequestedFile != workflowpolicy.BuildFile {
+	if row.Release || row.Origin.RequestedFile != "" && row.Origin.RequestedFile != workflowpolicy.BuildFile {
 		return false, nil
+	}
+	if !row.HasAdmission {
+		return true, refusal("release_build", nil)
 	}
 	full, err := runs.Run(ctx, row.ID)
 	if err != nil {
