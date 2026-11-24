@@ -245,4 +245,5 @@ exact grant before publication; a failed publication reports incomplete applicat
 Authority publication has one fenced Publish operation and no cached-generation port.
 
 Promotion selects the newest build.yaml branch result for its commit; an optional
-workflow result cannot replace that evidence.
+workflow result cannot replace that evidence. Scan at most two 200-run pages;
+after 400 optional rows, refuse with guidance to run a fresh build for the commit.
