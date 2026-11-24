@@ -107,7 +107,7 @@ cancellation never cancels a run. `run wait` sends `run_wait
 `retry_hint`. `events wait --after-id` sends `after_id` to `events_wait`;
 filtering, retention gaps and the next cursor remain C2's contract.
 
-`validate [file]` reports its offline scope and fills the bound repository in its commands; deferred template
+`validate [file]` uses canonical repository bindings and reports its offline scope; deferred template
 references and live facts point to `oberth check`, without claiming missing authorization. **Delta:** add
 `check [ref] [--repo <canonical-repository>] [--local <path>] [-o json]`, calling
 `run_check`; it creates no run, Workflow, token or grant declaration. It shares C3/C4's

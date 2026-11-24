@@ -10,6 +10,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/reponame"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -30,7 +31,11 @@ func (s *flowSession) validateDocument(path string, document []byte) error {
 		return err
 	}
 	r := admissioncontract.PrepareRequest{Mode: admissioncontract.ModeInspect, SelectedFile: selected, Document: document, Trigger: model.TriggerBranch}
-	r.Repository, _ = s.git("config", "--local", "--get", "oberth.repository")
+	if repository, _ := s.git("config", "--local", "--get", "oberth.repository"); repository != "" {
+		if _, err := reponame.ParseRepository(repository); err == nil {
+			r.Repository = repository
+		}
+	}
 	if release {
 		r.Trigger = model.TriggerTag
 	}
