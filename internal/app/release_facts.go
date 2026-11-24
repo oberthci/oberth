@@ -88,7 +88,7 @@ func newerRelease(ctx context.Context, v releaseVersion, runs ReleaseRuns) error
 
 func passedBuild(ctx context.Context, r Request, runs ReleaseRuns) error {
 	filter := stateport.RunFilter{Repositories: []string{r.Repository}, CommitSHA: r.Ref.CommitSHA, Limit: stateport.RunPageLimit}
-	for {
+	for range 2 {
 		rows, err := runs.Runs(ctx, filter)
 		if err != nil {
 			return err
@@ -104,6 +104,7 @@ func passedBuild(ctx context.Context, r Request, runs ReleaseRuns) error {
 			return refusal("release_build", nil)
 		}
 	}
+	return refusal("release_limit", nil)
 }
 
 func retainedReleaseFacts(ctx context.Context, r Request, file string, runs ReleaseRuns) (admissioncontract.ReleaseFacts, error) {
@@ -131,7 +132,7 @@ func retainedReleaseFacts(ctx context.Context, r Request, file string, runs Rele
 }
 
 func buildResult(ctx context.Context, row stateport.Run, runs ReleaseRuns) (bool, error) {
-	if row.Release || !row.HasAdmission {
+	if row.Release || !row.HasAdmission || row.Origin.RequestedFile != "" && row.Origin.RequestedFile != workflowpolicy.BuildFile {
 		return false, nil
 	}
 	full, err := runs.Run(ctx, row.ID)
