@@ -43,6 +43,7 @@ func newPublishFixture(t *testing.T) *publishFixture {
 	p.oldTag = f.Git(t, f.Work, "rev-parse", "old-release")
 	f.Git(t, f.Store(), "fetch", f.Work, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
 	p.intent = publicationFor(f, "refs/heads/topic", p.next, "")
+	p.intent.ReceivedSHA = new("")
 	return p
 }
 func (p *publishFixture) upstream(t *testing.T, oid string) {
@@ -54,7 +55,10 @@ func (p *publishFixture) object(oid string) {
 	p.intent.ObjectSHA = oid
 	p.intent.CommitSHA = &oid
 }
-func (p *publishFixture) predecessor(oid string) { p.intent.PreviousSHA = &oid }
+func (p *publishFixture) predecessor(oid string) {
+	p.intent.PreviousSHA = &oid
+	p.intent.ReceivedSHA = new(oid)
+}
 func (p *publishFixture) releaseTag() {
 	p.intent.Ref = "refs/tags/release"
 	p.intent.ObjectSHA = p.tag
@@ -164,8 +168,8 @@ func publicationBranchCases() []publicationCase {
 		{name: "identical retry", class: "ok",
 			noPush: true, change: func(t *testing.T, p *publishFixture) { p.intent.Attempts = 2; p.upstream(t, p.next) }},
 		{name: "upstream moved", class: "moved(upstream)", change: func(t *testing.T, p *publishFixture) {
-			p.upstream(t, p.f.Commit)
-			p.predecessor(p.unrelated)
+			p.upstream(t, p.unrelated)
+			p.predecessor(p.f.Commit)
 		}},
 		{name: "accepted local head moved", class: "moved(local)",
 			noPush: true, change: func(t *testing.T, p *publishFixture) {

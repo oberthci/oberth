@@ -38,7 +38,7 @@ func (c *Cache) Publish(ctx context.Context, r model.Publication) (gitport.Publi
 		return gitport.PublicationReceipt{}, unavailable("publish", errors.New(reasonPublishing))
 	}
 	defer c.setPublication(p+"\x00"+r.Ref, false)
-	err = c.publishCached(ctx, p, remote, r)
+	err = c.publishCached(ctx, p, remote, &r)
 	if err != nil {
 		return gitport.PublicationReceipt{}, err
 	}
@@ -65,7 +65,11 @@ func validatePublication(r model.Publication) error {
 	if r.PreviousSHA == nil {
 		return refuse("publication predecessor")
 	}
-	for _, oid := range []string{r.ObjectSHA, *r.PreviousSHA} {
+	objects := []string{r.ObjectSHA, *r.PreviousSHA}
+	if r.ReceivedSHA != nil {
+		objects = append(objects, *r.ReceivedSHA)
+	}
+	for _, oid := range objects {
 		if oid != "" && !gitoid.Valid(oid) {
 			return refuse("publication object")
 		}
@@ -87,12 +91,12 @@ func validatePublishedCommit(r model.Publication) error {
 	}
 	return nil
 }
-func (c *Cache) publishIntent(ctx context.Context, p string, remote Remote, r model.Publication) error {
-	if err := c.publicationDefault(ctx, remote, r); err != nil {
+func (c *Cache) publishIntent(ctx context.Context, p string, remote Remote, r *model.Publication) error {
+	if err := c.publicationDefault(ctx, remote, *r); err != nil {
 		return err
 	}
 	if r.Attempts > 1 || r.ReadBack {
-		held, err := c.forgeHolds(ctx, p, remote, r)
+		held, err := c.forgeHolds(ctx, p, remote, *r)
 		if err != nil || held {
 			return err
 		}
@@ -100,12 +104,17 @@ func (c *Cache) publishIntent(ctx context.Context, p string, remote Remote, r mo
 	if err := c.lock(ctx, p); err != nil {
 		return err
 	}
-	err := c.checkIntent(ctx, p, r, remote.DefaultBranch)
+	err := c.checkIntent(ctx, p, *r, remote.DefaultBranch)
 	c.unlock(p)
 	if err != nil {
 		return err
 	}
-	return c.pushIntent(ctx, p, remote, r)
+	qualified, err := c.topicLease(ctx, p, remote, *r)
+	if err != nil {
+		return err
+	}
+	*r = qualified
+	return c.pushIntent(ctx, p, remote, *r)
 }
 
 // A saved empty predecessor must not recreate an emptied established forge.

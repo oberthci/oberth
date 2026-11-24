@@ -27,6 +27,7 @@ type Decision struct {
 }
 
 type RunStore interface {
+	ReceivedHead(context.Context, stateport.ReceivedRef) (*string, error)
 	RunCounts(context.Context, []string) (map[stepmodel.RunStatus]int, error)
 	AcceptBatch(context.Context, stateport.BatchAcceptance) (stateport.AcceptanceResult, error)
 	Run(context.Context, string) (stateport.Run, error)

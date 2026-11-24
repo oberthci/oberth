@@ -61,7 +61,7 @@ func unexpectedService(t *testing.T) service.Config {
 		Git: servicecontract.GitFuncs{ResolveRefFunc: func(context.Context, string, string) (gitport.Ref, error) { return gitport.Ref{}, problem() }, ListRefsFunc: func(context.Context, string) ([]gitport.Ref, error) { return nil, problem() }, ReleaseTagFunc: func(context.Context, stateport.Repository, gitport.Ref) (gitport.Ref, error) {
 			return gitport.Ref{}, problem()
 		}},
-		MovingGit: servicecontract.MovingGitFuncs{ObservedRefFunc: func(context.Context, string, string) (gitport.Ref, error) { return gitport.Ref{}, problem() }, RemoteRefFunc: func(context.Context, string, string) (gitport.Ref, error) { return gitport.Ref{}, problem() }, PreparePromotionFunc: func(context.Context, gitport.PromotionRequest) (gitport.Promotion, error) {
+		MovingGit: servicecontract.MovingGitFuncs{RemoteRefFunc: func(context.Context, string, string) (gitport.Ref, error) { return gitport.Ref{}, problem() }, PreparePromotionFunc: func(context.Context, gitport.PromotionRequest) (gitport.Promotion, error) {
 			return gitport.Promotion{}, problem()
 		}, PublishFunc: func(context.Context, model.Publication) (gitport.PublicationReceipt, error) {
 			return gitport.PublicationReceipt{}, problem()

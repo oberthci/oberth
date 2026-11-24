@@ -21,6 +21,7 @@ func publicationFor(f *gittest.Fixture, ref, object, previous string) model.Publ
 		Ref:         ref,
 		ObjectSHA:   object,
 		PreviousSHA: &previous,
+		ReceivedSHA: new(previous),
 		Actor:       "actor"}
 	if object != "" {
 		r.CommitSHA = &object
@@ -65,7 +66,10 @@ func TestPublishDistinguishesLocalUpstreamUnknownAndOutage(t *testing.T) {
 	f.Git(t, f.Store(), "update-ref", ref, next)
 	_, err := c.Publish(t.Context(), publicationFor(f, ref, f.Commit, ""))
 	checkMoved(t, err, "local")
-	f.Git(t, f.Bare, "update-ref", ref, f.Commit)
+	tree := f.Git(t, f.Work, "rev-parse", "HEAD^{tree}")
+	independent := f.Git(t, f.Work, "commit-tree", tree, "-m", "independent forge head")
+	f.Git(t, f.Bare, "fetch", f.Work, independent)
+	f.Git(t, f.Bare, "update-ref", ref, independent)
 	_, err = c.Publish(t.Context(), publicationFor(f, ref, next, ""))
 	checkMoved(t, err, "upstream")
 	f.Git(t, f.Store(), "update-ref", "-d", ref)

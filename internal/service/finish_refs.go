@@ -20,6 +20,12 @@ func (s *Service) finishIntent(ctx context.Context, r stateport.Run, o FinishedR
 	p := model.Publication{ID: "publication:" + r.ID, Repo: r.Repo, Ref: r.Ref, RunID: r.ID, ObjectSHA: r.ObjectSHA, CommitSHA: r.CommitSHA, Actor: r.Origin.Actor}
 	if strings.HasPrefix(r.Ref, "refs/tags/") {
 		p.PreviousSHA = new("")
+	} else {
+		var err error
+		p.ReceivedSHA, err = s.c.Runs.ReceivedHead(ctx, stateport.ReceivedRef{Repo: r.Repo, Ref: r.Ref, ObjectSHA: r.ObjectSHA, RunID: r.ID})
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	return &stateport.PublicationIntent{Publication: p}, nil, nil
 }

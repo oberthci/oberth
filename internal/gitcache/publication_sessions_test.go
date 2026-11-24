@@ -14,6 +14,11 @@ import (
 
 func TestFirstPublicationSkipsReadBeforeFencedPush(t *testing.T) {
 	p := newPublishFixture(t)
+	// #1830 still removes redundant target preflights on the default branch.
+	// Topic publication has a distinct required live-head/receive-head rule.
+	p.intent.Ref = "refs/heads/main"
+	p.predecessor(p.f.Commit)
+	p.f.Git(t, p.f.Store(), "update-ref", p.intent.Ref, p.next)
 	p.intent.Attempts = 1
 	commands := filepath.Join(p.f.Root, "commands.jsonl")
 	if err := os.WriteFile(commands, nil, 0600); err != nil {
@@ -29,10 +34,8 @@ func TestFirstPublicationSkipsReadBeforeFencedPush(t *testing.T) {
 	}
 	reads := strings.Count(string(data), `"ls-remote"`)
 	t.Logf("first publication: %v; forge reads=%d pushes=%d", (clock.RealClock{}).Since(start), reads, publicationPushes(t, p.f))
-	// B3 requires a live default-head check before a topic can publish. The
-	// target itself is read only after the fenced push, never as a preflight.
-	if reads != 2 || publicationPushes(t, p.f) != 1 {
-		t.Fatal("first topic attempt needs its default check, fenced push and read-back", string(data))
+	if reads != 1 || publicationPushes(t, p.f) != 1 {
+		t.Fatal("first default attempt needs only its fenced push and read-back", string(data))
 	}
 	checkTargetReadFollowsPush(t, data, p.intent.Ref)
 	p.intent.Attempts = 2

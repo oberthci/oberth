@@ -1547,6 +1547,7 @@
       "internal/nativebinding",
       "internal/publicerr",
       "internal/pushretry",
+      "internal/sourcecontract",
       "internal/stepmodel"
     ],
     "internal/model": [

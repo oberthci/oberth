@@ -95,6 +95,7 @@ func (s *Submitter) preparePush(ctx context.Context, r Receive, replay bool) (ac
 			continue
 		}
 		request := u.Request
+		a.Received = append(a.Received, d.Request.Clone())
 		request.Actor, request.Trigger, request.Release = d.Request.Actor.Clone(), d.Request.Trigger, d.Release
 		request.ReleaseHead = d.ReleaseHead
 		a.Actor = request.Actor.Clone()

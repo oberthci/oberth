@@ -41,6 +41,12 @@ func TestTopicRunPublishesThePushersAmendedCommit(t *testing.T) {
 }
 
 func TestTopicSyncPreservesTheUnseenForgeCommit(t *testing.T) {
+	for _, refresh := range []bool{false, true} {
+		t.Run(map[bool]string{false: "without fetch", true: "after fetch"}[refresh], func(t *testing.T) { checkTopicSyncUnseenCommit(t, refresh) })
+	}
+}
+
+func checkTopicSyncUnseenCommit(t *testing.T, refresh bool) {
 	f := composeFixture(t, composeBinary(t))
 	base := f.prepareCommit(t)
 	f.git.Git(t, f.git.Work, "push", f.git.Bare, base+":refs/heads/topic")
@@ -66,6 +72,12 @@ func TestTopicSyncPreservesTheUnseenForgeCommit(t *testing.T) {
 	if f.forge.sessions.Load() != before {
 		t.Fatal("cached topic consulted the forge during admission")
 	}
+	if refresh {
+		setPushCacheAge(t, f, 16*time.Minute)
+		if err := f.owners.cache.Fetch(t.Context(), gittest.Repository); err != nil {
+			t.Fatal(err)
+		}
+	}
 	call, err := f.owners.service.PrepareSync(t.Context(), apicontract.Caller{Actor: f.joinedActor(t)}, apicontract.SyncArgs{Repo: gittest.Repository, Branch: "topic", SHA: local})
 	if err != nil {
 		t.Fatal(err)
@@ -74,8 +86,8 @@ func TestTopicSyncPreservesTheUnseenForgeCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	publication := settledTopicPublication(t, f)
-	if publication.Status == model.PublicationDelivered || publication.PreviousSHA == nil || *publication.PreviousSHA != base {
-		t.Fatal("sync adopted an unseen forge head as its lease", publication)
+	if publication.Status == model.PublicationDelivered || publication.ReceivedSHA == nil || *publication.ReceivedSHA != base {
+		t.Fatal("sync lost its original receive head", publication)
 	}
 	if actual := f.git.Git(t, f.git.Bare, "rev-parse", "refs/heads/topic"); actual != external {
 		t.Fatal("sync overwrote the unseen forge commit", actual)

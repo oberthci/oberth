@@ -87,7 +87,15 @@ func (s *Store) Publications(ctx context.Context, filter stateport.RecordFilter)
 	if err != nil {
 		return nil, err
 	}
-	return readRecords[model.Publication](ctx, s.readers, query, args)
+	stored, err := readRecords[storedPublication](ctx, s.readers, query, args)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]model.Publication, len(stored))
+	for i, p := range stored {
+		result[i] = p.publication()
+	}
+	return result, nil
 }
 
 func (s *Store) PendingPublications(ctx context.Context, filter stateport.RecordFilter) ([]model.Publication, error) {

@@ -41,14 +41,9 @@ func (p GitFuncs) ReleaseTag(ctx context.Context, repo stateport.Repository, ref
 }
 
 type MovingGitFuncs struct {
-	ObservedRefFunc      func(context.Context, string, string) (gitport.Ref, error)
 	RemoteRefFunc        func(context.Context, string, string) (gitport.Ref, error)
 	PreparePromotionFunc func(context.Context, gitport.PromotionRequest) (gitport.Promotion, error)
 	PublishFunc          func(context.Context, model.Publication) (gitport.PublicationReceipt, error)
-}
-
-func (p MovingGitFuncs) ObservedRef(ctx context.Context, repo, ref string) (gitport.Ref, error) {
-	return p.ObservedRefFunc(ctx, repo, ref)
 }
 
 func (p MovingGitFuncs) RemoteRef(ctx context.Context, repo, ref string) (gitport.Ref, error) {

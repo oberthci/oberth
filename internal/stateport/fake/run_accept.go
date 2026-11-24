@@ -76,9 +76,10 @@ func receiptBinding(b stateport.BatchAcceptance) string {
 	return jsonValue(struct {
 		Repository string
 		Actor      any
+		Received   []model.CIRequest
 		Runs       []accepted
 		Deletions  []stateport.BranchDeletion
-	}{b.Repository, b.Actor, rows, b.Deletions})
+	}{b.Repository, b.Actor, b.Received, rows, b.Deletions})
 }
 
 func (m *runMemory) acceptRun(b stateport.BatchAcceptance, a stateport.Acceptance, at time.Time) (stateport.Run, error) {
@@ -166,6 +167,9 @@ func (f *Runs) AcceptedRuns(ctx context.Context, id string) ([]stateport.Run, er
 func (m *runMemory) writeReceive(b stateport.BatchAcceptance, at time.Time) ([]stateport.Run, error) {
 	if _, ok := m.repos[b.Repository]; !ok {
 		return nil, runProblem(publicerr.NotFound)
+	}
+	if err := m.recordReceived(b); err != nil {
+		return nil, err
 	}
 	for _, d := range b.Deletions {
 		if err := m.deleteBranch(b, d, at); err != nil {

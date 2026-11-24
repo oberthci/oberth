@@ -19,7 +19,7 @@ func TestExplicitRetryConfirmsLandedPublicationAfterLocalMove(t *testing.T) {
 	f := newMovingFixtureFrom(t, gittest.New(t))
 	g := f.git
 	g.Git(t, g.Store(), "update-ref", "refs/heads/topic", g.Commit)
-	p := model.Publication{ID: "landed-retry", Repo: request().Repository, Ref: "refs/heads/topic", Actor: movingCaller().Actor.Identity, ObjectSHA: g.Commit, CommitSHA: new(g.Commit)}
+	p := model.Publication{ID: "landed-retry", Repo: request().Repository, Ref: "refs/heads/topic", Actor: movingCaller().Actor.Identity, ObjectSHA: g.Commit, CommitSHA: new(g.Commit), ReceivedSHA: new("")}
 	landedOK(t, f.db.PreparePublication(t.Context(), stateport.Action{Actor: p.Actor}, stateport.PublicationIntent{Publication: p}))
 	lost := &lostPublicationReply{MovingGit: f.moving.MovingGit}
 	f.moving.MovingGit = lost

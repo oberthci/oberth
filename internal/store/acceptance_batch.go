@@ -25,6 +25,7 @@ type acceptedBinding struct {
 type receiveBinding struct {
 	Repository string
 	Actor      actor.Actor
+	Received   []model.CIRequest
 	Runs       []acceptedBinding
 	Deletions  []stateport.BranchDeletion
 }
@@ -46,6 +47,12 @@ func prepareBatch(input stateport.BatchAcceptance) (preparedBatch, error) {
 		return batch, err
 	}
 	receipt := receiveBinding{Repository: input.Repository, Actor: input.Actor.Clone(), Deletions: batch.Deletions}
+	var err error
+	batch.Received, err = prepareReceived(input)
+	if err != nil {
+		return batch, err
+	}
+	receipt.Received = batch.Received
 	batch.events = append([]stateport.EventWrite(nil), input.Events...)
 	if err := prepareAdmissions(&batch, &receipt); err != nil {
 		return batch, err
@@ -101,6 +108,9 @@ func (s *Store) writeBatch(ctx context.Context, tx *sql.Tx, batch preparedBatch)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO receives VALUES(?,?,?)`, batch.ReceiveID, repoID, batch.body); err != nil {
 		return nil, databaseError(err)
+	}
+	if err := writeReceivedHeads(ctx, tx, repoID, batch.Received); err != nil {
+		return nil, err
 	}
 	if len(batch.Runs) == 0 && len(batch.Deletions) == 0 {
 		if err := s.appendAudit(ctx, tx, mutation{batch.Actor.Identity, "receive.accept", "receive", batch.ReceiveID, nil}); err != nil {

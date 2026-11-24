@@ -60,7 +60,7 @@ func (s *Store) writePublication(ctx context.Context, tx *sql.Tx, p model.Public
 	if p.RunID != "" {
 		runID = p.RunID
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO publications VALUES(?,?,?,?,?)`, p.ID, repoID, runID, p.Status, encode(p)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO publications VALUES(?,?,?,?,?)`, p.ID, repoID, runID, p.Status, encode(storedPublication{Publication: p, ReceivedSHA: p.ReceivedSHA})); err != nil {
 		return refuse(conflict, err)
 	}
 	return s.appendAudit(ctx, tx, mutation{p.Actor, "publication.prepare", "publication", p.ID, map[string]any{"publication": p, "reason": reason}})
@@ -145,7 +145,8 @@ func (s *Store) AbandonPublication(ctx context.Context, action stateport.Action,
 // ordering bound, which the record's own encoding leaves out.
 type storedPublication struct {
 	model.Publication
-	CIAfter int64 `json:"ci_after,omitempty"`
+	CIAfter     int64   `json:"ci_after,omitempty"`
+	ReceivedSHA *string `json:"received_sha,omitempty"`
 }
 
 func readPublication(ctx context.Context, tx *sql.Tx, id string) (model.Publication, error) {
@@ -157,12 +158,17 @@ func readPublication(ctx context.Context, tx *sql.Tx, id string) (model.Publicat
 	if err := json.Unmarshal([]byte(body), &stored); err != nil {
 		return stored.Publication, refuse(corrupt, err)
 	}
+	return stored.publication(), nil
+}
+
+func (stored storedPublication) publication() model.Publication {
 	stored.Publication.CIAfter = stored.CIAfter
-	return stored.Publication, nil
+	stored.Publication.ReceivedSHA = stored.ReceivedSHA
+	return stored.Publication
 }
 
 func savePublication(ctx context.Context, tx *sql.Tx, p model.Publication) error {
-	value := encode(storedPublication{Publication: p, CIAfter: p.CIAfter})
+	value := encode(storedPublication{Publication: p, CIAfter: p.CIAfter, ReceivedSHA: p.ReceivedSHA})
 	_, err := tx.ExecContext(ctx, `UPDATE publications SET status=?,value=? WHERE id=?`, p.Status, value, p.ID)
 	return databaseError(err)
 }

@@ -10,7 +10,7 @@ import (
 
 // Record the confirmed publication after any older in-flight forge snapshot.
 // Independent publications keep their network work outside the shared gate.
-func (c *Cache) publishCached(ctx context.Context, p string, remote Remote, r model.Publication) error {
+func (c *Cache) publishCached(ctx context.Context, p string, remote Remote, r *model.Publication) error {
 	if err := c.publishIntent(ctx, p, remote, r); err != nil {
 		return err
 	}
@@ -19,7 +19,7 @@ func (c *Cache) publishCached(ctx context.Context, p string, remote Remote, r mo
 		return err
 	}
 	defer func() { <-slot }()
-	return c.recordPublication(ctx, p, r)
+	return c.recordPublication(ctx, p, *r)
 }
 
 // The confirmed value is already known. Record it with its tracking ref in one

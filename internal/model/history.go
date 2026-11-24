@@ -64,11 +64,16 @@ type Publication struct {
 	// ReadBack marks a re-entered delivery, including an explicit retry. It does
 	// not advance the durable attempt count and is never stored or sent.
 	ReadBack bool `json:"-"`
+	// ReceivedSHA is the old ref recorded by the original accepted receive.
+	// Nil means no receive evidence; empty means that receive created the ref.
+	// It is durable private evidence, independent of the live push lease.
+	ReceivedSHA *string `json:"-"`
 }
 
 func (v Publication) Clone() Publication {
 	v.CommitSHA = copyPointer(v.CommitSHA)
 	v.PreviousSHA = copyPointer(v.PreviousSHA)
+	v.ReceivedSHA = copyPointer(v.ReceivedSHA)
 	v.RetryAt = copyPointer(v.RetryAt)
 	if v.Release != nil {
 		receipt := *v.Release

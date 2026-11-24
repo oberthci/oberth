@@ -126,7 +126,7 @@ func TestNativeSchemaVersionIsPersisted(t *testing.T) {
 	if err := s.readers.QueryRowContext(t.Context(), `SELECT schema_number FROM protocol`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if Schema != 6 || version != 6 || backupOptions(s).Schema != 6 {
+	if Schema != 7 || version != 7 || backupOptions(s).Schema != 7 {
 		t.Fatal("native progress schema is not versioned", Schema, version)
 	}
 }
