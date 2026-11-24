@@ -126,7 +126,7 @@ no service, wiring, native executor, source implementation or concrete Store.
 2. **Exact target.** Every child command and SDK call uses the selected context
    and verified cluster identity. Never change current-context or the user's
    kubeconfig. Private merged copies have owner-only permissions, cancellation
-   cleanup and conservative recovery. There is no cluster-type trust bypass. Enter selects a shown single-context default; multiple contexts require an explicit choice. A URL derived from a loopback API host requires a reachable URL prompt or --url.
+   cleanup and conservative recovery. There is no cluster-type trust bypass. Enter selects a shown single-context default; multiple contexts require an explicit choice. A URL derived from a loopback API host requires a reachable URL prompt or --url. Generated chart inputs use only the target schema's declared keys.
 3. **Current identities.** Clear private buffers and require explicit rotation
    review. Keep server, SSH, audit and store identities across
    reruns and upgrades. Added names preserve the served certificate's names;

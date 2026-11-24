@@ -216,6 +216,11 @@ func (e *Engine) prepareIdentities(ctx context.Context, p *Plan) error {
 		"server":               map[string]any{"runtime": map[string]any{"source": map[string]any{"ca_pem": string(p.identities.CA.Data["tls.crt"])}}},
 		"adminPublicKeySHA256": publicDigest(p.admin.public),
 	})
+	p.request.Values, err = declaredChartValues(p.release.chart, p.request.Values)
+	if err != nil {
+		p.Close()
+		return err
+	}
 	if err = e.Charts.Preview(ctx, p.request); err != nil {
 		p.Close()
 		return chartError("chart", err)

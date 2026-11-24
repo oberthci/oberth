@@ -3,6 +3,7 @@ package installer
 import (
 	"context"
 	"reflect"
+	"strings"
 )
 
 func (e *Engine) discoverSharedCluster(ctx context.Context, p *Plan) error {
@@ -33,7 +34,8 @@ func (e *Engine) recheckSharedCluster(ctx context.Context, p *Plan) (bool, error
 	if err != nil {
 		return false, err
 	}
-	if p.request.Values["statusPodSecurity"] != namespaceSecurityLevel(state) {
+	level, _, _ := strings.Cut(p.podSecurity, " ")
+	if level != namespaceSecurityLevel(state) {
 		return false, described("target", nil, "Pipeline Pod Security changed after review.")
 	}
 	create := pipelineNamespaceCreation(p, state.pipeline)
