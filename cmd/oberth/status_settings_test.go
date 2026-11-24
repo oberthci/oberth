@@ -41,8 +41,11 @@ func assertEffectiveSettings(t *testing.T, settings []apicontract.EffectiveSetti
 		}
 		byName[row.Name] = row
 	}
-	if byName["parallel runs"].Value != "4" || byName["parallel runs"].Source != "default" || byName["Pod defaults"].Source != "chosen" || byName["source pins"].Value != "1" || byName["scheduled backup"].Value != "off" {
+	if byName["parallel runs"].Value != "4" || byName["parallel runs"].Source != "default" || byName["Pod defaults"].Source != "chosen" || byName["source pins"].Value != "1" {
 		t.Fatal("effective values or explicit default choice lost", byName)
+	}
+	if _, exists := byName["scheduled backup"]; exists {
+		t.Fatal("unmeasured backup schedule exposed")
 	}
 	for _, name := range []string{"version", "commit", "store mode", "store state", "server URL", "SSH port", "HTTPS node port", "Pod Security", "link-local egress filter", "Argo controller image", "Argo executor image", "source plugin image", "store image"} {
 		if _, ok := byName[name]; !ok {

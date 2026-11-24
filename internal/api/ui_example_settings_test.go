@@ -9,7 +9,7 @@ func exampleSettingsStatus() apicontract.SystemStatus {
 	values := [][2]string{
 		{"version", "1"}, {"commit", strings.Repeat("a", 40)},
 		{"parallel runs", "4"}, {"Pod defaults", "on"}, {"link-local egress filter", "on"}, {"Pod Security", "baseline"},
-		{"store mode", "bundled"}, {"store state", "unsealed"}, {"scheduled backup", "off"}, {"last backup", "2026-11-16T14:00:00Z"},
+		{"store mode", "bundled"}, {"store state", "unsealed"}, {"last backup", "2026-11-16T14:00:00Z"},
 		{"source pins", "2"}, {"registered upstreams", "2"}, {"registered repositories", "3"},
 		{"server URL", "https://ci.example:30443"}, {"SSH port", "30022"}, {"HTTPS node port", "30443"}, {"SSH node port", "30022"},
 		{"server image", "registry.example/oberth@sha256:" + strings.Repeat("a", 64)},

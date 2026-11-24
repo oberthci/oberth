@@ -114,7 +114,6 @@ func (s *settingsRows) observations(ctx context.Context, a serverAdministration,
 		}
 	}
 	s.observe("store state", seal)
-	s.observe("scheduled backup", "off")
 	if a.owner.c.store != nil {
 		stats, err := a.owner.c.store.InstallationStats(ctx)
 		if err == nil {
