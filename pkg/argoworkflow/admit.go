@@ -16,6 +16,9 @@ func (g *graph) err() error {
 	g.dedupeFindings()
 	failures, needs := []admissioncontract.Finding{}, []admissioncontract.Finding{}
 	for _, f := range g.findings {
+		if f.Advisory {
+			continue
+		}
 		if g.offline() && f.Installation && (f.Code != "store_config" || g.offlineValidation) {
 			needs = append(needs, f)
 		} else {
@@ -118,6 +121,7 @@ func (g *graph) spec(s *wfv1.WorkflowSpec, where string, shared bool) {
 	g.parameters(s.Arguments.Parameters, where+".arguments.parameters")
 	g.releaseArguments(s.Arguments.Parameters, where+".arguments.parameters")
 	g.synchronization(s.Synchronization, where+".synchronization")
+	g.compoundLock(s.Synchronization, where+".synchronization", true)
 	g.podSecurity(s.SecurityContext, where+".securityContext")
 	g.volumes(s.Volumes, nil, where+".volumes", shared)
 	if s.PodMetadata != nil {
@@ -168,7 +172,7 @@ func (g *graph) admitNode(n *node) {
 	g.podMetadata(&metadata, p+".metadata")
 	g.metadataKeys(p+".annotations", t.Annotations, false)
 	g.podSecurity(t.SecurityContext, p+".securityContext")
-	g.synchronization(t.Synchronization, p+".synchronization")
+	g.templateLocks(t, p+".synchronization")
 	g.parameters(t.Inputs.Parameters, p+".inputs.parameters")
 	g.parameters(t.Outputs.Parameters, p+".outputs.parameters")
 	g.volumes(t.Volumes, n, p+".volumes", n.scope != "")

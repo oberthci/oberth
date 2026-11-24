@@ -82,12 +82,13 @@ type ExecResult struct {
 	Truncated bool   `json:"truncated"`
 }
 type Finding struct {
-	Command string `json:"command,omitempty"`
-	Path    string `json:"path"`
-	Code    string `json:"code"`
-	Reason  string `json:"reason"`
-	Remedy  string `json:"remedy"`
-	Detail  string `json:"detail,omitempty"`
+	Advisory bool   `json:"advisory,omitempty"`
+	Command  string `json:"command,omitempty"`
+	Path     string `json:"path"`
+	Code     string `json:"code"`
+	Reason   string `json:"reason"`
+	Remedy   string `json:"remedy"`
+	Detail   string `json:"detail,omitempty"`
 }
 type Check struct {
 	Name  string `json:"name"`

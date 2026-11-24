@@ -107,6 +107,8 @@ type GrantEvidence struct {
 }
 
 type Finding struct {
+	// Advisory describes an authored choice without refusing admission.
+	Advisory bool `json:"advisory,omitempty"`
 	// Installation marks evidence supplied by the installation, not a YAML fault.
 	Installation bool   `json:"installation,omitempty"`
 	Path         string `json:"path"`

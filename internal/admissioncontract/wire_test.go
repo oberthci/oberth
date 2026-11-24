@@ -22,7 +22,7 @@ func TestWireTags(t *testing.T) {
 		{AccountEvidence{}, "Name:name UID:uid"},
 		{IdentityEvidence{}, "Namespace:namespace Pipeline:pipeline Resource:resource,omitempty State:state"},
 		{GrantEvidence{}, "Repository:repo File:file Step:step Kind:kind Path:path Audience:audience Revision:revision State:state"},
-		{Finding{}, "Installation:installation,omitempty Path:path Code:code Reason:reason Remedy:remedy Command:command,omitempty"},
+		{Finding{}, "Advisory:advisory,omitempty Installation:installation,omitempty Path:path Code:code Reason:reason Remedy:remedy Command:command,omitempty"},
 	}
 	for _, tc := range cases {
 		typ := reflect.TypeOf(tc.value)

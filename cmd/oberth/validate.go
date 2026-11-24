@@ -21,6 +21,7 @@ type validationResult struct {
 	Plan     *admissioncontract.Plan     `json:"plan,omitempty"`
 	Refusals []admissioncontract.Finding `json:"refusals"`
 	Needs    []admissioncontract.Finding `json:"needs"`
+	Findings []admissioncontract.Finding `json:"findings,omitempty"`
 	Detail   string                      `json:"detail,omitempty"`
 }
 
@@ -52,7 +53,13 @@ func (s *flowSession) validateDocument(path string, document []byte) error {
 	} else {
 		view := prepared.View()
 		result.Plan = &view.Plan
-		result.Needs = append(result.Needs, view.Findings...)
+		for _, f := range view.Findings {
+			if f.Advisory {
+				result.Findings = append(result.Findings, f)
+			} else {
+				result.Needs = append(result.Needs, f)
+			}
+		}
 	}
 	if outputErr := s.validationOutput(result); outputErr != nil {
 		return outputErr
@@ -76,10 +83,8 @@ func (s *flowSession) validationOutput(result validationResult) error {
 	if s.options.json {
 		return json.NewEncoder(s.app.out).Encode(result)
 	}
-	for _, f := range result.Refusals {
-		if err := s.validationFinding(s.app.diagnostic, result.File, f); err != nil {
-			return err
-		}
+	if err := s.validationFindings(s.app.diagnostic, result.File, result.Refusals); err != nil {
+		return err
 	}
 	if result.Plan != nil {
 		for _, entry := range result.Plan.Entries {
@@ -92,14 +97,24 @@ func (s *flowSession) validationOutput(result validationResult) error {
 		if err := s.fact("Not checked offline:"); err != nil {
 			return err
 		}
-		for _, f := range result.Needs {
-			if err := s.validationFinding(s.app.out, result.File, f); err != nil {
-				return err
-			}
-		}
+	}
+	if err := s.validationFindings(s.app.out, result.File, result.Needs); err != nil {
+		return err
+	}
+	if err := s.validationFindings(s.app.out, result.File, result.Findings); err != nil {
+		return err
 	}
 	if result.OK {
 		return s.fact("%s valid offline; run oberth check for live checks", result.File)
+	}
+	return nil
+}
+
+func (s *flowSession) validationFindings(out io.Writer, file string, findings []admissioncontract.Finding) error {
+	for _, f := range findings {
+		if err := s.validationFinding(out, file, f); err != nil {
+			return err
+		}
 	}
 	return nil
 }

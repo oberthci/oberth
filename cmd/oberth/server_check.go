@@ -42,14 +42,16 @@ func (o *serverOwners) Inspect(ctx context.Context, q service.CheckRequest) (api
 	}
 	v := prepared.View()
 	findings := make([]apicontract.Finding, 0, len(v.Findings))
+	ok := true
 	for _, f := range v.Findings {
-		findings = append(findings, apicontract.Finding{Path: f.Path, Code: f.Code, Reason: f.Reason, Remedy: f.Remedy, Command: f.Command})
+		findings = append(findings, apicontract.Finding{Advisory: f.Advisory, Path: f.Path, Code: f.Code, Reason: f.Reason, Remedy: f.Remedy, Command: f.Command})
+		ok = ok && f.Advisory
 	}
 	releaseTag := ""
-	if len(findings) == 0 {
+	if ok {
 		releaseTag = q.ReleaseTag
 	}
-	return apicontract.RunCheckResult{ReleaseTag: releaseTag, OK: len(findings) == 0, Repo: r.Repository, Ref: r.Ref.Name, ObjectSHA: &v.ObjectSHA, CommitSHA: &v.CommitSHA, SelectedFile: &v.SelectedFile, SpecDigest: &v.SpecDigest, Plan: &v.Plan, Findings: findings, Checks: []apicontract.Check{{Name: "native identity", State: string(v.Identity.State)}}}, nil
+	return apicontract.RunCheckResult{ReleaseTag: releaseTag, OK: ok, Repo: r.Repository, Ref: r.Ref.Name, ObjectSHA: &v.ObjectSHA, CommitSHA: &v.CommitSHA, SelectedFile: &v.SelectedFile, SpecDigest: &v.SpecDigest, Plan: &v.Plan, Findings: findings, Checks: []apicontract.Check{{Name: "native identity", State: string(v.Identity.State)}}}, nil
 }
 
 type checkSource struct {

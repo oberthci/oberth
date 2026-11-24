@@ -22,8 +22,14 @@ func (s *Submitter) PrepareSchedule(ctx context.Context, r Request) (*admissionc
 		return nil, err
 	}
 	view := run.Prepared.View()
-	if len(view.Findings) > 0 {
-		return nil, &Refusal{Code: "prepare", Problems: view.Findings}
+	var failures []admissioncontract.Finding
+	for _, f := range view.Findings {
+		if !f.Advisory {
+			failures = append(failures, f)
+		}
+	}
+	if len(failures) > 0 {
+		return nil, &Refusal{Code: "prepare", Problems: failures}
 	}
 	if err := scheduleExpressions(view.Workflow.Spec); err != nil {
 		return nil, err
