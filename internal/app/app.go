@@ -112,6 +112,8 @@ func (s *Submitter) prepareStart(ctx context.Context, q service.StartRequest) (a
 	if err != nil {
 		return acceptance{}, err
 	}
-	run.Request, run.RerunOf, run.PromotionID = q.Request.Clone(), q.RerunOf, q.PromotionID
+	request := q.Request.Clone()
+	request.RequestedFile = run.Request.RequestedFile
+	run.Request, run.RerunOf, run.PromotionID = request, q.RerunOf, q.PromotionID
 	return acceptance{BatchAcceptance: stateport.BatchAcceptance{ReceiveID: run.Request.ReceiveID, Repository: run.Request.Repo, Actor: run.Request.Actor.Clone(), Runs: []stateport.Acceptance{run}}, Result: PushResult{Outcomes: []Outcome{{Ref: r.Ref.Name, RunID: r.RunID, State: "accepted"}}}}, nil
 }
