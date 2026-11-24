@@ -46,6 +46,8 @@ const (
 	remedyTag              = "Push a new tag name."
 	reasonProtected        = "branch deletion is protected"
 	remedyProtected        = "Keep the default and reserved branches."
+	reasonDeletion         = "deletion-only push cannot run CI"
+	remedyDeletion         = "Delete topic branches directly on the forge; keep default and reserved branches."
 	reasonForward          = "push is not a fast-forward"
 	remedyForward          = "Test and promote a commit containing the current branch head."
 	reasonMoved            = "the publication predecessor changed"

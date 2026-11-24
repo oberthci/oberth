@@ -45,6 +45,8 @@ func refusalText(field string) (string, string) {
 		return reasonTag, remedyTag
 	case "protected branch":
 		return reasonProtected, remedyProtected
+	case "deletion admission":
+		return reasonDeletion, remedyDeletion
 	case "default fast-forward", "publication fast-forward":
 		return reasonForward, remedyForward
 	case "newer local head":

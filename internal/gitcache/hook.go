@@ -69,7 +69,7 @@ func receiveHook(ctx context.Context, input io.Reader, p string, record *Reserva
 		return err
 	}
 	for _, u := range updates {
-		if u.Ref == record.Event.Admission.DefaultBranch && !record.AllowDefault {
+		if u.Ref == record.Event.Admission.DefaultBranch && u.NewSHA != "" && !record.AllowDefault {
 			return &RefusalError{reason: reasonDefault, remedy: remedyDefault, Field: record.Event.Admission.DefaultBranch}
 		}
 		if err = validateUpdate(ctx, p, record, u); err != nil {

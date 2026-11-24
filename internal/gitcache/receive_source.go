@@ -38,6 +38,9 @@ func (
 	*ReceiveSource,
 	error,
 ) {
+	if quarantine == "" && len(record.Event.Updates) > 0 && !slices.ContainsFunc(record.Event.Updates, func(u RefUpdate) bool { return u.NewSHA != "" }) {
+		return nil, refuse("deletion admission")
+	}
 	objects := filepath.Join(store, "objects")
 	quarantine = filepath.Clean(quarantine)
 	if !filepath.IsAbs(quarantine) ||
