@@ -2,12 +2,22 @@
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
+import tempfile
 from unittest.mock import patch
 
 
 class GoGateTests:
+    def vm_parent_environment(self):
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory(dir=self.fixture.parent)))
+        for name in ("go.mod", "go.sum"):
+            shutil.copyfile(self.fixture / name, directory / name)
+        self.enterContext(patch.dict(os.environ, {"OBERTH_TOOLS_MODFILE": str(directory / "go.mod")}))
+        os.environ.pop("GOLANGCI_LINT", None)
+
     def test_added_product_dependency_uses_branch_module_files(self):
+        self.vm_parent_environment()
         root = Path(__file__).resolve().parents[2]
         revision = "e95687a848b6dc636835292289ad8abd7f8c2fd1"
         self.git("checkout", "-q", "main")
@@ -50,6 +60,7 @@ lint-selftest:
                 self.assertEqual((self.fixture / name).read_bytes(), (vm / checkout / name).read_bytes())
 
     def test_main_module_files_keep_branch_code_out_of_trusted_go(self):
+        self.vm_parent_environment()
         module = self.fixture / "internal/zzyaml"
         module.mkdir(parents=True)
         (module / "go.mod").write_text("module go.yaml.in/yaml/v3\n\ngo 1.26.0\n")
@@ -112,4 +123,3 @@ fi
         self.assertEqual(f"{vm / 'branch'} unset", observed[1])
         self.assertIn("off\n-mod=readonly -p=2 -buildvcs=false", result.stdout)
         self.assertEqual("branch code", marker.read_text())
-

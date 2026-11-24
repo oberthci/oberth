@@ -11,6 +11,11 @@ import tarfile
 import tempfile
 
 
+def nested_environment():
+    return {name: value for name, value in os.environ.items()
+            if name not in ("OBERTH_TOOLS_MODFILE", "GOLANGCI_LINT")}
+
+
 class GateFixture:
     def setUp(self):
         scratch = Path(os.environ.get("GOTMPDIR", Path.home() / ".cache/go-tmp"))
@@ -21,7 +26,7 @@ class GateFixture:
         root = Path(__file__).resolve().parents[2]
         manifest = re.search(r"tool_paths=\((.*?)\)", (root / "hack/gate.sh").read_text(), re.S)
         plans = [str(p.relative_to(root)) for p in (root / "docs/plans").rglob("*") if p.is_file()]
-        # Contents only: a step receives the checkout with read-only files and the fixture edits its copies.
+        # Preserve executable files while keeping copies of read-only inputs editable.
         inputs = ["go.mod", "go.sum", "hack/guards", "hack/base-image/inputs.lock.json", "hack/base-image/git-no-shell.patch", "internal/staticgit/build.env",
                   "internal/staticgit/qualified-artifacts.json"]
         for name in [*shlex.split(manifest[1]), *plans, *inputs]:
@@ -32,6 +37,7 @@ class GateFixture:
                     target = self.fixture / file.relative_to(root)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(file, target)
+                    target.chmod(file.stat().st_mode | 0o200)
         self.packaged_git_body = b"#!/bin/sh\nexit 0\n"
         record = self.fixture / "internal/staticgit/qualified-artifacts.json"
         data = json.loads(record.read_text())
@@ -73,7 +79,7 @@ esac
 
     def run_gate(self, branch="w0/probe", status=0):
         result = subprocess.run(["bash", "hack/gate.sh", branch], cwd=self.fixture,
-            env={**os.environ, "PATH": f"{self.bin_path}:{os.environ['PATH']}",
+            env={**nested_environment(), "PATH": f"{self.bin_path}:{os.environ['PATH']}",
                  "GOLANGCI_LINT": str(self.bin_path / "docker"),
                  "OBERTH_TEST_GIT": str(self.packaged_git),
                  "GOTMPDIR": str(self.fixture), "GATE_FAKE_START_STATUS": str(status),
@@ -105,7 +111,7 @@ esac
         script = re.sub("|".join(map(re.escape, paths)), lambda match: shlex.quote(str(paths[match[0]])), script)
         result = subprocess.run(["bash", "-ec", script, "gate", self.git("rev-parse", "HEAD").decode().strip(),
                                  command.splitlines()[-3], self.fixture.name, self.fixture.name],
-            cwd=self.fixture, env={**os.environ, "PATH": f"{self.bin_path}:{os.environ['PATH']}",
+            cwd=self.fixture, env={**nested_environment(), "PATH": f"{self.bin_path}:{os.environ['PATH']}",
                 "GATE_CHECKS": str(vm / "checks"), "GATE_MAKE_STATUS": str(status), "OBERTH_PARITY_TARGET_FILE": ""},
             text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False, timeout=timeout)
         return result, vm
@@ -142,4 +148,3 @@ esac
         if addition:
             self.assertFalse((vm / "src" / addition).exists())
             self.assertTrue((vm / "branch" / addition).is_file())
-

@@ -19,6 +19,20 @@ from tools.gate_vendor import VendorGateTests
 
 class GateVerdicts(VendorGateTests, GoGateTests, GateFixture, unittest.TestCase):
 
+    def test_nested_checks_ignore_outer_tool_selection(self):
+        path = self.fixture / "hack/ui-check.sh"
+        path.write_text("# branch tooling\n")
+        self.git("add", "hack/ui-check.sh")
+        self.git("commit", "-qm", "Change branch UI tooling")
+        with patch.dict(os.environ, {"GOLANGCI_LINT": "/outer/linter", "OBERTH_TOOLS_MODFILE": "/outer/trusted.mod"}):
+            gate = self.run_gate()
+            self.assertEqual(0, gate.returncode, gate.stdout)
+            result, vm = self.run_vm_script(make_body='printf "%s %s\\n" "${GOLANGCI_LINT-unset}" "${OBERTH_TOOLS_MODFILE-unset}" >> "$GATE_CHECKS.tools"\n')
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertEqual([f"unset {vm / 'trusted.mod'}"] * 2 + ["unset unset"],
+                         (vm / "checks.tools").read_text().splitlines())
+
+
 
     def test_root_python_cannot_replace_trusted_entries(self):
         files = ("unittest.py", "json.py", "portable.py", "sitecustomize.py", "unittest/__init__.py",
@@ -364,7 +378,7 @@ class GateVerdicts(VendorGateTests, GoGateTests, GateFixture, unittest.TestCase)
         checkout = Path(self.enterContext(tempfile.TemporaryDirectory(dir=self.fixture.parent)))
         for name in ["hack/test_gate.py", *self.git("ls-files", "-z").decode().split("\0")[:-1]]:
             (checkout / name).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(root / name, checkout / name)
+            shutil.copy2(root / name, checkout / name)
         for path in [*checkout.rglob("*"), checkout]:
             path.chmod(path.stat().st_mode & ~0o222)
         tests = ("test_branch_policy_changes_use_target_and_request_branch_check",
