@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,5 +85,35 @@ func sealStore(f fixture) {
 	f.engine.OpenStore = func(context.Context, secretstore.Config) (*secretstore.Client, func(), error) {
 		c, err := secretstore.New(secretstore.Connection{URL: "https://store.oberth.svc", Transport: sealed})
 		return c, func() {}, err
+	}
+}
+
+func TestUpgradeStoreRestartExplainsUnsealAndResumes(t *testing.T) {
+	t.Parallel()
+	f, m := maintenanceFixture(t)
+	plan, err := m.PlanUpgrade(t.Context(), f.release, f.choices, installer.UpgradeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plan.Plan.Close()
+	if !strings.Contains(strings.Join(plan.Plan.Review(), "\n"), "run oberth unseal, then repeat oberth upgrade") {
+		t.Fatal("upgrade review omits store restart recovery", plan.Plan.Review())
+	}
+	sealStore(f)
+	_, err = m.Upgrade(t.Context(), plan, plan.Plan.Digest(), nil)
+	var refusal *installer.Problem
+	if !errors.As(err, &refusal) || !strings.Contains(refusal.Detail, "oberth unseal") || readUpgradeRecord(t, f).State != "pending" {
+		t.Fatal("store restart loses unseal guidance or recovery record", err)
+	}
+	if _, err = f.engine.Unseal(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := m.PlanUpgrade(t.Context(), f.release, f.choices, installer.UpgradeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resumed.Plan.Close()
+	if _, err = m.Upgrade(t.Context(), resumed, resumed.Plan.Digest(), nil); err != nil {
+		t.Fatal("unsealed upgrade did not resume", err)
 	}
 }

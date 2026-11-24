@@ -25,6 +25,13 @@ func namespaceValues(v map[string]any, namespace string) map[string]any {
 		defaultText(store, "address", storeURL(namespace))
 	}
 	defaultText(native, "namespaceOverride", namespace)
+	priority := "oberth-control-" + namespace
+	controller["priorityClassName"] = priority
+	if bundled, ok := v["storeNative"].(map[string]any); ok {
+		if server, ok := bundled["server"].(map[string]any); ok {
+			server["priorityClassName"] = priority
+		}
+	}
 	pipelineNamespace, ok := pipeline["namespace"].(string)
 	if !ok {
 		return v

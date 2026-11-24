@@ -43,6 +43,7 @@ spec:
         checksum/ca: {{ .Values.server.runtime.source.ca_pem | sha256sum | quote }}
         checksum/admin: {{ .Values.adminPublicKeySHA256 | quote }}
     spec:
+      priorityClassName: oberth-control-{{ .Release.Namespace }}
       serviceAccountName: oberth
       terminationGracePeriodSeconds: 30
       securityContext:

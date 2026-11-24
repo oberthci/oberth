@@ -107,20 +107,19 @@ oberth upgrade --yes
 ```
 Upgrades require signed releases; local charts use `oberth install --chart <directory>`. Add
 `--version <version>` to both commands to select a version. Offline `--release-dir <directory>`
-accepts signed release files or a parent of version directories such as `v0.1.0` and `v0.2.0`.
-The version directory takes precedence over the flat one; invalid version directories refuse.
-Recorded same-schema repair needs both releases; select their parent. Review preserves settings and
-shows changed defaults, schema and revision; JSON has images. Direct Helm changes appear in one
-review line; install and upgrade replace them. Rollback and repair refuse those changes and point to
-install or upgrade. Review failed revisions. Finish unlabelled Workflows before upgrading (not
-adopted). Runs continue through restart; one submitted while the workflow controller restarts can
-fail at step start: `oberth run rerun <id>`. Upgrade backs up the database in the profile by version
-and UTC time; copy off-machine. Success keeps the three newest copies, failure its recovery files.
-The record binds cluster UID, revisions, versions and backup digest; `--no-backup` opts out.
-Verified completion and rollback audit versions and revision. An unconfirmed receipt doesn't undo
-success: use the printed audit command without repeating the upgrade. Readiness waits up to ten
-minutes and ends when ready. After a timeout, wait for `oberth system status` to be ready, then
-run `oberth upgrade`, which completes a ready target's record unchanged, or `oberth rollback --yes`.
+reads signed files or a parent of version directories (`v0.1.0`, `v0.2.0`). Version directories
+override flat files; invalid directories refuse. Same-schema repair needs both releases; select
+their parent. Review preserves settings and shows changed defaults, schema and revision; JSON has
+images. Review names direct Helm edits; install and upgrade replace them. Rollback/repair refuse
+them and name install or upgrade. Review failed revisions. Finish unlabelled Workflows before
+upgrading (not adopted). Runs survive restarts; submission during a controller restart may fail at
+step start: `oberth run rerun <id>`. Database backups stay in the profile by version/UTC time; copy
+off-machine. If the store restarts sealed, run `oberth unseal`, then repeat the upgrade. Success
+keeps the three newest copies; failure keeps recovery files. The record binds cluster UID,
+revisions, versions and backup digest; `--no-backup` opts out. Completion/rollback audit versions
+and revision. Missing receipts do not undo success; use the printed audit command. Readiness waits
+up to ten minutes. After a timeout, wait for `oberth system status` to be ready, then run
+`oberth upgrade`, which completes a ready target's record unchanged, or `oberth rollback --yes`.
 After a schema change, if it stays down, recovery is manual: keep the encrypted pre-upgrade archive,
 `backup.agekey` and `rollback.json` in `~/.config/oberth/<profile>/` and copy them off-machine.
 

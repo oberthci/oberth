@@ -74,6 +74,9 @@ func (m Maintenance) PlanUpgrade(ctx context.Context, r Release, c Choices, o Up
 		record.BackupPath = m.upgradeBackupPath(record)
 	}
 	p.review = review(p, record.Source.Version+" -> "+r.Version())
+	if settingText(p.request.Values, "secretStore", "bundled") == "on" {
+		p.review = append(p.review, "If the store restarts sealed, run oberth unseal, then repeat oberth upgrade.")
+	}
 	if err = m.Engine.reviewPendingStore(p); err != nil {
 		return fail(err)
 	}

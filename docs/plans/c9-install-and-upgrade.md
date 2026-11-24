@@ -182,7 +182,7 @@ no service, wiring, native executor, source implementation or concrete Store.
    verify-only with actionable corrections. Argo's global run cap defaults to 4;
    zero is unlimited. The cap is controller configuration only; cap-only changes leave
    server and store Pod templates unchanged. The pinned controller reloads the cap. No additional run cap, CPU formula, queue or workload
-   resource rewriting. Argo `failedPodRestart` is on with `maxRestarts: 1`. Control Pods have fixed measured CPU/memory requests; only store memory is capped. Controller workflow state and repository-dependent server Git processes remain uncapped.
+   resource rewriting. Argo `failedPodRestart` is on with `maxRestarts: 1`. Control Pods have fixed measured CPU/memory requests; only store memory is capped. Controller workflow state and repository-dependent server Git processes remain uncapped. The three control Pods use an installation-scoped PriorityClass of 1000000, above ordinary CI and below system priorities; it is not a global default.
    Chart roles follow component contracts: no Workflow deletion, no secret-approval
    mirror and no arbitrary exec in the server namespace. The server may create
    and delete step service accounts only in the pipeline namespace.
@@ -223,7 +223,7 @@ no service, wiring, native executor, source implementation or concrete Store.
     4 GiB, with framing/extraction bounds and staging-space checks.
 
 After a reboot, the operator opens the secret store by hand with `oberth unseal`.
-There is no automatic unseal. Preserve the private recovery file after failures.
+There is no automatic unseal. Upgrade review explains that a restarted sealed store needs `oberth unseal`, then the upgrade is repeated. Preserve the private recovery file after failures.
 
 The `waiters wake` walk fills global parallelism and any authored Argo semaphore,
 cancels one running step and lets another fail. Every waiting run must start within

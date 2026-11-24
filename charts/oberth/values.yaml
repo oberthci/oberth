@@ -85,6 +85,7 @@ argoNative:
   images:
     pullPolicy: IfNotPresent
   controller:
+    priorityClassName: oberth-control-oberth
     resources:
       requests: {cpu: 100m, memory: 512Mi}
     extraEnv:
@@ -132,6 +133,7 @@ storeNative:
   injector:
     enabled: false
   server:
+    priorityClassName: oberth-control-oberth
     resources:
       requests: {cpu: 50m, memory: 128Mi}
       limits: {memory: 512Mi}
