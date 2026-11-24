@@ -29,11 +29,12 @@ type Archive struct {
 	Report            stateport.BackupReport `json:"report,omitzero"`
 }
 type BackupConfig struct {
-	Source    SnapshotPort
-	Options   stateport.Options
-	Recipient string
-	Path      string
-	DryRun    bool
+	Source       SnapshotPort
+	Options      stateport.Options
+	Recipient    string
+	Path         string
+	DryRun       bool
+	Installation bool
 }
 
 // Backup publishes a complete encrypted database without replacing a destination.
@@ -98,6 +99,9 @@ func (c BackupConfig) publish(identity os.FileInfo, stage *string, archive *Arch
 		return backupLinkFailure(err, c.Path)
 	}
 	archive.StoreSnapshotHint = StoreSnapshotHint
+	if c.Installation {
+		archive.StoreSnapshotHint = "Includes installation Secrets; bundled store data is included when configured."
+	}
 	if err := removeBackupStage(identity, stage); err != nil {
 		return backupFailure("backup-cleanup", err, c.Path)
 	}

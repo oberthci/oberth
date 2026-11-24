@@ -8,27 +8,33 @@ import (
 	"github.com/oberthci/oberth/internal/installer"
 )
 
-func TestInstallGuideStatesRecoveryLimitsAndSavesFiveSecrets(t *testing.T) {
+func TestInstallGuideStatesEncryptedCoverageAndReviewLimits(t *testing.T) {
 	raw, err := os.ReadFile("../../docs/install.md")
 	if err != nil {
 		t.Fatal(err)
 	}
 	guide := string(raw)
-	for _, heading := range []string{"Keep the recovery files", "Back up"} {
+	for heading, required := range map[string][]string{
+		"Keep the recovery files": {"five installation Secrets", "encrypt", "bundled store data", "recovery", "age identity", "review cannot apply a restore yet"},
+		"Back up": {"five installation Secrets", "CA key", "forge deploy key", "SSH host key", "store TLS", "administrator",
+			"--database-only", "No local backup schedule or restore application ships yet", "archive has neither", "Keep age"},
+	} {
 		_, section, found := strings.Cut(guide, "## "+heading+"\n")
 		section, _, _ = strings.Cut(section, "\n## ")
 		if !found {
 			t.Fatal("missing recovery section", heading)
 		}
-		for _, text := range []string{"five installation Secrets", "in no backup", "CA key", "forge deploy key", "SSH host key", "store TLS", "administrator", "storage-level copy", "data volume"} {
+		section = strings.Join(strings.Fields(section), " ")
+		for _, text := range required {
 			if !strings.Contains(section, text) {
 				t.Error(heading, "omits", text)
 			}
 		}
 	}
-	command := "(umask 077; kubectl --context \"$context\" -n \"$namespace\" get secret \\\n  oberth-ca oberth-forge-key oberth-ssh-host oberth-store-tls oberth-admin -o yaml \\\n  > /private/storage/oberth-secrets.yaml)"
-	if !strings.Contains(guide, command) {
-		t.Fatal("private five-Secret export missing")
+	for _, command := range []string{"oberth backup --out <new-archive-file>", "oberth restore --from <archive> --identity-file <private-age-file> --dry-run"} {
+		if !strings.Contains(guide, command) {
+			t.Fatal("encrypted backup or offline review command missing", command)
+		}
 	}
 }
 

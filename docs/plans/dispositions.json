@@ -9392,7 +9392,7 @@
   "spec_sha256": {
     "docs/plans/c1-transport-and-tool-registry.md": "eba3b199429ff7ddd85963c2c58474fb9a6b707ec21693951baa4c78a1e271be",
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
-    "docs/plans/c11-cli-and-server-composition.md": "1d4da3ff8912fe071f3e35649b390fa0f1834a0e50471aabf5ef316ce539249d",
+    "docs/plans/c11-cli-and-server-composition.md": "6aff73c851998aade33690539834c8147ab8900fd0ca591ef2cdc1b2d30746d0",
     "docs/plans/c12-agent-client.md": "1839b17c036fa9a854df8097a076a712f84c9660b1945f029d5ae9efe728ddac",
     "docs/plans/c13-own-pipelines.md": "2be0f87654a8cc52525eb7d105b4f662a8b4f21fdd899cd19e4459bda150bda0",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
@@ -9403,7 +9403,7 @@
     "docs/plans/c6-source-delivery.md": "a3846f5f32189988bc2135ff72d4db6cce88d68ed675df116e508bb84f29e113",
     "docs/plans/c7-durable-state.md": "62094b0475735bd2427ee573807cdc767a45befdaa86a0472f6587629d537361",
     "docs/plans/c8-logs.md": "e7e04d0a411011160a2f5cb9d885b7dbd6c55503452f5849a5b0557df4f67b63",
-    "docs/plans/c9-install-and-upgrade.md": "f06974905316c70450ecd48006e615e45ceff5e126fe530f39a4327adb76a1d2"
+    "docs/plans/c9-install-and-upgrade.md": "26c89719653d9c0f616fde80765a95c57d8f53f396b40fd35d81137ccac6ec7d"
   },
   "deltas": [
     {
@@ -14307,7 +14307,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "| Commands | **Delta:** C11 exposes `install` with `--dry-run` and `--verify`, `upgrade`, `rollback`, `backup`, `unseal`, `secretstore setup`, `secretstore check` and `secret put`. There is no `oberth restore`, restore flag, installation restore action or restore-completion audit action in the first release: no transport puts a backup into an installation. There is no uninstall command; the install guide gives the native release-removal procedure. `secretstore setup` has no `--print`. The in-step command is `secretstore exec`. Verification is read-only; there is no policy probe or secret-policy sync. |",
+      "basis": "| Commands | **Delta:** C11 exposes `install` with `--dry-run` and `--verify`, `upgrade`, `rollback`, `backup`, `unseal`, `secretstore setup`, `secretstore check` and `secret put`. `oberth restore --dry-run` inspects a complete installation archive offline; no restore apply action or restore-completion audit action is shipped yet. There is no uninstall command; the install guide gives the native release-removal procedure. `secretstore setup` has no `--print`. The in-step command is `secretstore exec`. Verification is read-only; there is no policy probe or secret-policy sync. |",
       "rows": [
         {
           "category": "CLI commands",
@@ -14970,7 +14970,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** Encrypted backups use age with the operator's age backup key. A backup preserves an encrypted database copy for safekeeping. Its archive is authenticated and complete: decryption and C7's inspection recover the snapshot and its matching report; dry runs write nothing. The destination directory is trusted to its writers; there is no protection against a concurrent directory writer. Before publication or failure cleanup, the staging path must still name the written file, as an accident check. Cleanup authority ends at its first successful unlink. Publication is a hard link that never overwrites; a filesystem without hard links refuses with the remedy \"write to a local disk, then copy\". A dry run refuses a missing destination directory. Backups contain the database, not installation keys. The bundled store's contents are in no backup, and install gives the operator no administrator token for it. After a store loss, put the secrets again. Review and `oberth backup` state this gap and show `oberth access list --json` as administrator to list granted secret paths; keep that name list beside the database backup. It contains no secret values. There is no store snapshot command or store-administrator recovery procedure in this version, and no shipped offline inspection command.",
+      "basis": "**Delta:** Complete backups use age with the operator’s backup identity. They contain the canonical database archive and report, all five installation Secrets and, when authorized, a native bundled-store Raft snapshot. The installer verifies the live cluster UID and administrator ownership before reading Secrets or requesting a ten-minute projection for the dedicated `oberth-backup` account. Its store role has snapshot read and self-revocation only, bound to that account in the server namespace. Fresh setup provisions the role. Missing backup account/role access on older stores omits the snapshot while retaining database and Secrets; archive metadata and output say so. Secrets and store data stream into encryption without plaintext staging. The stream has the configured C7 size bound plus framing allowance. Each member has a digest checked by offline restore review. Publication is a hard link which never overwrites; absent directories and unsupported hard links refuse. Verify staging identity before publication/cleanup; cleanup authority ends at first unlink. Dry runs create no archive or cluster work. `--database-only` and pre-upgrade archives explicitly exclude store data and installation Secrets. External stores remain their operator’s responsibility. Restore review checks age authentication through EOF, database integrity and complete inventory, without cluster calls or restored files. Applying a restore and a default local bounded-retention schedule, existing-store backup-role setup and store snapshot validation remain stage 2 work. Keep age and unseal identities separately, outside the archive.",
       "rows": [
         {
           "category": "CLI commands",
@@ -15151,7 +15151,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c9-install-and-upgrade.md:59",
+      "spec": "docs/plans/c9-install-and-upgrade.md:58",
       "markers": [
         "**Delta:**"
       ],
@@ -15194,7 +15194,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c9-install-and-upgrade.md:68",
+      "spec": "docs/plans/c9-install-and-upgrade.md:67",
       "markers": [
         "**Delta:**"
       ],
@@ -15212,7 +15212,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c9-install-and-upgrade.md:78",
+      "spec": "docs/plans/c9-install-and-upgrade.md:77",
       "markers": [
         "**Delta:**"
       ],
@@ -15230,7 +15230,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c9-install-and-upgrade.md:94",
+      "spec": "docs/plans/c9-install-and-upgrade.md:93",
       "markers": [
         "**Delta:**"
       ],
@@ -15248,7 +15248,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c9-install-and-upgrade.md:163",
+      "spec": "docs/plans/c9-install-and-upgrade.md:162",
       "markers": [
         "**Delta:**"
       ],
@@ -15267,7 +15267,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c9-install-and-upgrade.md:175",
+      "spec": "docs/plans/c9-install-and-upgrade.md:174",
       "markers": [
         "**Delta:**"
       ],
@@ -15291,7 +15291,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c9-install-and-upgrade.md:179",
+      "spec": "docs/plans/c9-install-and-upgrade.md:178",
       "markers": [
         "**Delta:**"
       ],
@@ -15300,12 +15300,12 @@
       "rows": []
     },
     {
-      "spec": "docs/plans/c9-install-and-upgrade.md:271",
+      "spec": "docs/plans/c9-install-and-upgrade.md:270",
       "markers": [
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "These inspections are obligations, not claims of completed execution. `TestResumablePrivateEnrollmentContract` must cover the administrator-key restriction in invariant 5 as well as interrupted enrollment. `TestVerifiedReleaseInstallationContract` must cover the complete release-input and key-only trust contract in invariant 10, including offline rollback and recorded repair. Both named tests must check their full requirement sentences. The install walk puts two releases beside one another, repeats an interrupted first install, checks namespace roles from unmarked release history and borrows each supported definition/template form without payload loss. It removes only the new release by the documented procedure and checks the other installation and shared definitions remain. Upgrade walks use genuinely signed releases, exercise foreign and pruned history, and repeat rollback and repair without network access. The install walk also uses a cluster-wide default controller, checks that only the installation's controller acts on each run and scheduled child, recreates missing owned definitions, and refuses a second profile without the target's administrator key before any write. `TestChartDefaults` checks floor/egress on, global cap 4, paired plugin registration and one failed-Pod restart. The policy test sends a plain Pod UPDATE without subResource; the push walk checks finished Pods carry `workflows.argoproj.io/completed=true` and controller logs have no admission refusals. `TestSourceScratchFloor` covers equivalent quantities, invalid input and the floor. `TestStepPodsCanReachServerGitSSH` checks the explicit step-to-server Pod selector and TCP 2222 rule in default and custom release namespaces. **Delta:** Install checks saved access, trust, explicit paths, declared image commands and a real source-consuming run. Upgrade checks preserved settings and the rollback record. `TestBackupIsAgeAndDryRunCreatesNoFiles` decrypts the produced archive, checks its complete snapshot and matching report through C7's Inspector, and proves that a dry run writes no file. This backup production test must also check the excluded-store warning and secret-name-list guidance. It is not a shipped offline inspection surface. Internal replacement-port tests do not prove installation recovery. The walk proves manual unseal after store restart, templated step isolation, restart adoption and `waiters wake`; a plan or template check alone cannot prove those live facts.",
+      "basis": "These inspections are obligations, not claims of completed execution. `TestResumablePrivateEnrollmentContract` must cover the administrator-key restriction in invariant 5 as well as interrupted enrollment. `TestVerifiedReleaseInstallationContract` must cover the complete release-input and key-only trust contract in invariant 10, including offline rollback and recorded repair. Both named tests must check their full requirement sentences. The install walk puts two releases beside one another, repeats an interrupted first install, checks namespace roles from unmarked release history and borrows each supported definition/template form without payload loss. It removes only the new release by the documented procedure and checks the other installation and shared definitions remain. Upgrade walks use genuinely signed releases, exercise foreign and pruned history, and repeat rollback and repair without network access. The install walk also uses a cluster-wide default controller, checks that only the installation's controller acts on each run and scheduled child, recreates missing owned definitions, and refuses a second profile without the target's administrator key before any write. `TestChartDefaults` checks floor/egress on, global cap 4, paired plugin registration and one failed-Pod restart. The policy test sends a plain Pod UPDATE without subResource; the push walk checks finished Pods carry `workflows.argoproj.io/completed=true` and controller logs have no admission refusals. `TestSourceScratchFloor` covers equivalent quantities, invalid input and the floor. `TestStepPodsCanReachServerGitSSH` checks the explicit step-to-server Pod selector and TCP 2222 rule in default and custom release namespaces. **Delta:** Install checks saved access, trust, explicit paths, declared image commands and a real source-consuming run. Upgrade checks preserved settings and the rollback record. `TestBackupIsAgeAndDryRunCreatesNoFiles` decrypts the produced archive, checks its complete snapshot and matching report through C7's Inspector, and proves that a dry run writes no file. This backup production test must also check the database-only exclusion warning and secret-name-list guidance; complete backups must include store data and installation Secrets and pass offline restore review. It is not a shipped offline inspection surface. Internal replacement-port tests do not prove installation recovery. The walk proves manual unseal after store restart, templated step isolation, restart adoption and `waiters wake`; a plan or template check alone cannot prove those live facts.",
       "rows": [
         {
           "category": "CLI commands",
@@ -15317,7 +15317,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c9-install-and-upgrade.md:284",
+      "spec": "docs/plans/c9-install-and-upgrade.md:283",
       "markers": [
         "**Delta:**"
       ],

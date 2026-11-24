@@ -32,7 +32,7 @@ func checkBackupWarning(t *testing.T, code, format string) {
 	app.install = func(_ context.Context, r installationRequest, _ io.Reader, w io.Writer) error {
 		return (installationSession{app: app, request: r}).backupResult(w, archive, problem)
 	}
-	if code := app.run(t.Context(), []string{"backup", "--out", path, "--output", format}); code != 0 {
+	if code := app.run(t.Context(), []string{"backup", "--database-only", "--out", path, "--output", format}); code != 0 {
 		t.Fatal("published backup reported failure", code, diagnostic.String())
 	}
 	var want bytes.Buffer
@@ -68,7 +68,7 @@ func TestBackupFailuresUseTheSharedRefusalAndStayFailed(t *testing.T) {
 			app.install = func(_ context.Context, r installationRequest, _ io.Reader, w io.Writer) error {
 				return (installationSession{app: app, request: r}).backupResult(w, installer.Archive{}, problem)
 			}
-			if code := app.run(t.Context(), []string{"backup", "--out", path}); code != 1 || out.Len() != 0 {
+			if code := app.run(t.Context(), []string{"backup", "--database-only", "--out", path}); code != 1 || out.Len() != 0 {
 				t.Fatal("failed backup reported completion", code, out.String())
 			}
 			var want bytes.Buffer
@@ -89,7 +89,7 @@ func TestBackupJSONOmitsWarningOnCleanResult(t *testing.T) {
 		app.install = func(_ context.Context, r installationRequest, _ io.Reader, w io.Writer) error {
 			return (installationSession{app: app, request: r}).backupResult(w, archive, nil)
 		}
-		if code := app.run(t.Context(), []string{"backup", "--out", archive.Path, "--output", "json"}); code != 0 {
+		if code := app.run(t.Context(), []string{"backup", "--database-only", "--out", archive.Path, "--output", "json"}); code != 0 {
 			t.Fatal("clean JSON backup failed", code, diagnostic.String())
 		}
 		var result map[string]json.RawMessage

@@ -19,7 +19,7 @@ type response struct {
 
 func validName(s string) bool { return runtimeconfig.ValidStoreName(s) }
 func (c Config) Validate() error {
-	if !runtimeconfig.SecretStoreAccess(c).Valid() {
+	if !runtimeconfig.SecretStoreAccess(c).Valid() || c.WriterRole == BackupRole || c.StepRole == BackupRole || c.ServerAccount == BackupRole {
 		return refuse("input", nil)
 	}
 	return nil

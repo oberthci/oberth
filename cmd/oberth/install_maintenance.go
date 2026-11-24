@@ -90,7 +90,7 @@ func (s installationSession) changeInstallation(ctx context.Context, in io.Reade
 	maintenance.LiveState = func(ctx context.Context) (stateport.Options, error) {
 		options, err := liveInstallationState(ctx, source.remote)
 		if err != nil {
-			return options, installationProblem("Cannot read the installation's live schema.", "Run oberth rollback --yes for a recorded same-schema rollback; otherwise restore service, then retry.")
+			return options, installationProblem("Cannot read the live database schema.", "Run oberth rollback --yes for a recorded same-schema rollback; otherwise recover service, then retry.")
 		}
 		return options, nil
 	}

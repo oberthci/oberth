@@ -7,7 +7,7 @@ import (
 	"github.com/oberthci/oberth/internal/secretstore"
 )
 
-const StoreSnapshotHint = "Store values are not in backups; keep them to put again."
+const StoreSnapshotHint = "Database-only backups exclude store data; keep secure originals to put again."
 
 // SecretPutRequest contains public grant selectors; values are read from a stream.
 type SecretPutRequest struct{ Repo, File, Step, Path string }

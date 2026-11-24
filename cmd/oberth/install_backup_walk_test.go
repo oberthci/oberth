@@ -33,7 +33,7 @@ func TestComposedInstallationBackupEncryptsVerifiedLiveDatabase(t *testing.T) {
 	f.verifyInstallerEndpoint(t, app)
 	archivePath := filepath.Join(t.TempDir(), "installation.age")
 	configPath := writeBackupConfiguration(t, f)
-	args := []string{"backup", "--config", configPath, "--out", archivePath, "--output", "json"}
+	args := []string{"backup", "--database-only", "--config", configPath, "--out", archivePath, "--output", "json"}
 	if code := app.run(t.Context(), args); code != 0 {
 		t.Fatalf("backup failed: %d %s", code, app.diagnostic)
 	}
@@ -60,7 +60,7 @@ func TestComposedInstallationBackupEncryptsVerifiedLiveDatabase(t *testing.T) {
 	f.checkBackupTextHint(t, app, configPath)
 	app.config.Transport = f.client(f.config.Listen.HTTPS, f.unknownCertificate(t)).Transport
 	refused := filepath.Join(filepath.Dir(archivePath), "refused.age")
-	if code := app.run(t.Context(), []string{"backup", "--config", configPath, "--out", refused}); code == 0 {
+	if code := app.run(t.Context(), []string{"backup", "--database-only", "--config", configPath, "--out", refused}); code == 0 {
 		t.Fatal("unknown identity received a database backup")
 	}
 	if _, err = os.Stat(refused); !os.IsNotExist(err) {
@@ -140,7 +140,7 @@ func (f *composedFixture) checkBackupTextHint(t *testing.T, app application, con
 	var output, diagnostic bytes.Buffer
 	app.out, app.diagnostic = &output, &diagnostic
 	path := filepath.Join(t.TempDir(), "text-backup.age")
-	if code := app.run(t.Context(), []string{"backup", "--config", configPath, "--out", path}); code != 0 {
+	if code := app.run(t.Context(), []string{"backup", "--database-only", "--config", configPath, "--out", path}); code != 0 {
 		t.Fatal("text backup failed", code, diagnostic.String())
 	}
 	text := strings.Join(strings.Fields(output.String()), " ")

@@ -18,7 +18,8 @@ func installationCommands() []installationCommand {
 		{"install", "Review or install Oberth in the chosen context.", 0, 0},
 		{"upgrade", "Upgrade Oberth using a signed release.", 0, 0},
 		{"rollback", "Roll back the installation to its prior release.", 0, 0},
-		{"backup", "Encrypted database copy for safekeeping; archive restore is not in this release.", 0, 0},
+		{"backup", "Back up database, store data and installation Secrets.", 0, 0},
+		{"restore", "Review an encrypted installation backup without applying it.", 0, 0},
 		{"unseal", "Unseal the installation's secret store.", 0, 0},
 		{"secret put", "Store a secret value from standard input.", 1, 1},
 		{"secretstore exec", "Run a step command with its admitted secrets.", 1, math.MaxInt},
@@ -56,6 +57,11 @@ func installationFlags(name string) *flag.FlagSet {
 	case "backup":
 		f.String("out", "", "New backup destination.")
 		f.Bool("dry-run", false, "Print the planned destination without creating a backup.")
+		f.Bool("database-only", false, "Explicitly exclude store data and installation Secrets.")
+	case "restore":
+		f.String("from", "", "Encrypted installation backup to inspect.")
+		f.String("identity-file", "", "Private age identity file; defaults to the selected profile.")
+		f.Bool("dry-run", false, "Review contents and integrity; restore application is not available yet.")
 	}
 	addInstallerInputs(f, name)
 	switch name {
@@ -111,11 +117,11 @@ func addInstallerInputs(f *flag.FlagSet, name string) {
 		}
 	}
 	switch name {
-	case "install", "upgrade", "rollback", "unseal", "backup":
+	case "install", "upgrade", "rollback", "unseal", "backup", "restore":
 		f.String("profile", "", "Installation profile; defaults to the selected profile.")
 	}
 	switch name {
-	case "backup":
+	case "backup", "restore":
 		f.String("config", "", "Installation configuration for its explicit database protocol.")
 	}
 	switch name {
@@ -124,7 +130,7 @@ func addInstallerInputs(f *flag.FlagSet, name string) {
 		f.String("ca-file", "", "Secret-store TLS CA certificate.")
 		f.String("token-file", "", "Private store token, or the step's projected login token.")
 	}
-	if name == "backup" {
+	if name == "backup" || name == "restore" {
 		f.String("output", "text", "Result format: text or json.")
 	}
 }

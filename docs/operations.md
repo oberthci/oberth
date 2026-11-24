@@ -89,11 +89,10 @@ nothing. Audit records a request, not stored success. Inspect and approve resour
 repeatable `oberth upgrade --source-pin <consumer>=<producer>`; upgrades keep saved pairs,
 `--no-source-pins` drops them first, and `--detail` lists them. Install configures the bundled
 store's static rules and installation audience; grants need no synchronization or chart upgrade. Its
-contents are not in any backup; no store snapshot procedure or operator token ships. Put secrets
-again from secure originals after loss. Keep approved paths, workflows and steps beside backups, not
-values or proof of stored values: `oberth access list --repo <repo> --kind store_path --json`. The
-profile's `recovery` file unseals surviving data after restart; it cannot restore lost values. See
-[backup and secret recovery](install.md#back-up).
+complete backup encrypts store data and installation Secrets; database-only archives exclude both.
+Keep secure originals to put again after loss: `recovery` can unseal data but cannot restore it.
+`oberth access list --repo <repo> --kind store_path --json` lists approved paths and steps.
+See [backup and secret recovery](install.md#back-up) for offline review and remaining limitations.
 
 For external stores, run these advanced checks in an operator Pod with store network access:
 

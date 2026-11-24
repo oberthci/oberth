@@ -20,7 +20,17 @@ func (s installationSession) backup(ctx context.Context, out io.Writer) error {
 		return err
 	}
 	defer source.remote.Close()
-	archive, err := installer.Backup(ctx, installer.BackupConfig{Source: source, Options: s.maintenance(source).Options, Recipient: s.profile.BackupRecipient, Path: s.request.text("out"), DryRun: s.request.enabled("dry-run")})
+	config := installer.BackupConfig{Source: source, Options: s.options, Recipient: s.profile.BackupRecipient, Path: s.request.text("out"), DryRun: s.request.enabled("dry-run")}
+	var archive installer.Archive
+	if config.DryRun || s.request.enabled("database-only") {
+		archive, err = installer.Backup(ctx, config)
+	} else {
+		if err = s.openEngine(); err != nil {
+			return err
+		}
+		defer s.engine.Credentials.Close()
+		archive, err = s.engine.BackupInstallation(ctx, config)
+	}
 	return s.backupResult(out, archive, err)
 }
 

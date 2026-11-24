@@ -71,9 +71,8 @@ check compatibility again.
 
 The profile is `~/.config/oberth/<profile>/`; `installation.json` records paths. Copy it, archives,
 `backup.agekey` and `recovery` to private off-machine storage.
-**The five installation Secrets (CA key, forge deploy key, SSH host key, store TLS, administrator)
-are in no backup**; save them with the [Back up command](#back-up). Only a storage-level copy of
-the data volume can recover the database today. `recovery` unseals a store; it cannot restore one.
+Complete backups encrypt the five installation Secrets and bundled store data. Keep `recovery`
+and the age identity separately: review cannot apply a restore yet.
 Install reuses the administrator key; if missing, it refuses. Select with `OBERTH_PROFILE` or
 `~/.config/oberth/current`; agent joining preserves that selection.
 
@@ -134,25 +133,22 @@ Repeating resumes rollback; without the record, inspect the deployed revision. O
 
 ## Back up
 
-`oberth backup --out <new-archive-file>` saves an age-encrypted database; no restore command ships.
-**Only a storage-level copy of the data volume can recover the database today.**
-Backup never overwrites a file; use local storage with hard-link support, then copy off-machine.
-`--dry-run` previews the destination. Database input defaults to 1 GiB, maximum 4 GiB;
-archive framing has its own bound, separate from encrypted-file size.
+`oberth backup --out <new-archive-file>` encrypts the database and five installation Secrets.
+A bundled store snapshot is included when the dedicated backup role is available. Fresh setup
+creates it; older stores still back up everything else and print that the snapshot is not included.
+Enabling backup access on existing stores arrives in stage 2; no root-token remedy is required.
+The Secrets hold the CA key, forge deploy key, SSH host key, store TLS and administrator.
+`--database-only` and pre-upgrade archives exclude them and store data; the default bound is 1 GiB.
+Backup never overwrites. Use local storage with hard links, copy off-machine; `--dry-run` previews.
+No local backup schedule or restore application ships yet; snapshot validation is stage 2.
+`oberth restore --from <archive> --identity-file <private-age-file> --dry-run` reviews offline.
+It checks encryption, database integrity, member digests and inventory; JSON contains public facts.
+Keep age and unseal material separately: the archive has neither. Omit the flag to use the profile.
 For automation, `--output json` publication warnings exit 0: the optional `warning` has `code`,
-`reason`, `remedy`, optional `id` (subtype), `context` (recovery facts), `detail` (diagnostics).
-Warnings also use standard error; clean and dry-run results omit `warning`. Keep a published
-archive and fix its storage problem. **The five installation Secrets are in no backup:** CA key,
-forge deploy key, SSH host key, store TLS and administrator; save all five to private storage:
-```sh
-(umask 077; kubectl --context "$context" -n "$namespace" get secret \
-  oberth-ca oberth-forge-key oberth-ssh-host oberth-store-tls oberth-admin -o yaml \
-  > /private/storage/oberth-secrets.yaml)
-```
-**The bundled store's contents are not in any backup**; no store snapshot procedure or operator
-token ships; use `oberth secret put` to put secrets again from secure originals after loss.
-Keep `oberth access list --repo <repo> --kind store_path --json` output with the backup: it lists
-approved paths, workflows and steps; no values or proof of stored values. Keep `recovery` private.
+`reason`, `remedy`, optional `id`, `context`, `detail`. Warnings also use standard error;
+clean and dry-run results omit `warning`. Keep a published archive and fix its storage problem.
+Keep secure originals to put again: a database-only backup cannot restore store values.
+`oberth access list --repo <repo> --kind store_path --json` lists paths and steps, not values.
 
 ## Unseal after restart
 

@@ -12,8 +12,8 @@ import (
 	"github.com/oberthci/oberth/internal/stateport"
 )
 
-func TestStoreBackupGuidanceDoesNotPromiseSnapshots(t *testing.T) {
-	const hint = "Store values are not in backups; keep them to put again."
+func TestDatabaseOnlyBackupGuidanceNamesCoverageAndRestoreLimit(t *testing.T) {
+	const hint = "Database-only backups exclude store data; keep secure originals to put again."
 	if installer.StoreSnapshotHint != hint || len(hint) > 80 {
 		t.Fatal(installer.StoreSnapshotHint)
 	}
@@ -23,14 +23,9 @@ func TestStoreBackupGuidanceDoesNotPromiseSnapshots(t *testing.T) {
 			t.Fatal(err)
 		}
 		text := strings.Join(strings.Fields(string(raw)), " ")
-		for _, required := range []string{"contents are not in any backup", "no store snapshot", "put", "again", "recovery", "unseal", "cannot restore", "oberth access list --repo <repo> --kind store_path --json"} {
+		for _, required := range []string{"store data", "installation Secrets", "restore", "put", "again", "recovery", "unseal", "cannot restore", "oberth access list --repo <repo> --kind store_path --json"} {
 			if !strings.Contains(text, required) {
 				t.Fatal(path, "missing recovery fact", required)
-			}
-		}
-		for _, obsolete := range []string{"bao operator raft snapshot", "store administrator's", "sys/storage/raft/snapshot", "Back up the database and store"} {
-			if strings.Contains(text, obsolete) {
-				t.Fatal(path, "unavailable procedure survived", obsolete)
 			}
 		}
 	}

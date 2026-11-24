@@ -37,26 +37,25 @@ func TestTopHelpIncludesEveryCatalogueSummary(t *testing.T) {
 	}
 }
 
-func TestRestoreHasNoCommandOrInstallerPath(t *testing.T) {
-	app, _, diagnostic := fixture(t, fake.Bindings())
-	app.install = func(context.Context, installationRequest, io.Reader, io.Writer) error {
-		t.Fatal("restore reached installation owner")
-		return nil
-	}
-	for _, args := range [][]string{{"restore", "archive", "--yes"}, {"restore", "archive", "--dry-run"}, {"help", "restore"}} {
-		diagnostic.Reset()
-		if code := app.run(t.Context(), args); code != 2 || !strings.Contains(diagnostic.String(), "Unknown command") {
-			t.Fatal("restore is a command", code, diagnostic.String())
+func TestRestoreHasOnlyOfflineReview(t *testing.T) {
+	app, out, diagnostic := fixture(t, fake.Bindings())
+	for _, args := range [][]string{{"restore", "--from", "archive", "--yes"}, {"restore", "archive", "--dry-run"}} {
+		if code := app.run(t.Context(), args); code != 2 {
+			t.Fatal("invalid restore syntax accepted", code)
 		}
 	}
-	if _, found := commandCatalogue()["restore"]; found {
-		t.Fatal("restore catalogued")
+	diagnostic.Reset()
+	if code := app.run(t.Context(), []string{"restore", "--from", "archive"}); code != 1 || !strings.Contains(diagnostic.String(), "Restore application is not available.") {
+		t.Fatal("restore entered an effect path", code, diagnostic.String())
+	}
+	if code := app.run(t.Context(), []string{"help", "restore"}); code != 0 || !strings.Contains(out.String(), "--dry-run") {
+		t.Fatal("restore review has no help", code)
 	}
 	session := installationSession{request: installationRequest{name: "restore", flags: installationFlags("restore")}}
 	err := session.dispatch(t.Context(), nil, nil)
 	var usage usageProblems
 	if !errors.As(err, &usage) {
-		t.Fatal("unknown installer action entered an effect path", err)
+		t.Fatal("offline review entered installation effect dispatch", err)
 	}
 }
 
@@ -152,7 +151,7 @@ func TestInstallFlagsUseReviewNamesWithoutAliases(t *testing.T) {
 	if err := writeWrapped(&output, commandCatalogue()["backup"].Summary); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "safekeeping") || !strings.Contains(output.String(), "not in this release") {
+	if !strings.Contains(output.String(), "store data") || !strings.Contains(output.String(), "installation Secrets") {
 		t.Fatal("backup purpose missing")
 	}
 }

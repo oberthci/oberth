@@ -21,7 +21,7 @@ C9 uses injected ports and the narrow client, never concrete service or store co
 | Inputs | **Delta:** Flags or plain prompts fill `Choices`; the newest applied installer revision fills unset fields. Credentials are private file references. Validate all independently knowable problems together. |
 | Review | Show context, cluster identity, namespaces, addresses, images, source registration, controller settings, store, credential paths and every write. Show the policy choices defined in invariant 7. |
 | Plan and apply | Resolve inputs, installed revision, target release, user values and identities once. Preview and apply use that same operation; recheck mutable target and ownership facts before writes. Changed facts require a new review. A plan proves only its named reads, never an unperformed enforcement check. Unknown checks stay unknown. There is no saved-plan service. |
-| Commands | **Delta:** C11 exposes `install` with `--dry-run` and `--verify`, `upgrade`, `rollback`, `backup`, `unseal`, `secretstore setup`, `secretstore check` and `secret put`. There is no `oberth restore`, restore flag, installation restore action or restore-completion audit action in the first release: no transport puts a backup into an installation. There is no uninstall command; the install guide gives the native release-removal procedure. `secretstore setup` has no `--print`. The in-step command is `secretstore exec`. Verification is read-only; there is no policy probe or secret-policy sync. |
+| Commands | **Delta:** C11 exposes `install` with `--dry-run` and `--verify`, `upgrade`, `rollback`, `backup`, `unseal`, `secretstore setup`, `secretstore check` and `secret put`. `oberth restore --dry-run` inspects a complete installation archive offline; no restore apply action or restore-completion audit action is shipped yet. There is no uninstall command; the install guide gives the native release-removal procedure. `secretstore setup` has no `--print`. The in-step command is `secretstore exec`. Verification is read-only; there is no policy probe or secret-policy sync. |
 | Completion | Exit 0 means the requested operation and checks completed or an explicit no-op succeeded. Install has no forge step; exit 3 belongs to `repo add`. Phase events drive plain progress lines and timings, including finish and total. Preserve `upgrade.completed` after verified completion. |
 | Saved access | Save a private profile with the server URL, CA, client certificate, SSH endpoint, SSH trust and public installation metadata. Record the administrator's push key as `AdminKey`; every consumer uses that field, and printed commands use its saved path. Print the exact paths, deploy public key, selected identity and one next action. Public metadata contains no credential bytes or readiness verdict. Imported public metadata cannot supply credential paths. |
 | Chart | One server replica/PVC, separate pipeline namespace, services, Secrets, scoped permissions, source registration and native controller integration. Defaults and explicit false/zero/empty choices survive rerun and upgrade. Remove unread values. |
@@ -36,23 +36,22 @@ and checks use C9's verified client; store admin credentials never reach the dae
 
 ## Backup
 
-**Delta:** Encrypted backups use age with the operator's age backup key. A backup
-preserves an encrypted database copy for safekeeping. Its archive is authenticated
-and complete: decryption and C7's inspection recover the snapshot and its matching
-report; dry runs write nothing. The destination directory is trusted to its writers;
-there is no protection against a concurrent directory writer. Before publication or
-failure cleanup, the staging path must still name the written file, as an accident
-check. Cleanup authority ends at its first successful unlink. Publication is a hard
-link that never overwrites; a filesystem without hard links refuses with the remedy
-"write to a local disk, then copy". A dry run refuses a missing destination directory.
-Backups contain the database, not installation keys.
-The bundled store's contents are in no backup, and
-install gives the operator no administrator token for it. After a store loss,
-put the secrets again. Review and `oberth backup` state this gap and show
-`oberth access list --json` as administrator to list granted secret paths;
-keep that name list beside the database backup. It contains no secret values.
-There is no store snapshot command or store-administrator recovery procedure
-in this version, and no shipped offline inspection command.
+**Delta:** Complete backups use age with the operator’s backup identity. They contain the
+canonical database archive and report, all five installation Secrets and, when authorized, a native bundled-store
+Raft snapshot. The installer verifies the live cluster UID and administrator ownership before
+reading Secrets or requesting a ten-minute projection for the dedicated `oberth-backup` account.
+Its store role has snapshot read and self-revocation only, bound to that account in the server
+namespace. Fresh setup provisions the role. Missing backup account/role access on older stores
+omits the snapshot while retaining database and Secrets; archive metadata and output say so.
+Secrets and store data stream into encryption without plaintext staging. The stream has the configured
+C7 size bound plus framing allowance. Each member has a digest checked by offline restore review.
+Publication is a hard link which never overwrites; absent directories and unsupported hard links
+refuse. Verify staging identity before publication/cleanup; cleanup authority ends at first unlink.
+Dry runs create no archive or cluster work. `--database-only` and pre-upgrade archives explicitly
+exclude store data and installation Secrets. External stores remain their operator’s responsibility.
+Restore review checks age authentication through EOF, database integrity and complete inventory,
+without cluster calls or restored files. Applying a restore and a default local bounded-retention
+schedule, existing-store backup-role setup and store snapshot validation remain stage 2 work. Keep age and unseal identities separately, outside the archive.
 
 ## Installation answers and shared resources
 
@@ -273,7 +272,7 @@ real source-consuming run. Upgrade checks preserved settings and the rollback
 record. `TestBackupIsAgeAndDryRunCreatesNoFiles` decrypts the produced archive,
 checks its complete snapshot and matching report through C7's Inspector, and
 proves that a dry run writes no file. This backup production test must also
-check the excluded-store warning and secret-name-list guidance. It is
+check the database-only exclusion warning and secret-name-list guidance; complete backups must include store data and installation Secrets and pass offline restore review. It is
 not a shipped offline inspection surface. Internal replacement-port tests
 do not prove installation recovery. The walk proves manual unseal after store
 restart, templated step isolation, restart adoption and `waiters wake`; a plan or

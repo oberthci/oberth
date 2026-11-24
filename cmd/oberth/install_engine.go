@@ -34,6 +34,9 @@ type installationSession struct {
 }
 
 func (a application) runInstaller(ctx context.Context, r installationRequest, in io.Reader, out io.Writer) error {
+	if r.name == "restore" {
+		return a.reviewRestore(ctx, r, out)
+	}
 	if r.name == "secretstore setup" || r.name == "secretstore check" {
 		return runStoreOperator(ctx, r, out)
 	}
