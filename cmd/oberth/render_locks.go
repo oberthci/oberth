@@ -25,7 +25,7 @@ func renderLock(out io.Writer, lock map[string]any, detail bool) error {
 	rows := [][]string{{"HOLDER", "PERMITS", "STEPS"}}
 	for _, item := range listValue(lock["holders"]) {
 		holder := item.(map[string]any)
-		rows = append(rows, []string{publicText(holder["run_id"]), publicText(holder["permits"]), publicText(holder["steps"])})
+		rows = append(rows, []string{publicText(holder["run_id"]), fmt.Sprint(holder["permits"]), publicText(holder["steps"])})
 	}
 	if len(rows) > 1 {
 		if err := renderTable(out, rows); err != nil {
