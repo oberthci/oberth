@@ -74,9 +74,24 @@ func (s *Service) systemStatus(ctx context.Context, c apicontract.Caller, action
 			if err != nil {
 				return apicontract.SystemStatus{}, err
 			}
+		} else {
+			status.Settings = publicStatusSettings(status.Settings)
 		}
 		return status, nil
 	}})
+}
+
+func publicStatusSettings(settings *[]apicontract.EffectiveSetting) *[]apicontract.EffectiveSetting {
+	if settings == nil {
+		return nil
+	}
+	rows := make([]apicontract.EffectiveSetting, 0, len(*settings))
+	for _, row := range *settings {
+		if row.Name != "registered upstreams" && row.Name != "registered repositories" {
+			rows = append(rows, row)
+		}
+	}
+	return &rows
 }
 func (s *Service) PrepareAdminReadiness(ctx context.Context, c apicontract.Caller, _ apicontract.AdminReadinessArgs) (apicontract.Call[apicontract.SystemStatus], error) {
 	return s.systemStatus(ctx, c, "admin_readiness")
