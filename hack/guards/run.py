@@ -14,6 +14,7 @@ from tools import go_tool as GO
 MESSAGES = json.loads(Path(__file__).with_name("messages.json").read_text())
 RULE = re.compile(r"^.+:\d+: \[([A-Z][A-Z0-9-]*)\](?: |$)")
 KEYWORDS = re.compile(r"keywords: \[([A-Z, ]+)\]")
+MIGRATION_TEST = "TestMigrationReleaseCoverage"
 SKIPS = r'\.Skip(f|Now)?[[:space:]]*\([[:space:]]*(\)|"[[:space:]]*")'
 
 class NamesError(ValueError): pass
@@ -129,11 +130,11 @@ def name_rows(ref):
         rows.extend(name_hits(pattern, masked_path(pattern, tag), tag))
     return rows
 
-def tool_output(rule, result):
+def tool_output(rule, result, test=""):
     lines = [line for line in result.stdout.splitlines() if not re.fullmatch(r"exit status \d+", line)]
-    if result.returncode and (rule == "HISTORY" or not any(RULE.search(line) for line in lines)):
+    if (result.returncode or test and not re.search(rf"^--- PASS: {re.escape(test)}(?: |$)", result.stdout, re.M)) and (rule == "HISTORY" or test or not any(RULE.search(line) for line in lines)):
         return [finding(rule, detail="\n".join(lines))]
-    return lines
+    return [] if test else lines
 
 def walk_steps(tracked):
     file = "test/walk/walklib.py"
@@ -219,14 +220,13 @@ def deadcode(module, report):
                 for pkg in sorted(set(report["Packages"] or []) - set(deps.stdout.splitlines())))
     return list(dict.fromkeys(rows + unreachable(module, "false", report["Roots"])))
 
-def pins(ref="HEAD"):
-    return tool_output("PIN-POLICY", command(["python3", "-I", "hack/plans/policy.py", ref]))
+def pins(ref="HEAD"): return tool_output("PIN-POLICY", command(["python3", "-I", "hack/plans/policy.py", ref]))
 
 def checks():
     policy = command(["python3", "-I", "hack/plans/parity.py", "--check"])
     if policy.returncode: return tool_output("POLICY", policy)
     module, report = analysis()
-    rows = pins() + vocabulary() + names() + tool_output("SCHEMA", command(GO.args(ROOT, *"test -p=2 -buildvcs=false -count=1 -timeout=120s ./internal/store -run ^TestMigrationReleaseCoverage$".split())))
+    rows = pins() + vocabulary() + names() + tool_output("SCHEMA", command(GO.args(ROOT, *"test -v -p=2 -buildvcs=false -count=1 -timeout=120s ./internal/store -run".split(), "^"+MIGRATION_TEST+"$")), MIGRATION_TEST)
     markers = "|".join(s.strip() for s in KEYWORDS.search(Path(".golangci.yml").read_text())[1].split(","))
     rows.extend(hits(["-nIwE", markers, "--", *text_paths("leftovers"), ":!*.go", ":!.golangci.yml"], "LEFTOVER"))
     rows.extend(hits(["-nIE", SKIPS, "--", "*_test.go", *text_paths("leftovers")[1:]], "SKIP"))

@@ -27,6 +27,7 @@ func TestMigrationReleaseCoverage(t *testing.T) {
 	// The schema-6 image also proves the framework while there are no live steps.
 	for number := 6; number == 6 || number < target.number; number++ {
 		path, fixture := migrationFixturePath(t, number)
+		requireOK(t, fixture.verifySource(t.Context()))
 		s, err := Open(t.Context(), path, testOptions())
 		requireOK(t, err)
 		assertMigrationRecords(t, s, fixture)

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -58,7 +59,7 @@ func readMigrationFixture(directory string, number int) ([]byte, migrationFixtur
 }
 
 func (f migrationFixture) validate(number int, body []byte) error {
-	if f.Schema != number || len(f.SourceCommit) != 40 || f.SHA256 != fmt.Sprintf("%x", sha256.Sum256(body)) {
+	if f.Schema != number || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(f.SourceCommit) || f.SHA256 != fmt.Sprintf("%x", sha256.Sum256(body)) {
 		return fmt.Errorf("schema %d fixture provenance differs", number)
 	}
 	if len(f.Issues) < 2 || f.Run.ID == "" || f.Repository.ID == 0 || len(f.Grants.Grants) == 0 || len(f.Audit) == 0 {

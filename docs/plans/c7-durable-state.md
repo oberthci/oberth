@@ -103,8 +103,8 @@ and query indexes and no configured release-role records. Current-schema opens a
 schema number preserves its baseline digest; changing the layout requires a new
 number. Open applies numbered forward steps in one transaction, preserving immutable IDs,
 receipts, grants and audit; a gap or newer schema refuses. Each step has a previous-code
-fixture proving complete record reads and unknown-ID refusal; the release guard requires
-both. Current-schema opens only verify; creation and maintenance stay distinct. A missing admin database is never created.
+fixture proving complete record reads and unknown-ID refusal; the release guard requires both.
+Its named coverage test must run and pass. Current-schema opens only verify; creation and maintenance stay distinct. A missing admin database is never created.
 
 Database snapshots pin a committed read-only view, include committed WAL state, verify
 schema, integrity, foreign keys and audit before emission, and stream a bounded

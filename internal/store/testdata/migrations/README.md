@@ -13,6 +13,8 @@ that source's baseline. Add schemaN.sqlite.gz, schemaN.json and its builder
 from the code that writes schema N. TestMigrationReleaseCoverage opens every
 source fixture through the current Open and compares complete issue, run,
 repository, grant and audit records. make guards runs this test explicitly.
+Release validation also needs that source commit in the checkout: it verifies
+that the recorded revision declares the fixture's schema number.
 
 Schema 6 has no production step. Tests inject two real layout changes into
 the private open seam to prove forward migration and whole-chain rollback.

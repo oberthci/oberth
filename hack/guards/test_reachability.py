@@ -194,10 +194,13 @@ class ReachabilityGuards(RepositoryFixture):
         failure = "broken.go:1: [GO] fixture analysis failed"
         report = {"Lines": [failure], "Product": "", "Roots": [], "Packages": []}
         self.write(".golangci.yml", "keywords: [NOTE]\n")
+        def success(args, *unused):
+            output = "--- PASS: TestMigrationReleaseCoverage (0.00s)\n" if "^TestMigrationReleaseCoverage$" in args else ""
+            return subprocess.CompletedProcess([], 0, stdout=output)
         with patch.multiple(GUARDS, analysis=lambda: ("module", report), pins=lambda: [],
                             vocabulary=lambda: [], names=lambda: [], hits=lambda *args: [],
                             text_paths=lambda *args: ["."],
-                            command=lambda *args: subprocess.CompletedProcess([], 0, stdout="")):
+                            command=success):
             self.assertEqual([failure], GUARDS.checks())
 
     def test_both_analyzer_failure_branches_are_findings(self):
