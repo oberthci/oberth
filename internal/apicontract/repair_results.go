@@ -18,8 +18,7 @@ type LockState struct {
 	Lock    string       `json:"lock"`
 	Holders []LockHolder `json:"holders"`
 	Held    int          `json:"held"`
-	Limit   int          `json:"limit"`
-	Usage   string       `json:"usage"`
+	Limit   *int         `json:"limit"`
 	Waiters []string     `json:"waiters"`
 	Stale   []string     `json:"stale,omitempty"`
 	Remedy  string       `json:"remedy,omitempty"`

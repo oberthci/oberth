@@ -53,7 +53,8 @@ func TestComposedCancelledRunLeavesNoLockHolder(t *testing.T) {
 	if _, err := f.kube.CoreV1().ConfigMaps(held.Namespace).Create(t.Context(), &core.ConfigMap{ObjectMeta: meta.ObjectMeta{Name: "oberth-sync-limits"}, Data: map[string]string{"heavy-stop": "2"}}, meta.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	want := apicontract.LockState{Lock: lock, Held: 2, Limit: 2, Usage: "2/2", Holders: []apicontract.LockHolder{{RunID: run.ID, Permits: 2, Steps: "compile, test"}}, Waiters: []string{}}
+	limit := 2
+	want := apicontract.LockState{Lock: lock, Held: 2, Limit: &limit, Holders: []apicontract.LockHolder{{RunID: run.ID, Permits: 2, Steps: "compile, test"}}, Waiters: []string{}}
 	if got := f.lockStatus(t, lock); !reflect.DeepEqual(got, want) {
 		t.Fatal("holding run is not the holder", got)
 	}
@@ -73,7 +74,7 @@ func (f *composedFixture) checkCancelledLockStatus(t *testing.T, run stateport.R
 	lock := waiting.Status.Synchronization.Semaphore.Waiting[0].Semaphore
 	// The later run holds both released units with e and f while g waits.
 	got := f.lockStatus(t, lock)
-	if !slices.Equal(lockHolderRuns(got.Holders), []string{"waiting-heavy-stop"}) || !slices.Equal(got.Waiters, []string{"waiting-heavy-stop"}) || len(got.Stale) != 0 || got.Usage != "2/2" {
+	if !slices.Equal(lockHolderRuns(got.Holders), []string{"waiting-heavy-stop"}) || !slices.Equal(got.Waiters, []string{"waiting-heavy-stop"}) || len(got.Stale) != 0 || got.Held != 2 || got.Limit == nil || *got.Limit != 2 {
 		t.Fatal("cancelled run is still listed as holding a unit", got)
 	}
 	if got.Remedy != "" || got.Command != "" {

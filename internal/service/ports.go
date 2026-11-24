@@ -79,7 +79,8 @@ type Git interface {
 type Lock struct {
 	Repo, RunID, Name, Clear string
 	Steps                    string
-	Permits, Held, Limit     int
+	Permits, Held            int
+	Limit                    int // Negative when the native ConfigMap could not be inspected.
 	Waiting                  bool
 }
 

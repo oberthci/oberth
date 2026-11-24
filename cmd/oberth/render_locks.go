@@ -19,7 +19,11 @@ func renderLocks(out io.Writer, value map[string]any, detail bool) error {
 }
 
 func renderLock(out io.Writer, lock map[string]any, detail bool) error {
-	if _, err := fmt.Fprintf(out, "%s  %s held\n", publicText(lock["lock"]), publicText(lock["usage"])); err != nil {
+	limit := "?"
+	if lock["limit"] != nil {
+		limit = fmt.Sprint(lock["limit"])
+	}
+	if _, err := fmt.Fprintf(out, "%s  %v/%s held\n", publicText(lock["lock"]), lock["held"], limit); err != nil {
 		return err
 	}
 	rows := [][]string{{"HOLDER", "PERMITS", "STEPS"}}

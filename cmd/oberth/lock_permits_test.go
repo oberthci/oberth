@@ -17,10 +17,12 @@ import (
 func TestLockLimitsAndCLIShowHeldPermits(t *testing.T) {
 	o := serverOwners{cluster: clusterClients{Kube: fake.NewClientset(&core.ConfigMap{ObjectMeta: meta.ObjectMeta{Namespace: "runs", Name: "limits"}, Data: map[string]string{"heavy": "2"}})}}
 	rows := []service.Lock{{Name: "runs/ConfigMap/limits/heavy"}, {Name: "runs/Mutex/repo"}}
-	if err := o.lockLimits(t.Context(), rows); err != nil || rows[0].Limit != 2 || rows[1].Limit != 1 {
-		t.Fatal(rows, err)
+	o.lockLimits(t.Context(), rows)
+	if rows[0].Limit != 2 || rows[1].Limit != 1 {
+		t.Fatal(rows)
 	}
-	value := apicontract.SyncStatus{Locks: []apicontract.LockState{{Lock: rows[0].Name, Held: 9, Limit: 12, Usage: "9/12", Holders: []apicontract.LockHolder{{RunID: "build", Permits: 7, Steps: "compile, test"}, {RunID: "lint", Permits: 2, Steps: "lint"}}}}}
+	limit := 12
+	value := apicontract.SyncStatus{Locks: []apicontract.LockState{{Lock: rows[0].Name, Held: 9, Limit: &limit, Holders: []apicontract.LockHolder{{RunID: "build", Permits: 7, Steps: "compile, test"}, {RunID: "lint", Permits: 2, Steps: "lint"}}}}}
 	raw, _ := json.Marshal(value)
 	var out bytes.Buffer
 	if err := (application{out: &out}).render(raw, false, commonOptions{}); err != nil {
@@ -46,7 +48,8 @@ func TestLockLimitsAndCLIShowHeldPermits(t *testing.T) {
 func TestLockLimitsPermitZeroCapacity(t *testing.T) {
 	o := serverOwners{cluster: clusterClients{Kube: fake.NewClientset(&core.ConfigMap{ObjectMeta: meta.ObjectMeta{Namespace: "runs", Name: "limits"}, Data: map[string]string{"paused": "0"}})}}
 	rows := []service.Lock{{Name: "runs/ConfigMap/limits/paused"}}
-	if err := o.lockLimits(t.Context(), rows); err != nil || rows[0].Limit != 0 {
-		t.Fatal("zero capacity lock cannot be inspected", rows, err)
+	o.lockLimits(t.Context(), rows)
+	if rows[0].Limit != 0 {
+		t.Fatal("zero capacity lock cannot be inspected", rows)
 	}
 }
