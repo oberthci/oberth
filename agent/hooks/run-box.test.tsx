@@ -856,6 +856,58 @@ test('a live run changes in the box within one second through a bounded change w
   expect(waits).toEqual([['/verified/oberth', 'run', 'wait', current.id, '--until', 'any', '--timeout-s', '1', '--json']])
 })
 
+for (const phase of [0, 250, 500, 750, 999]) {
+  test(`an unwaited live row refreshes within one second after a change at ${phase}ms`, { options }, async ($, on) => {
+    bottom(on)
+    const start = Date.parse('2026-11-18T00:01:00Z')
+    const clock = mock.clock(on, { now: start })
+    let rows = six.slice(0, 3)
+    let lists = 0
+    let release!: () => void
+    let armed!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const waiting = new Promise<void>(resolve => { armed = resolve })
+    const waits: string[][] = []
+    let observedAt = start
+    on('state.set', { plugin: 'oberth', key: 'snapshot' }, (_, e, next) => {
+      observedAt = e.value.value.now
+      return next(e)
+    })
+    on('process.run', async (_, e) => {
+      let value: unknown
+      if (e.argv[2] === 'wait') {
+        waits.push([...e.argv])
+        armed()
+        await held
+        value = { run: rows[0], timed_out: true }
+      } else {
+        lists++
+        value = { runs: rows }
+      }
+      return { value: { exitCode: 0, stdout: JSON.stringify(value), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    })
+    try {
+      await startSession($, on)
+      await waiting
+      await clock.advance(phase)
+      const changedAt = start + phase
+      rows = rows.map(row => ({ ...row, status: 'passed' as const, finished_at: new Date(start + phase).toISOString() }))
+      await clock.advance(1000 - phase)
+      const refreshed = nextSnapshot(on)
+      release()
+      await refreshed
+      expect(observedAt - changedAt).toBe(1000 - phase)
+      expect((await boxLines($)).slice(1).every(line => line.includes('✓ passed'))).toBe(true)
+      expect((await boxLines($)).slice(1)).toHaveLength(3)
+      expect(lists).toBe(2)
+      expect(waits).toEqual([['/verified/oberth', 'run', 'wait', six[0]!.id, '--until', 'any', '--timeout-s', '1', '--json']])
+    } finally {
+      await $.session.end({ sessionId: 'test-session', resume: { id: 'test-session' }, reason: 'prompt_input_exit' })
+      release()
+    }
+  })
+}
+
 for (const rows of [[], [{ ...run(), status: 'passed' as const, finished_at: '2026-11-18T00:01:00Z' }]]) {
   test(`idle polling stays at fifteen seconds with ${rows.length ? 'a finished run' : 'no runs'}`, { options }, async ($, on) => {
     bottom(on)
