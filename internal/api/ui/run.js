@@ -33,7 +33,6 @@ function fitRunHeader(row) {
 }
 function fitRunMetadata(region) {
  const parts = Array.from(region.children), gap = parseFloat(getComputedStyle(region).columnGap);
- region.classList.remove("compact");
  for (const node of parts) node.hidden = false;
  const commit = region.querySelector(".commit"); commit.hidden = false;
  for (const node of [commit, ...region.querySelectorAll(".meta-extra")]) {
@@ -42,7 +41,6 @@ function fitRunMetadata(region) {
   if (width <= region.clientWidth) break;
   node.hidden = true;
  }
- region.classList.add("compact");
 }
 function stepHeader(step) {
  return [h("h2", {}, step.name + " · " + step.status), step.display_reason && step.display_reason !== step.status ? h("p", {}, step.display_reason) : null, detail(step.detail)].filter(Boolean);

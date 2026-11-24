@@ -206,7 +206,7 @@ func TestUINeverTruncates(t *testing.T) {
 // a repository or ref name, an issue title or a step name in a list cell (each carries its whole
 // name as a title). Reasons, messages and logs are never cut.
 func clippingOutsideNames(css string) string {
-	names := map[string]bool{".runs .row > .repo": true, ".runs .row > .ref": true, ".run-metadata.compact .run-ref": true, ".repo-filter": true, ".repo-group-name": true, ".issues .row > .title": true, ".steps .step-name": true}
+	names := map[string]bool{".runs .row > .repo": true, ".runs .row > .ref": true, ".repo-filter": true, ".repo-group-name": true, ".issues .row > .title": true, ".steps .step-name": true}
 	rules := regexp.MustCompile(`/\*[\s\S]*?\*/`).ReplaceAllString(css, "")
 	clips := regexp.MustCompile(`(?i)text-overflow|overflow(?:-[xy])?\s*:\s*(?:clip|hidden)\b`)
 	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(rules, -1) {

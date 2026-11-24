@@ -31,7 +31,8 @@ export async function runHeader(client) {
      cancel:Array.from(summary.querySelectorAll('button')).map(node=>({text:node.textContent,disabled:node.disabled,right:node.getBoundingClientRect().right})),right:rect.right};
    })()`);
    check(metrics.summary.startsWith(status)&&!metrics.summary.includes('run is'),'status sentence retained '+JSON.stringify(metrics));
-   check(!metrics.overflow&&metrics.summaryHeight<=metrics.lineHeight*(metrics.wrapped?2:1)&&metrics.metaHeight<=metrics.lineHeight&&metrics.height<=metrics.lineHeight*(2+Number(Boolean(metrics.reason))+Number(metrics.wrapped)),'header wraps or overflows '+JSON.stringify({width,theme,status,...metrics}));
+   const metaLines=width<760?2:1;
+   check(!metrics.overflow&&metrics.summaryHeight<=metrics.lineHeight*(metrics.wrapped?2:1)&&metrics.metaHeight<=metrics.lineHeight*metaLines&&metrics.height<=metrics.lineHeight*(1+metaLines+Number(Boolean(metrics.reason))+Number(metrics.wrapped)),'header exceeds its wrapped layout or overflows '+JSON.stringify({width,theme,status,...metrics}));
    check(metrics.reason===(specific?'waiting for a node':'')&&metrics.reasonHeight<=metrics.lineHeight&&(!metrics.reason||metrics.reason==='waiting for a node'),'reason cut or missing '+JSON.stringify(metrics));
    check(metrics.counts===(status==='queued'?'0/14 passed · 14 pending':status==='failed'?'12/14 passed · 1 failed · 1 pending':'13/14 passed'),'step counts changed '+JSON.stringify(metrics));
    if(status==='queued')check(metrics.duration===undefined&&(metrics.wrapped||Math.abs(metrics.queuedGap-metrics.gap)<0.5),'queued header reserves an empty duration gap '+JSON.stringify({width,theme,metrics}));

@@ -132,10 +132,10 @@ a.row:focus-visible { outline-offset: -2px; }
 .run-reason .failed-step { margin-right: 8px; }
 .run-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; font-size: 11px; }
 .run-metadata, .identity { display: flex; align-items: center; white-space: nowrap; }
-.run-metadata { min-width: 0; column-gap: 6px; }
+.run-metadata { min-width: 0; column-gap: 6px; flex-wrap: wrap; white-space: normal; }
 .run-metadata > * { flex-shrink: 0; }
 .run-metadata > .identity::before { content: "·"; }
-.run-metadata.compact .run-ref { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.run-metadata .run-ref { max-width: 100%; overflow-wrap: anywhere; }
 .identity { gap: 6px; margin: 0; font-size: inherit; color: var(--muted); }
 .run-meta details { display: contents; }
 .run-meta summary { grid-column: 2; font-size: inherit; line-height: inherit; }
