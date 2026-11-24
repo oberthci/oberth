@@ -47,4 +47,5 @@ type Annotations struct {
 }
 
 // Schema describes the concrete wire value of a declaration.
+// Declaration consumers treat the map and its nested values as read-only.
 type Schema map[string]any

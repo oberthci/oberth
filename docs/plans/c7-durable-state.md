@@ -68,7 +68,7 @@ observation](c2-service-actions-and-history.md#events-and-observation), includin
 a projection revision and its event written with the fact, plus separate progress retention. Preserve
 cursor order and replay across restarts; notices never authorize work. The fact writer
 supplies the events; C2 owns reconnect/reset semantics. Use the existing endpoint-seek bounds query, not
-a full event scan.
+a full event scan for the fence; own-event cursors seek the event window. A lagging cursor may scan that whole window before reaching the fence.
 
 Bounded queries supply lists, a run by exact commit or ref, pending publications
 and upstream details needed by consumers. Declarations are not a stored fact.
