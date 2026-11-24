@@ -17,7 +17,7 @@ func runLocks(facts []argojob.LockFact, repos map[string]string, clear string) [
 		if repo == "" {
 			continue
 		}
-		l := service.Lock{Repo: repo, RunID: f.Workflow.Annotations[nativebinding.RunIDAnnotation], Name: f.Lock, Waiting: f.Role == argojob.LockWaiter}
+		l := service.Lock{Repo: repo, RunID: f.Workflow.Annotations[nativebinding.RunIDAnnotation], Name: f.Lock, Permits: f.Permits, Steps: f.Steps, Waiting: f.Role == argojob.LockWaiter}
 		if f.Role == argojob.LockStale {
 			l.Clear = clear
 		}

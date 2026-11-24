@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strconv"
 	"time"
@@ -132,7 +133,7 @@ func lockResult(rows []Lock, name string) apicontract.SyncStatus {
 			i++
 		}
 		if i == len(out.Locks) {
-			out.Locks = append(out.Locks, apicontract.LockState{Lock: r.Name, Holders: []string{}, Waiters: []string{}})
+			out.Locks = append(out.Locks, apicontract.LockState{Lock: r.Name, Holders: []apicontract.LockHolder{}, Held: r.Held, Limit: r.Limit, Usage: fmt.Sprintf("%d/%d", r.Held, r.Limit), Waiters: []string{}})
 		}
 		switch {
 		case r.Clear != "":
@@ -143,7 +144,7 @@ func lockResult(rows []Lock, name string) apicontract.SyncStatus {
 		case r.Waiting:
 			out.Locks[i].Waiters = append(out.Locks[i].Waiters, r.RunID)
 		default:
-			out.Locks[i].Holders = append(out.Locks[i].Holders, r.RunID)
+			out.Locks[i].Holders = append(out.Locks[i].Holders, apicontract.LockHolder{RunID: r.RunID, Permits: r.Permits, Steps: r.Steps})
 		}
 	}
 	return out

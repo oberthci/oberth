@@ -163,7 +163,7 @@ outcomes, step order and domain identities remain strict. Audit includes
 authority and administrative records only; omit progress and retired
 promotion-grant/train/prune/tag-after/bulk-deletion kinds, preserving retained
 ordering, identities and chain validity. sync_status exposes current
-holders/waiters/stale units without stored intervals or aggregate history.
+holders/waiters/stale units without stored intervals or aggregate history. Each lock shows held/limit; each authorized holder shows its permit count and step names.
 
 ## Allowed dependencies
 

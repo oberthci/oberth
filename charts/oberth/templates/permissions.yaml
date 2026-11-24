@@ -24,7 +24,7 @@ rules:
     verbs: [get, list, create, update, delete]
   - apiGroups: ['']
     resources: [configmaps]
-    resourceNames: [oberth-source]
+    resourceNames: [oberth-source, oberth-sync-limits]
     verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

@@ -132,5 +132,9 @@ func (o *serverOwners) Locks(ctx context.Context) ([]service.Lock, error) {
 	if err != nil {
 		return nil, err
 	}
-	return runLocks(facts, names, lockClearCommand(o.c.config.ArgoNamespace)), nil
+	locks := runLocks(facts, names, lockClearCommand(o.c.config.ArgoNamespace))
+	if err := o.lockLimits(ctx, locks); err != nil {
+		return nil, err
+	}
+	return locks, nil
 }

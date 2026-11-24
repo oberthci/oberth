@@ -131,7 +131,7 @@ func TestCanceledCallDoesNotReadAuthority(t *testing.T) {
 func TestSyncStatusHidesOtherRepositories(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
-	f.exec.LockValues = []service.Lock{{Repo: repository, RunID: runID, Name: "build"}, {Repo: "private/team/hidden", Name: "secret"}}
+	f.exec.LockValues = []service.Lock{{Repo: repository, RunID: runID, Name: "build", Permits: 1}, {Repo: "private/team/hidden", Name: "secret", Permits: 1}}
 	locks, err := f.s.SyncStatus(t.Context(), caller())
 	if err != nil || len(locks.Locks) != 1 || locks.Locks[0].Lock != "build" {
 		t.Fatalf("lock scope %+v %v", locks, err)

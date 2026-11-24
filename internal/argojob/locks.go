@@ -28,6 +28,8 @@ type LockFact struct {
 	Lock     string
 	Role     LockRole
 	Workflow *wf.Workflow
+	Permits  int
+	Steps    string
 }
 
 // LockFacts reads current holders and waiters from Workflow statuses. An ended
@@ -79,18 +81,43 @@ func (c *lockCollector) workflow(w *wf.Workflow) {
 	}
 	held, waited := lockEntries(w.Status.Synchronization)
 	for _, e := range held {
-		for _, h := range e.holders {
-			if h != "" {
-				c.live[e.lock] = append(c.live[e.lock], h)
-				c.add(LockFact{Lock: e.lock, Role: LockHolder, Workflow: w})
-			}
-		}
+		c.holding(w, e)
 	}
 	for _, e := range waited {
 		if waitsFor(w, e.lock) {
 			c.add(LockFact{Lock: e.lock, Role: LockWaiter, Workflow: w})
 			c.counts = append(c.counts, e)
 		}
+	}
+}
+
+func (c *lockCollector) holding(w *wf.Workflow, e lockEntry) {
+	holders, steps := []string{}, []string{}
+	for _, h := range e.holders {
+		if h == "" || slices.Contains(holders, h) {
+			continue
+		}
+		holders = append(holders, h)
+		c.live[e.lock] = append(c.live[e.lock], h)
+		parts := strings.SplitN(h, "/", 3)
+		if len(parts) < 3 {
+			steps = append(steps, "workflow")
+		}
+		if len(parts) == 3 {
+			node := w.Status.Nodes[parts[2]]
+			step := node.DisplayName
+			if step == "" {
+				step = node.Name
+			}
+			if step == "" {
+				step = parts[2]
+			}
+			steps = append(steps, step)
+		}
+	}
+	if len(holders) > 0 {
+		slices.Sort(steps)
+		c.add(LockFact{Lock: e.lock, Role: LockHolder, Workflow: w, Permits: len(holders), Steps: strings.Join(steps, ", ")})
 	}
 }
 
@@ -102,7 +129,7 @@ func (c *lockCollector) stale(e lockEntry) {
 	}
 	for _, holder := range e.holders {
 		if other := c.byKey[holderWorkflow(holder)]; other != nil && terminalWorkflow(other) && other.Spec.Shutdown != "" {
-			c.add(LockFact{Lock: e.lock, Role: LockStale, Workflow: other})
+			c.add(LockFact{Lock: e.lock, Role: LockStale, Workflow: other, Permits: stalePermits(e, other)})
 		}
 	}
 }
@@ -154,4 +181,14 @@ func holderWorkflow(key string) string {
 		return ""
 	}
 	return parts[0] + "/" + parts[1]
+}
+
+func stalePermits(e lockEntry, w *wf.Workflow) int {
+	holders := []string{}
+	for _, h := range e.holders {
+		if holderWorkflow(h) == w.Namespace+"/"+w.Name && !slices.Contains(holders, h) {
+			holders = append(holders, h)
+		}
+	}
+	return len(holders)
 }

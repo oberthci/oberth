@@ -15,13 +15,23 @@ type OutboxResult struct {
 // Stale lists ended runs the workflow controller still counts as holders;
 // Remedy and Command then say how an administrator releases them.
 type LockState struct {
-	Lock    string   `json:"lock"`
-	Holders []string `json:"holders"`
-	Waiters []string `json:"waiters"`
-	Stale   []string `json:"stale,omitempty"`
-	Remedy  string   `json:"remedy,omitempty"`
-	Command string   `json:"command,omitempty"`
+	Lock    string       `json:"lock"`
+	Holders []LockHolder `json:"holders"`
+	Held    int          `json:"held"`
+	Limit   int          `json:"limit"`
+	Usage   string       `json:"usage"`
+	Waiters []string     `json:"waiters"`
+	Stale   []string     `json:"stale,omitempty"`
+	Remedy  string       `json:"remedy,omitempty"`
+	Command string       `json:"command,omitempty"`
 }
 type SyncStatus struct {
 	Locks []LockState `json:"locks"`
+}
+
+// LockHolder counts permits, including separate live steps of the same run.
+type LockHolder struct {
+	RunID   string `json:"run_id"`
+	Permits int    `json:"permits"`
+	Steps   string `json:"steps"`
 }

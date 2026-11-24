@@ -174,8 +174,15 @@ func (s *Service) prepareSyncStatus(ctx context.Context, a actor.Actor) (func(co
 func (s *Service) syncStatus(ctx context.Context, a actor.Actor) ([]Lock, error) {
 	locks, err := s.c.Exec.Locks(ctx)
 	out, seen := []Lock{}, map[string]bool{}
+	held := map[string]int{}
+	for _, l := range locks {
+		if !l.Waiting {
+			held[l.Name] += l.Permits
+		}
+	}
 	for _, l := range locks {
 		if a.CanTouchRepository(l.Repo) {
+			l.Held = held[l.Name]
 			out, seen[l.Name] = append(out, l), true
 		}
 	}

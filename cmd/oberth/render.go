@@ -103,6 +103,9 @@ func factLine(path, value string) string {
 }
 
 func renderView(out io.Writer, value map[string]any, detail bool) (bool, error) {
+	if _, ok := value["locks"].([]any); ok {
+		return true, renderLocks(out, value, detail)
+	}
 	if _, ok := value["settings"].([]any); ok {
 		return true, renderSettings(out, value, detail)
 	}

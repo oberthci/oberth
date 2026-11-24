@@ -6,7 +6,9 @@ package main
 
 import (
 	"encoding/json"
+	core "k8s.io/api/core/v1"
 	"os"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,8 +48,13 @@ func TestComposedCancelledRunLeavesNoLockHolder(t *testing.T) {
 	held := f.nativeWorkflow(t, run)
 	key := held.Namespace + "/" + held.Name + "/" + held.Name
 	held.Status = wf.WorkflowStatus{Phase: wf.WorkflowRunning, Synchronization: &wf.SynchronizationStatus{Semaphore: &wf.SemaphoreStatus{Holding: []wf.SemaphoreHolding{{Semaphore: lock, Holders: []string{key + "-a", key + "-b"}}}}}}
+	held.Status.Nodes = wf.Nodes{held.Name + "-a": {DisplayName: "compile"}, held.Name + "-b": {DisplayName: "test"}}
 	f.updateNative(t, held)
-	if got := f.lockStatus(t, lock); !slices.Equal(got.Holders, []string{run.ID}) || got.Stale != nil {
+	if _, err := f.kube.CoreV1().ConfigMaps(held.Namespace).Create(t.Context(), &core.ConfigMap{ObjectMeta: meta.ObjectMeta{Name: "oberth-sync-limits"}, Data: map[string]string{"heavy-stop": "2"}}, meta.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	want := apicontract.LockState{Lock: lock, Held: 2, Limit: 2, Usage: "2/2", Holders: []apicontract.LockHolder{{RunID: run.ID, Permits: 2, Steps: "compile, test"}}, Waiters: []string{}}
+	if got := f.lockStatus(t, lock); !reflect.DeepEqual(got, want) {
 		t.Fatal("holding run is not the holder", got)
 	}
 	f.cancelStillRunning(t, run)
@@ -66,7 +73,7 @@ func (f *composedFixture) checkCancelledLockStatus(t *testing.T, run stateport.R
 	lock := waiting.Status.Synchronization.Semaphore.Waiting[0].Semaphore
 	// The later run holds both released units with e and f while g waits.
 	got := f.lockStatus(t, lock)
-	if !slices.Equal(got.Holders, []string{"waiting-heavy-stop"}) || !slices.Equal(got.Waiters, []string{"waiting-heavy-stop"}) || len(got.Stale) != 0 {
+	if !slices.Equal(lockHolderRuns(got.Holders), []string{"waiting-heavy-stop"}) || !slices.Equal(got.Waiters, []string{"waiting-heavy-stop"}) || len(got.Stale) != 0 || got.Usage != "2/2" {
 		t.Fatal("cancelled run is still listed as holding a unit", got)
 	}
 	if got.Remedy != "" || got.Command != "" {
@@ -157,4 +164,12 @@ func (f *composedFixture) lockStatus(t *testing.T, lock string) apicontract.Lock
 		t.Fatal("lock status output", out.String(), err)
 	}
 	return status.Locks[0]
+}
+
+func lockHolderRuns(holders []apicontract.LockHolder) []string {
+	runs := make([]string, len(holders))
+	for i, holder := range holders {
+		runs[i] = holder.RunID
+	}
+	return runs
 }

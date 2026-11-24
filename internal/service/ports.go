@@ -78,6 +78,8 @@ type Git interface {
 // a unit for it; Clear is then the exact command that releases that unit.
 type Lock struct {
 	Repo, RunID, Name, Clear string
+	Steps                    string
+	Permits, Held, Limit     int
 	Waiting                  bool
 }
 

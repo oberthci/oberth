@@ -109,7 +109,7 @@ func TestNativeServerVerbsContract(t *testing.T) {
 		{APIGroups: []string{""}, Resources: []string{"pods/log"}, Verbs: []string{"get"}},
 		{APIGroups: []string{""}, Resources: []string{"serviceaccounts"}, Verbs: []string{"get", "create"}},
 		{APIGroups: []string{"argoproj.io"}, Resources: []string{"cronworkflows"}, Verbs: []string{"get", "list", "create", "update", "delete"}},
-		{APIGroups: []string{""}, Resources: []string{"configmaps"}, ResourceNames: []string{"oberth-source"}, Verbs: []string{"get"}},
+		{APIGroups: []string{""}, Resources: []string{"configmaps"}, ResourceNames: []string{"oberth-source", "oberth-sync-limits"}, Verbs: []string{"get"}},
 	}
 	var actual rbacv1.Role
 	if err := json.Unmarshal([]byte(jsonOf(t, role)), &actual); err != nil {

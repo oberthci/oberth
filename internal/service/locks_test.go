@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/service"
 )
@@ -14,7 +15,7 @@ const (
 )
 
 func liveLocks() []service.Lock {
-	return []service.Lock{{Repo: repository, RunID: "live", Name: staleLock}, {Repo: repository, RunID: "queued", Name: staleLock, Waiting: true}}
+	return []service.Lock{{Repo: repository, RunID: "live", Name: staleLock, Permits: 1}, {Repo: repository, RunID: "queued", Name: staleLock, Waiting: true}}
 }
 
 // An ended run the controller still counts is listed apart from holders, with
@@ -22,13 +23,13 @@ func liveLocks() []service.Lock {
 func TestSyncStatusListsStaleHolderWithItsCommand(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
-	f.exec.LockValues = append(liveLocks(), service.Lock{Repo: repository, RunID: runID, Name: staleLock, Clear: staleClear}, service.Lock{Repo: "private/team/hidden", RunID: "hidden", Name: staleLock, Clear: staleClear})
+	f.exec.LockValues = append(liveLocks(), service.Lock{Repo: repository, RunID: runID, Name: staleLock, Clear: staleClear, Permits: 1}, service.Lock{Repo: "private/team/hidden", RunID: "hidden", Name: staleLock, Clear: staleClear, Permits: 1})
 	locks, err := f.s.SyncStatus(t.Context(), caller())
 	if err != nil || len(locks.Locks) != 1 {
 		t.Fatalf("lock status %+v %v", locks, err)
 	}
 	got := locks.Locks[0]
-	if !slices.Equal(got.Holders, []string{"live"}) || !slices.Equal(got.Waiters, []string{"queued"}) || !slices.Equal(got.Stale, []string{runID}) || got.Command != staleClear {
+	if !slices.Equal(got.Holders, []apicontract.LockHolder{{RunID: "live", Permits: 1}}) || !slices.Equal(got.Waiters, []string{"queued"}) || !slices.Equal(got.Stale, []string{runID}) || got.Command != staleClear {
 		t.Fatalf("stale holder not separated %+v", got)
 	}
 	if got.Remedy != "A run that ended still blocks this lock; restart the workflow controller to release it." || publicerr.CheckMessage(got.Remedy, 120) != nil {
@@ -43,8 +44,8 @@ func TestSyncStatusKeepsRemedyOfAHiddenStaleHolder(t *testing.T) {
 	f := setup(t)
 	f.exec.LockValues = []service.Lock{
 		{Repo: repository, RunID: "queued", Name: staleLock, Waiting: true},
-		{Repo: "private/team/hidden", RunID: "hidden", Name: staleLock, Clear: staleClear},
-		{Repo: "private/team/hidden", RunID: "other", Name: "runs/Mutex/hidden", Clear: staleClear},
+		{Repo: "private/team/hidden", RunID: "hidden", Name: staleLock, Clear: staleClear, Permits: 1},
+		{Repo: "private/team/hidden", RunID: "other", Name: "runs/Mutex/hidden", Clear: staleClear, Permits: 1},
 	}
 	locks, err := f.s.SyncStatus(t.Context(), caller())
 	if err != nil || len(locks.Locks) != 1 {
