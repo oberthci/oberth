@@ -46,7 +46,7 @@ class BrowserGate(unittest.TestCase):
             'node': '#!/bin/sh\nexit 0\n',
             'mkdir': '#!/bin/sh\nexec /bin/mkdir "$@"\n',
             'timeout': '''#!/bin/sh
-[ "$1" = --signal=KILL ] && [ "$2" = 120s ] || exit 2
+[ "$1" = --signal=KILL ] && [ "$2" = 180s ] || exit 2
 [ "$OBERTH_UI_ARTIFACTS" = "$PWD/.cache/webui" ] || exit 3
 printf 'stalled browser assertion' > "$OBERTH_UI_STEP_FILE"
 exit 137
@@ -54,7 +54,7 @@ exit 137
         })
         self.assertEqual(result.returncode, 137, result.stdout + result.stderr)
         self.assertEqual(result.stderr,
-                         'ui-browser: FAIL (120s limit: stalled browser assertion)\n')
+                         'ui-browser: FAIL (180s limit: stalled browser assertion)\n')
         self.assertNotIn('ui-browser: PASS', result.stdout)
         self.assertEqual('stalled browser assertion',
                          (self.checkout / '.cache/webui/check-step').read_text())

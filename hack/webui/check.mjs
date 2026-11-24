@@ -16,19 +16,21 @@ import {containersFit} from './containers.mjs';
 import {eventReads} from './event-reads.mjs';
 import {panelState} from './panel-state.mjs';
 import {waitingLog} from './waiting-log.mjs';
+import {waitingPace} from './waiting-pace.mjs';
 
 let client;
 try {
  client=await launch();
  step('browser behavior assertions');
  const only=process.argv.find(arg=>arg.startsWith('--only='))?.slice(7);
- if(only)check(['starting-run','liveness','run-header','run-rows','containers','progress','event-reads','panel-state','waiting-log'].includes(only),'unknown browser check '+only);
+ if(only)check(['starting-run','liveness','run-header','run-rows','containers','progress','event-reads','panel-state','waiting-log','waiting-pace'].includes(only),'unknown browser check '+only);
  const result={};
  if(!only||only==='event-reads')result.eventReads=await eventReads(client);
  if(!only||only==='starting-run'){result.startingRun=[];for(const path of ['prepare',''])result.startingRun.push(await startingRun(client,path));}
  if(!only||only==='progress')result.progress=await progress();
  if(!only||only==='panel-state')result.panelState=await panelState();
  if(!only||only==='waiting-log')result.waitingLog=await waitingLog();
+ if(!only||only==='waiting-pace')result.waitingPace=await waitingPace();
  if(!only||only==='liveness')result.liveness=await liveness(client);
  if(only==='run-header')result.runHeader=await runHeader(client);
  if(!only||only==='containers')result.containers=await containersFit(client);

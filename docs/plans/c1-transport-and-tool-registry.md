@@ -264,7 +264,7 @@ The script has no folding rule. Live updates use `events_wait` to trigger reads.
 Read the first event immediately; coalesce events at the cursor while its read and one-second burst interval finish.
 Preserve open Details and log selections when their content is unchanged.
 Step reasons add diagnostics beyond the status; reads do not invent status sentences.
-Only a changed selected-step projection reloads a settled log; waiting output retries while the run and step are running.
+Only a changed selected-step projection reloads a settled log; waiting output retries while the run and step are running, from 250 ms doubling to 5 s, reset on selected-step or output progress; hidden tabs pause log reads.
 Signed-out visitors see only the sign-in card. The header starts hidden and appears
 only after an accepted bearer or browser certificate sign-in; a 401 hides it.
 Navigation keeps the sign-in card until the server answers.

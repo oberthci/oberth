@@ -3,9 +3,12 @@
 async function loadLog(view, path, args, regions, restart) {
  if (restart) { view.logs.abort(); view.logs = new AbortController(); }
  const signal = view.logs.signal;
+ let delay = 250, observedStep, observedContent;
  view.logBusy = true; view.logDirty = false; view.logReload = () => loadLog(view, path, args, regions, false);
  try {
   while (!signal.aborted) {
+   if (document.hidden) await visibleLog(signal);
+   if (signal.aborted) return;
    try {
     const step = view.logStep;
     if (args.step !== undefined && step?.status === "queued" && !step.attempts?.length && !step.logs?.length) return;
@@ -18,8 +21,12 @@ async function loadLog(view, path, args, regions, restart) {
     regions.controls.querySelector("button")?.remove();
     if (result.meta.has_more) regions.controls.append(button("Earlier output", () => loadLog(view, path, {...args, byte_offset: result.meta.next_byte_offset}, regions, true)));
     const target = native ? args : result.containers?.at(-1);
+    const projection = JSON.stringify(view.logStep);
+    if (projection !== observedStep || result.content !== observedContent) delay = 250;
+    observedStep = projection; observedContent = result.content;
     const waiting = result.meta.waiting && view.runStatus === "running" && view.logStep?.status === "running" && args.byte_offset === undefined;
-    if (result.meta.copying || waiting || (result.meta.follow && args.byte_offset === undefined && !target)) { await waitRetry(250, signal); continue; }
+    if (result.meta.copying || (result.meta.follow && args.byte_offset === undefined && !target)) { delay = 250; await waitRetry(250, signal); continue; }
+    if (waiting) { await waitLogRetry(view, delay, signal); delay = Math.min(5000, delay * 2); continue; }
     if (!result.meta.follow || args.byte_offset !== undefined || !target) return;
     await streamLog(path, target, {regions, signal});
    } catch (error) {
@@ -33,6 +40,27 @@ async function loadLog(view, path, args, regions, restart) {
    view.logBusy = false;
    if (view.logDirty && !signal.aborted) view.logReload();
   }
+ }
+}
+async function visibleLog(signal) {
+ if (!document.hidden || signal.aborted) return;
+ await new Promise(resolve => {
+  const ready = () => {
+   if (document.hidden && !signal.aborted) return;
+   document.removeEventListener("visibilitychange", ready); signal.removeEventListener("abort", ready); resolve();
+  };
+  document.addEventListener("visibilitychange", ready); signal.addEventListener("abort", ready, {once: true}); ready();
+ });
+}
+async function waitLogRetry(view, milliseconds, signal) {
+ const timer = new AbortController(), wake = () => timer.abort();
+ const visible = () => { if (!document.hidden) wake(); };
+ view.logWake = wake;
+ signal.addEventListener("abort", wake, {once: true}); document.addEventListener("visibilitychange", visible);
+ try { if (signal.aborted) wake(); await waitRetry(milliseconds, timer.signal); }
+ finally {
+  signal.removeEventListener("abort", wake); document.removeEventListener("visibilitychange", visible);
+  if (view.logWake === wake) view.logWake = null;
  }
 }
 async function streamLog(path, target, context) {

@@ -114,6 +114,10 @@ func (p *progressPage) advance(ctx context.Context, phase string) error {
 }
 
 func progressSteps(steps []stepmodel.RunStep, phase string, at time.Time) []stepmodel.RunStep {
+	if phase == "running-progress" {
+		steps[0].Detail = "Updated running diagnostics."
+		return steps
+	}
 	steps[0].Status = stepmodel.StepRunning
 	if steps[0].StartedAt == nil {
 		steps[0].StartedAt = &at

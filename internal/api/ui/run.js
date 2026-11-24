@@ -50,7 +50,7 @@ function updateSelectedStep(view, selected) {
  view.logStep = selected;
  if (view.logHeader) view.logHeader.replaceChildren(...stepHeader(selected, open));
  if (!view.logBusy) view.logReload?.();
- else view.logDirty = true;
+ else { view.logDirty = true; view.logWake?.(); }
 }
 function stepHeader(step, open = false) {
  const reason = step.display_reason;
