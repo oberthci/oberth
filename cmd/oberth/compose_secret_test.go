@@ -67,7 +67,7 @@ func TestComposedSecretWriteBareStepAndLiveState(t *testing.T) {
 }
 func (f *composedFixture) secretBackend(t *testing.T) *storefake.Store {
 	t.Helper()
-	backend := &storefake.Store{}
+	backend := &storefake.Store{Initialized: true}
 	server := deliveryHTTPServer(t, backend)
 	f.config.SecretStore.Address = server.URL
 	f.config.SecretStore.Audience = "composed-store-audience"

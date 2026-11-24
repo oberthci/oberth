@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ type Client struct {
 	address string
 }
 type Request struct {
+	Query  url.Values
 	Method string
 	Path   string
 	Token  []byte
@@ -72,7 +74,11 @@ func (c *Client) JSON(ctx context.Context, r Request, out any) (int, error) {
 	if len(body) > maxBody {
 		return 0, refuse("limit", nil)
 	}
-	req, err := http.NewRequestWithContext(ctx, r.Method, c.address+"/v1"+r.Path, bytes.NewReader(body))
+	address := c.address + "/v1" + r.Path
+	if len(r.Query) > 0 {
+		address += "?" + r.Query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, r.Method, address, bytes.NewReader(body))
 	if err != nil {
 		return 0, refuse("address", err)
 	}

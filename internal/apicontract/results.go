@@ -209,6 +209,7 @@ type SchedulePage struct {
 	Schedules []Schedule `json:"schedules"`
 }
 type PartStatus struct {
+	Remedy        string `json:"remedy,omitempty"`
 	Name          string `json:"name"`
 	Ready         bool   `json:"ready"`
 	DisplayReason string `json:"display_reason"`

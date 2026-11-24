@@ -156,6 +156,7 @@ func fixtureServer(t *testing.T) *serverFixture {
 	f.config.Files.SSHHostKey, _ = composeSSHKey(t, t.TempDir(), "host-key")
 	f.config.Files.ForgeKey, _ = composeSSHKey(t, t.TempDir(), "forge-key")
 	f.config.Runtime = validRuntime()
+	f.healthyStore(t)
 
 	f.deps.constructors = constructors{CacheNew: f.cache, NativeNew: f.native, WiringNew: f.wiring, ServiceNew: f.service, SourceNew: f.delivery}
 	return f

@@ -7,12 +7,15 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/secretstore"
+	storefake "github.com/oberthci/oberth/internal/secretstore/fake"
 )
 
 func TestSystemStatusUsesPartReadiness(t *testing.T) {
 	for _, scenario := range []string{"starting", "ready", "watch", "database", "failed", "stopping"} {
 		t.Run(scenario, func(t *testing.T) {
 			c := testComposition(t)
+			c.storeWriter.Client, _ = secretstore.New(secretstore.Connection{URL: "https://store.invalid", Transport: &storefake.Store{Initialized: true}})
 			c.lifecycle = newLifecycle(t.Context(), []Part{{Name: "store"}, {Name: "cluster"}, {Name: "source"}, {Name: "schedules"}, {Name: "logs"}, {Name: "secret store"}})
 			defer c.lifecycle.cancel()
 			c.health.success = c.clock.Now()

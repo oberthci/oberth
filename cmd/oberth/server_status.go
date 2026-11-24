@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/publicerr"
 )
+
+const storeStatusTimeout = 5 * time.Second
 
 func (a serverAdministration) statusParts(ctx context.Context) []apicontract.PartStatus {
 	c := a.owner.c
@@ -17,21 +21,30 @@ func (a serverAdministration) statusParts(ctx context.Context) []apicontract.Par
 	fresh := !c.health.success.IsZero() && c.clock.Now().Sub(c.health.success) < 90*time.Second
 	c.health.mu.RUnlock()
 	for i := range rows {
-		p := &rows[i]
-		switch p.Name {
-		case "pending pushes":
-			a.receiveStatus(ctx, p)
-		case "cluster":
-			if p.Ready && (c.health.watch == nil || !c.health.watch()) {
-				p.Ready, p.DisplayReason = false, "watch disconnected"
-			}
-		case "store":
-			if p.Ready && !fresh {
-				p.Ready, p.DisplayReason = false, "database unavailable"
-			}
-		}
+		a.inspectPartStatus(ctx, &rows[i], fresh)
 	}
 	return rows
+}
+
+func (a serverAdministration) inspectPartStatus(ctx context.Context, p *apicontract.PartStatus, fresh bool) {
+	c := a.owner.c
+
+	switch p.Name {
+	case "pending pushes":
+		a.receiveStatus(ctx, p)
+	case "cluster":
+		if p.Ready && (c.health.watch == nil || !c.health.watch()) {
+			p.Ready, p.DisplayReason = false, "watch disconnected"
+		}
+	case "secret store":
+		if p.Ready {
+			a.secretStoreStatus(ctx, p)
+		}
+	case "store":
+		if p.Ready && !fresh {
+			p.Ready, p.DisplayReason = false, "database unavailable"
+		}
+	}
 }
 
 func (l *lifecycle) status() []apicontract.PartStatus {
@@ -64,6 +77,18 @@ func (a serverAdministration) receiveStatus(ctx context.Context, p *apicontract.
 		if r.Problem != "" || r.State == "corrupt" {
 			p.DisplayReason = "receives set aside; inspect outbox"
 			return
+		}
+	}
+}
+
+func (a serverAdministration) secretStoreStatus(ctx context.Context, p *apicontract.PartStatus) {
+	probe, cancel := context.WithTimeout(ctx, storeStatusTimeout)
+	defer cancel()
+	if err := a.owner.c.storeWriter.Client.Readiness(probe); err != nil {
+		p.Ready, p.DisplayReason = false, "secret store unavailable"
+		var refusal *publicerr.Error
+		if errors.As(err, &refusal) && refusal.Reason() == "Secret store is sealed." {
+			p.DisplayReason, p.Remedy = "secret store sealed", refusal.Remedy()
 		}
 	}
 }
