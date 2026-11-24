@@ -85,7 +85,7 @@ func (s *Store) Steps(ctx context.Context, id string) ([]stepmodel.RunStep, erro
 		}
 		return steps, nil
 	}
-	r, err := loadRunRecord(ctx, tx, id)
+	r, err := readRun(ctx, tx, id, false)
 	if err != nil {
 		return nil, err
 	}

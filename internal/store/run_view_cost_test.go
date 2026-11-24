@@ -12,6 +12,28 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func TestRunViewAndFullReadAgreeOnAdmissionPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body any
+		want bool
+	}{{"null", nil, false}, {"empty blob", []byte{}, false}, {"present", []byte(`{}`), true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			r, _ := accepted(t, s, "admission-presence")
+			_, err := s.writer.ExecContext(t.Context(), `UPDATE runs SET admission=? WHERE id=?`, tc.body, r.ID)
+			requireOK(t, err)
+			full, err := s.Run(t.Context(), r.ID)
+			requireOK(t, err)
+			view, err := s.LookupRun(t.Context(), nil, r.ID)
+			requireOK(t, err)
+			if full.HasAdmission != tc.want || view.HasAdmission != tc.want {
+				t.Fatal("admission presence depends on its reader", full.HasAdmission, view.HasAdmission, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunViewDoesNotDecodeAdmission(t *testing.T) {
 	for _, observed := range []bool{false, true} {
 		t.Run(fmt.Sprint(observed), func(t *testing.T) {
