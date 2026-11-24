@@ -18,6 +18,9 @@ func TestReleaseHelpListsExecutableFlags(t *testing.T) {
 	flags := releaseFlags(new(options))
 	flags.SetOutput(&want)
 	flags.Usage()
+	if !strings.Contains(want.String(), "--registry <host>") {
+		t.Fatal("registry login usage omits the required host")
+	}
 	for _, operation := range []string{"", "base", "package", "key", "pin", "signature", "verify", "publish", "finalize"} {
 		for _, form := range []string{"--help", "-h"} {
 			t.Run(strings.TrimSpace(operation+" "+form), func(t *testing.T) {

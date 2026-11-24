@@ -25,7 +25,7 @@ func releaseFlags(o *options) *flag.FlagSet {
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "Usage: oberth-release <operation> [flags]")
 		fmt.Fprintln(flags.Output(), usage.Remedy())
-		fmt.Fprintln(flags.Output(), "Registry login: registry-login --provider <resource> --service-account <email> --identity-file <path> --dir <new-directory>")
+		fmt.Fprintln(flags.Output(), "Registry login: registry-login --provider <resource> --service-account <email> --identity-file <path> --dir <new-directory> --registry <host>")
 		fmt.Fprintln(flags.Output())
 		flags.PrintDefaults()
 	}
