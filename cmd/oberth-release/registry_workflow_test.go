@@ -86,9 +86,16 @@ func checkRegistryPushStep(t *testing.T, wf *wfv1.Workflow, failure string) {
 	dir := registryPushFixture(t)
 	values := workflowValues(dir)
 	values["DOCKER_CONFIG"] = filepath.Join(dir, "registry")
+	values["PRIVATE_REGISTRY_DIR"] = values["DOCKER_CONFIG"]
+	values["REGISTRY_LOGIN_DIR"] = filepath.Join(dir, "login-dir")
+	values["CRANE_CONFIG_LOG"] = filepath.Join(dir, "crane-config.log")
 	values["REGISTRY_LOGIN_HOST"] = filepath.Join(dir, "login-host")
 	values["PUSH_LOG"], values["PUSH_FAIL"] = filepath.Join(dir, "push.log"), failure
 	output, err := executeWorkflowTemplate(t, wf, wf.GetTemplateByName("release-images-pushed"), values)
+	loginDir, readErr := os.ReadFile(values["REGISTRY_LOGIN_DIR"])
+	if readErr != nil || string(loginDir) != values["PRIVATE_REGISTRY_DIR"] {
+		t.Fatal("helper did not receive the private registry directory", string(loginDir), readErr)
+	}
 	if (err != nil) != (failure != "") || len(output) != 0 {
 		t.Fatal("push failure or credential output was mishandled", err, string(output))
 	}
@@ -103,6 +110,10 @@ func checkRegistryPushStep(t *testing.T, wf *wfv1.Workflow, failure string) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	configs, err := os.ReadFile(values["CRANE_CONFIG_LOG"])
+	if err != nil || string(configs) != strings.Repeat(values["PRIVATE_REGISTRY_DIR"]+"\n", len(lines)) {
+		t.Fatal("crane did not use the private registry directory", string(configs), err)
+	}
 	if failure != "" {
 		if len(lines) != 1 {
 			t.Fatal("first push failure reached another push", lines)
@@ -121,16 +132,21 @@ func registryPushFixture(t *testing.T) string {
 		}
 	}
 	writeFixtureCommand(t, filepath.Join(dir, "shared/oberth-release"), `[ "$1" = registry-login ] || exit 2
-[ "$PUSH_FAIL" != login ] || exit 1
 while [ "$#" -gt 0 ]; do
-  case "$1" in --registry) shift; printf '%s' "$1" > "$REGISTRY_LOGIN_HOST";; esac
+  case "$1" in
+    --registry) shift; printf '%s' "$1" > "$REGISTRY_LOGIN_HOST";;
+    --dir) shift; login_dir="$1"; printf '%s' "$1" > "$REGISTRY_LOGIN_DIR";;
+  esac
   shift
 done
+[ "$login_dir" = "$PRIVATE_REGISTRY_DIR" ] || exit 2
+[ "$PUSH_FAIL" != login ] || exit 1
 [ -s "$REGISTRY_LOGIN_HOST" ] || exit 2
-mkdir -p "$DOCKER_CONFIG"
-printf fixture-login > "$DOCKER_CONFIG/config.json"
+mkdir -p "$login_dir"
+printf fixture-login > "$login_dir/config.json"
 `)
 	writeFixtureCommand(t, filepath.Join(dir, "bin/go"), `[ "$1 $2 $3 $4" = 'tool -modfile=hack/tools/crane.mod crane push' ] || exit 2
+printf '%s\n' "$DOCKER_CONFIG" >> "$CRANE_CONFIG_LOG"
 [ "$(cat "$DOCKER_CONFIG/config.json")" = fixture-login ] || exit 3
 [ -d "$5" ] || exit 4
 printf '%s|%s\n' "$5" "$6" >> "$PUSH_LOG"
