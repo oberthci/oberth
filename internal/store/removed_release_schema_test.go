@@ -7,7 +7,7 @@ import (
 	"github.com/oberthci/oberth/internal/publicerr"
 )
 
-func TestRemovedReleaseTableRequiresFreshDatabase(t *testing.T) {
+func TestRemovedReleaseTablePreservesDatabase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.sqlite")
 	s, err := Create(t.Context(), path, testOptions())
 	requireOK(t, err)
@@ -18,7 +18,7 @@ func TestRemovedReleaseTableRequiresFreshDatabase(t *testing.T) {
 	_, err = Open(t.Context(), path, testOptions())
 	requireCode(t, err, publicerr.SchemaRefused)
 	refusal := publicerr.Classify(err)
-	if refusal.Reason() != "This version requires a fresh database." || refusal.Remedy() != "Create a fresh database for this version; no upgrade path is supported." {
+	if refusal.Reason() != "Database layout is unsupported." || refusal.Remedy() != "Preserve this database; use its release or restore a verified backup." {
 		t.Fatal("removed schema offered an unsupported upgrade", err)
 	}
 }

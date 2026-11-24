@@ -100,9 +100,9 @@ these limits. C2 owns the
 
 **Delta:** The current baseline is schema 6, with only current records, constraints
 and query indexes and no configured release-role records. Current-schema opens add no persistent schema objects. Existing receive receipt JSON retains all accepted old/new ref values and at most 16 replaced heads, including parked and no-pipeline pushes; inherit only when the old object equals the previous accepted new object. A disposable connection-local index rebuilds from those receipts for sync. Run publications copy their original receive's set into private durable evidence, separate from the live lease; the durable schema stays unchanged. A layout pin for each
-schema number preserves its baseline digest; changing the layout requires a new
+schema number pins its lineage by layout; no step receipt is stored. A changed layout requires a new
 number. Open applies numbered forward steps in one transaction, preserving immutable IDs,
-receipts and grants; the full audit chain and head are verified before commit. A gap or newer schema refuses. Each step has a previous-code
+receipts and grants; the full audit chain and head are verified before commit. A gap refuses read-only and names the source schema's upgrade release; newer schemas refuse. Older backups name their reader release. Each step has a previous-code
 fixture proving complete record reads and unknown-ID refusal; the release guard requires both.
 Its named coverage test must run and pass. Current-schema opens only verify; creation and maintenance stay distinct. A missing admin database is never created.
 
@@ -213,9 +213,9 @@ The requirement sentence is the inspection contract. These inspections are plann
 | [REQ-C7-021](REQUIREMENTS.md#req-c7-021) | `TestSchemaNumberPinsBaselineLayout` (contract_test) |
 
 The schema inspection pins each numbered baseline's complete layout and requires a
-new number for a changed layout. `TestRemovedReleaseTableRequiresFreshDatabase`
+new number for a changed layout. `TestRemovedReleaseTablePreservesDatabase`
 also proves that adding a removed release-role table refuses open with the
-fresh-database remedy, even when the schema number still matches.
+data-preserving release or verified-backup remedy, even when the schema number still matches.
 
 `TestTransactionalEvidenceUpdatesContract` must include the native CI failure
 case in the Issues and repair projection contract: a person's lock and title

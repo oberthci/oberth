@@ -9401,7 +9401,7 @@
     "docs/plans/c4-admission-rules-and-plan.md": "d7c2a5a09ea28c71d5aa853d41db1e0f952cf1701ef8011e4d5db7b9b49f042a",
     "docs/plans/c5-native-execution.md": "f3ad4a361270e5fd47078a07a6e4e55dd99f76a8686c5e6f5b988092a24a8c38",
     "docs/plans/c6-source-delivery.md": "b234c97f1365905d824a38e469b96433370dfb7ff038f78d3e5efd26a2dac41f",
-    "docs/plans/c7-durable-state.md": "2eb42e53d8b2dddf9a79deacf089ea0552bac80a1ce9ea5433ec780865059489",
+    "docs/plans/c7-durable-state.md": "e95b7a3f3eae873d0cc9d060914fbd3d5df131bc2a4e46afd5eaa6122abe30ef",
     "docs/plans/c8-logs.md": "e7e04d0a411011160a2f5cb9d885b7dbd6c55503452f5849a5b0557df4f67b63",
     "docs/plans/c9-install-and-upgrade.md": "78a73528a66ebba6fb1a8795f3943f416a17f761c55ec9f486a0517330ad1666"
   },
@@ -13580,7 +13580,7 @@
         "**Delta:**"
       ],
       "spec": "docs/plans/c7-durable-state.md:101",
-      "basis": "A layout pin for each schema number preserves its baseline digest; changing the layout requires a new number."
+      "basis": "**Delta:** The current baseline is schema 6, with only current records, constraints and query indexes and no configured release-role records. Current-schema opens add no persistent schema objects. Existing receive receipt JSON retains all accepted old/new ref values and at most 16 replaced heads, including parked and no-pipeline pushes; inherit only when the old object equals the previous accepted new object. A disposable connection-local index rebuilds from those receipts for sync. Run publications copy their original receive's set into private durable evidence, separate from the live lease; the durable schema stays unchanged. A layout pin for each schema number pins its lineage by layout; no step receipt is stored. A changed layout requires a new number. Open applies numbered forward steps in one transaction, preserving immutable IDs, receipts and grants; the full audit chain and head are verified before commit. A gap refuses read-only and names the source schema's upgrade release; newer schemas refuse. Older backups name their reader release. Each step has a previous-code fixture proving complete record reads and unknown-ID refusal; the release guard requires both. Its named coverage test must run and pass. Current-schema opens only verify; creation and maintenance stay distinct. A missing admin database is never created."
     },
     {
       "spec": "docs/plans/c7-durable-state.md:161",

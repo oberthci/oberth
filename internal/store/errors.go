@@ -17,6 +17,8 @@ const (
 	conflict
 	unavailable
 	schema
+	migrationGap
+	olderSchema
 	foreignProtocol
 	newerSchema
 	forbidden

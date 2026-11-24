@@ -1,6 +1,15 @@
 package store
 
-import "github.com/oberthci/oberth/internal/publicerr"
+import (
+	"fmt"
+
+	"github.com/oberthci/oberth/internal/publicerr"
+)
+
+func schemaVersionRefusal(kind refusal, number int) error {
+	code, reason, remedy := message(kind)
+	return publicerr.New(code, fmt.Sprintf(reason, number), fmt.Sprintf(remedy, number), nil)
+}
 
 func diagnostics() map[refusal]diagnostic {
 	result := coreDiagnostics()
@@ -26,11 +35,15 @@ func coreDiagnostics() map[refusal]diagnostic {
 			"Read the existing record and submit its current identity."},
 		unavailable: {publicerr.Unavailable, "database access failed",
 			"Check the database path and permissions, then retry."},
-		schema: {publicerr.SchemaRefused, "This version requires a fresh database.",
-			"Create a fresh database for this version; no upgrade path is supported."},
+		schema: {publicerr.SchemaRefused, "Database layout is unsupported.",
+			"Preserve this database; use its release or restore a verified backup."},
+		migrationGap: {publicerr.SchemaRefused, "No upgrade: schema %d.",
+			"Use a release that upgrades schema %d, or restore a verified backup."},
+		olderSchema: {publicerr.SchemaRefused, "Cannot read schema %d.",
+			"Use a release that reads schema %d; restore backups there, then upgrade."},
 		foreignProtocol: {publicerr.SchemaRefused, "Database belongs to another installation.",
 			"Use the installation this database belongs to."},
-		newerSchema: {publicerr.SchemaRefused, "Database schema is newer than this executable.",
+		newerSchema: {publicerr.SchemaRefused, "Database schema is newer.",
 			"Use the executable that supports this database version."},
 		forbidden: {publicerr.Forbidden, "authority is missing or expired",
 			"Request an active grant or an explicit scope change."},

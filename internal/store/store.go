@@ -193,7 +193,7 @@ func checkProtocol(ctx context.Context, db protocolReader, o stateport.Options) 
 		return refuse(newerSchema, nil)
 	}
 	if number < o.Schema {
-		return refuse(schema, nil)
+		return schemaVersionRefusal(olderSchema, number)
 	}
 	return nil
 }

@@ -34,7 +34,19 @@ func (s *Store) prepareSchema(ctx context.Context, target schemaDefinition) erro
 	if number == target.number {
 		return checkLayout(ctx, s.readers, target.baseline)
 	}
+	if err := target.checkMigrations(number); err != nil {
+		return err
+	}
 	return migrate(ctx, s.writer, s.options.Protocol, target)
+}
+
+func (d schemaDefinition) checkMigrations(number int) error {
+	for next := number; next < d.number; next++ {
+		if _, ok := d.migrations[next]; !ok {
+			return schemaVersionRefusal(migrationGap, number)
+		}
+	}
+	return nil
 }
 
 // One immediate transaction covers all steps, version changes and final validation.
@@ -52,12 +64,11 @@ func migrate(ctx context.Context, db *sql.DB, protocol stateport.Protocol, targe
 	if number > target.number {
 		return refuse(newerSchema, nil)
 	}
+	if err := target.checkMigrations(number); err != nil {
+		return err
+	}
 	for ; number < target.number; number++ {
-		step, ok := target.migrations[number]
-		if !ok {
-			return refuse(schema, nil)
-		}
-		if err := applyMigration(ctx, tx, number, step); err != nil {
+		if err := applyMigration(ctx, tx, number, target.migrations[number]); err != nil {
 			return err
 		}
 	}

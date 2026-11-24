@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/publicerr"
 )
 
-func TestMissingProtocolRowRequiresFreshDatabase(t *testing.T) {
+func TestMissingProtocolRowPreservesDatabase(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.sqlite")
 	s, err := Create(t.Context(), path, testOptions())
@@ -24,7 +24,7 @@ func TestMissingProtocolRowRequiresFreshDatabase(t *testing.T) {
 	_, err = Open(t.Context(), path, testOptions())
 	requireCode(t, err, publicerr.SchemaRefused)
 	refusal := publicerr.Classify(err)
-	if !errors.Is(err, sql.ErrNoRows) || refusal.Reason() != "This version requires a fresh database." || refusal.Remedy() != "Create a fresh database for this version; no upgrade path is supported." {
+	if !errors.Is(err, sql.ErrNoRows) || refusal.Reason() != "Database layout is unsupported." || refusal.Remedy() != "Preserve this database; use its release or restore a verified backup." {
 		t.Fatal("missing database protocol offered record lookup", err)
 	}
 }
@@ -61,8 +61,8 @@ func TestSchemaNumberRefusalDistinguishesBinaryRollback(t *testing.T) {
 		name, reason, remedy string
 		number               int
 	}{
-		{"older", "This version requires a fresh database.", "Create a fresh database for this version; no upgrade path is supported.", Schema - 1},
-		{"newer", "Database schema is newer than this executable.", "Use the executable that supports this database version.", Schema + 1},
+		{"older", "No upgrade: schema 5.", "Use a release that upgrades schema 5, or restore a verified backup.", Schema - 1},
+		{"newer", "Database schema is newer.", "Use the executable that supports this database version.", Schema + 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "state.sqlite")
