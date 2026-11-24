@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"golang.org/x/text/width"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -16,15 +17,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/installer"
 )
-
-func containsContext(contexts []string, selected string) bool {
-	for _, name := range contexts {
-		if selected == name {
-			return true
-		}
-	}
-	return false
-}
 
 // Ask selects a context and public address using one caller-owned scanner.
 // Terminal input cancellation is owned by the CLI, which closes its input on exit.
@@ -58,7 +50,7 @@ func Ask(ctx context.Context, in *bufio.Scanner, out io.Writer, contexts []strin
 			if c.Context == "" && len(contexts) == 1 {
 				c.Context = contexts[0]
 			}
-			if !containsContext(contexts, c.Context) {
+			if !slices.Contains(contexts, c.Context) {
 				return c, installer.NewProblem("context-missing", nil, "Context: "+c.Context)
 			}
 		}

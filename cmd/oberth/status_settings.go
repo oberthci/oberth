@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/oberthci/oberth/internal/apicontract"
@@ -145,9 +144,6 @@ func (rows *settingsRows) installation(s installationSettings) {
 	rows.add(apicontract.SettingSSHNodePort, s.SSHNodePort)
 	rows.add("source plugin image", s.SourceImage)
 	rows.add("Argo controller image", s.ControllerImage)
-	image, _, _ := strings.Cut(s.ControllerImage, "@")
-	controllerVersion := image[strings.LastIndex(image, ":")+1:]
-	rows.add("Argo controller version", controllerVersion)
 	rows.add("Argo executor image", s.ExecutorImage)
 	if s.BundledStore {
 		rows.add("store image", s.StoreImage)
