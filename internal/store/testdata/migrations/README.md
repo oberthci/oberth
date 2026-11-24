@@ -18,3 +18,8 @@ that the recorded revision declares the fixture's schema number.
 
 Schema 6 has no production step. Tests inject two real layout changes into
 the private open seam to prove forward migration and whole-chain rollback.
+
+Foreign keys stay enabled during every step. Changing foreign_keys inside the
+transaction has no effect. Do not drop referenced tables: a drop can refuse or
+cascade into dependent records. The first table-rebuild step needs a reviewed
+foreign-key strategy and fixtures that prove dependent history is preserved.

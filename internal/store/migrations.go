@@ -67,6 +67,9 @@ func migrate(ctx context.Context, db *sql.DB, protocol stateport.Protocol, targe
 	if err := checkProtocol(ctx, tx, stateport.Options{Protocol: protocol, Schema: target.number}); err != nil {
 		return err
 	}
+	if _, err := verifyAudit(ctx, tx, protocol.AuditDomain); err != nil {
+		return err
+	}
 	return databaseError(tx.Commit())
 }
 
