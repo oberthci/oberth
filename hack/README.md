@@ -60,8 +60,8 @@ commands keep the installed compiler with `GOTOOLCHAIN=local`. Standalone
 tools use the current checkout's module pair. Lint and deadcode retain their
 own tool modules. They build with explicit readonly flags in private module
 directories without vendor data, then run those binaries in the product tree.
-Each process reuses its built binary and cleans up on exit or SIGINT/SIGTERM,
-terminating its child process group before deleting private files.
+Each process reuses its built binary and deletes private files on normal exit.
+CLI entries also terminate child groups and clean up on SIGINT/SIGTERM.
 Vendor changes are listed alongside module and workspace changes, including
 `go.work.sum`. The separate branch check uses its own module files and workspace.
 The Go image pinned in `hack/devloop/Dockerfile` must already be present in the

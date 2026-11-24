@@ -10,7 +10,7 @@ plans bundle. Changes to either are listed; a second detached worktree then
 runs the branch's own check and parity. An external names policy with no blank patterns is required. Pin changes are
 printed package by package under GATE FILES CHANGED and require a separate commit
 containing only plan JSON data.
-Existing parity cannot be deleted. The container has a 25-minute deadline.
+Existing parity cannot be deleted. The container has an 80-minute deadline.
 
 Dependencies are closed, numbered denies win, every Go package has exactly
 one owner, and every product package has a package Spec comment naming an
@@ -70,9 +70,9 @@ messages. A plugin docs allowance starts at the first unfenced level-2
 "Agent plugins" heading and ends at the next level-1 or level-2 heading;
 duplicate or wrong-level headings are findings. JSON and YAML plugin manifests
 receive the same structured authorship check, including owners and maintainers.
-History checks configured identity and attribution lines. Reachability
-runs `go tool` with its own declaration and version in `hack/tools/deadcode.mod`,
-keeping the analyzer and linter dependency graphs separate.
+History checks configured identity and attribution lines. Reachability builds
+the analyzer from `hack/tools/deadcode.mod` with readonly requirements in a
+private directory, then runs it in the product tree, separately from lint.
 Tests cover the module, while production checks
 the live mains' dependency closure and owned packages outside it. Source
 classification supplies roots and product packages through the AST report;
@@ -87,11 +87,11 @@ no temporary parser binary or JSON offset handoff.
 Successful subprocess diagnostics stay separate from structured output;
 failed commands include their diagnostics in the finding.
 
-Warm the analyzer once with `go tool -modfile=hack/tools/deadcode.mod deadcode -help`.
+Warm it with `python3 -I hack/tools/go_tool.py deadcode -help`.
 With its modules cached, run the guard suite offline:
 
 ```sh
-GOPROXY=off python3 -m unittest discover -s hack/guards -p 'test_*.py'
+GOPROXY=off python3 -I -m unittest discover -s hack/guards -p 'test_*.py'
 ```
 
 The reachability suite checks tool startup once before running its fixtures;
