@@ -20,7 +20,7 @@ func messages() map[string]message {
 		"release_head":    {"release default head is missing", "Push the tag again after the default branch is readable."},
 		"release_old":     {"release version is not newer", "Choose a higher version."},
 		"release_build":   {"release build has not passed", "Run .oberth/build.yaml on the tagged commit and wait for it to pass, then push the tag again."},
-		"release_limit":   {"release build scan limit reached", "Run .oberth/build.yaml again on the tagged commit, then retry the release."},
+		"release_limit":   {"release build scan limit reached", "Run .oberth/build.yaml again on the tagged commit, then push the tag again."},
 		"release_rerun":   {"release rerun facts differ", "Rerun the original release with its unchanged tag, commit, workflow and parameters."},
 		"release_used":    {"release version is already used", "Release the next version; a release tag on the forge is never moved."},
 		"release_count":   {"push carries more than one release tag", "Push one release tag at a time."},

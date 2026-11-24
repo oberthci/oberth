@@ -65,6 +65,9 @@ func checkReleaseBuildScan(t *testing.T, count int) {
 		}
 	} else {
 		expectRefusal(t, err, "release_limit")
+		if got := err.(interface{ Remedy() string }).Remedy(); got != "Run .oberth/build.yaml again on the tagged commit, then push the tag again." {
+			t.Fatal("release scan limit lost its exact next action", got)
+		}
 		if h.reads != 0 {
 			t.Fatal("optional runs loaded full admissions", h.reads)
 		}
