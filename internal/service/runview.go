@@ -45,9 +45,11 @@ func (s *Service) runView(ctx context.Context, r stateport.Run, q runQuery) (api
 		return apicontract.RunRecord{}, err
 	}
 	for i := range steps {
-		if steps[i].DisplayReason == "" {
-			reason := stepReason(steps[i].Status)
-			steps[i].DisplayReason = reason
+		if steps[i].DisplayReason == string(steps[i].Status) || steps[i].DisplayReason == "step "+string(steps[i].Status) {
+			steps[i].DisplayReason = ""
+		}
+		if steps[i].Status == stepmodel.StepUnknown && steps[i].DisplayReason == "" {
+			steps[i].DisplayReason = reasonUnknown
 		}
 		if !q.Helpers {
 			steps[i].Logs = slices.DeleteFunc(steps[i].Logs, nativeHelper)

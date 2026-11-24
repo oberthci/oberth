@@ -19,6 +19,10 @@ export async function progress() {
       observer.disconnect();resolve();};
      const observer=new MutationObserver(test);observer.observe(document.body,{subtree:true,childList:true,characterData:true});test();
     })`));
+    if(path!=='/runs') {
+     const header=await client.evaluate(`({status:screen.logStep.status,reasons:[...screen.logHeader.querySelectorAll(':scope > p')].map(node=>node.textContent)})`);
+     check(header.reasons.length===0,'native step invented a status sentence '+JSON.stringify(header));
+    }
     const notice=await client.evaluate(`document.querySelector('#notice').textContent`);
     check(notice==='','native progress showed a page error '+notice);
     seen.push({phase,status:await state()});

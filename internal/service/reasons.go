@@ -36,26 +36,20 @@ const (
 
 	reasonHoldAbandon = "hold release requested"
 
-	reasonQueued      = "waiting for execution"
-	reasonRunning     = "run is running"
-	reasonPassed      = "run passed"
-	reasonFailed      = "run failed"
-	reasonCancelled   = "run cancelled"
-	detailCancelled   = "Push a new commit or request a rerun to run again."
-	reasonSkipped     = "step skipped"
-	reasonPending     = "step not reached"
-	reasonUnknown     = "execution evidence unavailable"
-	reasonParked      = "branch parked"
-	reasonDeleted     = "deletion recorded"
-	reasonPurged      = "logs purged"
-	reasonRelease     = "release steps may run again"
-	reasonEscalate    = "repeat cancel to skip exit handlers"
-	reasonPartial     = "publication may be partial"
-	reasonStepQueued  = "step queued"
-	reasonStepRunning = "step is running"
-	reasonStepPassed  = "step passed"
-	reasonStepFailed  = "step failed"
-	reasonHeld        = "run is held"
+	reasonQueued    = "waiting for execution"
+	reasonRunning   = "run is running"
+	reasonPassed    = "run passed"
+	reasonFailed    = "run failed"
+	reasonCancelled = "run cancelled"
+	detailCancelled = "Push a new commit or request a rerun to run again."
+	reasonUnknown   = "execution evidence unavailable"
+	reasonParked    = "branch parked"
+	reasonDeleted   = "deletion recorded"
+	reasonPurged    = "logs purged"
+	reasonRelease   = "release steps may run again"
+	reasonEscalate  = "repeat cancel to skip exit handlers"
+	reasonPartial   = "publication may be partial"
+	reasonHeld      = "run is held"
 )
 
 type problem int
@@ -200,24 +194,6 @@ func terminal(status stepmodel.RunStatus) bool {
 func isMissing(err error) bool {
 	var p *publicerr.Error
 	return errors.As(err, &p) && p.Code() == publicerr.NotFound
-}
-
-func stepReason(status stepmodel.StepStatus) string {
-	switch status {
-	case stepmodel.StepPending:
-		return reasonPending
-	case stepmodel.StepQueued:
-		return reasonStepQueued
-	case stepmodel.StepRunning:
-		return reasonStepRunning
-	case stepmodel.StepPassed:
-		return reasonStepPassed
-	case stepmodel.StepFailed:
-		return reasonStepFailed
-	case stepmodel.StepSkipped:
-		return reasonSkipped
-	}
-	return reasonUnknown
 }
 
 // summary keeps reasons that add information beyond the status; detail stays whole.

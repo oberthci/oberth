@@ -48,7 +48,7 @@ func TestReasonCatalog(t *testing.T) {
 	if err := checkCatalogue(src); err != nil {
 		t.Fatal(err)
 	}
-	steptest.AssertReasons(t, reasonQueued, reasonRunning, reasonPassed, reasonFailed, reasonCancelled, reasonSkipped, reasonPending, reasonUnknown, reasonParked, reasonDeleted, reasonPurged, reasonRelease, reasonHeld)
+	steptest.AssertReasons(t, reasonQueued, reasonRunning, reasonPassed, reasonFailed, reasonCancelled, reasonUnknown, reasonParked, reasonDeleted, reasonPurged, reasonRelease, reasonHeld)
 	for i, d := range diagnostics() {
 		if err := publicerr.CheckMessage(d.reason, 80); err != nil {
 			t.Fatal(err)

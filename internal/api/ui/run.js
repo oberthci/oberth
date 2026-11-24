@@ -54,5 +54,5 @@ function updateSelectedStep(view, selected) {
 }
 function stepHeader(step, open = false) {
  const reason = step.display_reason;
- return [h("h2", {}, step.name + " · " + step.status), reason && ![step.status, "step " + step.status, "step is " + step.status].includes(reason) ? h("p", {}, reason) : null, detail(step.detail, open)].filter(Boolean);
+ return [h("h2", {}, step.name + " · " + step.status), reason ? h("p", {}, reason) : null, detail(step.detail, open)].filter(Boolean);
 }
