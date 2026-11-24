@@ -81,6 +81,9 @@ func sample(t reflect.Type) any {
 				object[f.name] = sample(f.field.Type)
 			}
 		}
+		if t == reflect.TypeFor[apicontract.UplinkAddArgs]() || t == reflect.TypeFor[apicontract.UplinkInviteArgs]() {
+			object["scope"] = []string{"*"}
+		}
 		return object
 	case reflect.String:
 		return "project"
@@ -192,7 +195,7 @@ func TestNoPrivateKeyInArgvOrOutput(t *testing.T) {
 	b := fake.Bindings()
 	b.UplinkAdd.Handler = &fake.Handler[apicontract.UplinkAddArgs, apicontract.Identity]{Value: apicontract.Identity{Identity: "agent"}}
 	app, out, diagnostic = fixture(t, b)
-	app.in = strings.NewReader(`{"identity":"agent","ssh_public_key":"public"}`)
+	app.in = strings.NewReader(`{"identity":"agent","scope":["*"],"ssh_public_key":"public"}`)
 	if app.run(context.Background(), []string{"tool", "uplink_add", "-", "-o", "json"}) != 0 || strings.Contains(out.String()+diagnostic.String(), "sensitive-value") {
 		t.Fatal("credential result leaked")
 	}

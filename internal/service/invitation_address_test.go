@@ -20,7 +20,7 @@ func TestInvitationRejectsAliasBeforeCreation(t *testing.T) {
 	store := &countedInvitations{EnrollmentStore: p.state}
 	p.f.c.People.Enrollment = store
 	p.f.restart(t)
-	q := apicontract.UplinkInviteArgs{Identity: "invited", ServerURL: "https://oberth", SecretDigest: digestText(strings.Repeat("s", 48))}
+	q := apicontract.UplinkInviteArgs{Scope: []string{"*"}, Identity: "invited", ServerURL: "https://oberth", SecretDigest: digestText(strings.Repeat("s", 48))}
 	for _, address := range []string{"https://oberth", "https://oberth.oberth.svc", "https://ci.example./mcp", "https://other.example/mcp", "https://ci.example:34444/mcp", "https://ci.example:34443/other"} {
 		q.ServerURL = address
 		before := p.f.seq.Load()
@@ -60,7 +60,7 @@ func TestInvitationLongPublicAddressKeepsBoundedRemedy(t *testing.T) {
 	address := "https://ci.example/" + strings.Repeat("path/", 50)
 	p.f.c.People.PublicURL = address
 	p.f.restart(t)
-	q := apicontract.UplinkInviteArgs{Identity: "invited", ServerURL: "https://oberth", SecretDigest: digestText(strings.Repeat("s", 48))}
+	q := apicontract.UplinkInviteArgs{Scope: []string{"*"}, Identity: "invited", ServerURL: "https://oberth", SecretDigest: digestText(strings.Repeat("s", 48))}
 	call, err := p.f.s.PrepareUplinkInvite(t.Context(), adminCaller(), q)
 	if err == nil || call != nil {
 		t.Fatal("alias prepared an invitation", err)
@@ -87,7 +87,7 @@ func TestInvitationHostComparisonUsesASCII(t *testing.T) {
 		p := people(t)
 		p.f.c.People.PublicURL = pair[0]
 		p.f.restart(t)
-		q := apicontract.UplinkInviteArgs{Identity: "invited", ServerURL: pair[1], SecretDigest: digestText(strings.Repeat("s", 48))}
+		q := apicontract.UplinkInviteArgs{Scope: []string{"*"}, Identity: "invited", ServerURL: pair[1], SecretDigest: digestText(strings.Repeat("s", 48))}
 		call, err := p.f.s.PrepareUplinkInvite(t.Context(), adminCaller(), q)
 		if err == nil || call != nil {
 			t.Fatal("Unicode folding substituted the public host", pair, err)

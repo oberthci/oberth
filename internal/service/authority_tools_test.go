@@ -111,7 +111,7 @@ func TestEnrollmentRefusalsAndAtomicRegistration(t *testing.T) {
 			t.Fatal("invalid identity accepted", q.Identity)
 		}
 	}
-	good := apicontract.UplinkAddArgs{Identity: "registered", SshPublicKey: key, CSR: csr, BearerDigest: apicontract.SecretDigest("test-only-bearer")}
+	good := apicontract.UplinkAddArgs{Scope: []string{"*"}, Identity: "registered", SshPublicKey: key, CSR: csr, BearerDigest: apicontract.SecretDigest("test-only-bearer")}
 	call, e := p.f.s.PrepareUplinkAdd(ctx, adminCaller(), good)
 	v, e := execute(ctx, call, e)
 	if e != nil || v.Certificate == "" {
@@ -167,7 +167,7 @@ func TestIssuerLifetimePublicBoundaries(t *testing.T) {
 	p := people(t)
 	for _, extra := range []time.Duration{0, time.Second} {
 		_, key := publicKeys(t)
-		q := apicontract.UplinkAddArgs{Identity: "lifetime", SshPublicKey: key, BearerDigest: apicontract.SecretDigest("test-only-bearer"), TTL: (365*24*time.Hour + extra).String()}
+		q := apicontract.UplinkAddArgs{Scope: []string{"*"}, Identity: "lifetime", SshPublicKey: key, BearerDigest: apicontract.SecretDigest("test-only-bearer"), TTL: (365*24*time.Hour + extra).String()}
 		call, e := p.f.s.PrepareUplinkAdd(t.Context(), adminCaller(), q)
 		_, e = execute(t.Context(), call, e)
 		if (e != nil) != (extra > 0) {

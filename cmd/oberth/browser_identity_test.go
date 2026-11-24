@@ -14,7 +14,7 @@ func TestUplinkAddBearerFileNeedsNoSSHOption(t *testing.T) {
 	handler := b.UplinkAdd.Handler.(*fake.Handler[apicontract.UplinkAddArgs, apicontract.Identity])
 	app, _, diagnostic := fixture(t, b)
 	path := filepath.Join(filepath.Dir(app.env("OBERTH_TOKEN_FILE")), "browser-bearer")
-	if code := app.run(t.Context(), []string{"uplink", "add", "--identity", "browser", "--bearer-file", path}); code != 0 {
+	if code := app.run(t.Context(), []string{"uplink", "add", "--scope", `["*"]`, "--identity", "browser", "--bearer-file", path}); code != 0 {
 		t.Fatal("browser-only CLI refused", code, diagnostic.String())
 	}
 	args, _, calls := handler.Observed()

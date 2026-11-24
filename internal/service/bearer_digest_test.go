@@ -14,7 +14,7 @@ func TestBearerActivationBindsCallerDigestAndNeverReturnsPlaintext(t *testing.T)
 	_, key := publicKeys(t)
 	secret := "caller-retained-one-time-bearer"
 	digest := apicontract.SecretDigest(secret)
-	q := apicontract.UplinkAddArgs{Identity: "bearer-agent", SshPublicKey: key, BearerDigest: digest}
+	q := apicontract.UplinkAddArgs{Scope: []string{"*"}, Identity: "bearer-agent", SshPublicKey: key, BearerDigest: digest}
 	call, err := p.f.s.PrepareUplinkAdd(t.Context(), adminCaller(), q)
 	out, err := execute(t.Context(), call, err)
 	if err != nil {
@@ -36,7 +36,7 @@ func TestBearerDigestRefusalLeavesNoIdentity(t *testing.T) {
 		t.Run(digest[:1], func(t *testing.T) {
 			p := people(t)
 			_, key := publicKeys(t)
-			call, err := p.f.s.PrepareUplinkAdd(t.Context(), adminCaller(), apicontract.UplinkAddArgs{Identity: "invalid-bearer", SshPublicKey: key, BearerDigest: digest})
+			call, err := p.f.s.PrepareUplinkAdd(t.Context(), adminCaller(), apicontract.UplinkAddArgs{Scope: []string{"*"}, Identity: "invalid-bearer", SshPublicKey: key, BearerDigest: digest})
 			if _, err = execute(t.Context(), call, err); err == nil {
 				t.Fatal("invalid bearer digest accepted")
 			}

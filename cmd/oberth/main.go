@@ -109,7 +109,7 @@ func (a application) runCommand(ctx context.Context, args []string) int {
 }
 
 func (a application) remote(ctx context.Context, row command, input []byte, options commonOptions) int {
-	resolved, err := client.Resolve(options.transport, a.base, a.env)
+	resolved, err := a.resolveRemote(row, input, options.transport)
 	if err != nil {
 		return a.failedDetail(err, options.detail)
 	}

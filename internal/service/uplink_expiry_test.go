@@ -20,7 +20,7 @@ func checkUplinkLifetime(t *testing.T, kind string) {
 	t.Helper()
 	p := people(t)
 	csr, key := publicKeys(t)
-	q := apicontract.UplinkAddArgs{Identity: "agent", SshPublicKey: key, TTL: "2h"}
+	q := apicontract.UplinkAddArgs{Scope: []string{"*"}, Identity: "agent", SshPublicKey: key, TTL: "2h"}
 	if kind == "certificate" || kind == "certificate-and-bearer" {
 		q.CSR = csr
 	}

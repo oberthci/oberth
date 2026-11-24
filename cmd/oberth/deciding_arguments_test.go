@@ -44,7 +44,7 @@ func TestDecidingBearerDigestConflictHasNoEffects(t *testing.T) {
 	b.UplinkAdd.Handler = h
 	app, _, diagnostic := fixture(t, b)
 	path := filepath.Join(decidingDirectory(t), "bearer")
-	args := []string{"uplink", "add", "--identity", "browser", "--ssh-public-key", "public", "--bearer-file", path, "--bearer-digest", strings.Repeat("a", 64)}
+	args := []string{"uplink", "add", "--scope", `["*"]`, "--identity", "browser", "--ssh-public-key", "public", "--bearer-file", path, "--bearer-digest", strings.Repeat("a", 64)}
 	if code := app.run(t.Context(), args); code != 2 {
 		t.Fatal("conflicting bearer sources accepted", code, diagnostic.String())
 	}

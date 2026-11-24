@@ -55,7 +55,7 @@ func checkInvitationRequest(t *testing.T, tc invitationAddressCase) {
 	store := &countedInvitations{EnrollmentStore: p.state}
 	p.f.c.People.Enrollment = store
 	p.f.restart(t)
-	q := apicontract.UplinkInviteArgs{Identity: "review", ServerURL: tc.address, SecretDigest: digestText(strings.Repeat("s", 48))}
+	q := apicontract.UplinkInviteArgs{Scope: []string{"*"}, Identity: "review", ServerURL: tc.address, SecretDigest: digestText(strings.Repeat("s", 48))}
 	before := p.f.seq.Load()
 	call, err := p.f.s.PrepareUplinkInvite(t.Context(), adminCaller(), q)
 	if err != nil {

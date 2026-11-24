@@ -38,7 +38,7 @@ func TestBrowserOnlyUplinkAuthenticatesWithoutAnSSHKey(t *testing.T) {
 
 func TestUplinkWithoutKeyOrBearerNamesBothOptions(t *testing.T) {
 	p := people(t)
-	call, err := p.f.s.PrepareUplinkAdd(t.Context(), adminCaller(), apicontract.UplinkAddArgs{Identity: "browser"})
+	call, err := p.f.s.PrepareUplinkAdd(t.Context(), adminCaller(), apicontract.UplinkAddArgs{Scope: []string{"*"}, Identity: "browser"})
 	problem := publicerr.Classify(err)
 	if call != nil || problem.Code() != publicerr.InvalidInput || !strings.Contains(problem.Remedy(), "--ssh-public-key") || !strings.Contains(problem.Remedy(), "--bearer-file") {
 		t.Fatal("missing credentials have no useful remedy", err)

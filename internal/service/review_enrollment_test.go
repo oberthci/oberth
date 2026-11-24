@@ -13,7 +13,7 @@ import (
 func registerReviewKey(t *testing.T, p *peopleFixture, identity string) apicontract.Identity {
 	t.Helper()
 	_, key := publicKeys(t)
-	call, e := p.f.s.PrepareUplinkAdd(t.Context(), adminCaller(), apicontract.UplinkAddArgs{Identity: identity, SshPublicKey: key})
+	call, e := p.f.s.PrepareUplinkAdd(t.Context(), adminCaller(), apicontract.UplinkAddArgs{Scope: []string{"*"}, Identity: identity, SshPublicKey: key})
 	v, e := execute(t.Context(), call, e)
 	if e != nil {
 		t.Fatal(e)
@@ -45,7 +45,7 @@ func reviewInvitation(t *testing.T, p *peopleFixture) (model.Invitation, model.I
 	t.Helper()
 	secret := strings.Repeat("s", 48)
 	csr, key := publicKeys(t)
-	call, e := p.f.s.PrepareUplinkInvite(t.Context(), adminCaller(), apicontract.UplinkInviteArgs{Identity: "invited", ServerURL: "https://ci.example/mcp", SecretDigest: digestText(secret)})
+	call, e := p.f.s.PrepareUplinkInvite(t.Context(), adminCaller(), apicontract.UplinkInviteArgs{Scope: []string{"*"}, Identity: "invited", ServerURL: "https://ci.example/mcp", SecretDigest: digestText(secret)})
 	v, e := execute(t.Context(), call, e)
 	if e != nil {
 		t.Fatal(e)
@@ -79,7 +79,7 @@ func TestInvitationRequiresCSRAndCanonicalDigest(t *testing.T) {
 	_, e := p.f.s.Redeem(t.Context(), v.ID, q)
 	requireField(t, e, "csr")
 	for _, digest := range []string{strings.Repeat("A", 64), strings.Repeat("a", 62)} {
-		call, e := p.f.s.PrepareUplinkInvite(t.Context(), adminCaller(), apicontract.UplinkInviteArgs{Identity: "invited", ServerURL: "https://ci.example/mcp", SecretDigest: digest})
+		call, e := p.f.s.PrepareUplinkInvite(t.Context(), adminCaller(), apicontract.UplinkInviteArgs{Scope: []string{"*"}, Identity: "invited", ServerURL: "https://ci.example/mcp", SecretDigest: digest})
 		requireField(t, e, "secret_digest")
 		if call != nil {
 			t.Fatal("noncanonical digest prepared")
@@ -128,7 +128,7 @@ func TestRotationCannotChangeAuthorityOrExecutionPolicy(t *testing.T) {
 		})
 	}
 }
-func TestScopeChangeDistinguishesOmissionAndEmptyScope(t *testing.T) {
+func TestScopeChangeRequiresExplicitScope(t *testing.T) {
 	t.Parallel()
 	p := people(t)
 	v := registerReviewKey(t, p, "scope")
@@ -139,8 +139,14 @@ func TestScopeChangeDistinguishesOmissionAndEmptyScope(t *testing.T) {
 	requireField(t, e, "scope")
 	empty := []*string{}
 	call, e := p.f.s.PrepareUplinkScope(t.Context(), adminCaller(), apicontract.UplinkScopeArgs{Identity: v.Identity, Fingerprint: v.Fingerprint, Scope: &empty})
+	if e == nil || call != nil {
+		t.Fatal("empty scope widened repository access")
+	}
+	all := "*"
+	explicit := []*string{&all}
+	call, e = p.f.s.PrepareUplinkScope(t.Context(), adminCaller(), apicontract.UplinkScopeArgs{Identity: v.Identity, Fingerprint: v.Fingerprint, Scope: &explicit})
 	got, e := execute(t.Context(), call, e)
 	if e != nil || got.Scope == nil || len(got.Scope) != 0 {
-		t.Fatal("explicit empty scope refused", got, e)
+		t.Fatal("explicit all-repositories scope refused", got, e)
 	}
 }

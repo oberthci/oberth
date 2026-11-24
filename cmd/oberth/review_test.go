@@ -147,7 +147,7 @@ func TestWaitAnnouncesBeforeBlocking(t *testing.T) {
 func TestCredentialSavedBeforeDisplay(t *testing.T) {
 	app, out, diagnostic := fixture(t, credentialBinding("uplink_add", ""))
 	path := filepath.Join(filepath.Dir(app.env("OBERTH_TOKEN_FILE")), "new-bearer")
-	if code := app.run(t.Context(), []string{"uplink", "add", "--identity", "agent", "--ssh-public-key", "public", "--bearer-file", path, "--json"}); code != 0 {
+	if code := app.run(t.Context(), []string{"uplink", "add", "--scope", `["*"]`, "--identity", "agent", "--ssh-public-key", "public", "--bearer-file", path, "--json"}); code != 0 {
 		t.Fatalf("bearer activation: %d %s", code, diagnostic.String())
 	}
 	assertSavedCredential(t, out.Bytes(), "")
@@ -168,7 +168,7 @@ func TestCredentialDestinationRefusesBeforeMutation(t *testing.T) {
 	if err := os.Chmod(dir, 0777); err != nil {
 		t.Fatal(err)
 	}
-	if app.run(t.Context(), []string{"uplink", "add", "--identity", "agent", "--ssh-public-key", "public", "--bearer-file", filepath.Join(dir, "new-bearer")}) != 1 {
+	if app.run(t.Context(), []string{"uplink", "add", "--scope", `["*"]`, "--identity", "agent", "--ssh-public-key", "public", "--bearer-file", filepath.Join(dir, "new-bearer")}) != 1 {
 		t.Fatalf("unsafe destination accepted: %s", diag.String())
 	}
 	_, _, calls := b.UplinkAdd.Handler.(*fake.Handler[apicontract.UplinkAddArgs, apicontract.Identity]).Observed()
@@ -305,7 +305,7 @@ func TestNamedBearerCreationRetainsCredential(t *testing.T) {
 		}
 		return apicontract.Identity{Identity: "agent"}, nil
 	}
-	if code := app.run(t.Context(), []string{"uplink", "add", "--identity", "agent", "--ssh-public-key", "public", "--bearer-file", path, "--json"}); code != 0 {
+	if code := app.run(t.Context(), []string{"uplink", "add", "--scope", `["*"]`, "--identity", "agent", "--ssh-public-key", "public", "--bearer-file", path, "--json"}); code != 0 {
 		t.Fatalf("activation failed: %d %s", code, diagnostic.String())
 	}
 	input, _, calls := h.Observed()
@@ -319,7 +319,7 @@ func TestNamedBearerCreationRetainsCredential(t *testing.T) {
 func TestBearerPathCanBeCopiedFromHumanOutput(t *testing.T) {
 	app, out, diagnostic := fixture(t, credentialBinding("uplink_add", ""))
 	path := filepath.Join(filepath.Dir(app.env("OBERTH_TOKEN_FILE")), "new-bearer")
-	if app.run(t.Context(), []string{"uplink", "add", "--identity", "agent", "--ssh-public-key", "public", "--bearer-file", path}) != 0 {
+	if app.run(t.Context(), []string{"uplink", "add", "--scope", `["*"]`, "--identity", "agent", "--ssh-public-key", "public", "--bearer-file", path}) != 0 {
 		t.Fatal(diagnostic.String())
 	}
 	secret, err := client.ReadPrivate(path)

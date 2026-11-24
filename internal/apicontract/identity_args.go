@@ -107,7 +107,7 @@ type UplinkAddArgs struct {
 	BearerDigest string   `json:"bearer_digest,omitempty" desc:"Activate the SHA256 digest of a bearer already generated and retained by the caller." sensitive:"false" position:"0"`
 	CSR          string   `json:"csr,omitempty" desc:"Supply a public certificate request generated with the matching local private key." sensitive:"false" position:"0"`
 	Identity     string   `json:"identity,omitempty" desc:"Name the approved uplink identity; this never selects a local filesystem path." required:"true" sensitive:"false" position:"0"`
-	Scope        []string `json:"scope,omitempty" desc:"Set the approved upstream names; an explicit empty array clears repository restrictions." maxItems:"128" sensitive:"false" position:"0"`
+	Scope        []string `json:"scope,omitempty" desc:"Required upstream names; use [\"*\"] explicitly for all repositories. Empty scope is refused." maxItems:"128" sensitive:"false" position:"0"`
 	SshPublicKey string   `json:"ssh_public_key,omitempty" desc:"Supply a public SSH key for Git pushes; omit it for a browser-only bearer." sensitive:"false" position:"0"`
 	TTL          string   `json:"ttl,omitempty" desc:"Select the requested credential lifetime within the issuer policy." sensitive:"false" position:"0"`
 	Reason       string   `json:"reason,omitempty" desc:"Explain why this action is requested; the service records it with the audit outcome." sensitive:"false" position:"0"`
@@ -124,7 +124,7 @@ type UplinkCertArgs struct {
 type UplinkInviteArgs struct {
 	Expires      string   `json:"expires,omitempty" desc:"Select the requested expiry within the configured policy lifetime." sensitive:"false" position:"0"`
 	Identity     string   `json:"identity,omitempty" desc:"Name the approved uplink identity; this never selects a local filesystem path." required:"true" sensitive:"false" position:"0"`
-	Scope        []string `json:"scope,omitempty" desc:"Set the approved upstream names; an explicit empty array clears repository restrictions." sensitive:"false" position:"0"`
+	Scope        []string `json:"scope,omitempty" desc:"Required approved upstream names; use the single wildcard explicitly for all repositories." sensitive:"false" position:"0"`
 	SecretDigest string   `json:"secret_digest,omitempty" desc:"Supply the digest of the random invitation secret generated and retained locally." required:"true" sensitive:"false" position:"0"`
 	ServerURL    string   `json:"server_url,omitempty" desc:"Bind the invitation to the public HTTPS MCP endpoint the recipient will use." required:"true" sensitive:"false" position:"0"`
 	Reason       string   `json:"reason,omitempty" desc:"Explain why this action is requested; the service records it with the audit outcome." sensitive:"false" position:"0"`
@@ -149,7 +149,7 @@ type UplinkRotateArgs struct {
 type UplinkScopeArgs struct {
 	Fingerprint string     `json:"fingerprint,omitempty" desc:"Select the exact registered SSH key fingerprint when an identity has several keys." sensitive:"false" position:"0"`
 	Identity    string     `json:"identity,omitempty" desc:"Name the approved uplink identity; this never selects a local filesystem path." required:"true" sensitive:"false" position:"0"`
-	Scope       *[]*string `json:"scope,omitempty" desc:"Set the approved upstream names; an explicit empty array clears repository restrictions." required:"true" maxItems:"128" sensitive:"false" position:"0"`
+	Scope       *[]*string `json:"scope,omitempty" desc:"Required approved upstream names; use the single wildcard explicitly for all repositories." required:"true" maxItems:"128" sensitive:"false" position:"0"`
 	Reason      string     `json:"reason,omitempty" desc:"Explain why this action is requested; the service records it with the audit outcome." sensitive:"false" position:"0"`
 }
 

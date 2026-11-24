@@ -54,7 +54,7 @@ a bearer for this installation or a certificate already configured in the browse
 administrator profile, create a short-lived credential in a new private directory outside Git.
 Browser-only registration needs no SSH key. Add `--ssh-public-key` only when also allowing Git
 pushes; pick an unused identity name. `<upstream>` is the first component of a full repository
-name; its scope covers every repository there, not only browser reads; `[]` lifts the limit.
+name; its scope covers every repository there. Only `["*"]` lifts the limit; `[]` refuses.
 
 ```sh
 mkdir -m 700 <private-directory>

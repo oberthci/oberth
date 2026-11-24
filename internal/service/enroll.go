@@ -98,6 +98,10 @@ func (s *Service) PrepareUplinkAdd(ctx context.Context, c apicontract.Caller, q 
 	if e != nil {
 		return nil, e
 	}
+	q.Scope, e = apicontract.ExplicitUplinkScope(q.Scope)
+	if e != nil {
+		return nil, e
+	}
 	if e = publicIdentity(q.Identity, q.Scope); e != nil {
 		return nil, e
 	}
@@ -191,6 +195,10 @@ func (s *Service) PrepareClientRenew(ctx context.Context, c apicontract.Caller, 
 }
 func (s *Service) PrepareUplinkInvite(ctx context.Context, c apicontract.Caller, q apicontract.UplinkInviteArgs) (apicontract.Call[model.Invitation], error) {
 	a, e := s.peopleAllow(ctx, c.Actor, "uplink_invite")
+	if e != nil {
+		return nil, e
+	}
+	q.Scope, e = apicontract.ExplicitUplinkScope(q.Scope)
 	if e != nil {
 		return nil, e
 	}

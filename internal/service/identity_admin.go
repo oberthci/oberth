@@ -34,7 +34,10 @@ func (s *Service) PrepareUplinkScope(ctx context.Context, c apicontract.Caller, 
 	if q.Scope == nil {
 		return nil, bad("scope")
 	}
-	scope := scopeNames(q.Scope)
+	scope, e := apicontract.ExplicitUplinkScope(scopeNames(q.Scope))
+	if e != nil {
+		return nil, e
+	}
 	if e = publicIdentity(k.Identity, scope); e != nil {
 		return nil, e
 	}

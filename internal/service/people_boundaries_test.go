@@ -40,7 +40,7 @@ func TestAdministrativeDetailAndIdentityBoundaries(t *testing.T) {
 	}
 	for _, extra := range []int{0, 1} {
 		_, key := publicKeys(t)
-		q := apicontract.UplinkAddArgs{Identity: strings.Repeat("i", 256+extra), SshPublicKey: key}
+		q := apicontract.UplinkAddArgs{Scope: []string{"*"}, Identity: strings.Repeat("i", 256+extra), SshPublicKey: key}
 		call, e := p.f.s.PrepareUplinkAdd(ctx, adminCaller(), q)
 		_, e = execute(ctx, call, e)
 		if (e != nil) != (extra > 0) {
@@ -123,14 +123,14 @@ func TestSSHAndInvitationLifetimePublicBoundaries(t *testing.T) {
 		_, key := publicKeys(t)
 		base := strings.TrimSpace(key) + " "
 		key = base + strings.Repeat("c", (64<<10)-len(base)+extra)
-		call, e := p.f.s.PrepareUplinkAdd(t.Context(), adminCaller(), apicontract.UplinkAddArgs{Identity: "bounded-key", SshPublicKey: key})
+		call, e := p.f.s.PrepareUplinkAdd(t.Context(), adminCaller(), apicontract.UplinkAddArgs{Scope: []string{"*"}, Identity: "bounded-key", SshPublicKey: key})
 		_, e = execute(t.Context(), call, e)
 		if (e != nil) != (extra > 0) {
 			t.Fatal("SSH N/N+1", extra, e)
 		}
 	}
 	for _, extra := range []int{0, 1} {
-		q := apicontract.UplinkInviteArgs{Identity: "invited", ServerURL: "https://ci.example/mcp", SecretDigest: digestText("bounded invitation" + fmt.Sprint(extra)), Expires: fmt.Sprint(168+extra) + "h"}
+		q := apicontract.UplinkInviteArgs{Scope: []string{"*"}, Identity: "invited", ServerURL: "https://ci.example/mcp", SecretDigest: digestText("bounded invitation" + fmt.Sprint(extra)), Expires: fmt.Sprint(168+extra) + "h"}
 		call, e := p.f.s.PrepareUplinkInvite(t.Context(), adminCaller(), q)
 		_, e = execute(t.Context(), call, e)
 		if (e != nil) != (extra > 0) {
@@ -177,7 +177,7 @@ func TestInvitationSecretPublicBoundaries(t *testing.T) {
 	for _, n := range []int{31, 32, 512, 513} {
 		secret := strings.Repeat("s", n)
 		csr, key := publicKeys(t)
-		q := apicontract.UplinkInviteArgs{Identity: "bounded-secret", ServerURL: "https://ci.example/mcp", SecretDigest: digestText(secret)}
+		q := apicontract.UplinkInviteArgs{Scope: []string{"*"}, Identity: "bounded-secret", ServerURL: "https://ci.example/mcp", SecretDigest: digestText(secret)}
 		call, e := p.f.s.PrepareUplinkInvite(t.Context(), adminCaller(), q)
 		v, e := execute(t.Context(), call, e)
 		if e != nil {
@@ -213,7 +213,7 @@ func TestBearerMinimumLifetimeBoundary(t *testing.T) {
 	p := people(t)
 	for _, d := range []time.Duration{time.Hour - time.Second, time.Hour} {
 		_, key := publicKeys(t)
-		q := apicontract.UplinkAddArgs{Identity: "minimum", SshPublicKey: key, BearerDigest: apicontract.SecretDigest("test-only-bearer"), TTL: d.String()}
+		q := apicontract.UplinkAddArgs{Scope: []string{"*"}, Identity: "minimum", SshPublicKey: key, BearerDigest: apicontract.SecretDigest("test-only-bearer"), TTL: d.String()}
 		call, e := p.f.s.PrepareUplinkAdd(t.Context(), adminCaller(), q)
 		_, e = execute(t.Context(), call, e)
 		if (e != nil) != (d < time.Hour) {
