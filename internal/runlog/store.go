@@ -19,6 +19,7 @@ type Store struct {
 	limit     int64
 	gate      chan struct{}
 	active    sync.Map
+	following sync.Map
 }
 
 func Open(ctx context.Context, directory string, limit int64) (*Store, error) {

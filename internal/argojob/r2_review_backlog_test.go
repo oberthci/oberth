@@ -78,3 +78,4 @@ func pendingCaptures(e *Executor) int {
 }
 
 func (*reviewBlockedLogStore) Track(context.Context, string, []runlog.ContainerLog) error { return nil }
+func (*reviewBlockedLogStore) KeepFollowing(string, []runlog.ContainerLog)                {}

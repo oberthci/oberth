@@ -146,3 +146,4 @@ func TestAcknowledgedObservationUsesOnlyRemainingWindow(t *testing.T) {
 }
 
 func (*boundedCapture) Track(context.Context, string, []runlog.ContainerLog) error { return nil }
+func (*boundedCapture) KeepFollowing(string, []runlog.ContainerLog)                {}

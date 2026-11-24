@@ -9399,10 +9399,10 @@
     "docs/plans/c2-service-actions-and-history.md": "26c2a3e84b20e5a1d9bda518492359591903f1f66cbfe08489659e4f359abd26",
     "docs/plans/c3-wiring-and-submission.md": "2bda8b25776d7f78706a4f57316c82e3ccb7434a42c67f96bcb762f2c8b36a47",
     "docs/plans/c4-admission-rules-and-plan.md": "9c29dfb7bdb5b34200f9abc83acb0fb666bff4939a8776dbd37ebeea9cab0327",
-    "docs/plans/c5-native-execution.md": "155a113cdea2691fb03f7fcfebd7c740a718660f161fa0c1ad01b91a76a11ce0",
+    "docs/plans/c5-native-execution.md": "f3ad4a361270e5fd47078a07a6e4e55dd99f76a8686c5e6f5b988092a24a8c38",
     "docs/plans/c6-source-delivery.md": "a3846f5f32189988bc2135ff72d4db6cce88d68ed675df116e508bb84f29e113",
     "docs/plans/c7-durable-state.md": "62094b0475735bd2427ee573807cdc767a45befdaa86a0472f6587629d537361",
-    "docs/plans/c8-logs.md": "d406f3a01f449719be4aa255d628b908e9a8a1e33230f3c21b9b50ce0e74a61d",
+    "docs/plans/c8-logs.md": "f7eb0a8e8994f978e6c7889cd2718b6bce816ca7176553b0ea9bc23f1c01637d",
     "docs/plans/c9-install-and-upgrade.md": "f06974905316c70450ecd48006e615e45ceff5e126fe530f39a4327adb76a1d2"
   },
   "deltas": [

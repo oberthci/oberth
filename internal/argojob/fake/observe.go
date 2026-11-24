@@ -37,6 +37,13 @@ var _ argojob.Cache = (*Cache)(nil)
 type Logs struct {
 	ReserveFunc func(context.Context, string, runlog.ContainerLog) (*runlog.Reservation, error)
 	TrackFunc   func(context.Context, string, []runlog.ContainerLog) error
+	KeepFunc    func(string, []runlog.ContainerLog)
+}
+
+func (f Logs) KeepFollowing(id string, entries []runlog.ContainerLog) {
+	if f.KeepFunc != nil {
+		f.KeepFunc(id, entries)
+	}
 }
 
 func (f Logs) Track(ctx context.Context, id string, entries []runlog.ContainerLog) error {

@@ -2,6 +2,7 @@ package runlog
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -54,11 +55,31 @@ func (s *Store) Track(ctx context.Context, id string, entries []ContainerLog) er
 		}
 		changed = changed || update
 	}
-	if !changed {
-		return nil
+	if changed {
+		if err := s.save(id, saved); err != nil {
+			return err
+		}
 	}
+	for _, entry := range entries {
+		if saved.Containers[position(saved, entry)].State == Following {
+			s.following.Store(copyKey(id, entry), true)
+		}
+	}
+	return nil
+}
 
-	return s.save(id, saved)
+// KeepFollowing retires process-only availability absent from a verified snapshot.
+// It performs no storage I/O and cannot revoke an active retained copy.
+func (s *Store) KeepFollowing(id string, entries []ContainerLog) {
+	s.following.Range(func(raw, _ any) bool {
+		key := raw.(captureKey)
+		if key.run == id && !slices.ContainsFunc(entries, func(entry ContainerLog) bool {
+			return entry.PodUID == key.pod && entry.Container == key.container
+		}) {
+			s.following.Delete(key)
+		}
+		return true
+	})
 }
 
 // Reservation permits one capture or a release before opening its source.
@@ -74,6 +95,7 @@ type Reservation struct {
 // Nil means this physical container has a pending or completed attempt, including
 // one interrupted by a restart, and must never be reopened.
 func (s *Store) Reserve(ctx context.Context, id string, entry ContainerLog) (*Reservation, error) {
+	live := entry.State == Following
 	if err := checkID(id); err != nil {
 		return nil, err
 	}
@@ -105,6 +127,9 @@ func (s *Store) Reserve(ctx context.Context, id string, entry ContainerLog) (*Re
 		return nil, err
 	}
 	s.active.Store(copyKey(id, entry), true)
+	if live {
+		s.following.Store(copyKey(id, entry), true)
+	}
 	return &Reservation{store: s, run: id, entry: entry}, nil
 }
 
@@ -178,6 +203,11 @@ func copyKey(run string, entry ContainerLog) captureKey {
 }
 func (s *Store) availability(run string, entries []ContainerLog) {
 	for i := range entries {
+		if entries[i].State == Following {
+			if _, live := s.following.Load(copyKey(run, entries[i])); !live {
+				entries[i].State, entries[i].Reason, entries[i].Detail = Interrupted, pendingReason, pendingDetail
+			}
+		}
 		if entries[i].State != Copying {
 			continue
 		}

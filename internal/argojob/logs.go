@@ -82,6 +82,7 @@ func logBinding(w *wf.Workflow, n wf.NodeStatus, p *core.Pod, entry runlog.Conta
 type LogStore interface {
 	Reserve(context.Context, string, runlog.ContainerLog) (*runlog.Reservation, error)
 	Track(context.Context, string, []runlog.ContainerLog) error
+	KeepFollowing(string, []runlog.ContainerLog)
 }
 
 func (e *Executor) capture(ctx context.Context, t *tracking, w *wf.Workflow, pods []*core.Pod) {
@@ -115,6 +116,7 @@ func (e *Executor) capture(ctx context.Context, t *tracking, w *wf.Workflow, pod
 			e.logError(ctx, t.binding.RunID, err)
 		}
 	}
+	e.config.Logs.KeepFollowing(t.binding.RunID, live)
 	for _, entries := range jobs {
 		e.offerCapture(t, captureJob{binding: t.binding, entries: entries})
 	}

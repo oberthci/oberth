@@ -85,6 +85,13 @@ func (e *Executor) Untrack(name string) {
 	e.mu.Unlock()
 }
 
+func (e *Executor) retire(t *tracking) {
+	if e.config.Logs != nil {
+		e.config.Logs.KeepFollowing(t.binding.RunID, nil)
+	}
+	e.Untrack(t.binding.Workflow.Name)
+}
+
 // Run consumes recovery and native change notifications through the same queue.
 func (e *Executor) Run(ctx context.Context) error {
 	e.queue.Add("")
@@ -213,7 +220,7 @@ func (e *Executor) process(ctx context.Context, name string) {
 	if e.expired(t) {
 		e.exhausted(parent, t, errors.New("terminal evidence window expired"))
 		e.queue.Forget(name)
-		e.Untrack(name)
+		e.retire(t)
 		return
 	}
 	err := e.observe(ctx, t)
@@ -225,7 +232,7 @@ func (e *Executor) process(ctx context.Context, name string) {
 		t.refusals = 0
 		e.queue.Forget(name)
 		if t.settled || t.lost {
-			e.Untrack(name)
+			e.retire(t)
 		}
 		return
 	}
@@ -239,7 +246,7 @@ func (e *Executor) process(ctx context.Context, name string) {
 	}
 	e.exhausted(parent, t, err)
 	e.queue.Forget(name)
-	e.Untrack(name)
+	e.retire(t)
 }
 func (e *Executor) observe(ctx context.Context, t *tracking) error {
 	if t.final != nil && !t.completed {

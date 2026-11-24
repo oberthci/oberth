@@ -40,4 +40,23 @@ func TestRunningContainerIsTrackedBeforeTerminalCapture(t *testing.T) {
 	if len(tr.pending) != 0 {
 		t.Fatal("running container started a retained capture")
 	}
+	e.capture(t.Context(), tr, w, nil)
+	assertTrackedAvailability(t, logs, runlog.Interrupted, "missing Pod still offers follow")
+	e.capture(t.Context(), tr, w, []*core.Pod{p})
+	assertTrackedAvailability(t, logs, runlog.Following, "current Pod did not restore follow")
+	e.retire(tr)
+	assertTrackedAvailability(t, logs, runlog.Interrupted, "retired observer still offers follow")
+}
+
+func assertTrackedAvailability(t *testing.T, logs *runlog.Store, want runlog.CaptureState, label string) {
+	t.Helper()
+	entries, err := logs.Containers(t.Context(), "run")
+	if err != nil || len(entries) != 2 {
+		t.Fatal(label, entries, err)
+	}
+	for _, entry := range entries {
+		if entry.State != want {
+			t.Fatal(label, entries)
+		}
+	}
 }
