@@ -53,8 +53,9 @@ func footerPage(now time.Time) apicontract.RunPage {
 		Status: stepmodel.RunFailed, CreatedAt: started.Add(-time.Minute), StartedAt: &started, FinishedAt: &finished,
 		LogicalStepCounts: stepmodel.LogicalStepCounts{Total: 4, Exact: true, Passed: 2, Failed: 1},
 		Failure:           &stepmodel.FailureRecord{Step: "lint", Name: "lint\u200b"}}
+	runningStart := now.Add(-42 * time.Second)
 	running := stepmodel.RunSummary{ID: "47c0aa00ffffffffffffffffffffffff", Repo: "github/oberthci/oberth", Ref: "refs/tags/v1",
-		Status: stepmodel.RunRunning, CreatedAt: now.Add(-42 * time.Second), LogicalStepCounts: stepmodel.LogicalStepCounts{Total: 3}}
+		Status: stepmodel.RunRunning, CreatedAt: runningStart, StartedAt: &runningStart, LogicalStepCounts: stepmodel.LogicalStepCounts{Total: 3}}
 	return apicontract.RunPage{Runs: []apicontract.RunRecord{{RunSummary: running}, {RunSummary: failed}}, ServerTime: now}
 }
 
@@ -300,11 +301,17 @@ func TestBridgeFooterQueuedTime(t *testing.T) {
 	run := &page.Runs[0]
 	run.Status = stepmodel.RunQueued
 	run.CreatedAt = now.Add(-time.Minute)
+	run.StartedAt = nil
 	if text := string(footerRows(page, nil, now)); !strings.Contains(text, "… queued 0/≥3 — 1m") {
 		t.Fatalf("queued footer counts waiting as execution: %s", text)
 	}
+	finished := now
+	run.Status, run.FinishedAt = stepmodel.RunCancelled, &finished
+	if text := string(footerRows(page, nil, now)); !strings.Contains(text, "■ cancelled 0/≥3 — 1m") {
+		t.Fatalf("unstarted cancelled footer counts waiting as execution: %s", text)
+	}
 	started := now.Add(-18 * time.Second)
-	run.Status, run.StartedAt = stepmodel.RunRunning, &started
+	run.Status, run.StartedAt, run.FinishedAt = stepmodel.RunRunning, &started, nil
 	if text := string(footerRows(page, nil, now)); !strings.Contains(text, "▶ running 0/≥3 18s 1m") {
 		t.Fatalf("running footer lost execution time: %s", text)
 	}

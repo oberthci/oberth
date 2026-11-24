@@ -54,7 +54,7 @@ system trust and settings do not change.
 none at 0) while a listed or watched run is active or finished in the last ten minutes of
 the server's clock that the run list carries, with watched runs first in any state. Each
 run is one line under a header: id, repository and ref in short forms, status word,
-authoritative plan counts, duration (unknown while queued), age, a watched mark and a failed run's step name,
+authoritative plan counts, duration (unknown until a recorded start), age, a watched mark and a failed run's step name,
 measured in terminal cells, cut to the box's width and never wrapped; the last column
 gives way first. `/oberth-runs` prints the same lines with a failed run's step and reason
 or a cancelled run's reason last; there the names give way before the reason.

@@ -526,8 +526,12 @@ test('queued time stays unknown until execution starts', async () => {
   const waiting = { ...run(undefined, 'queued'), created_at: created, started_at: null }
   expect(duration(waiting, Date.parse('2026-11-18T00:01:00Z'))).toBe('—')
   expect(age(waiting, Date.parse('2026-11-18T00:01:00Z'))).toBe('1m')
+  const cancelled = { ...waiting, status: 'cancelled' as const, finished_at: '2026-11-18T00:01:00Z' }
+  expect(duration(cancelled, Date.parse('2026-11-18T00:01:18Z'))).toBe('—')
   const running = { ...waiting, status: 'running' as const, started_at: '2026-11-18T00:01:00Z' }
   expect(duration(running, Date.parse('2026-11-18T00:01:18Z'))).toBe('18s')
+  expect(duration({ ...running, clockOffset: 1000 }, Date.parse('2026-11-18T00:01:19Z'))).toBe('18s')
+  expect(duration({ ...running, status: 'queued' }, Date.parse('2026-11-18T00:01:18Z'))).toBe('18s')
 })
 
 
@@ -1418,9 +1422,9 @@ test('a v0.30.7 run list reply with one running run draws the box', { options },
     const ui = await $.ui.mount({ ...band, surface })
     const lines = await ui.findAll({ type: 'Text' })
     expect(lines.map(line => line.text)).toEqual([
-      'RUN      REPO         REF     STATUS    STEPS TIME  AGE',
-      'd7a7d438 oberth-smoke smoke-2 ▶ running 0/1   1m59s 1m',
-      '0b4e2a91 oberth-smoke smoke-1 ✓ passed  1/1   20s   26m',
+      'RUN      REPO         REF     STATUS    STEPS TIME AGE',
+      'd7a7d438 oberth-smoke smoke-2 ▶ running 0/1   —    1m',
+      '0b4e2a91 oberth-smoke smoke-1 ✓ passed  1/1   —    26m',
     ])
     expect(SMOKE.test(lines[1]!.text)).toBe(true)
     await ui.unmount()

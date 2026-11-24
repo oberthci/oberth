@@ -43,9 +43,9 @@ export function span(ms: number, units: 1 | 2): string {
 }
 
 export function duration(run: Run, now: number): string {
-  if (run.status === 'queued') return '—'
+  if (!run.started_at) return '—'
   const created = Date.parse(run.created_at)
-  const start = Date.parse(run.started_at ?? run.created_at)
+  const start = Date.parse(run.started_at)
   const end = run.finished_at ? Date.parse(run.finished_at) : now - (run.clockOffset ?? 0)
   if (!Number.isFinite(created) || !Number.isFinite(start) || !Number.isFinite(end) || end < start) return '—'
   // Native start and stored creation stamps can differ; bound both on the profile's clock.

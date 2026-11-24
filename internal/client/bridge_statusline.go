@@ -120,18 +120,14 @@ func footerRun(run apicontract.RunRecord, runs []apicontract.RunRecord, now time
 	if !run.Exact {
 		steps = fmt.Sprintf("%d/≥%d", done, run.Total)
 	}
-	start, end := run.CreatedAt, now
-	if run.StartedAt != nil {
-		start = *run.StartedAt
-	}
+	end := now
 	if run.FinishedAt != nil {
 		end = *run.FinishedAt
 	}
 	age := max(0, now.Sub(run.CreatedAt))
-	duration := min(age, max(0, end.Sub(start)))
 	elapsed := "—"
-	if run.Status != "queued" {
-		elapsed = span(duration, 2)
+	if run.StartedAt != nil {
+		elapsed = span(min(age, max(0, end.Sub(*run.StartedAt))), 2)
 	}
 	cells := []string{footerID(run.ID, runs), run.Repo[strings.LastIndex(run.Repo, "/")+1:],
 		strings.TrimPrefix(strings.TrimPrefix(run.Ref, "refs/heads/"), "refs/tags/"),
