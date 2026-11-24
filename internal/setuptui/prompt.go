@@ -17,15 +17,28 @@ import (
 	"github.com/oberthci/oberth/internal/installer"
 )
 
-// Ask selects an explicit context and a public address using one caller-owned scanner.
+func containsContext(contexts []string, selected string) bool {
+	for _, name := range contexts {
+		if selected == name {
+			return true
+		}
+	}
+	return false
+}
+
+// Ask selects a context and public address using one caller-owned scanner.
 // Terminal input cancellation is owned by the CLI, which closes its input on exit.
 func Ask(ctx context.Context, in *bufio.Scanner, out io.Writer, contexts []string) (installer.Choices, error) {
 	var c installer.Choices
+	contextPrompt := "Context (choose one: " + strings.Join(contexts, ", ") + "): "
+	if len(contexts) == 1 {
+		contextPrompt = "Context [" + contexts[0] + "]: "
+	}
 	for _, prompt := range []struct {
 		text   string
 		target *string
 	}{
-		{"Context (" + strings.Join(contexts, ", ") + "): ", &c.Context},
+		{contextPrompt, &c.Context},
 		{"Server URL (blank uses the API host): ", &c.URL},
 	} {
 		if err := ctx.Err(); err != nil {
@@ -41,13 +54,16 @@ func Ask(ctx context.Context, in *bufio.Scanner, out io.Writer, contexts []strin
 			return c, installer.NewProblem("terminal", nil, "")
 		}
 		*prompt.target = strings.TrimSpace(in.Text())
-	}
-	for _, name := range contexts {
-		if c.Context == name {
-			return c, nil
+		if prompt.target == &c.Context {
+			if c.Context == "" && len(contexts) == 1 {
+				c.Context = contexts[0]
+			}
+			if !containsContext(contexts, c.Context) {
+				return c, installer.NewProblem("context-missing", nil, "Context: "+c.Context)
+			}
 		}
 	}
-	return c, installer.NewProblem("context-missing", nil, "Context: "+c.Context)
+	return c, nil
 }
 
 // Terminal is where a review is read and answered, and its size. Zero Rows
