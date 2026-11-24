@@ -119,10 +119,10 @@ class GuidanceContract(unittest.TestCase):
         skill = (ROOT / "agent/skills/oberth/SKILL.md").read_text()
         self.assertIn("Show timestamps with their UTC offset; convert to the person's local zone when known.", skill)
 
-    def test_install_summary_keeps_the_printed_web_signin_line(self):
+    def test_install_summary_keeps_both_printed_web_signin_lines(self):
         skill = (ROOT / "agent/skills/oberth/SKILL.md").read_text()
         apply = next(line for line in skill.splitlines() if "Apply after consent" in line)
-        self.assertIn("Show the printed web-view sign-in line verbatim.", apply)
+        self.assertIn("Show both printed Web view lines verbatim, including the sign-in command.", apply)
 
     def test_registration_requires_a_verified_absolute_executable(self):
         skill = (ROOT / "agent/skills/oberth/SKILL.md").read_text()
