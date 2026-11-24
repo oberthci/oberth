@@ -30,5 +30,33 @@ export async function liveness(client) {
   await pause(2100);
   check(client.requests.filter(request=>request.path==='/api/status').length===before,'hidden page sent a liveness read');
  } finally {await client.evaluate(`delete document.hidden;document.dispatchEvent(new Event('visibilitychange'))`);}
+ results.push(await slowStatus(client));
  return results;
+}
+
+async function slowStatus(client) {
+ const injection=await client.cdp('Page.addScriptToEvaluateOnNewDocument',{source:`
+  const statusFetch=fetch;window.slowStatus={reads:0,active:0,maximum:0};
+  window.fetch=async(path,options)=>{
+   if(new URL(path,location.href).pathname!=='/api/status')return statusFetch(path,options);
+   slowStatus.reads++;slowStatus.active++;slowStatus.maximum=Math.max(slowStatus.maximum,slowStatus.active);
+   try {
+    await new Promise((resolve,reject)=>{
+     const abort=()=>{clearTimeout(timer);reject(options.signal.reason);};
+     const timer=setTimeout(()=>{options.signal.removeEventListener('abort',abort);resolve();},1300);
+     options.signal.addEventListener('abort',abort,{once:true});if(options.signal.aborted)abort();
+    });
+    return await statusFetch(path,options);
+   } finally {slowStatus.active--;}
+  };`});
+ try {
+  await client.loaded('/repos','.repos a.row');
+  const result=await deadline('slow status remains reachable',()=>client.evaluate(`new Promise(resolve=>{
+   const alerts=[],record=()=>{if(notice.textContent.includes('Reconnecting to Oberth.')&&notice.getBoundingClientRect().height>0)alerts.push(notice.getBoundingClientRect().height);};
+   const observer=new MutationObserver(record);observer.observe(notice,{subtree:true,childList:true});record();
+   setTimeout(()=>{observer.disconnect();resolve({...slowStatus,alerts,state:server.dataset.state,lightWidth:server.querySelector('.mark').getBoundingClientRect().width});},8000);
+  })`),10000);
+  check(result.reads>=3&&result.maximum===1&&result.alerts.length===0&&result.state==='normal'&&result.lightWidth>0,'slow status reply produced a visible outage '+JSON.stringify(result));
+  return {kind:'slow-status',...result};
+ } finally {await client.cdp('Page.removeScriptToEvaluateOnNewDocument',{identifier:injection.identifier});}
 }

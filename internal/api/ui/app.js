@@ -38,14 +38,15 @@ function showError(error, target = notice) {
  return message;
 }
 async function exchange(path, options = {}) {
+ const {observe = reached, ...request} = options;
  let response, value;
  try {
-  response = await fetch(path, {...options, credentials: "same-origin", redirect: "error", headers: {
-    Accept: "application/json", ...(localStorage.getItem("oberth.token") ? {Authorization: "Bearer " + localStorage.getItem("oberth.token")} : {}), ...options.headers,
+  response = await fetch(path, {...request, credentials: "same-origin", redirect: "error", headers: {
+    Accept: "application/json", ...(localStorage.getItem("oberth.token") ? {Authorization: "Bearer " + localStorage.getItem("oberth.token")} : {}), ...request.headers,
    }});
   if (!response.ok) value = await response.json();
- } catch (error) { if (error.name !== "AbortError") reached(false); throw error; }
- reached(!unavailable(response.status));
+ } catch (error) { if (error.name !== "AbortError") observe(false); throw error; }
+ observe(!unavailable(response.status));
  if (!response.ok) {
   if (response.status === 401) {
    value.signin = !localStorage.getItem("oberth.token");
@@ -463,11 +464,15 @@ function paintServer() {
  server.setAttribute("aria-label", words.join(" ") + " Version " + (server.querySelector(".ver").textContent || "unknown") + ".");
 }
 function readStatus() {
- if (document.hidden || !signin.hidden || connection.reading) return;
+ if (document.hidden || !signin.hidden || (connection.reading && !connection.reading.expired)) return;
+ connection.reading?.abort();
  const controller = new AbortController();
  connection.reading = controller;
- const timeout = setTimeout(() => controller.abort(new DOMException("Status read timed out", "TimeoutError")), 1000);
- get("/api/status", controller.signal).then(status => { connection.ready = status.ready; server.querySelector(".ver").textContent = status.version; paintServer(); }).catch(() => {}).finally(() => { clearTimeout(timeout); connection.reading = null; });
+ const timeout = setTimeout(() => { controller.expired = true; reached(false); }, 1000);
+ const observe = ok => { if (ok || !controller.expired) reached(ok); };
+ exchange("/api/status", {signal: controller.signal, observe}).then(response => response.json()).then(status => {
+  if (connection.reading === controller) { connection.ready = status.ready; server.querySelector(".ver").textContent = status.version; paintServer(); }
+ }).catch(() => {}).finally(() => { clearTimeout(timeout); if (connection.reading === controller) connection.reading = null; });
 }
 // A bounded, single status read detects a silent server even during an idle event wait.
 setInterval(readStatus, 2000);
