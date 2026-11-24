@@ -69,6 +69,7 @@ type Engine struct {
 	Now           func() time.Time
 	CheckEndpoint func(context.Context, Profile) error
 	Pause         func(context.Context) error
+	Finalizers    func(context.Context, FinalizerScope) error
 	// GitHelper points the profile's Git helper at the saved profile's key and
 	// returns the files the helper names; false means it could not, so every
 	// earlier credential file is kept.

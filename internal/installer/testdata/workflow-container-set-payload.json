@@ -17,8 +17,11 @@
       "note": "authored",
       "oberth.ci/ref": "refs/heads/topic",
       "oberth.ci/run-id": "run-0000000000000001",
-      "oberth.ci/spec-identity": "136dcce8b21d1fa2e2da48862af5c4983fccf1fdfb5c613904f2a73bc05109e9"
-    }
+      "oberth.ci/spec-identity": "587192cdbbcad9f1b6886b86b21e60f8dc03e012bddc9b90fd2fa36c78332eaa"
+    },
+    "finalizers": [
+      "oberth.ci/run-record"
+    ]
   },
   "spec": {
     "templates": [
@@ -59,6 +62,9 @@
     "automountServiceAccountToken": false,
     "executor": {
       "serviceAccountName": "oberth-argo-ci-forge-org-repo-29207b457f2a4667542e"
+    },
+    "ttlStrategy": {
+      "secondsAfterCompletion": 86400
     },
     "podSpecPatch": "{\"volumes\":[{\"name\":\"exec-sa-token\",\"projected\":{\"sources\":[{\"serviceAccountToken\":{\"expirationSeconds\":3600,\"path\":\"token\"}},{\"configMap\":{\"name\":\"kube-root-ca.crt\",\"items\":[{\"key\":\"ca.crt\",\"path\":\"ca.crt\"}]}},{\"downwardAPI\":{\"items\":[{\"path\":\"namespace\",\"fieldRef\":{\"apiVersion\":\"v1\",\"fieldPath\":\"metadata.namespace\"}}]}}]},\"secret\":null}]}"
   },

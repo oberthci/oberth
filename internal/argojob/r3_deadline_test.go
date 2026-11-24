@@ -147,3 +147,16 @@ func TestAcknowledgedObservationUsesOnlyRemainingWindow(t *testing.T) {
 
 func (*boundedCapture) Track(context.Context, string, []runlog.ContainerLog) error { return nil }
 func (*boundedCapture) KeepFollowing(string, []runlog.ContainerLog)                {}
+
+func (s *boundedCapture) ReserveFinal(ctx context.Context, id string, entry runlog.ContainerLog) (*runlog.Reservation, error) {
+	return s.Reserve(ctx, id, entry)
+}
+func (*boundedCapture) Archived(context.Context, string, []runlog.ContainerLog) (bool, error) {
+	return false, nil
+}
+func (*boundedCapture) Containers(context.Context, string) ([]runlog.ContainerLog, error) {
+	return nil, nil
+}
+func (*boundedCapture) RecordGap(context.Context, string, runlog.ContainerLog, runlog.Gap) error {
+	return nil
+}

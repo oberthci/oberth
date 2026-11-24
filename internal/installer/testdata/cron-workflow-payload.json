@@ -72,7 +72,10 @@
       "annotations": {
         "oberth.ci/admission": "913028ab4d36c80b573a3ec142e7b1a0d75976defc9c414b803f4112e52f04f5",
         "oberth.ci/ref": "refs/heads/main"
-      }
+      },
+      "finalizers": [
+        "oberth.ci/run-record"
+      ]
     },
     "schedules": [
       "0 3 * * *"

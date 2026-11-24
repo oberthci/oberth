@@ -52,7 +52,10 @@ type Gap struct {
 }
 type GapReason string
 
-const PodMissing GapReason = "pod_missing"
+const (
+	PodMissing GapReason = "pod_missing"
+	NotRun     GapReason = "not_run"
+)
 
 type span struct{ start, end int64 }
 type index struct {

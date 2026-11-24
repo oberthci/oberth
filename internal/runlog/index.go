@@ -69,6 +69,10 @@ func (s *Store) save(id string, saved index) error {
 	if err = s.root.Rename(name, id+".index.json"); err != nil {
 		return storage(cannotPublishLogIndexReason, err)
 	}
+	return s.syncDirectory()
+}
+
+func (s *Store) syncDirectory() error {
 	directory, err := s.root.Open(".")
 	if err != nil {
 		return storage(cannotOpenLogDirectoryForSyncReason, err)

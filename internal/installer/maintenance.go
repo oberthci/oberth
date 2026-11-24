@@ -81,6 +81,8 @@ func (m Maintenance) PlanUpgrade(ctx context.Context, r Release, c Choices, o Up
 		return fail(err)
 	}
 	p.review = append(p.review, upgradeRunsReview(count),
+		"Log backfill: one-time storage up to 64 MiB per finished run.",
+		"Rollback and uninstall release archive finalizers first; preserve needed logs before either.",
 		fmt.Sprintf("Backup: %t; rollback record is saved before changes.", !o.NoBackup))
 	if record.BackupPath != "" {
 		// The file is named when the apply starts it; the review can only name its directory.

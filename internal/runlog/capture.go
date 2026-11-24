@@ -18,6 +18,8 @@ type CaptureRequest struct {
 	Source io.ReadCloser
 	Gap    Gap
 	Retry  func(context.Context) error
+	// Complete refuses a partial source read instead of publishing it as archived.
+	Complete bool
 }
 
 // Capture takes ownership of source, closing and joining its cancellation watcher.
@@ -49,16 +51,15 @@ func (r *Reservation) Capture(ctx context.Context, input CaptureRequest) error {
 		if gap.Reason == PodMissing {
 			result.reason = podMissingReason
 		}
+		if gap.Reason == NotRun {
+			result.reason = notRunReason
+		}
 	}
 	if source != nil {
-		result.size, err = copySource(ctx, spool, source, min(r.store.limit, math.MaxInt64-1)+1)
-		if ctx.Err() != nil {
-			return storage(logOperationCanceledReason, ctx.Err())
-		}
+		input.Source = source
+		result, err = r.readCapture(ctx, spool, input, result)
 		if err != nil {
-			result.reason = interruptedReason
-			result.explain(interruptedDetail)
-			result.explain(err.Error())
+			return err
 		}
 	}
 	return retryCapture(ctx, input.Retry, func() error { return r.commit(ctx, spool, result) })
@@ -67,7 +68,7 @@ func (r *Reservation) begin(source io.ReadCloser, gap Gap) error {
 	if r == nil || r.store == nil || !r.used.CompareAndSwap(false, true) {
 		return publicerr.New(publicerr.InvalidTransition, captureReservationAlreadyUsedReason, captureReservationRemedy, nil)
 	}
-	if (source == nil && gap.Detail == "" && gap.Reason == "") || (gap.Reason != "" && gap.Reason != PodMissing) {
+	if (source == nil && gap.Detail == "" && gap.Reason == "") || (gap.Reason != "" && gap.Reason != PodMissing && gap.Reason != NotRun) {
 		r.store.active.Delete(copyKey(r.run, r.entry))
 		return publicerr.New(publicerr.InvalidInput, captureSourceOrDetailRequiredReason, captureSourceRemedy, nil)
 	}
@@ -206,4 +207,21 @@ func retryCapture(ctx context.Context, retry func(context.Context) error, operat
 type stagedCapture struct {
 	spool  *os.File
 	result captureResult
+}
+
+func (r *Reservation) readCapture(ctx context.Context, spool *os.File, input CaptureRequest, result captureResult) (captureResult, error) {
+	var err error
+	result.size, err = copySource(ctx, spool, input.Source, min(r.store.limit, math.MaxInt64-1)+1)
+	if ctx.Err() != nil {
+		return result, storage(logOperationCanceledReason, ctx.Err())
+	}
+	if err != nil && input.Complete {
+		return result, storage(interruptedReason, err)
+	}
+	if err != nil {
+		result.reason = interruptedReason
+		result.explain(interruptedDetail)
+		result.explain(err.Error())
+	}
+	return result, nil
 }

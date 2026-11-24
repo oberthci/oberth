@@ -13,6 +13,8 @@ type SourceCapture struct {
 	Container ContainerLog
 	Open      func(context.Context) (io.ReadCloser, error)
 	Retry     func(context.Context) error
+	// Complete requests a complete bounded archive of a finished container.
+	Complete bool
 }
 
 // Capture retries reservation and source availability, then retains one source read.
@@ -25,8 +27,11 @@ func Capture(ctx context.Context, store interface {
 	if err != nil || reservation == nil {
 		return err
 	}
-	request := CaptureRequest{Retry: in.Retry}
+	request := CaptureRequest{Retry: in.Retry, Complete: in.Complete}
 	openError := retryCapture(ctx, in.Retry, func() error { var err error; request.Source, err = in.Open(ctx); return err })
+	if openError != nil && in.Complete {
+		return errors.Join(openError, reservation.Release(ctx))
+	}
 	if openError != nil {
 		request.Gap.Detail = openError.Error()
 	}

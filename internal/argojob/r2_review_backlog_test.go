@@ -79,3 +79,16 @@ func pendingCaptures(e *Executor) int {
 
 func (*reviewBlockedLogStore) Track(context.Context, string, []runlog.ContainerLog) error { return nil }
 func (*reviewBlockedLogStore) KeepFollowing(string, []runlog.ContainerLog)                {}
+
+func (s *reviewBlockedLogStore) ReserveFinal(ctx context.Context, id string, entry runlog.ContainerLog) (*runlog.Reservation, error) {
+	return s.Reserve(ctx, id, entry)
+}
+func (*reviewBlockedLogStore) Archived(context.Context, string, []runlog.ContainerLog) (bool, error) {
+	return false, nil
+}
+func (*reviewBlockedLogStore) Containers(context.Context, string) ([]runlog.ContainerLog, error) {
+	return nil, nil
+}
+func (*reviewBlockedLogStore) RecordGap(context.Context, string, runlog.ContainerLog, runlog.Gap) error {
+	return nil
+}

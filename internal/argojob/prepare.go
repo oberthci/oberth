@@ -55,6 +55,7 @@ func (e admission) transform(ctx context.Context, w *wf.Workflow, in admissionco
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	prepareCollection(w)
 	if admissioncontract.ScheduleParent(in.Mode, model.RunTrigger(p.Trigger)) {
 		v := admissioncontract.PreparedView{Ref: p.Ref.Name, CommitSHA: p.Ref.CommitSHA, Trigger: model.TriggerSchedule}
 		stampSubmission(w, v, p.RepositoryID)

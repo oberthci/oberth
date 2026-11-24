@@ -35,9 +35,25 @@ var _ argojob.Cache = (*Cache)(nil)
 
 // Logs supplies reservation outcomes; retained-store tests supply real receipts.
 type Logs struct {
-	ReserveFunc func(context.Context, string, runlog.ContainerLog) (*runlog.Reservation, error)
-	TrackFunc   func(context.Context, string, []runlog.ContainerLog) error
-	KeepFunc    func(string, []runlog.ContainerLog)
+	ContainersFunc func(context.Context, string) ([]runlog.ContainerLog, error)
+	GapFunc        func(context.Context, string, runlog.ContainerLog, runlog.Gap) error
+	ReserveFunc    func(context.Context, string, runlog.ContainerLog) (*runlog.Reservation, error)
+	ArchiveFunc    func(context.Context, string, []runlog.ContainerLog) (bool, error)
+	TrackFunc      func(context.Context, string, []runlog.ContainerLog) error
+	KeepFunc       func(string, []runlog.ContainerLog)
+}
+
+func (f Logs) Containers(ctx context.Context, id string) ([]runlog.ContainerLog, error) {
+	if f.ContainersFunc != nil {
+		return f.ContainersFunc(ctx, id)
+	}
+	return nil, ctx.Err()
+}
+func (f Logs) RecordGap(ctx context.Context, id string, entry runlog.ContainerLog, gap runlog.Gap) error {
+	if f.GapFunc != nil {
+		return f.GapFunc(ctx, id, entry, gap)
+	}
+	return ctx.Err()
 }
 
 func (f Logs) KeepFollowing(id string, entries []runlog.ContainerLog) {
@@ -58,4 +74,14 @@ func (f Logs) Reserve(ctx context.Context, id string, entry runlog.ContainerLog)
 		return f.ReserveFunc(ctx, id, entry)
 	}
 	return nil, nil
+}
+
+func (f Logs) ReserveFinal(ctx context.Context, id string, entry runlog.ContainerLog) (*runlog.Reservation, error) {
+	return f.Reserve(ctx, id, entry)
+}
+func (f Logs) Archived(ctx context.Context, id string, entries []runlog.ContainerLog) (bool, error) {
+	if f.ArchiveFunc != nil {
+		return f.ArchiveFunc(ctx, id, entries)
+	}
+	return false, ctx.Err()
 }

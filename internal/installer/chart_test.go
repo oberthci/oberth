@@ -190,7 +190,11 @@ func assertNativeDependencies(t *testing.T, objects []map[string]any) {
 			crds++
 		}
 		if o["kind"] == "Job" {
-			t.Fatal("unexpected install process job")
+			metadata := o["metadata"].(map[string]any)
+			annotations, _ := metadata["annotations"].(map[string]any)
+			if metadata["name"] != "oberth-release-finalizers" || annotations["helm.sh/hook"] != "pre-delete" {
+				t.Fatal("unexpected install process job")
+			}
 		}
 	}
 	if crds < 7 {

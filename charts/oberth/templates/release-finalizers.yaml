@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: oberth-release-finalizers
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: 660
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: oberth
+      priorityClassName: oberth-control-{{ .Release.Namespace }}
+      securityContext:
+        runAsUser: 65534
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: release
+          image: {{ (include "oberth.image" .) | quote }}
+          command: [/usr/local/bin/oberth]
+          args: [internal-finalizers, {{ .Values.pipeline.namespace | quote }}, {{ .Release.Namespace | quote }}]
+          resources:
+            requests: {cpu: 25m, memory: 64Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}

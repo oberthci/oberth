@@ -105,6 +105,13 @@ func (a application) streamGitSSH(ctx context.Context, cfg gitssh.Config) error 
 
 func (a application) helperEntry(ctx context.Context, argv []string) (int, bool) {
 	args := argv[1:]
+	if len(args) > 0 && args[0] == "internal-finalizers" {
+		if err := releaseInstallationFinalizers(ctx, args[1:]); err != nil {
+			_, _ = fmt.Fprintln(a.diagnostic, err)
+			return 1, true
+		}
+		return 0, true
+	}
 	if len(args) > 0 && args[0] == "internal-install" {
 		if len(args) != 3 || args[1] != "--to" {
 			return a.usage([]string{"Provide the destination file with --to."}), true

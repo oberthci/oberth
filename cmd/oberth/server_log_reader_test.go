@@ -25,7 +25,7 @@ func realServerLogReader(t *testing.T) (serverLogs, stateport.Run) {
 	return realServerLogReaderFor(t, document)
 }
 
-func realServerLogReaderFor(t *testing.T, document string) (serverLogs, stateport.Run) {
+func realServerLogReaderFor(t *testing.T, document string, ids ...string) (serverLogs, stateport.Run) {
 	t.Helper()
 	db, err := store.Create(t.Context(), filepath.Join(t.TempDir(), "state.db"), store.DefaultOptions(fake.NewClock().Now))
 	if err != nil {
@@ -34,7 +34,11 @@ func realServerLogReaderFor(t *testing.T, document string) (serverLogs, statepor
 	t.Cleanup(func() { _ = db.Close() })
 	repo := storetest.Repository(t, db)
 	sha := strings.Repeat("a", 40)
-	request := admissioncontract.PrepareRequest{Mode: admissioncontract.ModeInspect, Repository: repo.Canonical, RunID: "run-logs", Ref: "refs/heads/main", ObjectSHA: sha, CommitSHA: sha, FileBlob: sha, Trigger: model.TriggerBranch, SelectedFile: ".oberth/build.yaml", Document: []byte(document)}
+	id := "run-logs"
+	if len(ids) > 0 {
+		id = ids[0]
+	}
+	request := admissioncontract.PrepareRequest{Mode: admissioncontract.ModeInspect, Repository: repo.Canonical, RunID: id, Ref: "refs/heads/main", ObjectSHA: sha, CommitSHA: sha, FileBlob: sha, Trigger: model.TriggerBranch, SelectedFile: ".oberth/build.yaml", Document: []byte(document)}
 	prepared, err := argoworkflow.Prepare(t.Context(), request, argoworkflow.Policy{}, admissioncontract.PrepareHooks{OfflineValidation: true})
 	if err != nil {
 		t.Fatal(err)

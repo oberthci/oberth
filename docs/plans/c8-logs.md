@@ -89,8 +89,8 @@ C3/C11 compose; C5 verifies native bindings before opening log streams.
    only from a verified parent boundary. Namespace/Pod-name changes or unrelated
    children cannot reuse a receipt. Refined attribution preserves span, reason and
    capture state. Following availability requires a current verified observation; missing sources, retired observers and process restart end it without changing captured spans or active copies.
-2. Reserve durably before opening a source. A captured or interrupted attempted copy is
-   never reread after restart. Only a reservation whose source never opened may be
+2. Reserve durably before opening a source. Ordinary captured or interrupted attempted copies are
+   never reread after restart. Final-container archives may retry only unpublished copies; published spans never reopen, including after restart. New archive commit requires a complete bounded source read. Cleanup accepts any captured terminal receipt, preserving its explicit gap or interruption. Missing terminal sources gain one durable PodMissing or never-ran receipt; failed archive storage still blocks deletion. Only a reservation whose source never opened may be
    released on cancellation. Stream to an unlinked bounded spool outside append locks;
    serialize only the file/index commit. Sync bytes before publishing their span; index
    replacement is atomic. Reject invalid or unavailable ranges. Slow logs cannot block

@@ -45,6 +45,15 @@ func podOwned(w *wf.Workflow, n wf.NodeStatus, p *core.Pod) bool {
 
 // OpenLog verifies exact Workflow, node and physical Pod before and after opening.
 func (e *Executor) OpenLog(ctx context.Context, b nativebinding.RunBinding, entry runlog.ContainerLog, follow bool) (io.ReadCloser, error) {
+	return e.openLog(ctx, b, entry, logReadOptions{follow: follow})
+}
+
+type logReadOptions struct{ follow, collection bool }
+
+func (e *Executor) openLog(ctx context.Context, b nativebinding.RunBinding, entry runlog.ContainerLog, options logReadOptions) (io.ReadCloser, error) {
+	if err := e.logReadBudget(ctx, options.collection); err != nil {
+		return nil, err
+	}
 	w, err := e.unpacked(ctx, b)
 	if err != nil {
 		return nil, err
@@ -53,6 +62,9 @@ func (e *Executor) OpenLog(ctx context.Context, b nativebinding.RunBinding, entr
 	if !ok {
 		return nil, ownership(nil)
 	}
+	if err := e.logReadBudget(ctx, options.collection); err != nil {
+		return nil, err
+	}
 	p, err := e.config.Pods.Get(ctx, entry.PodName, meta.GetOptions{})
 	if err != nil {
 		return nil, err
@@ -60,8 +72,15 @@ func (e *Executor) OpenLog(ctx context.Context, b nativebinding.RunBinding, entr
 	if !logBinding(w, n, p, entry) {
 		return nil, ownership(nil)
 	}
-	stream, err := e.config.Pods.Logs(ctx, p.Name, core.PodLogOptions{Container: entry.Container, Follow: follow})
+	if err := e.logReadBudget(ctx, options.collection); err != nil {
+		return nil, err
+	}
+	stream, err := e.config.Pods.Logs(ctx, p.Name, core.PodLogOptions{Container: entry.Container, Follow: options.follow})
 	if err != nil {
+		return nil, err
+	}
+	if err := e.logReadBudget(ctx, options.collection); err != nil {
+		_ = stream.Close()
 		return nil, err
 	}
 	again, err := e.config.Pods.Get(ctx, p.Name, meta.GetOptions{})
@@ -71,6 +90,13 @@ func (e *Executor) OpenLog(ctx context.Context, b nativebinding.RunBinding, entr
 	}
 	return stream, nil
 }
+
+func (e *Executor) logReadBudget(ctx context.Context, collection bool) error {
+	if collection {
+		return e.collectionRead(ctx)
+	}
+	return nil
+}
 func logBinding(w *wf.Workflow, n wf.NodeStatus, p *core.Pod, entry runlog.ContainerLog) bool {
 	if !podOwned(w, n, p) || string(p.UID) != entry.PodUID || p.Name != entry.PodName || p.Namespace != entry.Namespace {
 		return false
@@ -78,15 +104,23 @@ func logBinding(w *wf.Workflow, n wf.NodeStatus, p *core.Pod, entry runlog.Conta
 	return slices.ContainsFunc(slices.Concat(p.Spec.InitContainers, p.Spec.Containers), func(c core.Container) bool { return c.Name == entry.Container })
 }
 
-// LogStore reserves a durable receipt before opening native output.
+// LogStore archives finished containers and verifies their durable receipts.
 type LogStore interface {
-	Reserve(context.Context, string, runlog.ContainerLog) (*runlog.Reservation, error)
+	ReserveFinal(context.Context, string, runlog.ContainerLog) (*runlog.Reservation, error)
+	Archived(context.Context, string, []runlog.ContainerLog) (bool, error)
+	Containers(context.Context, string) ([]runlog.ContainerLog, error)
+	RecordGap(context.Context, string, runlog.ContainerLog, runlog.Gap) error
 	Track(context.Context, string, []runlog.ContainerLog) error
 	KeepFollowing(string, []runlog.ContainerLog)
 }
 
 func (e *Executor) capture(ctx context.Context, t *tracking, w *wf.Workflow, pods []*core.Pod) {
 	if e.config.Logs == nil {
+		return
+	}
+	archived, err := e.archivedSources(ctx, t)
+	if err != nil {
+		e.logError(ctx, t.binding.RunID, err)
 		return
 	}
 	paths := indexPaths(w)
@@ -101,6 +135,9 @@ func (e *Executor) capture(ctx context.Context, t *tracking, w *wf.Workflow, pod
 		}
 		own := authoredContainerStatuses(nodeTemplate(w, n, admissioncontract.MaxNestingDepth), p)
 		for _, c := range append(append([]core.ContainerStatus{}, p.Status.InitContainerStatuses...), p.Status.ContainerStatuses...) {
+			if archived[string(p.UID)+"/"+c.Name] {
+				continue
+			}
 			entry := runlog.ContainerLog{NodeID: n.ID, Step: paths[n.ID].name, PodUID: string(p.UID), PodName: p.Name, Namespace: p.Namespace, Container: c.Name, Main: slices.ContainsFunc(own, func(status core.ContainerStatus) bool { return status.Name == c.Name })}
 			if c.State.Running != nil {
 				entry.State = runlog.Following
@@ -122,7 +159,24 @@ func (e *Executor) capture(ctx context.Context, t *tracking, w *wf.Workflow, pod
 	}
 }
 
-func (e *Executor) captureContainer(ctx context.Context, b nativebinding.RunBinding, entry runlog.ContainerLog) error {
+func (e *Executor) archivedSources(ctx context.Context, t *tracking) (map[string]bool, error) {
+	if !t.archiveOnly {
+		return nil, nil
+	}
+	entries, err := e.config.Logs.Containers(ctx, t.binding.RunID)
+	if err != nil {
+		return nil, err
+	}
+	archived := map[string]bool{}
+	for _, entry := range entries {
+		if entry.State == runlog.Captured {
+			archived[entry.PodUID+"/"+entry.Container] = true
+		}
+	}
+	return archived, nil
+}
+
+func (e *Executor) captureContainer(ctx context.Context, b nativebinding.RunBinding, entry runlog.ContainerLog, collection bool) error {
 	key := "log/" + entry.PodUID + "/" + entry.Container
 	defer e.config.RateLimiter.Forget(key)
 	retry := func(ctx context.Context) error {
@@ -133,7 +187,9 @@ func (e *Executor) captureContainer(ctx context.Context, b nativebinding.RunBind
 			return nil
 		}
 	}
-	return runlog.Capture(ctx, e.config.Logs, runlog.SourceCapture{RunID: b.RunID, Container: entry, Open: func(ctx context.Context) (io.ReadCloser, error) { return e.OpenLog(ctx, b, entry, false) }, Retry: retry})
+	return runlog.Archive(ctx, e.config.Logs, runlog.SourceCapture{RunID: b.RunID, Container: entry, Open: func(ctx context.Context) (io.ReadCloser, error) {
+		return e.openLog(ctx, b, entry, logReadOptions{collection: collection})
+	}, Retry: retry})
 }
 
 func podIdentity(w *wf.Workflow, n wf.NodeStatus, p *core.Pod) bool {
@@ -146,6 +202,7 @@ type captureJob struct {
 	binding nativebinding.RunBinding
 	entries []runlog.ContainerLog
 	until   time.Time
+	origin  *tracking
 }
 
 func (e *Executor) startCaptures(ctx context.Context) <-chan struct{} {
@@ -170,6 +227,8 @@ func (e *Executor) startCaptures(ctx context.Context) <-chan struct{} {
 	return done
 }
 func (e *Executor) captureBatch(ctx context.Context, job captureJob) {
+	var failed []runlog.ContainerLog
+	defer func() { e.captured(job, failed) }()
 	budget := captureBudget
 	if !job.until.IsZero() {
 		budget = min(budget, job.until.Sub(e.config.Now()))
@@ -177,8 +236,9 @@ func (e *Executor) captureBatch(ctx context.Context, job captureJob) {
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	for _, entry := range job.entries {
-		if err := e.captureContainer(ctx, job.binding, entry); err != nil {
+		if err := e.captureContainer(ctx, job.binding, entry, job.origin != nil && job.origin.archiveOnly); err != nil {
 			e.logError(ctx, job.binding.RunID, err)
+			failed = append(failed, entry)
 		}
 	}
 }

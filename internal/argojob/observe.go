@@ -52,16 +52,23 @@ type tracking struct {
 	final                    *Observation
 	refusals                 int
 	lastError                string
+	historical               bool
+	archiveOnly              bool
+	archiveRetryAt           time.Time
+	archiveFailures          int
 	evidenceUntil            time.Time
 	captures                 map[string]bool
 	pending                  map[string]captureJob
+	capturing                int
 	holds                    map[string]bool
 }
 
 type trackingSeed struct {
-	child *childObservation
-	steps []stepmodel.RunStep
-	nodes []stateport.Node
+	child       *childObservation
+	steps       []stepmodel.RunStep
+	nodes       []stateport.Node
+	completed   bool
+	archiveOnly bool
 }
 
 func (e *Executor) track(b nativebinding.RunBinding, plan admissioncontract.Plan, seed trackingSeed) {
@@ -70,6 +77,14 @@ func (e *Executor) track(b nativebinding.RunBinding, plan admissioncontract.Plan
 	if t, ok := e.tracked[b.Workflow.Name]; !ok || t.binding != b {
 		t = &tracking{binding: b, plan: plan.Clone(), previous: (stepmodel.RunSummary{Steps: seed.steps}).Clone().Steps, previousNodes: seed.nodes, captures: map[string]bool{}, holds: map[string]bool{}}
 		t.child = seed.child
+		t.archiveOnly = seed.archiveOnly
+		if seed.completed {
+			t.completed = true
+			if !seed.archiveOnly {
+				t.evidenceUntil = e.config.Now().Add(terminalEvidenceGrace)
+				e.queue.AddAfter(b.Workflow.Name, terminalEvidenceGrace)
+			}
+		}
 		if seed.child != nil {
 			t.final = seed.child.refused
 		}
@@ -186,11 +201,16 @@ func (e *Executor) restore(ctx context.Context, r stateport.Run) error {
 }
 
 func (e *Executor) restoreSnapshot(ctx context.Context, r stateport.Run, child *childObservation) error {
+	if terminalChild(r) {
+		b := runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.WorkflowUID})
+		e.track(b, r.Admission.Plan, trackingSeed{child: child, completed: true, archiveOnly: true})
+		return nil
+	}
 	steps, err := e.config.Runs.Steps(ctx, r.ID)
 	if err != nil {
 		return err
 	}
-	seed := trackingSeed{steps: steps, child: child}
+	seed := trackingSeed{steps: steps, child: child, completed: terminalChild(r)}
 	if e.config.Progress != nil {
 		seed.nodes, err = e.config.Progress.Nodes(ctx, r.ID)
 		if err != nil {
@@ -207,14 +227,20 @@ func (e *Executor) process(ctx context.Context, name string) {
 	t := e.tracked[name]
 	e.mu.Unlock()
 	if t == nil {
+		if e.resumeCollection(ctx, name) {
+			return
+		}
 		e.discoverChild(ctx, name)
 		return
 	}
-	parent := ctx
-	budget := e.config.ObservationTimeout
-	if t.completed {
-		budget = min(budget, t.evidenceUntil.Sub(e.config.Now()))
+	if t.archiveOnly {
+		if delay := e.collectionDelay(t); delay > 0 {
+			e.queue.AddAfter(name, delay)
+			return
+		}
 	}
+	parent := ctx
+	budget := e.observationBudget(t)
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	if e.expired(t) {
@@ -229,11 +255,11 @@ func (e *Executor) process(ctx context.Context, name string) {
 	}
 	e.logObservation(ctx, t, err)
 	if err == nil {
-		t.refusals = 0
-		e.queue.Forget(name)
-		if t.settled || t.lost {
-			e.retire(t)
-		}
+		e.observationSucceeded(t)
+		return
+	}
+	if t.archiveOnly {
+		e.archivePending(t, err)
 		return
 	}
 	var readError *nativeReadError
@@ -248,7 +274,29 @@ func (e *Executor) process(ctx context.Context, name string) {
 	e.queue.Forget(name)
 	e.retire(t)
 }
+
+func (e *Executor) observationSucceeded(t *tracking) {
+	t.refusals = 0
+	e.queue.Forget(t.binding.Workflow.Name)
+	if t.settled || t.lost {
+		e.retire(t)
+	}
+}
 func (e *Executor) observe(ctx context.Context, t *tracking) error {
+	if t.archiveOnly {
+		return e.observeArchive(ctx, t)
+	}
+	return e.observeRun(ctx, t)
+}
+
+func (e *Executor) observationBudget(t *tracking) time.Duration {
+	if t.completed && !t.archiveOnly {
+		return min(e.config.ObservationTimeout, t.evidenceUntil.Sub(e.config.Now()))
+	}
+	return e.config.ObservationTimeout
+}
+
+func (e *Executor) observeRun(ctx context.Context, t *tracking) error {
 	if t.final != nil && !t.completed {
 		if err := e.publish(ctx, t, *t.final); err != nil {
 			return err
@@ -258,17 +306,8 @@ func (e *Executor) observe(ctx context.Context, t *tracking) error {
 		return e.reportDeleted(ctx, t)
 	}
 	w, err := e.Adopt(ctx, t.binding)
-	if errors.As(err, new(ErrAbsent)) {
-		t.lost = true
-		return e.reportDeleted(ctx, t)
-	}
 	if err != nil {
-		var foreign *nativebinding.Refusal
-		if errors.As(err, &foreign) {
-			t.lost = true
-			return e.publish(ctx, t, observationFailure(err))
-		}
-		return &nativeReadError{err}
+		return e.adoptionFailed(ctx, t, err)
 	}
 	pods := e.config.Cache.Pods(w.Name)
 	o, err := Project(ctx, Projection{Plan: t.plan, Workflow: w, Pods: pods, Previous: t.previous, PreviousNodes: t.previousNodes})
@@ -286,7 +325,24 @@ func (e *Executor) observe(ctx context.Context, t *tracking) error {
 	progressError := e.saveObservation(ctx, t, o, terminalWorkflow(w))
 	e.reportHolds(ctx, t, w, pods)
 	t.settled = settled
-	return errors.Join(terminalError, progressError)
+	err = errors.Join(terminalError, progressError)
+	if err == nil && settled {
+		err = e.allowCollection(ctx, t.binding, t.historical)
+	}
+	return err
+}
+
+func (e *Executor) adoptionFailed(ctx context.Context, t *tracking, err error) error {
+	if errors.As(err, new(ErrAbsent)) {
+		t.lost = true
+		return e.reportDeleted(ctx, t)
+	}
+	var foreign *nativebinding.Refusal
+	if errors.As(err, &foreign) {
+		t.lost = true
+		return e.publish(ctx, t, observationFailure(err))
+	}
+	return &nativeReadError{err}
 }
 func (e *Executor) reportDeleted(ctx context.Context, t *tracking) error {
 	return e.publish(ctx, t, Observation{Status: stepmodel.RunFailed, Phase: stepmodel.NativeError, Reason: reasonDeleted, Failure: &stepmodel.FailureRecord{Class: stepmodel.FailureUnknown, Retry: stepmodel.RetryHint{Action: stepmodel.RetryNone}}})
@@ -378,7 +434,14 @@ func (e *Executor) exhausted(ctx context.Context, t *tracking, cause error) {
 	ctx, cancel := context.WithTimeout(ctx, e.config.ObservationTimeout)
 	defer cancel()
 	e.config.Metrics.IncompleteEvidence.Add(1)
-	e.logError(ctx, t.binding.RunID, errors.Join(cause, e.config.Progress.AdvanceNative(ctx, t.binding.RunID)))
+	err := e.config.Progress.AdvanceNative(ctx, t.binding.RunID)
+	if err == nil && t.completed {
+		err = e.allowCollection(ctx, t.binding, t.historical)
+	}
+	if err != nil && t.completed {
+		e.queue.AddAfter(t.binding.Workflow.Name, time.Second)
+	}
+	e.logError(ctx, t.binding.RunID, errors.Join(cause, err))
 }
 
 // Native reads may fail while Argo continues; they never consume store refusals.

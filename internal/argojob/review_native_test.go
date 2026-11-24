@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -81,7 +83,13 @@ func TestReviewDormantWorkflowBytes(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []string{"review-defaults", "review-defaults-ineligible"} {
 		p, _, _ := fixtureKind(t, kind, nativebinding.Preparation{Assist: kind == "review-defaults-ineligible", HelperImage: "oberth.ci/helper:1"})
-		raw, err := json.Marshal(p.View().Workflow)
+		workflow := p.View().Workflow
+		if !reflect.DeepEqual(workflow.Spec.TTLStrategy, &wf.TTLStrategy{SecondsAfterCompletion: new(int32(86400))}) {
+			t.Fatal("unarmed Workflow lacks its debug retention", workflow.Spec.TTLStrategy)
+		}
+		// Only the new retention default is excluded from the existing byte pin.
+		workflow.Spec.TTLStrategy = nil
+		raw, err := json.Marshal(workflow)
 		compositionOK(t, err)
 		got := fmt.Sprintf("%x", sha256.Sum256(raw))
 		want := map[string]string{"review-defaults": "a19e3ea421b0eff7ca539d206534c3957c2d8849e5590a05de54f50696c0dfd9", "review-defaults-ineligible": "563a36e7a85334a76ac47669cc4ce1417f230852a504cbd9c62deb4a66dc1471"}[kind]

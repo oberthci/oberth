@@ -65,6 +65,13 @@ func (m Maintenance) applyRollback(ctx context.Context, r Record) error {
 		return err
 	}
 	defer plan.Close()
+	pipeline := settingText(plan.request.Values, "pipeline", "namespace")
+	if pipeline == "" {
+		pipeline = pipelineNamespace(r.Namespace)
+	}
+	if err = m.Engine.releaseRunFinalizers(ctx, FinalizerScope{Namespace: pipeline, Instance: r.Namespace}); err != nil {
+		return err
+	}
 	rolled := m.Engine.watchController(ctx, r.Namespace)
 	if err = m.revertChart(ctx, r, plan); err != nil {
 		return err
@@ -142,6 +149,13 @@ func (m Maintenance) finishRollback(ctx context.Context, r Record, rolled bool) 
 	}
 	if err != nil {
 		return described("upgrade-failed", err, "Retry: oberth rollback")
+	}
+	pipeline := profile.PipelineNamespace
+	if pipeline == "" {
+		pipeline = pipelineNamespace(r.Namespace)
+	}
+	if err = m.Engine.releaseRunFinalizers(ctx, FinalizerScope{Namespace: pipeline, Instance: r.Namespace}); err != nil {
+		return err
 	}
 	raw, _ := json.Marshal(r)
 	if err = m.Engine.Credentials.saveProfile(profile, publicDigest(raw)); err != nil {

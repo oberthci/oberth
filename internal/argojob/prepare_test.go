@@ -81,6 +81,9 @@ func fixtureWorkflow(kind string) *wf.Workflow {
 	if kind == "review-inherited-retry" {
 		w.Spec.RetryStrategy = &wf.RetryStrategy{Limit: new(intstr.FromInt(2))}
 	}
+	if kind == "gc-policy" {
+		w.Spec.PodGC = &wf.PodGC{Strategy: wf.PodGCOnPodCompletion}
+	}
 	if kind == "definition-probe" {
 		definitionProbeInput(w)
 	}

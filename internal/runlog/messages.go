@@ -77,9 +77,10 @@ const (
 	purgedReason                              = "log was purged"
 	unknownStepReason                         = "step is unknown"
 	podMissingReason                          = "pod missing"
+	notRunReason                              = "no log: step never ran"
 	pendingRemedy                             = "follow the live container stream or read again when the step ends"
 	purgedRemedy                              = "retained output was removed; read the run facts or start another run"
 	interruptedRemedy                         = "read available output or run again to collect new output"
-	canceledRemedy                            = "retry with an active context; attempted container copies are not reopened"
+	canceledRemedy                            = "retry with an active context; completed container copies are not reopened"
 	noSelectionReason                         = "no log matches this selector"
 )

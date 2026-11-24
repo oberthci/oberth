@@ -16,7 +16,8 @@ amd64 and arm64. The executor argument and ConfigMap read the same executor valu
 The defaults render offline with development tags for the two product images;
 a local chart is always identified as unverified in the installation review.
 Installation identities are existing Secrets created outside chart ownership.
-No template creates a private key or executes a command.
+Rendering creates no private key and runs no command. The pre-delete hook releases
+this installation's archive finalizers before removing workloads and namespaces.
 
 The controller reads `runs.parallel` through the parent-owned ConfigMap. Zero
 means unlimited. The chart owns no second limit. The native subchart's ConfigMap
@@ -81,6 +82,7 @@ configuration preparation. The controller also uses RuntimeDefault seccomp.
 Fixed CPU/memory requests are 250m/1Gi for the server, 100m/512Mi for the
 controller and 50m/128Mi for the store. Only the store has a memory limit, 512Mi.
 All three use the installation control PriorityClass (1000000, not a global default).
+It never preempts CI Pods; a pipeline quota prevents CI from using that class.
 A store restarted by an upgrade stays sealed: run `oberth unseal`, then repeat the upgrade.
 Controller workflow state and server Git child processes have variable memory
 needs; working-set samples cannot establish safe memory limits for either.

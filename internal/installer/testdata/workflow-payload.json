@@ -17,8 +17,11 @@
       "note": "authored",
       "oberth.ci/ref": "refs/heads/topic",
       "oberth.ci/run-id": "run-0000000000000001",
-      "oberth.ci/spec-identity": "1ad298090f46a0cbc3e5b57e8d0eac98bbf1484bdeaa8b4d5ed42b0c09381503"
-    }
+      "oberth.ci/spec-identity": "97a2476dca8b8e4dcd6019044301f49b194fec085efb122c73e968a6db01f976"
+    },
+    "finalizers": [
+      "oberth.ci/run-record"
+    ]
   },
   "spec": {
     "templates": [
@@ -109,6 +112,9 @@
         "emptyDir": {}
       }
     ],
+    "ttlStrategy": {
+      "secondsAfterCompletion": 86400
+    },
     "podSpecPatch": "{\"volumes\":[{\"name\":\"exec-sa-token\",\"projected\":{\"sources\":[{\"serviceAccountToken\":{\"expirationSeconds\":3600,\"path\":\"token\"}},{\"configMap\":{\"name\":\"kube-root-ca.crt\",\"items\":[{\"key\":\"ca.crt\",\"path\":\"ca.crt\"}]}},{\"downwardAPI\":{\"items\":[{\"path\":\"namespace\",\"fieldRef\":{\"apiVersion\":\"v1\",\"fieldPath\":\"metadata.namespace\"}}]}}]},\"secret\":null}]}"
   },
   "status": {

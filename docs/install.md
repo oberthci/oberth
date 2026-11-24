@@ -164,14 +164,15 @@ install supplies none.
 ## Remove an installation
 
 There's no uninstall command: remove with Helm directly; install, upgrade and roll back with Oberth.
-Set `context` and `namespace` for this installation. Back up the database, keep secret names and
+Set `context` and `namespace`. Stop new runs, back up data, keep secret names and
 original values separately, and copy recovery material and archives to private storage.
 ```sh
 helm --kube-context "$context" uninstall oberth -n "$namespace" --wait
 ```
-Helm removes the release's server, controller, store, permissions and policies, and its pipeline
-namespace only if the installation created it. Pre-existing namespaces stay. These objects remain
-in the server namespace; Helm never owned the five Secrets:
+Helm's pre-delete hook releases this installation's archive finalizers; keep hooks enabled.
+Rollback releases them too. Copy needed logs first. Helm removes server, controller, store,
+permissions, policies and its installation-created pipeline namespace. Existing namespaces stay.
+These objects remain in the server namespace; Helm never owned the five Secrets:
 
 | Object | What remains |
 | --- | --- |
@@ -188,9 +189,8 @@ Shared workflow definitions stay, including ours; deleting them deletes every in
 
 ### Installation-created namespace
 
-Install marks only namespaces it creates with Helm release-name and release-namespace annotations.
-First confirm it contains no other workloads. Deletion removes everything; this command requires
-a matching creation mark and no remaining Helm release Secrets:
+Pre-existing namespaces stay. Namespace deletion removes everything; first check other workloads.
+Created namespaces need matching Helm creation marks and no remaining release Secrets:
 ```sh
 mark='{.metadata.annotations.meta\.helm\.sh/release-name}{"/"}'
 mark="$mark"'{.metadata.annotations.meta\.helm\.sh/release-namespace}'

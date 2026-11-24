@@ -182,14 +182,14 @@ no service, wiring, native executor, source implementation or concrete Store.
    verify-only with actionable corrections. Argo's global run cap defaults to 4;
    zero is unlimited. The cap is controller configuration only; cap-only changes leave
    server and store Pod templates unchanged. The pinned controller reloads the cap. No additional run cap, CPU formula, queue or workload
-   resource rewriting. Argo `failedPodRestart` is on with `maxRestarts: 1`. Control Pods have fixed measured CPU/memory requests; only store memory is capped. Controller workflow state and repository-dependent server Git processes remain uncapped. The three control Pods use an installation-scoped PriorityClass of 1000000, above ordinary CI and below system priorities; it is not a global default.
+   resource rewriting. Argo `failedPodRestart` is on with `maxRestarts: 1`. Control Pods have fixed measured CPU/memory requests; only store memory is capped. Controller workflow state and repository-dependent server Git processes remain uncapped. The three control Pods use an installation-scoped PriorityClass of 1000000 with preemptionPolicy Never, above ordinary CI and below system priorities; it is not a global default. A pipeline-namespace PriorityClass-scoped ResourceQuota refuses CI Pods using that control class.
    Chart roles follow component contracts: no Workflow deletion, no secret-approval
    mirror and no arbitrary exec in the server namespace. The server may create
    and delete step service accounts only in the pipeline namespace.
    C5 owns the task-result Role and admission policy; C9 renders and tests them.
    Policy expressions guard optional fields with `has(...)`; a plain Pod UPDATE
    without `subResource` is admitted. Retain source TokenReview and schedule rights.
-   By default the managed controller configuration supplies no `workflowDefaults`.
+   Argo's default background deletion keeps dependent Pods behind the Workflow finalizer. Before Helm removal a scoped pre-delete hook removes only this installation's archive guards, including Cron child inheritance; it uses 50 QPS/burst 100, a ten-minute helper budget and an eleven-minute Job deadline, tested with 500 Workflows. Rollback releases them before the earlier chart and again after readiness; other finalizers remain. Review states the one-time backfill cap of 64 MiB per finished run and advises preserving logs before removal or rollback. By default the controller configuration supplies no `workflowDefaults`.
    Each installation's controller runs with an instance ID equal to the server
    namespace name. C5 and C10 label their native submissions with that ID, so a
    cluster-wide default controller never acts on this installation's runs.

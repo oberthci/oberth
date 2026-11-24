@@ -9391,7 +9391,7 @@
   },
   "spec_sha256": {
     "docs/plans/c1-transport-and-tool-registry.md": "eba3b199429ff7ddd85963c2c58474fb9a6b707ec21693951baa4c78a1e271be",
-    "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
+    "docs/plans/c10-schedules.md": "78bd7b77d6511426d16b5c7ddf543b8124c47e82d40fb16542cfa8efbac7ca67",
     "docs/plans/c11-cli-and-server-composition.md": "d2a882319fe2372ad79eff0fd99dd17ab84ae32693609ce520a48ce3ebff4c0f",
     "docs/plans/c12-agent-client.md": "1839b17c036fa9a854df8097a076a712f84c9660b1945f029d5ae9efe728ddac",
     "docs/plans/c13-own-pipelines.md": "3264a0141755c9fc9b736ad06cc1589d23d855a1c0b51dced00d304a574db790",
@@ -9399,11 +9399,11 @@
     "docs/plans/c2-service-actions-and-history.md": "ee18d2e362eaf2575f61d97f545a1ec1dec7d73702c8d9214100a7e36d42ab61",
     "docs/plans/c3-wiring-and-submission.md": "a5b809053fd3596f0be3388983bdfe2d6e62be96fa5005f31b43874c8369411b",
     "docs/plans/c4-admission-rules-and-plan.md": "d7c2a5a09ea28c71d5aa853d41db1e0f952cf1701ef8011e4d5db7b9b49f042a",
-    "docs/plans/c5-native-execution.md": "f3ad4a361270e5fd47078a07a6e4e55dd99f76a8686c5e6f5b988092a24a8c38",
+    "docs/plans/c5-native-execution.md": "a5824d539fe9a73b226710c2e77849313074d2bce754f248220685f928d6b747",
     "docs/plans/c6-source-delivery.md": "b234c97f1365905d824a38e469b96433370dfb7ff038f78d3e5efd26a2dac41f",
     "docs/plans/c7-durable-state.md": "5a40d02e4b3f726d821943d60f892e37b3f8cd424410bcc1fbf9c971386bba65",
-    "docs/plans/c8-logs.md": "e7e04d0a411011160a2f5cb9d885b7dbd6c55503452f5849a5b0557df4f67b63",
-    "docs/plans/c9-install-and-upgrade.md": "e3b6c690ba397a2410adfab3190029f73892d7607f4aa3ffe4dcf30cba1deabb"
+    "docs/plans/c8-logs.md": "60f21dbc1d3a8677ccf25e8d98e2e871f38713feff40b7fb7128c1d23bf3372f",
+    "docs/plans/c9-install-and-upgrade.md": "d679999b3dd4760e63683384732cc68e09cb68a97faf4678b4b33dde0e994224"
   },
   "deltas": [
     {
@@ -15296,7 +15296,7 @@
         "**Delta:**"
       ],
       "scope": "implementation",
-      "basis": "9. **Delta:** **Native configuration.** Keep server and pipeline namespaces and identities distinct. Managed controllers get reviewed settings; external controllers are verify-only with actionable corrections. Argo's global run cap defaults to 4; zero is unlimited. The cap is controller configuration only; cap-only changes leave server and store Pod templates unchanged. The pinned controller reloads the cap. No additional run cap, CPU formula, queue or workload resource rewriting. Argo `failedPodRestart` is on with `maxRestarts: 1`. Control Pods have fixed measured CPU/memory requests; only store memory is capped. Controller workflow state and repository-dependent server Git processes remain uncapped. The three control Pods use an installation-scoped PriorityClass of 1000000, above ordinary CI and below system priorities; it is not a global default. Chart roles follow component contracts: no Workflow deletion, no secret-approval mirror and no arbitrary exec in the server namespace. The server may create and delete step service accounts only in the pipeline namespace. C5 owns the task-result Role and admission policy; C9 renders and tests them. Policy expressions guard optional fields with `has(...)`; a plain Pod UPDATE without `subResource` is admitted. Retain source TokenReview and schedule rights. By default the managed controller configuration supplies no `workflowDefaults`. Each installation's controller runs with an instance ID equal to the server namespace name. C5 and C10 label their native submissions with that ID, so a cluster-wide default controller never acts on this installation's runs. Operator-supplied defaults that merge into an admitted scheduled child spec prevent that child from being recorded by C10's exact spec check.",
+      "basis": "9. **Delta:** **Native configuration.** Keep server and pipeline namespaces and identities distinct. Managed controllers get reviewed settings; external controllers are verify-only with actionable corrections. Argo's global run cap defaults to 4; zero is unlimited. The cap is controller configuration only; cap-only changes leave server and store Pod templates unchanged. The pinned controller reloads the cap. No additional run cap, CPU formula, queue or workload resource rewriting. Argo `failedPodRestart` is on with `maxRestarts: 1`. Control Pods have fixed measured CPU/memory requests; only store memory is capped. Controller workflow state and repository-dependent server Git processes remain uncapped. The three control Pods use an installation-scoped PriorityClass of 1000000 with preemptionPolicy Never, above ordinary CI and below system priorities; it is not a global default. A pipeline-namespace PriorityClass-scoped ResourceQuota refuses CI Pods using that control class. Chart roles follow component contracts: no Workflow deletion, no secret-approval mirror and no arbitrary exec in the server namespace. The server may create and delete step service accounts only in the pipeline namespace. C5 owns the task-result Role and admission policy; C9 renders and tests them. Policy expressions guard optional fields with `has(...)`; a plain Pod UPDATE without `subResource` is admitted. Retain source TokenReview and schedule rights. Argo's default background deletion keeps dependent Pods behind the Workflow finalizer. Before Helm removal a scoped pre-delete hook removes only this installation's archive guards, including Cron child inheritance; it uses 50 QPS/burst 100, a ten-minute helper budget and an eleven-minute Job deadline, tested with 500 Workflows. Rollback releases them before the earlier chart and again after readiness; other finalizers remain. Review states the one-time backfill cap of 64 MiB per finished run and advises preserving logs before removal or rollback. By default the controller configuration supplies no `workflowDefaults`. Each installation's controller runs with an instance ID equal to the server namespace name. C5 and C10 label their native submissions with that ID, so a cluster-wide default controller never acts on this installation's runs. Operator-supplied defaults that merge into an admitted scheduled child spec prevent that child from being recorded by C10's exact spec check.",
       "rows": []
     },
     {

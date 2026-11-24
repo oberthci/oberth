@@ -3,6 +3,7 @@ package argojob
 import (
 	"context"
 	"github.com/oberthci/oberth/internal/runtimeconfig"
+	"golang.org/x/time/rate"
 	"io"
 	"log/slog"
 	"os"
@@ -80,14 +81,17 @@ type Config struct {
 	Now                func() time.Time
 }
 type Executor struct {
-	storeConfigured bool
-	config          Config
-	mu              sync.Mutex
-	tracked         map[string]*tracking
-	recoveryErrors  map[string]string
-	childNotices    map[string]childNotice
-	queue           workqueue.TypedRateLimitingInterface[string]
-	captureReady    chan struct{}
+	storeConfigured  bool
+	config           Config
+	mu               sync.Mutex
+	tracked          map[string]*tracking
+	recoveryErrors   map[string]string
+	childNotices     map[string]childNotice
+	queue            workqueue.TypedRateLimitingInterface[string]
+	captureReady     chan struct{}
+	collectionReads  *rate.Limiter
+	collectionWindow time.Time
+	collectionCount  int
 }
 
 func New(c Config) *Executor {
@@ -104,6 +108,7 @@ func New(c Config) *Executor {
 		c.RateLimiter = workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Second, 8*time.Second)
 	}
 	e := &Executor{storeConfigured: c.SecretStore.Valid(), captureReady: make(chan struct{}, 1), config: c, tracked: make(map[string]*tracking), recoveryErrors: map[string]string{}, childNotices: map[string]childNotice{}, queue: workqueue.NewTypedRateLimitingQueue(c.RateLimiter)}
+	e.collectionReads = newCollectionReads()
 	if c.Cache != nil {
 		c.Cache.OnChange(e.changed)
 	}

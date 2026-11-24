@@ -12,8 +12,8 @@ const terminalEvidenceGrace = time.Minute
 func (e *Executor) evidenceSettled(t *tracking, o Observation, pods []*core.Pod) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return t.completed && (len(o.Nodes) == 0 || o.Complete && len(t.pending) == 0 && podCoverage(o.workflow, pods) || e.expired(t))
+	return t.completed && (len(o.Nodes) == 0 || o.Complete && len(t.pending) == 0 && t.capturing == 0 && podCoverage(o.workflow, pods) || e.expired(t))
 }
 func (e *Executor) expired(t *tracking) bool {
-	return t.completed && !t.evidenceUntil.IsZero() && !e.config.Now().Before(t.evidenceUntil)
+	return t.completed && !t.archiveOnly && !t.evidenceUntil.IsZero() && !e.config.Now().Before(t.evidenceUntil)
 }

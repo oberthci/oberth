@@ -40,6 +40,7 @@ func (e *Executor) Create(ctx context.Context, p *admissioncontract.PreparedAdmi
 		}
 	}
 	stampSubmission(w, v, r.RepositoryID)
+	w.Finalizers = append(w.Finalizers, nativebinding.RecordFinalizer)
 	instanceid.NewService(e.config.InstanceID).Label(w)
 	created, err := e.config.Workflows.Create(ctx, w, meta.CreateOptions{})
 	if err != nil {

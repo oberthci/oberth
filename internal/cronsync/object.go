@@ -81,7 +81,7 @@ func render(namespace, instanceID string, request Preparation, prepared *admissi
 			SuccessfulJobsHistoryLimit: ptr.To(int32(2147483647)),
 			FailedJobsHistoryLimit:     ptr.To(int32(2147483647)),
 			WorkflowSpec:               view.Workflow.Spec,
-			WorkflowMetadata:           &metav1.ObjectMeta{Labels: labels, Annotations: annotations},
+			WorkflowMetadata:           &metav1.ObjectMeta{Labels: labels, Annotations: annotations, Finalizers: []string{nativebinding.RecordFinalizer}},
 		},
 	}
 	instanceid.NewService(instanceID).Label(object)
