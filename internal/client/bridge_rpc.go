@@ -60,10 +60,7 @@ func (b *bridge) tool(ctx context.Context, req rpcRequest) {
 	if len(params.Arguments) == 0 {
 		params.Arguments = json.RawMessage(`{}`)
 	}
-	for _, d := range apicontract.Definitions(apicontract.Bindings{}) {
-		if d.Name != params.Name {
-			continue
-		}
+	if d, ok := toolDefinition(params.Name); ok {
 		b.forwardTool(ctx, req, bridgeTool{d, params.Arguments, params.Meta.ProgressToken})
 		return
 	}

@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"sync"
+
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/publicerr"
 )
@@ -36,13 +38,18 @@ func (c *Client) Invoke(ctx context.Context, name string, input, out any) error 
 	return nil
 }
 
-func toolDefinition(name string) (apicontract.Definition, bool) {
+//nolint:gochecknoglobals // The client catalogue contains immutable declarations, never service handlers or caller state.
+var clientDefinitions = sync.OnceValue(func() map[string]apicontract.Definition {
+	out := make(map[string]apicontract.Definition)
 	for _, d := range apicontract.Definitions(apicontract.Bindings{}) {
-		if d.Name == name {
-			return d, true
-		}
+		out[d.Name] = d
 	}
-	return apicontract.Definition{}, false
+	return out
+})
+
+func toolDefinition(name string) (apicontract.Definition, bool) {
+	d, ok := clientDefinitions()[name]
+	return d, ok
 }
 
 func resultError(data []byte) error {
