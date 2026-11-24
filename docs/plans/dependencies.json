@@ -1670,7 +1670,8 @@
       "pkg/argoworkflow"
     ],
     "internal/installer": [
-      "internal/argojob/argojobtest"
+      "internal/argojob/argojobtest",
+      "pkg/argoworkflow/controllertest"
     ],
     "internal/api": [
       "pkg/argoworkflow/argoworkflowtest",

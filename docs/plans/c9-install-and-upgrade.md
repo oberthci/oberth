@@ -125,7 +125,7 @@ no service, wiring, native executor, source implementation or concrete Store.
 2. **Exact target.** Every child command and SDK call uses the selected context
    and verified cluster identity. Never change current-context or the user's
    kubeconfig. Private merged copies have owner-only permissions, cancellation
-   cleanup and conservative recovery. There is no cluster-type trust bypass. Enter selects a shown single-context default; multiple contexts require an explicit choice. A URL derived from a loopback API host requires a reachable URL prompt or --url. Choice markers record explicit input; rollback restores source provenance and replaces current settings with the recorded source settings and source chart defaults. Generated chart inputs use only the target schema's declared keys.
+   cleanup and conservative recovery. There is no cluster-type trust bypass. Enter selects a shown single-context default; multiple contexts require an explicit choice. A URL derived from a loopback API host requires a reachable URL prompt or --url. Choice markers record explicit input; saved origins remain sparse across reruns and upgrades. Rollback restores source provenance and replaces current settings with the recorded source settings and source chart defaults. Generated chart inputs use only the target schema's declared keys.
 3. **Current identities.** Clear private buffers and require explicit rotation
    review. Keep server, SSH, audit and store identities across
    reruns and upgrades. Added names preserve the served certificate's names;
@@ -180,8 +180,8 @@ no service, wiring, native executor, source implementation or concrete Store.
 9. **Delta:** **Native configuration.** Keep server and pipeline namespaces and identities
    distinct. Managed controllers get reviewed settings; external controllers are
    verify-only with actionable corrections. Argo's global run cap defaults to 4;
-   zero is unlimited. The cap is controller configuration only; changing it leaves
-   the server Pod template unchanged. No additional run cap, CPU formula, queue or workload
+   zero is unlimited. The cap is controller configuration only; cap-only changes leave
+   server and store Pod templates unchanged. The pinned controller reloads the cap. No additional run cap, CPU formula, queue or workload
    resource rewriting. Argo `failedPodRestart` is on with `maxRestarts: 1`. Control Pods have fixed measured CPU/memory requests; only store memory is capped. Controller workflow state and repository-dependent server Git processes remain uncapped.
    Chart roles follow component contracts: no Workflow deletion, no secret-approval
    mirror and no arbitrary exec in the server namespace. The server may create

@@ -175,13 +175,9 @@ func inheritedStatusOrigins(stored map[string]any) map[string]string {
 	if origins == nil {
 		origins = map[string]string{}
 	}
-	baseline := "default"
-	if len(stored) > 0 {
-		baseline = ""
-	}
-	for _, name := range apicontract.InstallationChoiceNames() {
-		if _, known := origins[name]; !known {
-			origins[name] = baseline
+	if len(stored) == 0 {
+		for _, name := range apicontract.InstallationChoiceNames() {
+			origins[name] = "default"
 		}
 	}
 	return origins
