@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/api"
@@ -34,7 +35,7 @@ func progressExample(t *testing.T) http.Handler {
 	p := &progressPage{store: store, id: strings.Repeat("c", 32), ready: make(chan struct{})}
 	plan := admissioncontract.Plan{Entries: []admissioncontract.PlanEntry{{Path: "prepare", Name: "prepare"}, {Path: "test", Name: "test"}}}
 	store.SeedRun(stateport.Run{HasAdmission: true, RepositoryID: 1, RunSummary: stepmodel.RunSummary{ID: p.id, Repo: "origin/team/web", Ref: "refs/heads/progress", Status: stepmodel.RunQueued, CreatedAt: testNow()}, Admission: admissioncontract.PreparedView{Plan: plan}})
-	store.SeedSteps(p.id, []stepmodel.RunStep{{Path: "prepare", Name: "prepare", Status: stepmodel.StepQueued}, {Path: "test", Name: "test", Status: stepmodel.StepPending}})
+	store.SeedSteps(p.id, []stepmodel.RunStep{{Path: "prepare", Name: "prepare", Status: stepmodel.StepQueued, Detail: "Prepare diagnostics."}, {Path: "test", Name: "test", Status: stepmodel.StepPending}})
 	bindings := exampleRunService(t, store).Bindings()
 	f := setup(t, func(c *api.Config, b *apicontract.Bindings) {
 		c.Runtime.Now = testNow
@@ -85,15 +86,11 @@ func (p *progressPage) advance(ctx context.Context, phase string) error {
 	p.ready, p.waiting = make(chan struct{}), false
 	p.mu.Unlock()
 	at := testNow()
-	steps := []stepmodel.RunStep{{Path: "prepare", Name: "prepare", Status: stepmodel.StepRunning, StartedAt: &at}, {Path: "test", Name: "test", Status: stepmodel.StepQueued}}
-	if phase != "running" {
-		steps[0].Status, steps[0].FinishedAt = stepmodel.StepPassed, &at
-		steps[1].Status, steps[1].StartedAt = stepmodel.StepRunning, &at
+	steps, err := p.store.Steps(ctx, p.id)
+	if err != nil {
+		return err
 	}
-	if phase == "passed" {
-		steps[1].Status, steps[1].FinishedAt = stepmodel.StepPassed, &at
-	}
-	if err := p.store.SaveProgress(ctx, p.id, stateport.Progress{Steps: steps}); err != nil {
+	if err := p.store.SaveProgress(ctx, p.id, stateport.Progress{Steps: progressSteps(steps, phase, at)}); err != nil {
 		return err
 	}
 	if phase != "passed" {
@@ -105,6 +102,31 @@ func (p *progressPage) advance(ctx context.Context, phase string) error {
 	}
 	event := stateport.EventWrite{Dedupe: "finished:" + p.id, Event: model.AgentEvent{Kind: string(model.EventRunFinished), Repo: run.Repo, RunID: run.ID, At: at, Summary: "passed"}}
 	return p.store.Finish(ctx, stateport.Action{Actor: "operator", Events: []stateport.EventWrite{event}}, stateport.RunUpdate{ID: p.id, Revision: run.Revision, Status: stepmodel.RunPassed})
+}
+
+func progressSteps(steps []stepmodel.RunStep, phase string, at time.Time) []stepmodel.RunStep {
+	steps[0].Status = stepmodel.StepRunning
+	if steps[0].StartedAt == nil {
+		steps[0].StartedAt = &at
+	}
+	steps[1].Status, steps[1].Detail = stepmodel.StepQueued, phase
+	if phase != "running" {
+		steps[0].Status = stepmodel.StepPassed
+		if steps[0].FinishedAt == nil {
+			steps[0].FinishedAt = &at
+		}
+		steps[1].Status = stepmodel.StepRunning
+		if steps[1].StartedAt == nil {
+			steps[1].StartedAt = &at
+		}
+	}
+	if phase == "passed" {
+		steps[1].Status, steps[1].FinishedAt = stepmodel.StepPassed, &at
+	}
+	if phase == "detail" {
+		steps[0].Detail = "Updated prepare diagnostics."
+	}
+	return steps
 }
 
 func (p *progressPage) logs(ctx context.Context) (apicontract.LogResult, error) {

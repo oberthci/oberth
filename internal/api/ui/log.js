@@ -12,8 +12,9 @@ async function loadLog(view, path, args, regions, restart) {
     const native = args.node_id !== undefined;
     const result = await get(path + (native ? "/containerlog?" : "/logs?") + params({tail: true, limit: 500, ...args}), signal);
     if (signal.aborted) return;
-    resetLog(regions, result.content || "");
-    regions.status.replaceChildren(...[...(result.containers || []).map(item => h("p", {}, "Container: " + item.container)), h("p", {}, result.display_reason || result.meta.reason || (result.content ? "" : copy.emptyLog[0])), detail(result.detail || result.meta.detail)].filter(Boolean));
+    if (regions.output.textContent !== (result.content || "")) resetLog(regions, result.content || "");
+    const open = regions.status.querySelector("details")?.open;
+    regions.status.replaceChildren(...[...(result.containers || []).map(item => h("p", {}, "Container: " + item.container)), h("p", {}, result.display_reason || result.meta.reason || (result.content ? "" : copy.emptyLog[0])), detail(result.detail || result.meta.detail, open)].filter(Boolean));
     regions.controls.querySelector("button")?.remove();
     if (result.meta.has_more) regions.controls.append(button("Earlier output", () => loadLog(view, path, {...args, byte_offset: result.meta.next_byte_offset}, regions, true)));
     const target = native ? args : result.containers?.at(-1);

@@ -28,7 +28,7 @@ function h(tag, attrs = {}, ...children) {
  return node;
 }
 function button(text, onclick) { return h("button", {type: "button", onclick}, text); }
-function detail(text) { return text ? h("details", {}, h("summary", {}, "Detail"), h("pre", {}, text)) : null; }
+function detail(text, open = false) { return text ? h("details", {open: open ? "" : null}, h("summary", {}, "Detail"), h("pre", {}, text)) : null; }
 function empty(words) { return h("div", {class: "empty"}, words.map(word => h("p", {}, word))); }
 function showError(error, target = notice) {
  if (error.name === "AbortError" || error.signin) return;
@@ -279,11 +279,8 @@ function runScreen(view, id) {
   if (run.next_step_offset !== undefined) steps.append(button("Next 100 steps", () => { view.offset = run.next_step_offset; refresh(view); }));
   if (view.offset) steps.append(button("First steps", () => { view.offset = 0; refresh(view); }));
   const selected = run.steps?.find(step => step.plan_path === view.selected);
-  view.logStep = selected;
-  if (selected && view.logHeader) view.logHeader.replaceChildren(...stepHeader(selected));
   if (view.selected === undefined && run.steps?.length) chooseStep(view, run.steps.find(step => step.status === "failed") || run.steps[0], path, pane, false);
-  else if (!view.logBusy) view.logReload?.();
-  else view.logDirty = true;
+  else updateSelectedStep(view, selected);
  };
 }
 function stepRows(view, steps, path, pane) {

@@ -9390,7 +9390,7 @@
     }
   },
   "spec_sha256": {
-    "docs/plans/c1-transport-and-tool-registry.md": "2023725eb5a3fa6ebfebda28f6f86823a2c9fed641e7cd57a999cae366bd41b1",
+    "docs/plans/c1-transport-and-tool-registry.md": "d2a314588551bb332d02748454f154af2c118ea319486bb371dd449341ead057",
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
     "docs/plans/c11-cli-and-server-composition.md": "ca015ccba8efcc4a069ffdfd63c4c725809c6881ab3f1a80b9f346cda04995b9",
     "docs/plans/c12-agent-client.md": "c7f6697a5c7dfd408df7afca3bb8d216022be5f310bc5e636e2744afc0f10d83",
@@ -10155,7 +10155,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** C1 never writes a secret, token or private key to logs, events, diagnostics or command output. Server diagnostics use a fixed field list. The UI shows a new pushed run within five seconds and preserves the CLI's run, step and log identities. Steps stay in plan order; consecutive runs of at least two rows with the same positive `parallel_group` share an inset rail with visible ends and at least 3:1 panel contrast, keeping one line per row at one text level. The CLI and agent block use `┌ │ └` for each group; single rows carry no mark. `credential_intent` shows one `secret` tag without secret names or values. Issue bodies are plain text. Imported issues show their original author, closer, ordered history and imported mark through the same issue view. The status screen shows one reason, its detail and run counts. Executor-noise lines appear as returned by the log read; the bundled controller disables informational executor diagnostics at their source. The script has no folding rule. Live updates use `events_wait` to trigger reads. Read the first event immediately; coalesce events at the cursor while its read and one-second burst interval finish.",
+      "basis": "**Delta:** C1 never writes a secret, token or private key to logs, events, diagnostics or command output. Server diagnostics use a fixed field list. The UI shows a new pushed run within five seconds and preserves the CLI's run, step and log identities. Steps stay in plan order; consecutive runs of at least two rows with the same positive `parallel_group` share an inset rail with visible ends and at least 3:1 panel contrast, keeping one line per row at one text level. The CLI and agent block use `┌ │ └` for each group; single rows carry no mark. `credential_intent` shows one `secret` tag without secret names or values. Issue bodies are plain text. Imported issues show their original author, closer, ordered history and imported mark through the same issue view. The status screen shows one reason, its detail and run counts. Executor-noise lines appear as returned by the log read; the bundled controller disables informational executor diagnostics at their source. The script has no folding rule. Live updates use `events_wait` to trigger reads. Read the first event immediately; coalesce events at the cursor while its read and one-second burst interval finish. Preserve open Details and log selections when their content is unchanged. Only a change to the selected step's projection reloads its log.",
       "rows": [],
       "predicates": [
         {

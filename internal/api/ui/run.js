@@ -42,6 +42,14 @@ function fitRunMetadata(region) {
   node.hidden = true;
  }
 }
-function stepHeader(step) {
- return [h("h2", {}, step.name + " · " + step.status), step.display_reason && step.display_reason !== step.status ? h("p", {}, step.display_reason) : null, detail(step.detail)].filter(Boolean);
+function updateSelectedStep(view, selected) {
+ if (!selected || JSON.stringify(selected) === JSON.stringify(view.logStep)) return;
+ const open = view.logHeader?.querySelector("details")?.open;
+ view.logStep = selected;
+ if (view.logHeader) view.logHeader.replaceChildren(...stepHeader(selected, open));
+ if (!view.logBusy) view.logReload?.();
+ else view.logDirty = true;
+}
+function stepHeader(step, open = false) {
+ return [h("h2", {}, step.name + " · " + step.status), step.display_reason && step.display_reason !== step.status ? h("p", {}, step.display_reason) : null, detail(step.detail, open)].filter(Boolean);
 }
