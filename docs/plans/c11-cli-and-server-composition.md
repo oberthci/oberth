@@ -31,7 +31,7 @@ print help.
 ### Commands and output
 
 Run get shows an explicit `selected_file`; run list adds it to the existing reason text.
-The layout stays fixed. JSON preserves the same public field for web and agent consumers.
+The layout stays fixed. JSON preserves the same public field for web and agent consumers. Log output keeps a status sentence when a failed step has no specific reason.
 
 C13 defines the happy-path limits. C11 supports `oberth promote <sha>` without
 an input file, storing a secret without cluster access, pipeline

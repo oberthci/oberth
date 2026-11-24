@@ -406,7 +406,14 @@ func (s *flowSession) finishLogStep(logs apicontract.LogResult, cursor *logCurso
 	}
 	for _, step := range run.Steps {
 		if step.Path == path && step.Status == stepmodel.StepFailed {
-			return s.fact("%s\n%s", step.DisplayReason, step.Detail)
+			reason := step.DisplayReason
+			if reason == "" {
+				reason = "step " + string(step.Status)
+			}
+			if step.Detail != "" {
+				reason += "\n" + step.Detail
+			}
+			return s.fact("%s", reason)
 		}
 	}
 	reason := logs.DisplayReason
