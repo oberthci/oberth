@@ -31,13 +31,11 @@ async function follow($: EngineInterface, options: PluginOptions, loop: Loop) {
     await refresh($, options, loop)
     const state = await read($, snapshot)
     if (loop.stopped || !state.reachable) return
-    const runs = [...state.recent, ...state.pins.map(pin => pin.run)]
-      .filter(run => active(run) && run.profile && !state.unavailable?.includes(run.profile))
-      .filter((run, index, all) => all.findIndex(row => row.id === run.id) === index)
-    if (!runs.length) return
-    const changes = await Promise.allSettled(runs.map(run => waitForChange($, options, run.id, run.profile!)))
+    const run = [...state.pins.map(pin => pin.run), ...visible(state, loop.count)]
+      .find(run => active(run) && run.profile && !state.unavailable?.includes(run.profile))
+    if (!run) return
     // A failed change feed falls back to the idle timer, never a busy loop.
-    if (loop.stopped || changes.every(change => change.status === 'rejected')) return
+    try { await waitForChange($, options, run.id, run.profile!) } catch { return }
   }
 }
 

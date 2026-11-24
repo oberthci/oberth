@@ -682,6 +682,53 @@ test('a competing state write cannot duplicate a completion toast', { options },
 
 const six = [1, 2, 3, 4, 5, 6].map(n => run(String(n).repeat(8) + '0'.repeat(24)))
 
+for (const pinFirst of [false, true]) {
+  test(`three live rows use one wait per round${pinFirst ? ' and prefer a watched pin' : ''}`, { options }, async ($, on) => {
+    bottom(on)
+    const clock = mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+    let rows = six.slice(0, 3)
+    const pinned = run('dddddddd000000000000000000000000')
+    let lists = 0
+    const waits: string[] = []
+    let releaseFirst!: () => void
+    let releaseRest!: () => void
+    let nextRound!: () => void
+    const first = new Promise<void>(resolve => { releaseFirst = resolve })
+    const rest = new Promise<void>(resolve => { releaseRest = resolve })
+    const advanced = new Promise<void>(resolve => { nextRound = resolve })
+    on('process.run', async (_, e) => {
+      let value: unknown
+      if (e.argv[2] === 'wait') {
+        const id = e.argv[3]!
+        waits.push(id)
+        if (waits.length === 2) nextRound()
+        await (id === six[0]!.id ? first : rest)
+        value = { run: id === pinned.id ? pinned : rows.find(row => row.id === id), timed_out: false }
+      } else if (e.argv[2] === 'get') value = pinned
+      else { lists++; value = { runs: rows } }
+      return { value: { exitCode: 0, stdout: JSON.stringify(value), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    })
+    try {
+      await startSession($, on)
+      await boxLines($)
+      expect(lists).toBe(1)
+      expect(waits).toEqual([six[0]!.id])
+      if (pinFirst) await $.command.run({ ...commandInput, command: 'oberth-watch', args: pinned.id })
+      rows = rows.map((row, index) => index ? row : { ...row, status: 'passed', finished_at: '2026-11-18T00:01:00.200Z' })
+      await clock.advance(200)
+      releaseFirst()
+      await advanced
+      expect(lists).toBe(2)
+      expect(waits).toEqual([six[0]!.id, pinFirst ? pinned.id : six[1]!.id])
+      expect((await boxLines($)).some(line => line.startsWith('11111111') && line.includes('✓ passed'))).toBe(true)
+    } finally {
+      await $.session.end({ sessionId: 'test-session', resume: { id: 'test-session' }, reason: 'prompt_input_exit' })
+      releaseFirst()
+      releaseRest()
+    }
+  })
+}
+
 test('a live run changes in the box within one second through a bounded change wait', { options }, async ($, on) => {
   bottom(on)
   let server = Date.parse('2026-11-18T00:01:00Z')
@@ -1127,7 +1174,7 @@ test('runs 0 keeps the table and watches with completion toasts', { options: { .
   await clock.advance(15000)
   expect(notices).toEqual(rows.map(row => `Oberth ${row.id}: passed`))
   expect(calls.filter(call => call[2] === 'list')).toHaveLength(2)
-  expect(calls.filter(call => call[2] === 'wait').map(call => call[3])).toEqual(rows.map(row => row.id))
+  expect(calls.filter(call => call[2] === 'wait').map(call => call[3])).toEqual([rows[0]!.id])
   const finished = calls.length
   await clock.advance(180000)
   expect(calls).toHaveLength(finished)

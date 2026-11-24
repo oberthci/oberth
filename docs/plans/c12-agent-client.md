@@ -73,8 +73,9 @@ these notices wrap. Without a selection it explains setup once and stays hidden.
 It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.
 
 One timer discovers idle runs every 15 seconds. While a shown or pinned run is live,
-public `run wait --until any --timeout-s 1` replaces the sleep between coalesced
-refreshes, so changes appear in about one second. Failed change waits leave the next
+one public `run wait --until any --timeout-s 1` per round replaces the sleep between
+coalesced refreshes: an active watched pin first, otherwise the first shown live row.
+Its change refreshes at once; other changes appear by the one-second timeout. Failed change waits leave the next
 read to the idle timer. Watches begin reading immediately; every CLI call is bounded.
 Session start does not await the first refresh. A new session retires the previous
 loop, including its pending waits and watch reads. Missing profile setup is explained once per option value;
