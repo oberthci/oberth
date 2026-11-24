@@ -99,7 +99,7 @@ these limits. C2 owns the
 ### Baseline and backup
 
 **Delta:** The current baseline is schema 6, with only current records, constraints
-and query indexes and no configured release-role records. Optional query indexes for issue totals and CI repository/branch lookups are created idempotently at open; archives may omit them, while present definitions must match. Existing receive receipt JSON retains all accepted old/new ref values and at most 16 replaced heads, including parked and no-pipeline pushes; inherit only when the old object equals the previous accepted new object. A disposable connection-local index rebuilds from those receipts for sync. Run publications copy their original receive's set into private durable evidence, separate from the live lease; the durable schema stays unchanged. A layout pin for each
+and query indexes and no configured release-role records. Open adds no persistent schema objects. Existing receive receipt JSON retains all accepted old/new ref values and at most 16 replaced heads, including parked and no-pipeline pushes; inherit only when the old object equals the previous accepted new object. A disposable connection-local index rebuilds from those receipts for sync. Run publications copy their original receive's set into private durable evidence, separate from the live lease; the durable schema stays unchanged. A layout pin for each
 schema number preserves its baseline digest; changing the layout requires a new
 number. Do not transplant the migration catalog. Future migrations keep immutable IDs,
 transactional receipts and unknown-ID refusal, including when numeric counts match.

@@ -11,3 +11,11 @@ a capped memory scope, Go 1.26.10, and a physical GOTMPDIR/TMPDIR. Close
 the store before gzip compression with mtime=0.
 
 Uncompressed SHA256: beaa6530061ad4e710fef05778e286e8eeaaefb9b8c23b17ba22a9df978f5abb
+
+Rollback probe: create a detached scratch worktree at main 547a35c7, copy
+schema6_rollback_test.go.txt to internal/store/rollback_probe_test.go there,
+and build its store tests with go test -c. Run the current branch's
+TestSchema6OpenPreservesBaselineLayout with OBERTH_SCHEMA6_PROBE pointing
+at that binary. It opens the database using main's unmodified store code
+after the current binary opens it, and reads the accepted run and issues.
+Without the variable, the test still checks baseline layout and records.

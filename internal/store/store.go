@@ -85,7 +85,7 @@ func Create(ctx context.Context, path string, options Options) (_ *Store, result
 	return Open(ctx, path, options)
 }
 
-// Open requires an existing exact baseline and adds only optional query indexes.
+// Open requires an existing exact baseline and never creates or migrates it.
 func Open(ctx context.Context, path string, options Options) (*Store, error) {
 	path, options, err := configuration(path, options)
 	if err != nil {
@@ -116,9 +116,6 @@ func Open(ctx context.Context, path string, options Options) (*Store, error) {
 		return nil, errors.Join(err, s.Close())
 	}
 	if err := s.loadLastBackup(ctx); err != nil {
-		return nil, errors.Join(err, s.Close())
-	}
-	if err := ensureQueryIndexes(ctx, s.writer); err != nil {
 		return nil, errors.Join(err, s.Close())
 	}
 	worker, stop := context.WithCancel(context.WithoutCancel(ctx))

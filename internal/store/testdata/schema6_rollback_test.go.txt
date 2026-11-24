@@ -1,0 +1,24 @@
+package store
+
+import (
+	"os"
+	"testing"
+)
+
+func TestReadRollbackDatabase(t *testing.T) {
+	s, err := Open(t.Context(), os.Getenv("OBERTH_ROLLBACK_DATABASE"), testOptions())
+	requireOK(t, err)
+	defer func() { requireOK(t, s.Close()) }()
+	run, err := s.Run(t.Context(), "schema-six-run")
+	requireOK(t, err)
+	if run.Repo != "origin/team/repo" || !run.HasAdmission {
+		t.Fatal("main lost the accepted run")
+	}
+	for _, id := range []int64{50, 90} {
+		issue, err := s.Issue(t.Context(), id)
+		requireOK(t, err)
+		if issue.Title != "Schema six issue" {
+			t.Fatal("main lost an issue", id)
+		}
+	}
+}

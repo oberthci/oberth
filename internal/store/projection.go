@@ -22,12 +22,10 @@ func (s *Store) ProjectCI(ctx context.Context, action stateport.Action, runID st
 	}, action.Events...)
 }
 
-const ciIssueLookup = `SELECT id FROM issues WHERE repo=? AND json_extract(value,'$.kind')='ci' AND json_extract(value,'$.branch')=?
-ORDER BY id DESC LIMIT 1`
-
 func (s *Store) applyCIOutcome(ctx context.Context, tx *sql.Tx, r stateport.Run) (int64, error) {
 	var id int64
-	err := tx.QueryRowContext(ctx, ciIssueLookup, r.Repo, r.Ref).Scan(&id)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM issues WHERE repo=? AND json_extract(value,'$.kind')='ci' AND json_extract(value,'$.branch')=?
+ORDER BY id DESC LIMIT 1`, r.Repo, r.Ref).Scan(&id)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, databaseError(err)
 	}

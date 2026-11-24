@@ -59,9 +59,6 @@ func checkSchema(ctx context.Context, db *sql.DB) (resultErr error) {
 	if _, err := expected.ExecContext(ctx, baseline); err != nil {
 		return databaseError(err)
 	}
-	if err := expectQueryIndexes(ctx, db, expected); err != nil {
-		return err
-	}
 	want, err := schemaObjects(ctx, expected)
 	if err != nil {
 		return err
