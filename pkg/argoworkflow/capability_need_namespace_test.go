@@ -50,16 +50,20 @@ func assertCapabilityNamespaceNeed(t *testing.T, namespace string) {
 			}
 			findings = prepared.View().Findings
 		}
-		assertCapabilityNamespaceRemedy(t, findings, protected)
+		assertCapabilityNamespaceRemedy(t, findings, protected, mode)
 	}
 }
 
-func assertCapabilityNamespaceRemedy(t *testing.T, findings []admissioncontract.Finding, protected bool) {
+func assertCapabilityNamespaceRemedy(t *testing.T, findings []admissioncontract.Finding, protected bool, mode admissioncontract.Mode) {
 	t.Helper()
+	expected := "oberth workflow capability grant"
+	if mode == admissioncontract.ModeInspect {
+		expected = "oberth check"
+	}
 	refused, command := false, false
 	for _, f := range findings {
 		refused = refused || f.Code == "protected_namespace"
-		command = command || strings.Contains(f.Command, "oberth workflow capability grant")
+		command = command || f.Code == "capability" && strings.Contains(f.Command, expected)
 	}
 	if refused != protected || command == protected {
 		t.Fatal("capability remedy disagrees with the grant", findings)

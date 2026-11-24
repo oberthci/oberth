@@ -33,7 +33,7 @@ func (g *graph) dedupeFindings() {
 	unique := g.findings[:0]
 	for _, f := range g.findings {
 		if g.offlineValidation && g.offline() && f.Installation {
-			f = unverifiedFinding(f)
+			f = g.unverifiedFinding(f)
 		}
 		if !seen[f] {
 			unique = append(unique, f)

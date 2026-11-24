@@ -17,7 +17,7 @@ The starter only prints a success message: it neither fetches source nor tests y
 it with your tests. `init` refuses overwrites without `--force`; `--release` changes only the
 destination to `.oberth/release.yaml`, adding no signing or publication. `validate` connects to no
 server. It runs push admission with placeholder server parameters and reports all refusals in
-file/field order. “Not checked offline:” lists unverified live facts and requirement commands;
+file/field order. “Not checked offline:” lists unverified live facts and check commands;
 needs alone exit 0, refusals exit 1. `-o json` returns `refusals` and `needs`. Never define reserved
 parameters. After [connecting](../README.md#first-green-build), use `check` for live verification:
 

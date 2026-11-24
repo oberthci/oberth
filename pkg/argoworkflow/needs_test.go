@@ -7,9 +7,10 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/admissioncontract"
+	"github.com/oberthci/oberth/internal/publicerr"
 )
 
-func TestOfflineNeedsUseTheExactPushCommands(t *testing.T) {
+func TestOfflineNeedsUseCheckCommandsForPushTargets(t *testing.T) {
 	for _, file := range []string{"cache.yaml", "release.yaml", "resource.yaml"} {
 		t.Run(file, func(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join("../../docs/examples", file))
@@ -28,20 +29,23 @@ func TestOfflineNeedsUseTheExactPushCommands(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			checkCommand := publicerr.CheckCommand(r.Repository, r.SelectedFile)
 			for _, f := range push {
 				if !f.Installation || f.Command == "" || !slices.ContainsFunc(prepared.View().Findings, func(need admissioncontract.Finding) bool {
-					return offlineNeedMatchesPush(need, f)
+					return offlineNeedMatchesPush(need, f, checkCommand)
 				}) {
-					t.Fatal("push remedy differs from offline need", f, prepared.View().Findings)
+					t.Fatal("offline need lost its push target or check command", f, prepared.View().Findings)
 				}
 			}
 		})
 	}
 }
 
-func offlineNeedMatchesPush(need, push admissioncontract.Finding) bool {
+func offlineNeedMatchesPush(need, push admissioncontract.Finding, checkCommand string) bool {
 	if push.Code == "store_config" {
 		push.Code = "store_unverified"
+	} else {
+		push.Command = checkCommand
 	}
 	push.Reason, push.Remedy = need.Reason, need.Remedy
 	return need == push

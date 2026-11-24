@@ -136,11 +136,16 @@ func finding(path, code string) admissioncontract.Finding {
 	return admissioncontract.Finding{Path: path, Code: code, Reason: m.reason, Remedy: m.remedy}
 }
 
-// Offline validation has no live authority snapshot. Preserve the finding's code,
-// path and command, but use the catalogue's unchecked wording for live facts.
-func unverifiedFinding(f admissioncontract.Finding) admissioncontract.Finding {
+// Offline validation has no live authority snapshot. Preserve the finding's code
+// and path, and point unchecked live facts to a read-only check.
+func (g *graph) unverifiedFinding(f admissioncontract.Finding) admissioncontract.Finding {
 	if m, ok := messages()[f.Code+"_unverified"]; ok {
 		f.Reason, f.Remedy = m.reason, m.remedy
+		repo := g.request.Repository
+		if repo == "" {
+			repo = "<repo>"
+		}
+		f.Command = publicerr.CheckCommand(repo, g.commandFile())
 	}
 	return f
 }

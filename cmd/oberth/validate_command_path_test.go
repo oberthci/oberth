@@ -87,12 +87,13 @@ func validationGrantDocument(t *testing.T) []byte {
 func assertValidationCommandPaths(t *testing.T, result validationResult, local, selected string) {
 	t.Helper()
 	secret, live := false, false
+	command := "oberth check --repo '<repo>' --local '" + selected + "'"
 	for _, need := range result.Needs {
 		if strings.Contains(need.Command, local) {
 			t.Fatal("local path escaped into remedy", need)
 		}
-		secret = secret || strings.Contains(need.Command, "--file '"+selected+"'")
-		live = live || strings.Contains(need.Command, "--local '"+selected+"'")
+		secret = secret || need.Code == "grant" && need.Command == command
+		live = live || need.Code == "live" && need.Command == command
 	}
 	if !secret || !live {
 		t.Fatal("repository selection absent from commands", result.Needs)

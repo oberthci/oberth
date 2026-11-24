@@ -42,14 +42,18 @@ func TestValidateListsEachStepsDeclaredPaths(t *testing.T) {
 	if code := app.run(t.Context(), []string{"validate", ".oberth/build.yaml"}); code != 0 {
 		t.Fatal(code, diagnostic.String())
 	}
+	output := out.String()
+	const command = "oberth check --repo '<repo>' --local '.oberth/build.yaml'"
 	for _, step := range []struct{ name, path string }{{"sign", "team/signing"}, {"push", "team/registry"}} {
 		need := `spec.templates["` + step.name + `"].secrets[` + step.path + `]`
-		command := "oberth secret put --repo '<repo>' --file '.oberth/build.yaml' --step '" + step.name + "' '" + step.path + "' < <value-file>"
-		if !strings.Contains(out.String(), need) || !strings.Contains(out.String(), command) {
-			t.Fatal("validate does not list the step's own path and command", step, out.String())
+		if !strings.Contains(output, need) || !strings.Contains(output, command) {
+			t.Fatal("validate does not list the step's own path and check", step, output)
 		}
 	}
-	if strings.Contains(out.String(), "--step 'sign' 'team/registry'") || strings.Contains(out.String(), "--step 'push' 'team/signing'") {
-		t.Fatal("validate asks to grant a step another step's path", out.String())
+	if strings.Contains(output, `spec.templates["sign"].secrets[team/registry]`) || strings.Contains(output, `spec.templates["push"].secrets[team/signing]`) {
+		t.Fatal("validate lists another step's path", output)
+	}
+	if strings.Contains(output, "oberth secret put") {
+		t.Fatal("offline validation suggests a grant write", output)
 	}
 }
