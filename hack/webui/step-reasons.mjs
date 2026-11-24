@@ -2,20 +2,20 @@ import {check} from './cdp.mjs';
 
 export async function stepReasons(client) {
  const injection=await client.cdp('Page.addScriptToEvaluateOnNewDocument',{source:`
-  window.uiStepReason='passed';const reasonFetch=fetch;
+  window.uiStepReason='passed';window.uiStepStatus='passed';const reasonFetch=fetch;
   window.fetch=async(path,options)=>{
    const response=await reasonFetch(path,options);
    if(new URL(path,location.href).pathname!=='/api/runs/11111111')return response;
-   const run=await response.json();run.steps=[{...run.steps[0],name:'prepare',status:'passed',display_reason:uiStepReason,detail:'Complete step detail.'}];
+   const run=await response.json();run.steps=[{...run.steps[0],name:'prepare',status:uiStepStatus,display_reason:uiStepReason,detail:'Complete step detail.'}];
    return new Response(JSON.stringify(run));
   };`});
  try {
   await client.loaded('/runs/11111111','.log h2');
   const results=[];
-  for(const reason of ['passed','passed','waiting for a node']) {
-   if(results.length)await client.evaluate(`uiStepReason=${JSON.stringify(reason)};screen.read()`);
-   const result=await client.evaluate(`({heading:document.querySelector('.log h2').textContent,reasons:Array.from(screen.logHeader.querySelectorAll(':scope > p')).map(node=>node.textContent),detail:screen.logHeader.querySelector('pre').textContent})`);
-   check(result.heading==='prepare · passed'&&result.detail==='Complete step detail.'&&JSON.stringify(result.reasons)===JSON.stringify(reason==='passed'?[]:[reason]),'step panel repeats a status or loses its reason/detail '+JSON.stringify(result));
+  for(const [status,reason,specific] of [['passed','passed',false],['queued','step queued',false],['running','step is running',false],['passed','step passed',false],['cancelled','step cancelled',false],['pending','step pending',false],['failed','step failed',false],['skipped','step skipped',false],['passed','waiting for a node',true],['passed','step passed with warnings',true]]) {
+   if(results.length)await client.evaluate(`uiStepStatus=${JSON.stringify(status)};uiStepReason=${JSON.stringify(reason)};screen.read()`);
+   const result=await client.evaluate(`({heading:document.querySelector('.log h2').textContent,headingHeight:document.querySelector('.log h2').getBoundingClientRect().height,reasons:Array.from(screen.logHeader.querySelectorAll(':scope > p')).map(node=>({text:node.textContent,height:node.getBoundingClientRect().height,width:node.getBoundingClientRect().width})),detail:screen.logHeader.querySelector('pre').textContent,summaryHeight:screen.logHeader.querySelector('summary').getBoundingClientRect().height})`);
+   check(result.heading==='prepare · '+status&&result.headingHeight>0&&result.detail==='Complete step detail.'&&result.summaryHeight>0&&result.reasons.length===Number(specific)&&result.reasons.every(item=>item.text===reason&&item.height>0&&item.width>0),'status-only step reason occupies a visible line '+JSON.stringify(result));
    results.push({kind:'step-reason',...result});
   }
   return results;

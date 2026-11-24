@@ -51,5 +51,6 @@ function updateSelectedStep(view, selected) {
  else view.logDirty = true;
 }
 function stepHeader(step, open = false) {
- return [h("h2", {}, step.name + " · " + step.status), step.display_reason && step.display_reason !== step.status ? h("p", {}, step.display_reason) : null, detail(step.detail, open)].filter(Boolean);
+ const reason = step.display_reason;
+ return [h("h2", {}, step.name + " · " + step.status), reason && ![step.status, "step " + step.status, "step is " + step.status].includes(reason) ? h("p", {}, reason) : null, detail(step.detail, open)].filter(Boolean);
 }
