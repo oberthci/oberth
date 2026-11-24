@@ -8,7 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/internal/sourcedelivery"
@@ -16,16 +16,20 @@ import (
 
 func TestTransferWaitRechecksRunAfterCapacityRelease(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, checkTransferWaitReauthorization)
+}
+
+func checkTransferWaitReauthorization(t *testing.T) {
 	config := deliveryRulesConfig()
 	run := config.Run
 	var reads, stages atomic.Int32
 	var terminal atomic.Bool
-	seen := make(chan struct{})
+	rechecked := make(chan struct{})
 	config.Run = func(ctx context.Context, id string) (sourcedelivery.Run, error) {
 		r, err := run(ctx, id)
 		r.Terminal = terminal.Load()
-		if reads.Add(1) == 3 {
-			close(seen)
+		if reads.Add(1) == 4 {
+			close(rechecked)
 		}
 		return r, err
 	}
@@ -48,13 +52,19 @@ func TestTransferWaitRechecksRunAfterCapacityRelease(t *testing.T) {
 	}
 	awaitSourceStages(t, entered, responses)
 	workers.Go(func() { responses <- requestRulesSource(t, server, descriptor).Code })
-	select {
-	case <-seen:
-	case <-time.After(time.Second):
-		t.Fatal("waiting request was not authorized")
+	// All three workers are durably blocked: two inside Stage and the third
+	// waiting for a transfer slot, after its first authorization completed.
+	synctest.Wait()
+	if reads.Load() != 3 || stages.Load() != 2 || len(responses) != 0 {
+		t.Fatal("third request did not wait behind the active transfers", reads.Load(), stages.Load(), len(responses))
 	}
 	terminal.Store(true)
 	join()
+	select {
+	case <-rechecked:
+	default:
+		t.Fatal("capacity waiter did not re-authorize after release")
+	}
 	forbidden := 0
 	for range 3 {
 		if code := <-responses; code == http.StatusForbidden {
