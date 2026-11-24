@@ -729,6 +729,37 @@ for (const pinFirst of [false, true]) {
   })
 }
 
+test('a watch added during a pending wait uses its server clock before any refresh', { options }, async ($, on) => {
+  bottom(on)
+  const server = Date.parse('2026-11-18T00:01:00Z')
+  mock.clock(on, { now: server + 11 * 60000 })
+  const listed = run()
+  const watched = run('dddddddd000000000000000000000000')
+  let lists = 0
+  let release!: () => void
+  let armed!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const waiting = new Promise<void>(resolve => { armed = resolve })
+  on('process.run', async (_, e) => {
+    let value: unknown
+    if (e.argv[2] === 'wait') { armed(); await held; value = { run: listed, timed_out: true } }
+    else if (e.argv[2] === 'get') value = watched
+    else { lists++; value = { runs: [listed], server_time: new Date(server).toISOString() } }
+    return { value: { exitCode: 0, stdout: JSON.stringify(value), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  try {
+    await startSession($, on)
+    await waiting
+    await $.command.run({ ...commandInput, command: 'oberth-watch', args: watched.id })
+    expect(lists).toBe(1)
+    expect((await boxLines($))[1]).toMatch(/^dddddddd .*▶ running +6\/11 +1m00s +1m +●$/)
+    expect(lists).toBe(1)
+  } finally {
+    await $.session.end({ sessionId: 'test-session', resume: { id: 'test-session' }, reason: 'prompt_input_exit' })
+    release()
+  }
+})
+
 test('a live run changes in the box within one second through a bounded change wait', { options }, async ($, on) => {
   bottom(on)
   let server = Date.parse('2026-11-18T00:01:00Z')
