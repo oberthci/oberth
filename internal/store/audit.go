@@ -38,11 +38,23 @@ func (s *Store) change(ctx context.Context, m mutation, apply func(*sql.Tx) erro
 	if err := s.appendAudit(ctx, tx, m); err != nil {
 		return err
 	}
+	var completed time.Time
+	if m.action == "backup.completed" {
+		completed, err = backupAtHead(ctx, tx)
+		if err != nil {
+			return err
+		}
+	}
 	if err := writeEvents(ctx, tx, events); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return commitFailure{databaseError(err)}
+	}
+	if m.action == "backup.completed" {
+		s.backupMu.Lock()
+		s.lastBackup = completed
+		s.backupMu.Unlock()
 	}
 	s.signalChange()
 	return nil

@@ -25,6 +25,8 @@ type Options struct {
 
 // Store owns independent writer, observation and reserved live reader pools.
 type Store struct {
+	backupMu                                                    sync.RWMutex
+	lastBackup                                                  time.Time
 	changeMu                                                    sync.Mutex
 	changed                                                     chan struct{}
 	writes                                                      chan struct{}
@@ -111,6 +113,9 @@ func Open(ctx context.Context, path string, options Options) (*Store, error) {
 		return nil, errors.Join(err, s.Close())
 	}
 	if err := checkSchema(ctx, s.readers); err != nil {
+		return nil, errors.Join(err, s.Close())
+	}
+	if err := s.loadLastBackup(ctx); err != nil {
 		return nil, errors.Join(err, s.Close())
 	}
 	worker, stop := context.WithCancel(context.WithoutCancel(ctx))
