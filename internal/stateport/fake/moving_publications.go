@@ -134,6 +134,9 @@ func (f *Runs) RetryPublication(ctx context.Context, a stateport.Action, q state
 		if p.Status != model.PublicationFailed && (p.Status != model.PublicationPending || p.RetryAt == nil) {
 			return runProblem(publicerr.InvalidTransition)
 		}
+		if p.CIAfter == 0 {
+			p.CIAfter = -1
+		}
 		p.Attempts = 0
 		p.Status = model.PublicationPending
 		p.RetryAt = nil

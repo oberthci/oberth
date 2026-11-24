@@ -183,7 +183,7 @@ installer or transport imports. C1 owns schemas and decoding; C11 owns compositi
   C11 drains accepted submissions before dependencies close.
 - Publication attempt CAS precedes external mutation; preserve predecessor,
   accepted object and branch-head fencing. Five attempts use 2/4/8/16-minute
-  delays; explicit retry resets the budget. Permission/policy failures are not
+  delays; explicit retry resets the budget but retains prior-attempt evidence, so only the first-ever delivery skips the target preflight. Permission/policy failures are not
   transport retries. Recovery rearms durable retry times. C2 never retries a
   database operation; C7's busy timeout absorbs contention within caller deadlines.
 - **Delta:** Typed inputs use C1's standard bounded decoder; null means absent. A supplied
