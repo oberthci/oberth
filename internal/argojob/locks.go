@@ -70,9 +70,15 @@ type lockCollector struct {
 }
 
 func (c *lockCollector) add(f LockFact) {
-	if !slices.Contains(c.out, f) {
-		c.out = append(c.out, f)
+	for i, previous := range c.out {
+		if previous.Lock == f.Lock && previous.Role == f.Role && previous.Workflow == f.Workflow {
+			if previous.Permits < f.Permits {
+				c.out[i] = f
+			}
+			return
+		}
 	}
+	c.out = append(c.out, f)
 }
 
 func (c *lockCollector) workflow(w *wf.Workflow) {
