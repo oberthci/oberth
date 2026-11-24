@@ -33,12 +33,12 @@ Run an optional committed workflow explicitly:
 ```sh
 git push oberth HEAD:refs/heads/walk -o oberth.run=1 -o oberth.file=hack/walk-vm.yaml
 ```
-The path must be clean and repository-relative. Normal CI admission, exact file/step grants,
-source retention and capability checks apply. Missing files refuse the push. No automatic trigger
-or schedule selects it; reruns retain its file. Tags, `.oberth/release.yaml` and configured release
-route files refuse this option: releases require administrator-authorized tags. Optional results
-do not replace `build.yaml` promotion evidence or clear its CI issues. Offline `validate` treats
-only `.oberth/release.yaml` as a release; other files are CI without server route context.
+Clean repository-relative paths use normal CI admission, exact file/step grants, source retention
+and capability checks. Missing files refuse the push. Reruns retain the file; nothing selects it
+automatically. Tags and release route files refuse this option: releases require admin tags.
+Selected-file runs never publish their branch to the forge. Optional results do not replace
+`build.yaml` promotion evidence or clear its CI issues. Offline `validate` treats only
+`.oberth/release.yaml` as a release; other files are CI without server route context.
 
 | File | Copy to | Shows |
 | --- | --- | --- |

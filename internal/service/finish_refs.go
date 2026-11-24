@@ -14,7 +14,7 @@ func (s *Service) finishIntent(ctx context.Context, r stateport.Run, o FinishedR
 	if r.Origin.Trigger == model.TriggerPromotion {
 		return s.promotionIntent(ctx, r, o)
 	}
-	if o.Status != stepmodel.RunPassed || r.Origin.HasAssistance() {
+	if o.Status != stepmodel.RunPassed || r.Origin.HasAssistance() || r.Origin.RequestedFile != "" || r.Origin.Trigger == model.TriggerBranch && optionalWorkflow(r) {
 		return nil, nil, nil
 	}
 	p := model.Publication{ID: "publication:" + r.ID, Repo: r.Repo, Ref: r.Ref, RunID: r.ID, ObjectSHA: r.ObjectSHA, CommitSHA: r.CommitSHA, Actor: r.Origin.Actor}
