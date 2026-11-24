@@ -39,6 +39,9 @@ func (
 	error,
 ) {
 	if quarantine == "" && len(record.Event.Updates) > 0 && !slices.ContainsFunc(record.Event.Updates, func(u RefUpdate) bool { return u.NewSHA != "" }) {
+		if !record.AlwaysRun {
+			return nil, refuse("deletion run option")
+		}
 		return nil, refuse("deletion admission")
 	}
 	objects := filepath.Join(store, "objects")

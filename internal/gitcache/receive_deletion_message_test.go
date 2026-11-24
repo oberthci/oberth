@@ -41,7 +41,12 @@ func checkDeletionRefusal(t *testing.T, empty, operator bool, branch string) {
 	ref := "refs/heads/" + branch
 	f.Git(t, f.Store(), "update-ref", ref, f.Commit)
 	before := publicReceiveRefs(t, f)
-	r := fourthAgentPush(t, f, []gitcache.RefUpdate{{Ref: ref, OldSHA: f.Commit}}, nil)
+	var options []string
+	if !operator {
+		options = []string{"oberth.run=1"}
+	}
+	r := fourthAgentPush(t, f, []gitcache.RefUpdate{{Ref: ref, OldSHA: f.Commit}}, options)
+	r.AlwaysRun = operator
 	if empty {
 		r.Admission.SHA = ""
 	}
@@ -55,7 +60,7 @@ func checkDeletionRefusal(t *testing.T, empty, operator bool, branch string) {
 	if err := c.Receive(t.Context(), r); err == nil {
 		t.Fatal("deletion requiring admission returned success")
 	}
-	checkDeletionGuidance(t, branch, status.String(), feedback.String())
+	checkDeletionGuidance(t, branch, operator, [2]string{status.String(), feedback.String()})
 	if admissions != 0 || deliveries != 0 || publicReceiveRefs(t, f) != before {
 		t.Fatal("refused deletion reached admission, delivery or mutation", admissions, deliveries)
 	}
@@ -70,9 +75,12 @@ func checkDeletionRefusal(t *testing.T, empty, operator bool, branch string) {
 	}
 }
 
-func checkDeletionGuidance(t *testing.T, branch, status, feedback string) {
+func checkDeletionGuidance(t *testing.T, branch string, operator bool, output [2]string) {
 	t.Helper()
 	want := "deletion-only push cannot run CI. Delete topic branches directly on the forge; keep default and reserved branches."
+	if !operator {
+		want = "deletion-only push cannot run CI. Push the deletion again without -o oberth.run=1."
+	}
 	if branch != "topic" {
 		want = "branch deletion is protected. Keep the default and reserved branches."
 	}
@@ -80,7 +88,7 @@ func checkDeletionGuidance(t *testing.T, branch, status, feedback string) {
 	if len(reason) > 40 || len(remedy) > 120 {
 		t.Fatal("deletion message exceeds its bound", len(reason), len(remedy))
 	}
-	if !strings.Contains(feedback, want) || !strings.Contains(status, "ng refs/heads/"+branch) {
-		t.Fatal("deletion refusal lost its specific whole guidance", status, feedback)
+	if !strings.Contains(output[1], want) || !strings.Contains(output[0], "ng refs/heads/"+branch) {
+		t.Fatal("deletion refusal lost its specific whole guidance", output)
 	}
 }
