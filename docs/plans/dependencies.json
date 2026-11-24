@@ -201,6 +201,7 @@
       "internal/sshserver",
       "internal/stepmodel",
       "internal/strictjson",
+      "internal/workflowpolicy",
       "pkg/argoworkflow/defaults",
       "pkg/argoworkflow/specsize"
     ],
@@ -867,6 +868,7 @@
         "C2",
         "C3",
         "C4",
+        "C6",
         "C7",
         "C9",
         "C11",
@@ -1235,7 +1237,8 @@
       "internal/runtimeconfig",
       "internal/sourcecontract",
       "internal/stepmodel",
-      "internal/strictjson"
+      "internal/strictjson",
+      "internal/workflowpolicy"
     ],
     "C7": [
       "internal/actor",
@@ -1368,7 +1371,8 @@
       "internal/sourcecontract",
       "internal/sourcedelivery",
       "internal/stepmodel",
-      "internal/strictjson"
+      "internal/strictjson",
+      "internal/workflowpolicy"
     ],
     "internal/sourcedelivery": [
       "internal/admissioncontract",
@@ -1555,8 +1559,9 @@
     "internal/identityname": [],
     "internal/pushretry": [],
     "internal/workflowpolicy": [
+      "internal/identityname",
       "internal/reponame",
-      "internal/identityname"
+      "internal/sourcecontract"
     ],
     "internal/executoridentity": [],
     "internal/containerimage": [],
@@ -1610,7 +1615,7 @@
     ],
     "internal/stateport": [
       "internal/reponame",
-      "internal/sourcecontract"
+      "internal/workflowpolicy"
     ],
     "internal/store": [
       "pkg/argoworkflow"

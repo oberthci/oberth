@@ -1,7 +1,7 @@
 package gitcache
 
 import (
-	"github.com/oberthci/oberth/internal/sourcecontract"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"strings"
 )
 
@@ -20,7 +20,7 @@ func ParsePushOptions(options []string) (PushOptions, error) {
 		}
 		seen[k] = true
 		if k == "oberth.file" {
-			if sourcecontract.ValidateFilePath(v) != nil {
+			if workflowpolicy.ValidateFile(v) != nil {
 				return result, refuseOptions()
 			}
 			result.File = v

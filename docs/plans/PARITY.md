@@ -6,7 +6,7 @@ Regenerate: python3 hack/plans/parity.py --reference /path/to/old-checkout --rew
 Only extracted REWRITE.md §4 issue-table cells are hashed; unrelated prose/line numbers are not inputs. SHA256 a894a915ff94061a92cc88abdf96f9a76b292cf1e899d3cf96f62a1fa31d64e0.
 Spec input: docs/plans/dispositions.json (override --dispositions); SHA256 254e0330be307ac907d34be5967ef455fffd08977b7da00ffbed7a33166e15bd; 111 marked Delta locations.
 Sweep input: docs/plans/sweeps.json (override --sweeps, --sweep-dir); SHA256 9491f4c23060f639f680275de382e69e7a25f79de60c40fd611d9bc58b03941e; 32 findings.
-Dependency input: docs/plans/dependencies.json; SHA256 da6afacb074c92f903989830f6ca111459c0a148888d2f0b0e9513c58ac3ee97. JSON consumer permissions, recorded reference ownership and intended package acyclicity are checked on every run.
+Dependency input: docs/plans/dependencies.json; SHA256 c302923c1f7e849b75fec383fab752e389aa898e5d98fab2fcf8f91cd3ab9040. JSON consumer permissions, recorded reference ownership and intended package acyclicity are checked on every run.
 
 KEEP preserves observable behaviour even when implementation is rebuilt. Implementation Deltas only annotate rows. CHANGE names a specific observable difference and cites its actual Delta. RETIRED cites a spec or sweep absence decision. NEW names its approval state. No generic wave sentence licenses a behaviour change.
 The source registry has 92 tools; additions/retirements are explicit. All tracked source registrations, chart expressions, schema history, metrics/events, installer functions and own-pipeline declarations remain inventoried. VM product-bearing identifiers use neutral aliases; exact safe source locations remain evidence.

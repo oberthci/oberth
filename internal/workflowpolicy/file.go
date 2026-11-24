@@ -1,8 +1,9 @@
 package workflowpolicy
 
 import (
-	"path"
 	"strings"
+
+	"github.com/oberthci/oberth/internal/sourcecontract"
 )
 
 const (
@@ -56,16 +57,8 @@ func (e *InvalidError) Remedy() string {
 // ValidateFile accepts only an exact clean repository-relative path. No
 // wildcard, normalization, or inferred workflow is allowed in a grant key.
 func ValidateFile(file string) error {
-	if len(file) == 0 || len(file) > MaxFileBytes || path.IsAbs(file) || path.Clean(file) != file {
-		return &InvalidError{Path: "file", reason: "requires an exact clean repository-relative file"}
-	}
-	for _, segment := range strings.Split(file, "/") {
-		if segment == "." || segment == ".." || segment == "" {
-			return &InvalidError{Path: "file", reason: "reserved or empty path segment"}
-		}
-	}
-	if !policyAlphabet(file) {
-		return &InvalidError{Path: "file", reason: "requires ASCII letters, digits, dot, underscore, hyphen or slash"}
+	if len(file) > MaxFileBytes || sourcecontract.ValidateFilePath(file) != nil || !policyAlphabet(file) {
+		return &InvalidError{Path: "file", reason: "workflow file is invalid"}
 	}
 	return nil
 }
