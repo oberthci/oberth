@@ -116,8 +116,8 @@ spec:
           - {name: RELEASE_SHARED, value: /work/shared}
           - {name: DOCKER_CONFIG, value: /run/private/registry}
           - {name: RELEASE_REGISTRY_HOST, value: europe-west4-docker.pkg.dev}
-          - {name: RELEASE_WIF_PROVIDER, valueFrom: {configMapKeyRef: {name: release-config, key: registry-provider}}}
-          - {name: RELEASE_WIF_ACCOUNT, valueFrom: {configMapKeyRef: {name: release-config, key: registry-account}}}
+          - {name: RELEASE_WIF_PROVIDER, valueFrom: {configMapKeyRef: {name: release-config, key: registry-provider, optional: true}}}
+          - {name: RELEASE_WIF_ACCOUNT, valueFrom: {configMapKeyRef: {name: release-config, key: registry-account, optional: true}}}
         volumeMounts:
           - {name: cache, mountPath: /cache}
           - {name: registry-identity, mountPath: /run/registry-identity, readOnly: true}

@@ -85,7 +85,7 @@ An administrator configures the provider to trust the cluster issuer and audienc
 Allow that subject to impersonate a registry writer restricted to this image repository.
 Set `release-config.registry-provider` to
 `projects/NUMBER/locations/global/workloadIdentityPools/POOL/providers/PROVIDER`
-and `registry-account` to its account email. These are public configuration, not secret keys.
+and `registry-account` to the writer's email. A missing value refuses at the config stage.
 Only the push step mounts a read-only 3600-second identity. `oberth-release registry-login`
 exchanges it with STS, impersonates the writer for one hour and writes a private login in memory.
 Exchange failure stops the push; no stored registry login is used. The release needs two secrets:

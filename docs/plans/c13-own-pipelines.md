@@ -223,5 +223,6 @@ stored JSON key is only an alternative for clouds without federation, never an
 automatic fallback.
 Federation refusals identify configuration, exchange, impersonation or directory
 failure with a bounded remedy; provider responses and credential material stay private.
+Missing provider/account configuration lets the helper start and refuse at the config stage.
 The push leaf passes its one registry host to login and both image pushes; the helper
 contains no registry host constant. The signed chart repositories must match the pushes.
