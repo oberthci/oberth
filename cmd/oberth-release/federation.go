@@ -7,17 +7,25 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync/atomic"
 	"time"
 
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google/externalaccount"
 )
 
 const registryHost = "europe-west4-docker.pkg.dev"
 
-const federationFailed refusal = "Registry federation failed."
+const (
+	federationConfig        refusal = "Registry federation config is invalid."
+	federationExchange      refusal = "Registry identity exchange failed."
+	federationImpersonation refusal = "Registry impersonation failed."
+	federationDirectory     refusal = "Registry login directory refused."
+)
 
 // The cloud endpoints are fixed. Authored configuration selects only a provider
 // and account, never a destination to which the projected identity can be sent.
@@ -31,16 +39,47 @@ func registryLogin(ctx context.Context, args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	ctx, exchange := registryExchangeContext(ctx)
 	source, err := externalaccount.NewTokenSource(ctx, config)
 	if err != nil {
-		return federationFailed
+		return federationConfig
 	}
 	access, err := source.Token()
 	if err != nil || !access.Valid() {
 		// Provider errors can echo credential material; never print or wrap them.
-		return federationFailed
+		if exchange.impersonating.Load() {
+			return federationImpersonation
+		}
+		return federationExchange
 	}
 	return writeRegistryLogin(dir, access.AccessToken)
+}
+
+// Track only the fixed request stage, never provider response bodies or errors.
+type registryTransport struct {
+	http.RoundTripper
+	impersonating atomic.Bool
+}
+
+func (r *registryTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request.URL.Host == "iamcredentials.googleapis.com" {
+		r.impersonating.Store(true)
+	}
+	return r.RoundTripper.RoundTrip(request)
+}
+
+func registryExchangeContext(ctx context.Context) (context.Context, *registryTransport) {
+	client := http.DefaultClient
+	if configured, ok := ctx.Value(oauth2.HTTPClient).(*http.Client); ok {
+		client = configured
+	}
+	copy := *client
+	transport := &registryTransport{RoundTripper: copy.Transport}
+	if transport.RoundTripper == nil {
+		transport.RoundTripper = http.DefaultTransport
+	}
+	copy.Transport = transport
+	return context.WithValue(ctx, oauth2.HTTPClient, &copy), transport
 }
 
 func registryIdentity(args []string) (externalaccount.Config, string, error) {
@@ -59,7 +98,7 @@ func registryIdentity(args []string) (externalaccount.Config, string, error) {
 	if err != nil || f.NArg() != 0 || *subject == "" || *dir == "" ||
 		!regexp.MustCompile(`^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$`).MatchString(*provider) ||
 		!regexp.MustCompile(`^[a-z0-9-]+@[a-z0-9-]+\.iam\.gserviceaccount\.com$`).MatchString(*account) {
-		return externalaccount.Config{}, "", federationFailed
+		return externalaccount.Config{}, "", federationConfig
 	}
 	return externalaccount.Config{
 		Audience:                       "//iam.googleapis.com/" + *provider,
@@ -78,14 +117,14 @@ func writeRegistryLogin(dir, access string) error {
 	}}}
 	body, err := json.Marshal(config)
 	if err != nil {
-		return federationFailed
+		return federationDirectory
 	}
 	// Refuse existing directories, including links, rather than using stale login.
 	if err := os.Mkdir(dir, 0700); err != nil {
-		return federationFailed
+		return federationDirectory
 	}
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), body, 0600); err != nil {
-		return federationFailed
+		return federationDirectory
 	}
 	return nil
 }

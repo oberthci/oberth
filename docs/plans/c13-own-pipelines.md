@@ -221,3 +221,5 @@ The image-push leaf alone exchanges its exact-audience projected identity throug
 cloud federation for a short-lived registry login in private memory scratch. A
 stored JSON key is only an alternative for clouds without federation, never an
 automatic fallback.
+Federation refusals identify configuration, exchange, impersonation or directory
+failure with a bounded remedy; provider responses and credential material stay private.

@@ -23,7 +23,7 @@ func TestRegistryFederationRefusesMalformedResources(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "registry")
 			_, _, err := registryIdentity([]string{"--provider", tc.provider, "--service-account", tc.account, "--identity-file", "subject", "--dir", dir})
-			if !errors.Is(err, federationFailed) {
+			if !errors.Is(err, federationConfig) {
 				t.Fatal("malformed federation resource was accepted", err)
 			}
 			if _, err := os.Stat(dir); !os.IsNotExist(err) {
@@ -48,12 +48,22 @@ func TestRegistryLoginRequiresFreshPrivateDirectory(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := writeRegistryLogin(dir, "registry-fixture"); !errors.Is(err, federationFailed) {
+			if err := writeRegistryLogin(dir, "registry-fixture"); !errors.Is(err, federationDirectory) {
 				t.Fatal("existing login directory was reused", err)
 			}
 			if _, err := os.Stat(filepath.Join(existing, "config.json")); !os.IsNotExist(err) {
 				t.Fatal("refused directory received a login")
 			}
 		})
+	}
+}
+
+func TestRegistryFederationReasonsNameTheirStage(t *testing.T) {
+	seen := map[string]bool{}
+	for _, reason := range []refusal{federationConfig, federationExchange, federationImpersonation, federationDirectory} {
+		if len(reason) > 40 || len(reason.Remedy()) == 0 || len(reason.Remedy()) > 120 || seen[reason.Error()] {
+			t.Fatal("federation stage is missing, repeated or unbounded", reason)
+		}
+		seen[reason.Error()] = true
 	}
 }

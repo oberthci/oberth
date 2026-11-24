@@ -98,7 +98,8 @@ func checkFederation(t *testing.T, fail string) {
 	login := filepath.Join(dir, "registry")
 	err := run(ctx, []string{"registry-login", "--provider", "projects/123/locations/global/workloadIdentityPools/pool/providers/provider", "--service-account", "writer@project.iam.gserviceaccount.com", "--identity-file", subject, "--dir", login})
 	if fail != "" {
-		if !errors.Is(err, federationFailed) {
+		want := map[string]refusal{"sts": federationExchange, "impersonation": federationImpersonation}[fail]
+		if !errors.Is(err, want) {
 			t.Fatal("provider response leaked or failure ignored", err)
 		}
 		if _, err := os.Stat(login); !os.IsNotExist(err) {
