@@ -59,7 +59,9 @@ func renderedStatusSettings(t *testing.T, origins map[string]any) []apicontract.
 	}
 	c := &composition{config: cfg, settings: runtime}
 	a := serverAdministration{&serverOwners{c: c, settings: runtime, cluster: clusterClients{Kube: fake.NewClientset(maps["oberth-controller-config"])}}}
-	return a.effectiveSettings(t.Context(), []apicontract.PartStatus{{Name: "secret store", Ready: true}})
+	var cap settingsRows
+	cap.runCap(t.Context(), a.owner)
+	return a.effectiveSettings(t.Context(), []apicontract.PartStatus{{Name: "secret store", Ready: true}}, cap.values)
 }
 
 func renderedStatusMaps(t *testing.T, files map[string]string) map[string]*core.ConfigMap {

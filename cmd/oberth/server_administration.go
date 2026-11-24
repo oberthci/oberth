@@ -145,7 +145,8 @@ func (a serverAdministration) PublicIdentity(ctx context.Context, name string) (
 }
 func (a serverAdministration) Status(ctx context.Context, action string) (apicontract.SystemStatus, error) {
 	err := a.owner.c.health.ready(ctx)
-	result := apicontract.SystemStatus{Parts: a.statusParts(ctx), Ready: err == nil, DisplayReason: "ready", Version: binaryVersion()}
+	parts, settings := a.statusSnapshot(ctx, action)
+	result := apicontract.SystemStatus{Parts: parts, Settings: settings, Ready: err == nil, DisplayReason: "ready", Version: binaryVersion()}
 	if err != nil {
 		result.DisplayReason = "not ready"
 	}
@@ -153,10 +154,6 @@ func (a serverAdministration) Status(ctx context.Context, action string) (apicon
 		if !p.Ready {
 			result.Ready, result.DisplayReason = false, "not ready"
 		}
-	}
-	if action == "system_status" {
-		settings := a.effectiveSettings(ctx, result.Parts)
-		result.Settings = &settings
 	}
 	if action == "admin_idle" {
 		idle, err := a.owner.c.store.Idle(ctx)

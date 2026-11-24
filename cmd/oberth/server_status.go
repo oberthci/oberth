@@ -3,13 +3,27 @@ package main
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/publicerr"
 )
 
-const storeStatusTimeout = 5 * time.Second
+const statusProbeTimeout = 5 * time.Second
+
+func (a serverAdministration) statusSnapshot(ctx context.Context, action string) ([]apicontract.PartStatus, *[]apicontract.EffectiveSetting) {
+	if action != "system_status" {
+		return a.statusParts(ctx), nil
+	}
+	var cap settingsRows
+	var probes sync.WaitGroup
+	probes.Go(func() { cap.runCap(ctx, a.owner) })
+	parts := a.statusParts(ctx)
+	probes.Wait()
+	settings := a.effectiveSettings(ctx, parts, cap.values)
+	return parts, &settings
+}
 
 func (a serverAdministration) statusParts(ctx context.Context) []apicontract.PartStatus {
 	c := a.owner.c
@@ -82,7 +96,7 @@ func (a serverAdministration) receiveStatus(ctx context.Context, p *apicontract.
 }
 
 func (a serverAdministration) secretStoreStatus(ctx context.Context, p *apicontract.PartStatus) {
-	probe, cancel := context.WithTimeout(ctx, storeStatusTimeout)
+	probe, cancel := context.WithTimeout(ctx, statusProbeTimeout)
 	defer cancel()
 	if err := a.owner.c.storeWriter.Client.Readiness(probe); err != nil {
 		p.Ready, p.DisplayReason = false, "secret store unavailable"

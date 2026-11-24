@@ -29,10 +29,10 @@ type installationSettings struct {
 
 // effectiveSettings is an allowlist, not a serializer of serverConfig. In
 // particular a future config field cannot silently become a status field.
-func (a serverAdministration) effectiveSettings(ctx context.Context, parts []apicontract.PartStatus) []apicontract.EffectiveSetting {
+func (a serverAdministration) effectiveSettings(ctx context.Context, parts []apicontract.PartStatus, runCap []apicontract.EffectiveSetting) []apicontract.EffectiveSetting {
 	rows := settingsRows{origins: a.owner.c.config.Installation.Origins}
 	rows.server(a.owner.c.config, a.owner.settings)
-	rows.runCap(ctx, a.owner)
+	rows.values = append(rows.values, runCap...)
 	rows.pins(a.owner.settings.SourcePolicy)
 	rows.observations(ctx, a, parts)
 	rows.installation(a.owner.c.config.Installation)

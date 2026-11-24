@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"strconv"
-	"time"
 
 	"github.com/oberthci/oberth/internal/apicontract"
 
@@ -11,7 +10,6 @@ import (
 )
 
 const parallelOriginAnnotation = "oberth.ci/parallel-origin"
-const settingsStatusTimeout = 5 * time.Second
 
 // The controller owns the cap. Reading its live map keeps cap changes out of
 // server configuration and its Pod checksum.
@@ -20,7 +18,7 @@ func (s *settingsRows) runCap(ctx context.Context, o *serverOwners) {
 		s.observe(apicontract.SettingParallelRuns, "unavailable")
 		return
 	}
-	probe, cancel := context.WithTimeout(ctx, settingsStatusTimeout)
+	probe, cancel := context.WithTimeout(ctx, statusProbeTimeout)
 	defer cancel()
 	cm, err := o.cluster.Kube.CoreV1().ConfigMaps(o.c.config.ArgoNamespace).Get(probe, "oberth-controller-config", meta.GetOptions{})
 	if err != nil {
