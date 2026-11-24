@@ -257,7 +257,7 @@ async function runsScreen(view) {
   if (signal.aborted) return;
   replace(region, page.runs.length ? [h("div", {class: "row head", "aria-hidden": "true"}, ["STATUS", "REPOSITORY", "REF", "WHEN", "MESSAGE"].map(text => h("span", {}, text))),
    ...page.runs.map(run => h("a", {class: "row", href: "/runs/" + encodeURIComponent(run.id), "data-key": run.id}, state(run.status), h("b", {class: "repo", title: run.repo}, labels.get(run.repo) || run.repo),
-    h("span", {class: "ref", title: run.ref}, refName(run.ref)), runWhen(run), h("span", {class: "message", title: run.display_reason || null}, run.display_reason))),
+    h("span", {class: "ref", title: run.ref}, refName(run.ref)), runWhen(run), h("span", {class: "message", title: runMessage(run) || null}, runMessage(run)))),
    page.next_cursor ? h("a", {class: "pager", href: "/runs?" + params({...Object.fromEntries(query), before: page.next_cursor})}, "Older runs") : null].filter(Boolean) : [empty(query.size ? copy.filteredRuns : copy.emptyRuns)]);
  };
 }

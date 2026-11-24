@@ -30,6 +30,9 @@ print help.
 
 ### Commands and output
 
+Run get/list display an explicit `selected_file` beside the run's status. The JSON
+output preserves the same public field for the web and agent consumers.
+
 C13 defines the happy-path limits. C11 supports `oberth promote <sha>` without
 an input file, storing a secret without cluster access, pipeline
 scaffolding and enrollment without hand-run openssl. Each uses the existing

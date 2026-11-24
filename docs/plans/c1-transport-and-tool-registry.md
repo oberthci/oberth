@@ -122,6 +122,8 @@ pagination withholds global sequences and uses record-ID cursors. Full run detai
 retains authorized timing and diagnostics; `view=dashboard` omits heavy diagnostics.
 `run_get` defaults to a compact summary, paged at 100 steps. Read-only views never renew
 issue locks. Only `issue_lock` does so through C2's mutation gate.
+Run get/list records also carry `selected_file` for an explicitly selected workflow,
+including refused admissions. HTTP and MCP preserve that field inside the same scope.
 
 Run and event identity use only `object_sha` (accepted pushed object) and `commit_sha`
 (tested checkout commit), as pinned in [Shared contracts](README.md#shared-contracts).

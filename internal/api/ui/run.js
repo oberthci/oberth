@@ -1,4 +1,5 @@
 "use strict";
+function runMessage(run) { return [run.selected_file, run.display_reason].filter(Boolean).join(" · "); }
 function runIdentity(run) {
  return h("p", {class: "identity", "aria-label": "Run and commit"}, h("span", {title: "Run ID"}, "run " + run.id.slice(0, 8)), " · ", h("span", {title: "Commit ID"}, "commit " + (run.commit_sha ? run.commit_sha.slice(0, 12) : "unknown")));
 }
@@ -18,6 +19,7 @@ function runHeader(run, actions, open) {
  const row = h("div", {class: "run-summary"}, h("h1", {title: run.repo + " · " + run.ref}, state(run.status)), clock(run), h("span", {class: "run-counts"}, counts), cancel);
  new ResizeObserver((_, observer) => { if (row.isConnected) fitRunHeader(row); else observer.disconnect(); }).observe(row);
  return [row,
+  run.selected_file ? h("p", {class: "run-file"}, "Workflow: " + run.selected_file) : null,
   run.display_reason ? h("p", {class: "run-reason"}, run.failure ? h("b", {class: "failed-step"}, run.failure.failed_step_name || run.failure.failed_step) : null, run.display_reason) : null,
   h("div", {class: "run-meta muted"}, h("div", {class: "run-metadata"}, h("span", {class: "run-ref"}, run.repo + " · " + refName(run.ref)), runIdentity(run), origin ? h("span", {class: "meta-extra", "aria-label": "Started by"}, " · " + origin) : null,
    h("span", {class: "meta-extra"}, " · ", run.started_at ? "Started " : "Created ", h("time", {datetime: run.started_at || run.created_at, title: fullTimes(run)}, time(run.started_at || run.created_at)))), runDetail(run, open, origin))].filter(Boolean);

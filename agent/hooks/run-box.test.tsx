@@ -381,6 +381,17 @@ test('the floor host contract refuses newer wrap values and invalid layout value
 
 const lintFailure = { failed_step: 'onExit[0].lint', failed_step_name: 'lint', node_id: 'generated-node-419' }
 
+test('selected workflow is visible beside a passing run in the box and list', { options }, async ($, on) => {
+  bottom(on)
+  mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+  const selected = { ...run(undefined, 'passed'), finished_at: '2026-11-18T00:00:45Z', selected_file: 'hack/walk-vm.yaml' }
+  cli(on, () => [selected])
+  await startSession($, on)
+  expect((await boxLines($, 'terminal', 80)).join('\n')).toContain(selected.selected_file)
+  expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toContain(selected.selected_file)
+  expect(() => decodeRun({ ...selected, selected_file: 1 })).toThrow('Invalid workflow file.')
+})
+
 test('/oberth-runs prints the box rows and a reason for failed rows', { options }, async ($, on) => {
   bottom(on)
   mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })

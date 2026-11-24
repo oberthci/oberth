@@ -60,6 +60,8 @@ gives way first. `/oberth-runs` prints the same lines with a failed run's step a
 or a cancelled run's reason last; there the names give way before the reason.
 The box and bridge footer use one time per render and each profile's clock to bound
 duration by age, even when native start predates creation.
+An explicitly selected workflow's filename appears in the box, list and bridge footer,
+even for a passing run. The names give way before the filename in the box too.
 Finished watches produce one completion notice. The box, `/oberth-runs` and `/oberth-watch`
 read only public `run list --json`, `run get --json` and `run wait --json`, through the absolute verified
 executable (its option, by default the fetcher's install in the user bin directory),

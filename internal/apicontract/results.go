@@ -16,6 +16,8 @@ import (
 type RunRecord struct {
 	stepmodel.RunSummary
 	model.RunCause
+	// SelectedFile is the explicit workflow choice, including refused admissions.
+	SelectedFile string `json:"selected_file,omitempty"`
 }
 
 type RunPage struct {

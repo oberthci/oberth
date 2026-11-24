@@ -247,3 +247,6 @@ Authority publication has one fenced Publish operation and no cached-generation 
 Promotion selects the newest build.yaml branch result for its commit; an optional
 workflow result cannot replace that evidence. Scan at most two 200-run pages;
 after 400 optional rows, refuse with guidance to run a fresh build for the commit.
+
+Run get/list expose an explicit workflow choice as `selected_file` from the persisted
+request, including refused admissions and reruns, without another admission read.

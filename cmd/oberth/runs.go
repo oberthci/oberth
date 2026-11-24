@@ -11,16 +11,9 @@ func renderRuns(out io.Writer, runs []any, page map[string]any, detail bool) err
 	if len(runs) == 0 {
 		return writeWrapped(out, "no runs")
 	}
-	rows := [][]string{{"ID", "STATUS", "REF", "REASON"}}
-	for _, row := range runs {
-		run, ok := row.(map[string]any)
-		if !ok {
-			return fmt.Errorf("invalid run row")
-		}
-		id := publicText(run["id"])
-		ref := strings.TrimPrefix(publicText(run["ref"]), "refs/heads/")
-		rows = append(rows, []string{id, publicText(run["status"]), ref, publicText(run["display_reason"])})
-
+	rows, err := runTableRows(runs)
+	if err != nil {
+		return err
 	}
 	if err := renderTable(out, rows); err != nil {
 		return err
@@ -36,6 +29,35 @@ func renderRuns(out io.Writer, runs []any, page map[string]any, detail bool) err
 		return writeWrapped(out, "Next page: oberth run list --before "+cursor)
 	}
 	return nil
+}
+
+func runTableRows(runs []any) ([][]string, error) {
+	files := false
+	for _, row := range runs {
+		if run, ok := row.(map[string]any); ok && publicText(run["selected_file"]) != "" {
+			files = true
+		}
+	}
+	header := []string{"ID", "STATUS", "REF"}
+	if files {
+		header = append(header, "FILE")
+	}
+	rows := [][]string{append(header, "REASON")}
+	for _, row := range runs {
+		run, ok := row.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("invalid run row")
+		}
+		id := publicText(run["id"])
+		ref := strings.TrimPrefix(publicText(run["ref"]), "refs/heads/")
+		values := []string{id, publicText(run["status"]), ref}
+		if files {
+			values = append(values, publicText(run["selected_file"]))
+		}
+		rows = append(rows, append(values, publicText(run["display_reason"])))
+
+	}
+	return rows, nil
 }
 func renderRun(out io.Writer, run map[string]any, detail bool) error {
 	if err := writeWrapped(out, "Run "+publicText(run["id"])+"  "+publicText(run["status"])); err != nil {
@@ -66,7 +88,7 @@ func renderRun(out io.Writer, run map[string]any, detail bool) error {
 // renderRunFacts shows where the run came from beside what it ran; assistance
 // appears only when the push asked for it.
 func renderRunFacts(out io.Writer, run map[string]any, detail bool) error {
-	for _, key := range []string{"repo", "ref", "commit_sha", "trigger", "schedule_entry", "rerun_of", "actor", "assist_requested", "display_reason", "next_step_offset"} {
+	for _, key := range []string{"repo", "ref", "selected_file", "commit_sha", "trigger", "schedule_entry", "rerun_of", "actor", "assist_requested", "display_reason", "next_step_offset"} {
 		if key == "assist_requested" && run[key] != true {
 			continue
 		}

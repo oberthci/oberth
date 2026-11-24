@@ -69,8 +69,9 @@ def check_projection(contract):
     body, fields = projection_fields(contract, "Run")
     public = struct_fields("internal/stepmodel/run.go", "RunSummary")
     public |= struct_fields("internal/stepmodel/step.go", "LogicalStepCounts")
+    public |= struct_fields("internal/apicontract/results.go", "RunRecord")
     if fields - public:
-        raise ValueError("unknown RunSummary JSON field: " + str(fields - public))
+        raise ValueError("unknown run JSON field: " + str(fields - public))
     _, failure = projection_fields(contract, "Failure")
     if failure != {"failed_step", "failed_step_name"} or failure - struct_fields("internal/stepmodel/step.go", "FailureRecord"):
         raise ValueError("unknown failed plan step JSON field")

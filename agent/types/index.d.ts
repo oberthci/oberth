@@ -8,6 +8,7 @@ export type Run = {
   id: string
   repo: string
   ref: string
+  selected_file?: string
   status: 'queued' | 'running' | 'passed' | 'failed' | 'cancelled'
   failure?: Failure | null
   display_reason: string

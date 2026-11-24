@@ -65,7 +65,7 @@ func (s *Service) runView(ctx context.Context, r stateport.Run, q runQuery) (api
 // record shows a resolved run with its recorded cause. Callers pass only runs
 // already resolved inside the caller's repository scope.
 func record(r stateport.Run) apicontract.RunRecord {
-	return apicontract.RunRecord{RunSummary: summary(r.RunSummary), RunCause: r.Origin.RunCause}
+	return apicontract.RunRecord{RunSummary: summary(r.RunSummary), RunCause: r.Origin.RunCause, SelectedFile: r.Origin.RequestedFile}
 }
 
 func (s *Service) listFilter(ctx context.Context, a actor.Actor, q runQuery) (stateport.RunFilter, error) {

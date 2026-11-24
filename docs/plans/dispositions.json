@@ -9390,13 +9390,13 @@
     }
   },
   "spec_sha256": {
-    "docs/plans/c1-transport-and-tool-registry.md": "5659221f8d8ac6a3cb99a77d91911ef0e4bd7bda289d047cc0a5beec24b8d17b",
+    "docs/plans/c1-transport-and-tool-registry.md": "a20f41f102aef6a09777a919ff133566bc17813a6461b6d36617c2bf114942bf",
     "docs/plans/c10-schedules.md": "6f9a1083d931ec7382522664cf9abd87229b4bd0d7f46556ed0ccc4bf587ebc9",
-    "docs/plans/c11-cli-and-server-composition.md": "37dced5a793a5443ecbd12546051203460cda24ad552959de7b1bfad7471e131",
-    "docs/plans/c12-agent-client.md": "6f9982b9d0dd25d4cff808ecaa40a5c9d0d56213034d5aadf801982a04c59ad6",
+    "docs/plans/c11-cli-and-server-composition.md": "cec8edc89a80a1308ecb694acc751e6c0c5b220717cc2163e6631975716d898e",
+    "docs/plans/c12-agent-client.md": "d89f269dd8f442d7a007c073ff7e806208d277c1191a2259f65fc19d7648d469",
     "docs/plans/c13-own-pipelines.md": "c54d6c8ebb10f4727b6d51c59be1fea167623140e61adcf4717a1624b07b9dba",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
-    "docs/plans/c2-service-actions-and-history.md": "8be3c858fe10ae23893f8f438726ed5637983f3035c7d05b458f641dd441ef68",
+    "docs/plans/c2-service-actions-and-history.md": "890e1c7619d77c80c80c05e27bed0937ed0b67c231bca786e5f6b0ffb2502448",
     "docs/plans/c3-wiring-and-submission.md": "2bda8b25776d7f78706a4f57316c82e3ccb7434a42c67f96bcb762f2c8b36a47",
     "docs/plans/c4-admission-rules-and-plan.md": "9c29dfb7bdb5b34200f9abc83acb0fb666bff4939a8776dbd37ebeea9cab0327",
     "docs/plans/c5-native-execution.md": "155a113cdea2691fb03f7fcfebd7c740a718660f161fa0c1ad01b91a76a11ce0",
@@ -9537,7 +9537,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:133",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:135",
       "markers": [
         "**Delta:**"
       ],
@@ -9596,7 +9596,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:149",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:151",
       "markers": [
         "**Delta:**"
       ],
@@ -9634,7 +9634,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:157",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:159",
       "markers": [
         "**Delta:**"
       ],
@@ -9815,7 +9815,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:166",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:168",
       "markers": [
         "**Delta:**"
       ],
@@ -9839,7 +9839,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:180",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:182",
       "markers": [
         "**Delta:**"
       ],
@@ -10087,7 +10087,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:187",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:189",
       "markers": [
         "**Delta:**"
       ],
@@ -10096,7 +10096,7 @@
       "rows": []
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:192",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:194",
       "markers": [
         "**Delta:**"
       ],
@@ -10150,7 +10150,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:252",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:254",
       "markers": [
         "**Delta:**"
       ],
@@ -10268,7 +10268,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c11-cli-and-server-composition.md:38",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:41",
       "markers": [
         "**Delta:**"
       ],
@@ -10303,7 +10303,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c11-cli-and-server-composition.md:48",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:51",
       "markers": [
         "**Delta:**"
       ],
@@ -10346,7 +10346,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c11-cli-and-server-composition.md:80",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:83",
       "markers": [
         "**Delta:**"
       ],
@@ -10377,7 +10377,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c11-cli-and-server-composition.md:111",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:114",
       "markers": [
         "**Delta:**"
       ],
@@ -10427,7 +10427,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c11-cli-and-server-composition.md:128",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:131",
       "markers": [
         "**Delta:**"
       ],
@@ -10445,7 +10445,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c11-cli-and-server-composition.md:138",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:141",
       "markers": [
         "**Delta:**"
       ],
@@ -10468,7 +10468,7 @@
       "markers": [
         "**Delta:**"
       ],
-      "spec": "docs/plans/c11-cli-and-server-composition.md:206",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:209",
       "basis": "**Delta:** The server starts each part's background work once and stops parts in reverse order after HTTP drain. Missing parts or settings refuse startup. Composition calls store retention once a day using [C2's event-retention rule](c2-service-actions-and-history.md#events-and-observation)."
     },
     {
@@ -10574,7 +10574,7 @@
       "markers": [
         "**Delta:**"
       ],
-      "spec": "docs/plans/c11-cli-and-server-composition.md:218",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:221",
       "basis": "**Delta:** Version/status outputs retain their declared formats. Bind version, commit, date and schema to the selected build and database, so identity values vary by installation. Health, readiness and metrics belong to C11; retain readiness verdicts and scenario counters, with typed DTO and metric names as declared here."
     },
     {
@@ -10601,7 +10601,7 @@
       "markers": [
         "**Delta:**"
       ],
-      "spec": "docs/plans/c11-cli-and-server-composition.md:224",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:227",
       "basis": "**Delta:** The happy path allows `oberth promote <sha>` without a file, pipeline scaffolding, secret storage without cluster access and enrollment without hand-run openssl. Each command uses the same service authority and admission checks as other clients."
     },
     {
@@ -10610,7 +10610,7 @@
       "markers": [
         "**Delta:**"
       ],
-      "spec": "docs/plans/c11-cli-and-server-composition.md:299",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:302",
       "basis": "**Delta:** `connect` checks generated keys, matching invitation certificates, occupied-path refusal before redemption, a consumed-invitation remedy, selected identity/scope/profile and repository binding, `.local` discovery with TLS still bound to the original name, repo registration/forge acceptance and the smoke push after a fresh join using the returned SSH endpoint. It also checks the bridge's display block, complete reasons and separate detail, all accepted repository-address forms, credential-bearing and prefixed-path refusals, exact preservation of other remotes and browser-only enrollment without an SSH key. `TestBridgeDisplayBlock` tests this over the protocol. `TestServedLeafRenews` checks renewal at two thirds and the served CA chain. `promote` invokes `oberth promote <sha>` without a file and checks the tested run, resulting main commit and new CI run. `TestRemoteTransportFlags` exercises every wrapper with explicit client certificate/key and trust flags. `TestServerShutdownContract` blocks each dependency and proves cancellation, reverse-order join and no duplicate native work. `TestRefuseIncompleteComposition` checks every missing part and required setting. The health inspection separates local liveness from external waits and checks the 90-second database readiness bound."
     },
     {
@@ -10665,14 +10665,14 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** The optional box shows up to `runs` recent runs (three when unset or blank, none at 0) while a listed or watched run is active or finished in the last ten minutes of the server's clock that the run list carries, with watched runs first in any state. Each run is one line under a header: id, repository and ref in short forms, status word, authoritative plan counts, duration, age, a watched mark and a failed run's step name, measured in terminal cells, cut to the box's width and never wrapped; the last column gives way first. `/oberth-runs` prints the same lines with a failed run's step and reason or a cancelled run's reason last; there the names give way before the reason. The box and bridge footer use one time per render and each profile's clock to bound duration by age, even when native start predates creation. Finished watches produce one completion notice. The box, `/oberth-runs` and `/oberth-watch` read only public `run list --json`, `run get --json` and `run wait --json`, through the absolute verified executable (its option, by default the fetcher's install in the user bin directory), never a checkout executable or a PATH lookup. The plugin reads with the agent's joined uplink profile, selected by its option, `OBERTH_PROFILE` or the checkout's joined uplink binding. The selected value accepts one joined profile or up to 32 comma-separated names; reads merge newest first, deduplicate run IDs and apply one total row limit. Each profile list keeps its server-clock offset even without rows; unlisted watches use that offset and keep their source profile. Failed profile reads hide that profile's stale rows while healthy profiles remain visible. The box and table name unreadable profiles. The table keeps the CLI's refusal up to 80 characters, otherwise the bounded reason and remedy; failed reads alone never say `No runs.`. Multi-profile prompt notices wrap whole. A single-profile failure uses one short prompt line without a full-width frame, hidden only when its whole reason cannot fit the row. Without a selection it explains setup once and stays hidden. It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.",
+      "basis": "**Delta:** The optional box shows up to `runs` recent runs (three when unset or blank, none at 0) while a listed or watched run is active or finished in the last ten minutes of the server's clock that the run list carries, with watched runs first in any state. Each run is one line under a header: id, repository and ref in short forms, status word, authoritative plan counts, duration, age, a watched mark and a failed run's step name, measured in terminal cells, cut to the box's width and never wrapped; the last column gives way first. `/oberth-runs` prints the same lines with a failed run's step and reason or a cancelled run's reason last; there the names give way before the reason. The box and bridge footer use one time per render and each profile's clock to bound duration by age, even when native start predates creation. An explicitly selected workflow's filename appears in the box, list and bridge footer, even for a passing run. The names give way before the filename in the box too. Finished watches produce one completion notice. The box, `/oberth-runs` and `/oberth-watch` read only public `run list --json`, `run get --json` and `run wait --json`, through the absolute verified executable (its option, by default the fetcher's install in the user bin directory), never a checkout executable or a PATH lookup. The plugin reads with the agent's joined uplink profile, selected by its option, `OBERTH_PROFILE` or the checkout's joined uplink binding. The selected value accepts one joined profile or up to 32 comma-separated names; reads merge newest first, deduplicate run IDs and apply one total row limit. Each profile list keeps its server-clock offset even without rows; unlisted watches use that offset and keep their source profile. Failed profile reads hide that profile's stale rows while healthy profiles remain visible. The box and table name unreadable profiles. The table keeps the CLI's refusal up to 80 characters, otherwise the bounded reason and remedy; failed reads alone never say `No runs.`. Multi-profile prompt notices wrap whole. A single-profile failure uses one short prompt line without a full-width frame, hidden only when its whole reason cannot fit the row. Without a selection it explains setup once and stays hidden. It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.",
       "rows": [
         {
           "category": "Agent client commands",
           "name": "/oberth-runs",
           "disposition": "NEW",
           "reason": "Show the host run table through public CLI JSON, using the verified executable and the joined uplink profile.",
-          "basis": "**Delta:** The optional box shows up to `runs` recent runs (three when unset or blank, none at 0) while a listed or watched run is active or finished in the last ten minutes of the server's clock that the run list carries, with watched runs first in any state. Each run is one line under a header: id, repository and ref in short forms, status word, authoritative plan counts, duration, age, a watched mark and a failed run's step name, measured in terminal cells, cut to the box's width and never wrapped; the last column gives way first. `/oberth-runs` prints the same lines with a failed run's step and reason or a cancelled run's reason last; there the names give way before the reason. The box and bridge footer use one time per render and each profile's clock to bound duration by age, even when native start predates creation. Finished watches produce one completion notice. The box, `/oberth-runs` and `/oberth-watch` read only public `run list --json`, `run get --json` and `run wait --json`, through the absolute verified executable (its option, by default the fetcher's install in the user bin directory), never a checkout executable or a PATH lookup. The plugin reads with the agent's joined uplink profile, selected by its option, `OBERTH_PROFILE` or the checkout's joined uplink binding. The selected value accepts one joined profile or up to 32 comma-separated names; reads merge newest first, deduplicate run IDs and apply one total row limit. Each profile list keeps its server-clock offset even without rows; unlisted watches use that offset and keep their source profile. Failed profile reads hide that profile's stale rows while healthy profiles remain visible. The box and table name unreadable profiles. The table keeps the CLI's refusal up to 80 characters, otherwise the bounded reason and remedy; failed reads alone never say `No runs.`. Multi-profile prompt notices wrap whole. A single-profile failure uses one short prompt line without a full-width frame, hidden only when its whole reason cannot fit the row. Without a selection it explains setup once and stays hidden. It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.",
+          "basis": "**Delta:** The optional box shows up to `runs` recent runs (three when unset or blank, none at 0) while a listed or watched run is active or finished in the last ten minutes of the server's clock that the run list carries, with watched runs first in any state. Each run is one line under a header: id, repository and ref in short forms, status word, authoritative plan counts, duration, age, a watched mark and a failed run's step name, measured in terminal cells, cut to the box's width and never wrapped; the last column gives way first. `/oberth-runs` prints the same lines with a failed run's step and reason or a cancelled run's reason last; there the names give way before the reason. The box and bridge footer use one time per render and each profile's clock to bound duration by age, even when native start predates creation. An explicitly selected workflow's filename appears in the box, list and bridge footer, even for a passing run. The names give way before the filename in the box too. Finished watches produce one completion notice. The box, `/oberth-runs` and `/oberth-watch` read only public `run list --json`, `run get --json` and `run wait --json`, through the absolute verified executable (its option, by default the fetcher's install in the user bin directory), never a checkout executable or a PATH lookup. The plugin reads with the agent's joined uplink profile, selected by its option, `OBERTH_PROFILE` or the checkout's joined uplink binding. The selected value accepts one joined profile or up to 32 comma-separated names; reads merge newest first, deduplicate run IDs and apply one total row limit. Each profile list keeps its server-clock offset even without rows; unlisted watches use that offset and keep their source profile. Failed profile reads hide that profile's stale rows while healthy profiles remain visible. The box and table name unreadable profiles. The table keeps the CLI's refusal up to 80 characters, otherwise the bounded reason and remedy; failed reads alone never say `No runs.`. Multi-profile prompt notices wrap whole. A single-profile failure uses one short prompt line without a full-width frame, hidden only when its whole reason cannot fit the row. Without a selection it explains setup once and stays hidden. It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.",
           "item": 114,
           "owner": "C12",
           "behavior": "Show the host run table through public CLI JSON, using the verified executable and the joined uplink profile.",
@@ -10683,7 +10683,7 @@
           "name": "/oberth-watch",
           "disposition": "NEW",
           "reason": "Watch a run through public CLI JSON until completion; host state supplies the box and one notice.",
-          "basis": "**Delta:** The optional box shows up to `runs` recent runs (three when unset or blank, none at 0) while a listed or watched run is active or finished in the last ten minutes of the server's clock that the run list carries, with watched runs first in any state. Each run is one line under a header: id, repository and ref in short forms, status word, authoritative plan counts, duration, age, a watched mark and a failed run's step name, measured in terminal cells, cut to the box's width and never wrapped; the last column gives way first. `/oberth-runs` prints the same lines with a failed run's step and reason or a cancelled run's reason last; there the names give way before the reason. The box and bridge footer use one time per render and each profile's clock to bound duration by age, even when native start predates creation. Finished watches produce one completion notice. The box, `/oberth-runs` and `/oberth-watch` read only public `run list --json`, `run get --json` and `run wait --json`, through the absolute verified executable (its option, by default the fetcher's install in the user bin directory), never a checkout executable or a PATH lookup. The plugin reads with the agent's joined uplink profile, selected by its option, `OBERTH_PROFILE` or the checkout's joined uplink binding. The selected value accepts one joined profile or up to 32 comma-separated names; reads merge newest first, deduplicate run IDs and apply one total row limit. Each profile list keeps its server-clock offset even without rows; unlisted watches use that offset and keep their source profile. Failed profile reads hide that profile's stale rows while healthy profiles remain visible. The box and table name unreadable profiles. The table keeps the CLI's refusal up to 80 characters, otherwise the bounded reason and remedy; failed reads alone never say `No runs.`. Multi-profile prompt notices wrap whole. A single-profile failure uses one short prompt line without a full-width frame, hidden only when its whole reason cannot fit the row. Without a selection it explains setup once and stays hidden. It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.",
+          "basis": "**Delta:** The optional box shows up to `runs` recent runs (three when unset or blank, none at 0) while a listed or watched run is active or finished in the last ten minutes of the server's clock that the run list carries, with watched runs first in any state. Each run is one line under a header: id, repository and ref in short forms, status word, authoritative plan counts, duration, age, a watched mark and a failed run's step name, measured in terminal cells, cut to the box's width and never wrapped; the last column gives way first. `/oberth-runs` prints the same lines with a failed run's step and reason or a cancelled run's reason last; there the names give way before the reason. The box and bridge footer use one time per render and each profile's clock to bound duration by age, even when native start predates creation. An explicitly selected workflow's filename appears in the box, list and bridge footer, even for a passing run. The names give way before the filename in the box too. Finished watches produce one completion notice. The box, `/oberth-runs` and `/oberth-watch` read only public `run list --json`, `run get --json` and `run wait --json`, through the absolute verified executable (its option, by default the fetcher's install in the user bin directory), never a checkout executable or a PATH lookup. The plugin reads with the agent's joined uplink profile, selected by its option, `OBERTH_PROFILE` or the checkout's joined uplink binding. The selected value accepts one joined profile or up to 32 comma-separated names; reads merge newest first, deduplicate run IDs and apply one total row limit. Each profile list keeps its server-clock offset even without rows; unlisted watches use that offset and keep their source profile. Failed profile reads hide that profile's stale rows while healthy profiles remain visible. The box and table name unreadable profiles. The table keeps the CLI's refusal up to 80 characters, otherwise the bounded reason and remedy; failed reads alone never say `No runs.`. Multi-profile prompt notices wrap whole. A single-profile failure uses one short prompt line without a full-width frame, hidden only when its whole reason cannot fit the row. Without a selection it explains setup once and stays hidden. It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.",
           "item": 114,
           "owner": "C12",
           "behavior": "Watch a run through public CLI JSON until completion; host state supplies the box and one notice.",
