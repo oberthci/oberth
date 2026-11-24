@@ -63,8 +63,11 @@ type Publication struct {
 	// CIAfter is the newest run sequence when the first push attempt started,
 	// before the ref can move: a delivered fast-forward's CI result is ordered
 	// right after it. The stores keep it; no view shows it.
-	// Zero is unbound; -1 preserves an explicit retry's empty history bound.
+	// Zero is the valid bound for empty history.
 	CIAfter int64 `json:"-"`
+	// Attempted records that a push attempt started, even with empty history or
+	// after an explicit retry reset the budget. It is durable and private.
+	Attempted bool `json:"-"`
 	// ReadBack marks a re-entered delivery, including an explicit retry. It does
 	// not advance the durable attempt count and is never stored or sent.
 	ReadBack bool `json:"-"`

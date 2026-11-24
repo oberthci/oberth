@@ -10,6 +10,7 @@ import (
 
 // MovingSuite is the same persistence protocol for disk and the owner fake.
 func MovingSuite(t *testing.T, factory func(*testing.T) RunFixture) {
+	t.Run("publication_attempt_evidence", func(t *testing.T) { checkPublicationAttemptEvidence(t, factory(t)) })
 	t.Run("ci_passing_human_inputs", func(t *testing.T) {
 		title := "flaky login test, agent investigating"
 		for name, custom := range map[string]string{

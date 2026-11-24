@@ -60,7 +60,7 @@ func (s *Store) writePublication(ctx context.Context, tx *sql.Tx, p model.Public
 	if p.RunID != "" {
 		runID = p.RunID
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO publications VALUES(?,?,?,?,?)`, p.ID, repoID, runID, p.Status, encode(storedPublication{Publication: p, ReceivedHeads: p.ReceivedHeads})); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO publications VALUES(?,?,?,?,?)`, p.ID, repoID, runID, p.Status, encode(storedPublication{Publication: p, Attempted: new(false), ReceivedHeads: p.ReceivedHeads})); err != nil {
 		return refuse(conflict, err)
 	}
 	return s.appendAudit(ctx, tx, mutation{p.Actor, "publication.prepare", "publication", p.ID, map[string]any{"publication": p, "reason": reason}})
@@ -78,10 +78,11 @@ func (s *Store) StartPublicationAttempt(ctx context.Context, action stateport.Ac
 		if err := canStartPublication(p, attempt, s.options.Clock()); err != nil {
 			return err
 		}
-		if p.CIAfter == 0 {
+		if !p.Attempted {
 			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence),0) FROM runs`).Scan(&p.CIAfter); err != nil {
 				return databaseError(err)
 			}
+			p.Attempted = true
 		}
 		p.Attempts++
 		p.RetryAt = nil
@@ -141,11 +142,12 @@ func (s *Store) AbandonPublication(ctx context.Context, action stateport.Action,
 	}, action.Events...)
 }
 
-// storedPublication is a publication row's value: the record and its CI
-// ordering bound, which the record's own encoding leaves out.
+// storedPublication keeps private attempt and receive evidence in the existing
+// row JSON, outside the record's public encoding.
 type storedPublication struct {
 	model.Publication
 	CIAfter       int64    `json:"ci_after,omitempty"`
+	Attempted     *bool    `json:"attempted,omitempty"`
 	ReceivedHeads []string `json:"received_heads,omitempty"`
 }
 
@@ -162,13 +164,20 @@ func readPublication(ctx context.Context, tx *sql.Tx, id string) (model.Publicat
 }
 
 func (stored storedPublication) publication() model.Publication {
-	stored.Publication.CIAfter = stored.CIAfter
+	// Existing schema 6 rows used ci_after as both ordering and attempt evidence.
+	// Decode that private representation once; every new write separates them.
+	attempted := stored.Attempts > 0 || stored.CIAfter != 0
+	if stored.Attempted != nil {
+		attempted = *stored.Attempted
+	}
+	stored.Publication.CIAfter = max(0, stored.CIAfter)
+	stored.Publication.Attempted = attempted
 	stored.Publication.ReceivedHeads = stored.ReceivedHeads
 	return stored.Publication
 }
 
 func savePublication(ctx context.Context, tx *sql.Tx, p model.Publication) error {
-	value := encode(storedPublication{Publication: p, CIAfter: p.CIAfter, ReceivedHeads: p.ReceivedHeads})
+	value := encode(storedPublication{Publication: p, CIAfter: p.CIAfter, Attempted: new(p.Attempted), ReceivedHeads: p.ReceivedHeads})
 	_, err := tx.ExecContext(ctx, `UPDATE publications SET status=?,value=? WHERE id=?`, p.Status, value, p.ID)
 	return databaseError(err)
 }

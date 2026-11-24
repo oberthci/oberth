@@ -23,9 +23,7 @@ func (s *Store) RetryPublication(ctx context.Context, action stateport.Action, i
 			return refuse(transition, nil)
 		}
 		p.Status = model.PublicationPending
-		if p.CIAfter == 0 {
-			p.CIAfter = -1
-		}
+		p.Attempted = true
 		p.Attempts = 0
 		p.RetryAt = nil
 		p.Reason = ""

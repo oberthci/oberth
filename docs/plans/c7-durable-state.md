@@ -175,7 +175,7 @@ a bounded leaf adapter, not a dependency of Store.
    attempts cannot become success or replay permission.
 6. Publication attempt CAS happens before external mutation; intent retries do not
    repeat a push or Workflow Create. Preserve five publication attempts and persisted
-   backoff, exact predecessor/tag object and atomic finalization.
+   backoff, exact predecessor/tag object and atomic finalization. Store the attempted flag separately from the immutable CI sequence bound in existing publication JSON without changing the durable schema; decode existing private attempt metadata into that flag and normalize the old empty-history sentinel to zero.
    Abandoned intents stay terminal. C2's per-repository/ref coordination must not weaken
    these checks or become a global execution gate.
 7. Scope/filtering precedes pagination, totals, prefix resolution and metadata decoding.

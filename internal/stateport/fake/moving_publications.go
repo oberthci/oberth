@@ -85,8 +85,9 @@ func (f *Runs) StartPublicationAttempt(ctx context.Context, a stateport.Action, 
 		if p.Attempts > 0 && p.RetryAt == nil || p.RetryAt != nil && f.clock().Before(*p.RetryAt) {
 			return runProblem(publicerr.Conflict)
 		}
-		if p.CIAfter == 0 {
+		if !p.Attempted {
 			p.CIAfter = m.sequence
+			p.Attempted = true
 		}
 		p.Attempts++
 		p.RetryAt = nil
@@ -134,9 +135,7 @@ func (f *Runs) RetryPublication(ctx context.Context, a stateport.Action, q state
 		if p.Status != model.PublicationFailed && (p.Status != model.PublicationPending || p.RetryAt == nil) {
 			return runProblem(publicerr.InvalidTransition)
 		}
-		if p.CIAfter == 0 {
-			p.CIAfter = -1
-		}
+		p.Attempted = true
 		p.Attempts = 0
 		p.Status = model.PublicationPending
 		p.RetryAt = nil

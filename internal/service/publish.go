@@ -136,7 +136,7 @@ func (s *Service) deliverAttempt(ctx context.Context, id string) (string, error)
 		s.schedule(id, p.RetryAt)
 		return "", nil
 	}
-	readBack := p.ReadBack || p.CIAfter != 0
+	readBack := p.ReadBack || p.Attempted
 	p, err = s.c.Publications.StartPublicationAttempt(ctx, stateport.Action{Actor: p.Actor}, stateport.PublicationAttempt{ID: id, ExpectedAttempts: p.Attempts})
 	if err != nil {
 		return "", err
