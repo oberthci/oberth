@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/stateport"
 )
@@ -35,9 +36,27 @@ func checkRunEvents(t *testing.T, f RunFixture) {
 	if len(page.Events) != 10 {
 		t.Fatal("event fence ignored", len(page.Events))
 	}
+	checkRunEventCursor(t, f, q, page)
 	q.Limit = 501
 	_, err = f.Port.Events(t.Context(), q)
 	runCode(t, err, publicerr.InvalidInput)
+}
+
+func checkRunEventCursor(t *testing.T, f RunFixture, q stateport.EventFilter, page model.EventPage) {
+	t.Helper()
+	q.After, q.Limit = page.Events[4].ID, 2
+	wantFirst, wantLast := page.Events[5].ID, page.Events[6].ID
+	page, err := f.Port.Events(t.Context(), q)
+	mustRun(t, err)
+	if len(page.Events) != 2 || page.Events[0].ID != wantFirst || page.NextAfterID != wantLast || !page.HasMore {
+		t.Fatal("cursor ownership, page limit or fence changed", page)
+	}
+	q.After, q.Limit = q.Through, 500
+	page, err = f.Port.Events(t.Context(), q)
+	mustRun(t, err)
+	if len(page.Events) != 0 || page.NextAfterID != q.Through || page.HasMore {
+		t.Fatal("empty cursor window escaped its fence", page)
+	}
 }
 
 func checkInitialEvents(t *testing.T, f RunFixture) {

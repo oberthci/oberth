@@ -130,6 +130,11 @@ func eventQuery(f stateport.EventFilter, through int64) (string, []any) {
 		// Unary plus removes TEXT affinity so the expression index can seek the run ID.
 		from = `runs r INDEXED BY run_actor CROSS JOIN events e INDEXED BY event_run
 ON json_extract(e.value,'$.run_id')=+r.id JOIN repositories p ON p.id=r.repo_id AND p.canonical=e.repo`
+		if f.After > 0 {
+			// A wake reads only the new event window, then checks its run's owner.
+			from = `events e CROSS JOIN runs r ON r.id=json_extract(e.value,'$.run_id')
+JOIN repositories p ON p.id=r.repo_id AND p.canonical=e.repo`
+		}
 		predicate += ` AND json_extract(r.origin,'$.actor')=?`
 		args = append(args, f.Actor)
 	}
