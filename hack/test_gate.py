@@ -15,9 +15,10 @@ from unittest.mock import patch
 from tools.gate_fixture import GateFixture
 from tools.gate_go import GoGateTests
 from tools.gate_vendor import VendorGateTests
+from tools.gate_signal import SignalGateTests
 
 
-class GateVerdicts(VendorGateTests, GoGateTests, GateFixture, unittest.TestCase):
+class GateVerdicts(SignalGateTests, VendorGateTests, GoGateTests, GateFixture, unittest.TestCase):
 
     def test_nested_checks_ignore_outer_tool_selection(self):
         path = self.fixture / "hack/ui-check.sh"
