@@ -73,7 +73,7 @@ func (h *Hub) informer(in informerInput) (cache.SharedIndexInformer, error) {
 			return result, err
 		},
 	}
-	informer := cache.NewSharedIndexInformer(cache.ToListWatcherWithWatchListSemantics(lw, in.client), in.object, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc, "workflow": workflowIndex})
+	informer := cache.NewSharedIndexInformer(cache.ToListWatcherWithWatchListSemantics(lw, in.client), in.object, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc, "workflow": workflowIndex, "ip": podIPIndex})
 	if err := informer.SetTransform(func(obj any) (any, error) {
 		if m, ok := obj.(meta.Object); ok {
 			m.SetManagedFields(nil)
@@ -147,6 +147,29 @@ func (h *Hub) Pods(workflow string) []*core.Pod {
 	return out
 }
 
+// PodAt names the UID of the newest unfinished Pod holding ip, or "" when the
+// watch holds none; a finished Pod's recycled address names its successor.
+func (h *Hub) PodAt(ip string) string {
+	objects, err := h.pods.GetIndexer().ByIndex("ip", ip)
+	if err != nil {
+		return ""
+	}
+	var newest *core.Pod
+	for _, obj := range objects {
+		p := obj.(*core.Pod)
+		if p.Status.Phase == core.PodSucceeded || p.Status.Phase == core.PodFailed {
+			continue
+		}
+		if newest == nil || newest.CreationTimestamp.Before(&p.CreationTimestamp) || newest.CreationTimestamp.Equal(&p.CreationTimestamp) && p.UID > newest.UID {
+			newest = p
+		}
+	}
+	if newest == nil {
+		return ""
+	}
+	return string(newest.UID)
+}
+
 const resyncPeriod = 10 * time.Minute
 
 func workflowIndex(obj any) ([]string, error) {
@@ -154,4 +177,21 @@ func workflowIndex(obj any) ([]string, error) {
 		return []string{p.Labels["workflows.argoproj.io/workflow"]}, nil
 	}
 	return nil, nil
+}
+
+func podIPIndex(obj any) ([]string, error) {
+	p, ok := obj.(*core.Pod)
+	if !ok {
+		return nil, nil
+	}
+	ips := make([]string, 0, len(p.Status.PodIPs)+1)
+	if p.Status.PodIP != "" {
+		ips = append(ips, p.Status.PodIP)
+	}
+	for _, ip := range p.Status.PodIPs {
+		if ip.IP != "" && ip.IP != p.Status.PodIP {
+			ips = append(ips, ip.IP)
+		}
+	}
+	return ips, nil
 }

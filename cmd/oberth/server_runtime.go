@@ -89,6 +89,9 @@ type clusterClients struct {
 	REST           *rest.Config
 	collectionKube kubernetes.Interface
 	collectionArgo wfclient.Interface
+	deliveryReview kubernetes.Interface
+	deliveryKube   kubernetes.Interface
+	deliveryArgo   wfclient.Interface
 }
 
 // The server's cluster clients send at most serverClientQPS requests a second
@@ -124,7 +127,11 @@ func newClusterClients(cfg *rest.Config) (clusterClients, error) {
 		return clusterClients{}, err
 	}
 	collectionArgo, err := wfclient.NewForConfig(collection)
-	return clusterClients{Kube: kube, Argo: argo, REST: cfg, collectionKube: collectionKube, collectionArgo: collectionArgo}, err
+	if err != nil {
+		return clusterClients{}, err
+	}
+	review, deliveryKube, deliveryArgo, err := deliveryClients(cfg)
+	return clusterClients{Kube: kube, Argo: argo, REST: cfg, collectionKube: collectionKube, collectionArgo: collectionArgo, deliveryReview: review, deliveryKube: deliveryKube, deliveryArgo: deliveryArgo}, err
 }
 
 type serverPlatform struct {
@@ -145,6 +152,7 @@ type serverOwners struct {
 	authority *app.AuthorityReader
 	native    *argojob.Executor
 	service   *service.Service
+	podAt     func(ip string) string
 }
 
 func (p serverPlatform) constructors() constructors {

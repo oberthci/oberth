@@ -8,8 +8,13 @@ spec:
     matchLabels: {app: oberth}
   policyTypes: [Ingress]
   # The local node is allowed by NetworkPolicy itself; no peer gets the probe port.
+  # Source and step-secret delivery serve only Pods in the pipeline namespace.
   ingress:
     - ports:
         - {protocol: TCP, port: 8443}
         - {protocol: TCP, port: 2222}
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ .Values.pipeline.namespace }}}
+      ports:
         - {protocol: TCP, port: 8445}

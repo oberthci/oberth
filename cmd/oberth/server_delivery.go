@@ -34,7 +34,11 @@ func (c *composition) stepDelivery() runtimeconfig.SecretDelivery {
 }
 
 func (o *serverOwners) deliveryIdentity(ctx context.Context, caller sourcedelivery.Caller) (runlog.InfrastructureReceipt, error) {
-	w, err := o.cluster.Argo.ArgoprojV1alpha1().Workflows(caller.Namespace).Get(ctx, caller.Workflow, meta.GetOptions{})
+	argo := o.cluster.deliveryArgo
+	if argo == nil {
+		argo = o.cluster.Argo
+	}
+	w, err := argo.ArgoprojV1alpha1().Workflows(caller.Namespace).Get(ctx, caller.Workflow, meta.GetOptions{})
 	if err != nil {
 		return runlog.InfrastructureReceipt{}, err
 	}
@@ -64,6 +68,7 @@ func (o *serverOwners) persistDelivery(ctx context.Context, r runlog.Infrastruct
 }
 
 func (o *serverOwners) secretDeliveryHandler(authenticate func(context.Context, string) (sourcedelivery.Caller, error)) http.Handler {
+	bounded := o.boundedDeliveryAuthentication(authenticate)
 	slots := deliverySlots{limit: max(1, o.settings.SourceClientBurst/3), pods: map[string]int{}, runs: map[string]int{}}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -86,14 +91,14 @@ func (o *serverOwners) secretDeliveryHandler(authenticate func(context.Context, 
 			w.WriteHeader(400)
 			return
 		}
-		caller, err := authenticate(ctx, jwt)
+		caller, err := bounded(ctx, remoteHost(r), jwt)
 		if err != nil {
-			w.WriteHeader(secretDeliveryStatus(err))
+			secretDeliveryRefusal(w, err)
 			return
 		}
 		identity, err := o.deliveryIdentity(ctx, caller)
 		if err != nil {
-			w.WriteHeader(secretDeliveryStatus(err))
+			secretDeliveryRefusal(w, brokerIdentityFailure(err))
 			return
 		}
 		if !slots.acquire(identity) {
@@ -102,7 +107,7 @@ func (o *serverOwners) secretDeliveryHandler(authenticate func(context.Context, 
 			return
 		}
 		defer slots.release(identity)
-		value, err := o.fetchStepSecret(ctx, caller, jwt, request.Path)
+		value, err := o.fetchStepSecret(ctx, identity, jwt, request.Path)
 		if err != nil {
 			w.WriteHeader(secretDeliveryStatus(err))
 			return
@@ -147,14 +152,12 @@ func (s *deliverySlots) release(r runlog.InfrastructureReceipt) {
 	}
 }
 
-func (o *serverOwners) fetchStepSecret(ctx context.Context, caller sourcedelivery.Caller, jwt, path string) ([]byte, error) {
+// The handler's verified identity is reused; the Workflow is not read again.
+// deliveryIdentity already bound the caller to the pipeline namespace.
+func (o *serverOwners) fetchStepSecret(ctx context.Context, identity runlog.InfrastructureReceipt, jwt, path string) ([]byte, error) {
 	started := o.c.clock.Now()
-	identity, err := o.deliveryIdentity(ctx, caller)
-	if err != nil {
-		return nil, err
-	}
 	run, err := o.deliveryRun(ctx, identity.RunID)
-	if err == nil && (terminalRun(run.Status) || run.Origin.WorkflowUID != identity.WorkflowUID || run.Admission.Identity.Namespace != caller.Namespace) {
+	if err == nil && (terminalRun(run.Status) || run.Origin.WorkflowUID != identity.WorkflowUID || run.Admission.Identity.Namespace != o.c.config.PipelineNamespace) {
 		return nil, &sourcedelivery.Failure{Code: "forbidden"}
 	}
 	var values map[string][]byte

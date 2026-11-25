@@ -20,8 +20,11 @@ func TestProbePortIsNodeOnlyAndNeverAService(t *testing.T) {
 		Ingress: []networkingv1.NetworkPolicyIngressRule{{Ports: []networkingv1.NetworkPolicyPort{
 			{Protocol: &tcp, Port: ptr.To(intstr.FromInt32(8443))},
 			{Protocol: &tcp, Port: ptr.To(intstr.FromInt32(2222))},
-			{Protocol: &tcp, Port: ptr.To(intstr.FromInt32(8445))},
-		}}},
+		}}, {
+			// Delivery answers unverified bearer tokens; only pipeline Pods may reach it.
+			From:  []networkingv1.NetworkPolicyPeer{{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "oberth-runs"}}}},
+			Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: ptr.To(intstr.FromInt32(8445))}},
+		}},
 	}
 	for _, egress := range []bool{true, false} {
 		objects := rendered(t, map[string]any{"policies": map[string]any{"egress": egress}})

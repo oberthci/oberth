@@ -10,6 +10,7 @@ import (
 	core "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
@@ -98,4 +99,53 @@ func assertCache(t *testing.T, h *argowatch.Hub) {
 	if h.Pods("run")[0].Name != "pod" {
 		t.Fatal("mutable Pod escaped")
 	}
+}
+
+func TestPodAtNamesTheNewestUnfinishedPod(t *testing.T) {
+	pod := func(uid string, age int64, phase core.PodPhase, ips ...string) *core.Pod {
+		p := &core.Pod{ObjectMeta: meta.ObjectMeta{Name: uid, Namespace: "ci", UID: types.UID(uid), CreationTimestamp: meta.Unix(1_800_000_000-age, 0), Labels: map[string]string{"workflows.argoproj.io/workflow": "run"}}, Status: core.PodStatus{Phase: phase}}
+		for _, ip := range ips {
+			p.Status.PodIPs = append(p.Status.PodIPs, core.PodIP{IP: ip})
+		}
+		if len(ips) > 0 {
+			p.Status.PodIP = ips[0]
+		}
+		return p
+	}
+	kube := kubefake.NewClientset(pod("flooder", 60, core.PodFailed, "10.0.0.5"), pod("older", 90, core.PodRunning, "10.0.0.5"), pod("successor", 1, core.PodPending, "10.0.0.5"), pod("dual", 5, core.PodRunning, "10.0.0.6", "fd00::6"), pod("done", 5, core.PodSucceeded, "10.0.0.7"))
+	kube.PrependWatchReactor("pods", func(a clienttesting.Action) (bool, watch.Interface, error) {
+		options := a.(interface{ GetListOptions() meta.ListOptions }).GetListOptions()
+		if options.SendInitialEvents != nil && *options.SendInitialEvents {
+			return true, nil, apierrors.NewBadRequest("streaming list unsupported")
+		}
+		return false, nil, nil
+	})
+	argo := argofake.NewSimpleClientset()
+	argo.PrependWatchReactor("workflows", func(a clienttesting.Action) (bool, watch.Interface, error) {
+		options := a.(interface{ GetListOptions() meta.ListOptions }).GetListOptions()
+		if options.SendInitialEvents != nil && *options.SendInitialEvents {
+			return true, nil, apierrors.NewBadRequest("streaming list unsupported")
+		}
+		return false, nil, nil
+	})
+	h, err := argowatch.New(argowatch.Config{Namespace: "ci", Workflows: argo.ArgoprojV1alpha1().Workflows("ci"), Pods: kube.CoreV1().Pods("ci")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	ready, done := make(chan struct{}), make(chan error, 1)
+	go func() { done <- h.Run(ctx, func() { close(ready) }) }()
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		t.Fatal("informer not ready")
+	}
+	for ip, want := range map[string]string{"10.0.0.5": "successor", "10.0.0.6": "dual", "fd00::6": "dual", "10.0.0.7": "", "10.0.0.8": ""} {
+		if got := h.PodAt(ip); got != want {
+			t.Error("address resolved to the wrong Pod", ip, got, want)
+		}
+	}
+	cancel()
+	<-done
 }

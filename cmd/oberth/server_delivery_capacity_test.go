@@ -9,10 +9,13 @@ import (
 	"sync"
 	"testing"
 
+	wffake "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned/fake"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/secretstore"
 	"github.com/oberthci/oberth/internal/sourcedelivery"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	ktest "k8s.io/client-go/testing"
 )
 
 type stalledDeliveryBody struct {
@@ -58,7 +61,14 @@ func TestSlowTokenReviewsDoNotTakeDeliverySlots(t *testing.T) {
 	f := newDeliveryFixture(t)
 	f.o.settings.SourceClientBurst = 3
 	authenticate := f.authentication(t).Authenticate
-	entered, release, done := make(chan struct{}, 2), make(chan struct{}), make(chan struct{}, 2)
+	entered, release, done := make(chan struct{}, 1), make(chan struct{}), make(chan struct{}, 1)
+	identityEntered, identityRelease := make(chan struct{}), make(chan struct{})
+	releaseIdentity := sync.OnceFunc(func() { close(identityRelease) })
+	var identity sync.Once
+	f.o.cluster.Argo.(*wffake.Clientset).PrependReactor("get", "workflows", func(ktest.Action) (bool, runtime.Object, error) {
+		identity.Do(func() { close(identityEntered); <-identityRelease })
+		return false, nil, nil
+	})
 	h := f.o.secretDeliveryHandler(func(ctx context.Context, jwt string) (sourcedelivery.Caller, error) {
 		if jwt == "unverified" {
 			entered <- struct{}{}
@@ -70,15 +80,25 @@ func TestSlowTokenReviewsDoNotTakeDeliverySlots(t *testing.T) {
 	var workers sync.WaitGroup
 	defer workers.Wait()
 	defer close(release)
-	for range 2 {
-		workers.Go(func() { deliveryRequest(t, h, "unverified", `{"path":"registry/value"}`); done <- struct{}{} })
-		select {
-		case <-entered:
-		case <-done:
-		}
+	defer releaseIdentity()
+	first := make(chan int, 1)
+	workers.Go(func() { first <- deliveryRequest(t, h, f.jwt, `{"path":"registry/value"}`).Code })
+	select {
+	case <-identityEntered:
+	case code := <-first:
+		t.Fatal("verified request did not reach Workflow identity", code)
 	}
-	if reply := deliveryRequest(t, h, f.jwt, `{"path":"registry/value"}`); reply.Code != 200 {
-		t.Fatal("unverified reviews blocked verified delivery", reply.Code)
+	workers.Go(func() { deliveryRequest(t, h, "unverified", `{"path":"registry/value"}`); done <- struct{}{} })
+	select {
+	case <-entered:
+	case <-done:
+		t.Fatal("a delivery slot blocked independent authentication")
+	}
+	// Authentication has its own single occupied slot. The already verified
+	// request can still finish while this unrelated review is stalled.
+	releaseIdentity()
+	if code := <-first; code != 200 {
+		t.Fatal("unverified review held a delivery slot", code)
 	}
 }
 

@@ -36,8 +36,7 @@ func (o *serverOwners) sourcePart(ctx context.Context) (Part, error) {
 	}, RecordSuccess: func(ctx context.Context, caller sourcedelivery.Caller, started time.Time) error {
 		return o.recordDelivery(ctx, caller, runlog.InfrastructureReceipt{Kind: "source", StartedAt: started, Delivered: true})
 	}})
-	authentication.Audience = o.c.delivery.Access.Audience
-	secrets := o.secretDeliveryHandler(authentication.Authenticate)
+	secrets := o.secretDeliveryHandler(o.brokerAuthentication().Authenticate)
 	mux := http.NewServeMux()
 	mux.Handle(secretstore.BrokerPath, secrets)
 	mux.Handle("/", source)

@@ -253,8 +253,14 @@ func TestSecretDeliveryClientsCannotSubmitInfrastructureReceipts(t *testing.T) {
 			t.Fatal("client-supplied receipt accepted", w.Code)
 		}
 	}
-	if w := deliveryRequest(t, h, "unverified", `{"path":"registry/value"}`); w.Code != 403 {
-		t.Fatal("unverified caller accepted", w.Code)
+	// An invalid token puts its address on cooldown, so it comes from a Pod
+	// address of its own.
+	unverified := httptest.NewRequestWithContext(t.Context(), "POST", secretstore.BrokerPath, strings.NewReader(`{"path":"registry/value"}`))
+	unverified.RemoteAddr, unverified.Header["X-Vault-Token"] = "192.0.2.9:4000", []string{"unverified"}
+	refused := httptest.NewRecorder()
+	h.ServeHTTP(refused, unverified)
+	if refused.Code != 403 {
+		t.Fatal("unverified caller accepted", refused.Code)
 	}
 	if w := deliveryRequest(t, h, f.jwt, `{"path":"missing/value"}`); w.Code != 404 {
 		t.Fatal("missing value misclassified", w.Code)
