@@ -230,7 +230,7 @@ C2/C3/C4/C5/C7/C9/C10 import.
   configured service ceiling. Write deadlines include that ceiling plus one minute.
   Explicit acceptable SSE gets an immediate comment, 20-second heartbeats and exactly
   one final RPC message. Each frame has a five-second write/flush budget. Validate and
-  authorize before streaming; disconnect cancels observation only and joins the writer.
+  authorize before streaming; disconnect cancels observation only and joins the writer. Only request-owned client cancellation is quiet. Server-side cancellation and deadlines retain their classified refusals and logged reasons; expected interruptions log below ERROR.
 - Session bounds: 16 sessions per credential, one-hour idle lifetime, 64 run
   subscriptions per session; event streams default 4/max 64 per credential; replay
   backlog default 500/max 10,000, fetched in batches of 100. Reauthenticate at 30

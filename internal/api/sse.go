@@ -74,7 +74,7 @@ func (s *Server) streamCall(ctx context.Context, w http.ResponseWriter, r *http.
 	if s.draining.Load() {
 		resp.Error = drainRPC()
 	} else {
-		resp.Result = s.toolResponse(value, err, p.meta.OutputBytes, diagnostic)
+		resp.Result = s.toolResponse(ctx, toolReply{value, err, p.meta.OutputBytes}, diagnostic)
 	}
 	data, err := encodeBounded(resp, rpcResponseBytes)
 	if err != nil {

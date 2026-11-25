@@ -136,7 +136,7 @@ func (s *Server) resource(w http.ResponseWriter, r *http.Request, c apicontract.
 	arguments, _ := json.Marshal(apicontract.RunGetArgs{ID: run})
 	value, err := s.config.Registry.Invoke(r.Context(), c, "run_get", arguments)
 	if err != nil {
-		e := s.publicError(err)
+		e := s.publicError(r.Context(), err)
 		resp.Error = &rpcError{-32000, e.Reason(), e}
 		s.writeRPC(w, r, resp)
 		return
@@ -146,7 +146,7 @@ func (s *Server) resource(w http.ResponseWriter, r *http.Request, c apicontract.
 		resp.Result = map[string]any{"contents": []any{map[string]any{"uri": params.URI, "mimeType": "application/json", "text": string(encoded)}}}
 	} else {
 		if err := s.sessions.resource(id, run, req.Method == "resources/subscribe"); err != nil {
-			problem := s.publicError(err)
+			problem := s.publicError(r.Context(), err)
 			resp.Error = &rpcError{-32000, problem.Reason(), problem}
 		} else {
 			resp.Result = apicontract.Empty{}

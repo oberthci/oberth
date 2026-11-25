@@ -65,7 +65,7 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request, c apicontract.Calle
 	}
 	var req rpcRequest
 	if err = decode(raw, &req, apicontract.RequestBytes); err != nil {
-		s.writeRPC(w, r, rpcResponse{"2.0", json.RawMessage("null"), nil, &rpcError{-32700, refusal("input").Reason(), s.publicError(err)}})
+		s.writeRPC(w, r, rpcResponse{"2.0", json.RawMessage("null"), nil, &rpcError{-32700, refusal("input").Reason(), s.publicError(r.Context(), err)}})
 		return
 	}
 	if string(req.Params) == "null" {

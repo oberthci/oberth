@@ -48,12 +48,12 @@ func (s *Server) enrollment(w http.ResponseWriter, r *http.Request) {
 	}
 	var args model.InviteRedemption
 	if err := decode(params.Arguments, &args, apicontract.EnrollmentBytes); err != nil {
-		resp.Result = s.toolFailure(refusal("input"))
+		resp.Result = s.toolFailure(r.Context(), refusal("input"))
 		s.writeRPC(w, r, resp)
 		return
 	}
 	if !validRedemption(args) {
-		resp.Result = s.toolFailure(refusal("input"))
+		resp.Result = s.toolFailure(r.Context(), refusal("input"))
 		s.writeRPC(w, r, resp)
 		return
 	}
@@ -76,16 +76,16 @@ func (s *Server) redeem(w http.ResponseWriter, r *http.Request, args model.Invit
 		s.enrollmentFailure(w, r, resp, err)
 		return
 	}
-	resp.Result = s.toolResponse(value, nil, apicontract.ResponseBytes)
+	resp.Result = s.toolResponse(r.Context(), toolReply{value, nil, apicontract.ResponseBytes})
 	s.writeRPC(w, r, resp)
 }
 func (s *Server) enrollmentFailure(w http.ResponseWriter, r *http.Request, resp rpcResponse, err error) {
 	if err != nil && s.config.Classify(err).Code() != publicerr.Forbidden {
-		resp.Result = s.toolFailure(err)
+		resp.Result = s.toolFailure(r.Context(), err)
 		s.writeRPC(w, r, resp)
 		return
 	}
-	resp.Result = s.toolFailure(refusal("invitation"))
+	resp.Result = s.toolFailure(r.Context(), refusal("invitation"))
 	s.writeRPC(w, r, resp)
 }
 

@@ -21,11 +21,11 @@ func (s *Server) handshake(w http.ResponseWriter, r *http.Request, x handshakeRe
 	}
 	switch x.req.Method {
 	case "initialize":
-		resp = s.initializeReply(w, x, limit)
+		resp = s.initializeReply(w, r, x, limit)
 	case "ping":
 		var p apicontract.Empty
 		if err := decode(x.req.Params, &p, limit); err != nil {
-			resp.Error = &rpcError{-32602, refusal("input").Reason(), s.publicError(err)}
+			resp.Error = &rpcError{-32602, refusal("input").Reason(), s.publicError(r.Context(), err)}
 		} else {
 			resp.Result = apicontract.Empty{}
 		}
@@ -34,7 +34,7 @@ func (s *Server) handshake(w http.ResponseWriter, r *http.Request, x handshakeRe
 			Cursor string `json:"cursor,omitempty"`
 		}
 		if err := decode(x.req.Params, &p, limit); err != nil {
-			resp.Error = &rpcError{-32602, refusal("input").Reason(), s.publicError(err)}
+			resp.Error = &rpcError{-32602, refusal("input").Reason(), s.publicError(r.Context(), err)}
 		} else if x.enrollment {
 			resp.Result = enrollmentCatalogue()
 		} else {
@@ -49,7 +49,7 @@ func (s *Server) handshake(w http.ResponseWriter, r *http.Request, x handshakeRe
 	s.writeRPC(w, r, resp)
 	return true
 }
-func (s *Server) initializeReply(w http.ResponseWriter, x handshakeRequest, limit int) rpcResponse {
+func (s *Server) initializeReply(w http.ResponseWriter, r *http.Request, x handshakeRequest, limit int) rpcResponse {
 	resp := rpcResponse{JSONRPC: "2.0", ID: x.req.ID}
 	var p initializeParams
 	if decode(x.req.Params, &p, limit) != nil || !validVersion(p.ProtocolVersion) {
@@ -59,7 +59,7 @@ func (s *Server) initializeReply(w http.ResponseWriter, x handshakeRequest, limi
 	if !x.enrollment {
 		id, err := s.sessions.create(x.caller, s.config.Runtime)
 		if err != nil {
-			problem := s.publicError(err)
+			problem := s.publicError(r.Context(), err)
 			resp.Error = &rpcError{-32000, problem.Reason(), problem}
 			return resp
 		}

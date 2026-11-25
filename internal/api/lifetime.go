@@ -63,7 +63,7 @@ func (s *Server) rpcBudget(w http.ResponseWriter, r *http.Request, resp rpcRespo
 func (b *deliveryBudget) install(deadline time.Time) {
 	_ = http.NewResponseController(b.writer).SetWriteDeadline(deadline.Add(apicontract.WaitMargin))
 }
-func (b *deliveryBudget) expire(m apicontract.Metadata, timeout any) {
+func (b *deliveryBudget) expire(ctx context.Context, m apicontract.Metadata, timeout any) {
 	if b.expired {
 		return
 	}
@@ -84,9 +84,9 @@ func (b *deliveryBudget) expire(m apicontract.Metadata, timeout any) {
 	if s.draining.Load() {
 		resp.Error = drainRPC()
 	} else if m.LongPoll {
-		resp.Result = s.toolResponse(timeout, nil, m.OutputBytes)
+		resp.Result = s.toolResponse(ctx, toolReply{timeout, nil, m.OutputBytes})
 	} else {
-		resp.Result = s.toolFailure(deadlineError(m))
+		resp.Result = s.toolFailure(ctx, deadlineError(m))
 	}
 	if b.streaming {
 		data, err := encodeBounded(resp, rpcResponseBytes)
@@ -100,9 +100,9 @@ func (b *deliveryBudget) expire(m apicontract.Metadata, timeout any) {
 }
 func deadlineError(m apicontract.Metadata) error {
 	if !m.Mutation {
-		return refusal("deadline")
+		return messages()["deadline"].caused(context.DeadlineExceeded)
 	}
-	e := refusal("actionTimeout")
+	e := messages()["actionTimeout"].caused(context.DeadlineExceeded)
 	e.Detail = "Read tool: " + m.Check
 	return e
 }

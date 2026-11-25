@@ -11,7 +11,7 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request, c apicontract.
 	req, resp := x.req, x.resp
 	var params callParams
 	if err := decode(req.Params, &params, apicontract.RequestBytes); err != nil {
-		resp.Error = &rpcError{-32602, refusal("input").Reason(), s.publicError(err)}
+		resp.Error = &rpcError{-32602, refusal("input").Reason(), s.publicError(r.Context(), err)}
 		s.writeRPC(w, r, resp)
 		return
 	}
@@ -28,7 +28,7 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request, c apicontract.
 	defer s.finishTrace(trace)
 	release, err := s.reserveCall(c, t.meta)
 	if err != nil {
-		resp.Result = s.toolFailure(err, trace)
+		resp.Result = s.toolFailure(r.Context(), err, trace)
 		s.writeRPC(w, r, resp)
 		return
 	}
@@ -45,7 +45,7 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request, c apicontract.
 		return
 	}
 	if err != nil {
-		resp.Result = s.toolFailure(err, trace)
+		resp.Result = s.toolFailure(r.Context(), err, trace)
 		s.writeRPC(w, r, resp)
 		return
 	}
@@ -54,7 +54,7 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request, c apicontract.
 		if budget.expired {
 			return
 		}
-		resp.Result = s.toolResponse(value, err, p.meta.OutputBytes, trace)
+		resp.Result = s.toolResponse(r.Context(), toolReply{value, err, p.meta.OutputBytes}, trace)
 		s.writeRPC(w, r, resp)
 		return
 	}
@@ -74,24 +74,31 @@ func (s *Server) longPoll(ctx context.Context, w http.ResponseWriter, r *http.Re
 	if s.draining.Load() {
 		resp.Error = drainRPC()
 	} else {
-		resp.Result = s.toolResponse(value, err, p.meta.OutputBytes, v.trace)
+		resp.Result = s.toolResponse(ctx, toolReply{value, err, p.meta.OutputBytes}, v.trace)
 	}
 	s.writeRPC(w, r, resp)
 }
-func (s *Server) toolResponse(value any, err error, limit int, traces ...*Diagnostic) toolResult {
+
+type toolReply struct {
+	value any
+	err   error
+	limit int
+}
+
+func (s *Server) toolResponse(ctx context.Context, reply toolReply, traces ...*Diagnostic) toolResult {
 	traceOutcome(traces, Complete)
-	if err != nil {
-		return s.toolFailure(err, traces...)
+	if reply.err != nil {
+		return s.toolFailure(ctx, reply.err, traces...)
 	}
-	data, err := encodeBounded(value, limit)
+	data, err := encodeBounded(reply.value, reply.limit)
 	if err != nil {
-		return s.toolFailure(err, traces...)
+		return s.toolFailure(ctx, err, traces...)
 	}
 	return toolResult{Content: []content{{"text", string(data)}}, StructuredContent: json.RawMessage(data)}
 }
-func (s *Server) toolFailure(err error, traces ...*Diagnostic) toolResult {
+func (s *Server) toolFailure(ctx context.Context, err error, traces ...*Diagnostic) toolResult {
 	traceOutcome(traces, Failed)
-	e := s.publicError(err, traces...)
+	e := s.publicError(ctx, err, traces...)
 	data, _ := json.Marshal(e)
 	return toolResult{Content: []content{{"text", string(data)}}, IsError: true}
 }

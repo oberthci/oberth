@@ -78,7 +78,7 @@ func bindDefinition(d apicontract.Definition) Tool {
 		}
 		call, err := ownedCall(prepareCtx, func() (apicontract.Call[any], error) { return d.Prepare(prepareCtx, c, input) }, func() {
 			if budget != nil {
-				budget.expire(local, timeout)
+				budget.expire(prepareCtx, local, timeout)
 			}
 		})
 		if err != nil {
@@ -143,7 +143,7 @@ func boundedCall[O any](m apicontract.Metadata, call apicontract.Call[O], deadli
 		budget := requestBudget(ctx)
 		value, err := ownedCall(ctx, func() (O, error) { return call(ctx) }, func() {
 			if budget != nil {
-				budget.expire(m, timeout)
+				budget.expire(ctx, m, timeout)
 			}
 		})
 		return value, err

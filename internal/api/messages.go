@@ -7,7 +7,11 @@ type message struct {
 	reason, remedy string
 }
 
-func (m message) err() *publicerr.Error { return publicerr.New(m.code, m.reason, m.remedy, nil) }
+func (m message) err() *publicerr.Error { return m.caused(nil) }
+
+func (m message) caused(cause error) *publicerr.Error {
+	return publicerr.New(m.code, m.reason, m.remedy, cause)
+}
 
 // messages is the complete transport refusal catalogue, constructed per owner.
 func messages() map[string]message {
@@ -17,6 +21,7 @@ func messages() map[string]message {
 		"invitation":           {publicerr.Forbidden, "Invitation redemption was refused.", "Check the invitation and local key material, or request a new invitation."},
 		"eventMedia":           {publicerr.InvalidInput, "GET /mcp requires an event-stream response.", "Send Accept: text/event-stream, or call tools with POST /mcp."},
 		"deadline":             {publicerr.Unavailable, "Observation timed out.", "Read the current state before retrying the observation."},
+		"cancelled":            {publicerr.Unavailable, "Request interrupted.", "Read the operation's current state when ready."},
 		"actionTimeout":        {publicerr.Unavailable, "Action timed out; it may have completed.", "Inspect the read tool named in detail before repeating this action."},
 		"input":                {publicerr.InvalidInput, "Invalid request arguments.", "Use the declared fields and limits for this operation."},
 		"registry":             {publicerr.Invariant, "Tool registry is incomplete or inconsistent.", "Bind every declared tool once with its typed handler and classification."},

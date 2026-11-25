@@ -15,18 +15,36 @@ import (
 	"github.com/oberthci/oberth/internal/publicerr"
 )
 
-func (s *Server) publicError(err error, traces ...*Diagnostic) *publicerr.Error {
+func (s *Server) publicError(ctx context.Context, err error, traces ...*Diagnostic) *publicerr.Error {
 	if s.draining.Load() && errors.Is(err, context.Canceled) {
-		return refusal("restarting")
+		e := refusal("restarting")
+		s.logStopped(e, err)
+		return e
+	}
+	if requestCancelled(ctx) && errors.Is(err, context.Canceled) {
+		return refusal("cancelled")
 	}
 	e := s.config.Classify(err)
 	if e == nil || e.Code() == publicerr.Invariant {
 		e = refusal("internal")
 		reference := s.failureReference(traces)
 		e.Detail = "Reference: " + reference
-		s.config.FailureLog.Error("Request failed", "reference", reference, "cause", err)
+		s.config.FailureLog.Error("Request failed", "reference", reference, "reason", e.Reason(), "cause", err)
+	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		s.logStopped(e, err)
 	}
 	return e
+}
+
+func requestCancelled(ctx context.Context) bool {
+	if budget := requestBudget(ctx); budget != nil {
+		return errors.Is(budget.request.Context().Err(), context.Canceled)
+	}
+	return errors.Is(ctx.Err(), context.Canceled)
+}
+
+func (s *Server) logStopped(e *publicerr.Error, cause error) {
+	s.config.FailureLog.Warn("Request stopped", "reason", e.Reason(), "cause", cause)
 }
 func httpStatus(e *publicerr.Error) int {
 	switch e.Code() {
@@ -44,7 +62,7 @@ func httpStatus(e *publicerr.Error) int {
 	return 500
 }
 func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error, status int) {
-	e := s.publicError(err)
+	e := s.publicError(r.Context(), err)
 	if status == 0 {
 		status = httpStatus(e)
 	}
@@ -65,7 +83,7 @@ func (s *Server) writeJSON(w http.ResponseWriter, r *http.Request, reply jsonRep
 	data, err := encodeBounded(value, limit)
 	if err != nil {
 		status = 500
-		data, _ = json.Marshal(s.publicError(err))
+		data, _ = json.Marshal(s.publicError(r.Context(), err))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Vary", "Accept-Encoding")
