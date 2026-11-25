@@ -1,5 +1,5 @@
-schema6.sqlite.gz is a synthetic database built with main at
-e1d15af57c0a81f0092a6f1acf3889f137f4715f. It contains the accepted
+schema6.sqlite.gz is a synthetic database built from the tree at public commit
+fcef3fca505af8a58b466652332b787c73864ac0. It contains the accepted
 schema-six-run, two imported issues (50 and 90), and their audit history.
 It has neither issue_totals nor issue_ci. It contains no deployment data.
 
@@ -12,7 +12,7 @@ the store before gzip compression with mtime=0.
 
 Uncompressed SHA256: beaa6530061ad4e710fef05778e286e8eeaaefb9b8c23b17ba22a9df978f5abb
 
-Rollback probe: create a detached scratch worktree at main 547a35c7, copy
+Rollback probe: create a detached scratch worktree at public 909a3db5, copy
 schema6_rollback_test.go.txt to internal/store/rollback_probe_test.go there,
 and build its store tests with go test -c. Run the current branch's
 TestSchema6OpenPreservesBaselineLayout with OBERTH_SCHEMA6_PROBE pointing
