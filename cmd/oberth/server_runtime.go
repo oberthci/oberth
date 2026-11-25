@@ -21,6 +21,7 @@ import (
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/flowcontrol"
 	"strings"
 )
 
@@ -83,9 +84,11 @@ func validateRuntime(r serverRuntime) error {
 }
 
 type clusterClients struct {
-	Kube kubernetes.Interface
-	Argo wfclient.Interface
-	REST *rest.Config
+	Kube           kubernetes.Interface
+	Argo           wfclient.Interface
+	REST           *rest.Config
+	collectionKube kubernetes.Interface
+	collectionArgo wfclient.Interface
 }
 
 // The server's cluster clients send at most serverClientQPS requests a second
@@ -110,7 +113,18 @@ func newClusterClients(cfg *rest.Config) (clusterClients, error) {
 		return clusterClients{}, err
 	}
 	argo, err := wfclient.NewForConfig(cfg)
-	return clusterClients{Kube: kube, Argo: argo, REST: cfg}, err
+	if err != nil {
+		return clusterClients{}, err
+	}
+	collection := rest.CopyConfig(cfg)
+	collection.QPS, collection.Burst = argojob.CollectionClientQPS, argojob.CollectionClientBurst
+	collection.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(collection.QPS, collection.Burst)
+	collectionKube, err := kubernetes.NewForConfig(collection)
+	if err != nil {
+		return clusterClients{}, err
+	}
+	collectionArgo, err := wfclient.NewForConfig(collection)
+	return clusterClients{Kube: kube, Argo: argo, REST: cfg, collectionKube: collectionKube, collectionArgo: collectionArgo}, err
 }
 
 type serverPlatform struct {

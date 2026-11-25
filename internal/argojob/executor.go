@@ -60,6 +60,12 @@ type Cache interface {
 // Metrics holds native observation counters without per-run metric labels.
 type Metrics struct{ IncompleteEvidence atomic.Uint64 }
 
+// NativeClients lets collection use a transport budget separate from live work.
+type NativeClients struct {
+	Workflows Workflows
+	Pods      Pods
+}
+
 type Config struct {
 	InstanceID         string
 	SecretStore        runtimeconfig.SecretDelivery
@@ -74,6 +80,7 @@ type Config struct {
 	Workflows          Workflows
 	Accounts           Accounts
 	Pods               Pods
+	Collection         NativeClients
 	Runs               Runs
 	Logger             *slog.Logger
 	RateLimiter        workqueue.TypedRateLimiter[string]
@@ -81,6 +88,8 @@ type Config struct {
 	Now                func() time.Time
 }
 type Executor struct {
+	collector        *Executor
+	live             *Executor
 	storeConfigured  bool
 	config           Config
 	mu               sync.Mutex
@@ -95,6 +104,24 @@ type Executor struct {
 }
 
 func New(c Config) *Executor {
+	e := newExecutor(c)
+	collection := e.config
+	collection.RateLimiter = nil
+	if c.Collection.Workflows != nil {
+		collection.Workflows = c.Collection.Workflows
+	}
+	if c.Collection.Pods != nil {
+		collection.Pods = c.Collection.Pods
+	}
+	e.collector = newExecutor(collection)
+	e.collector.live = e
+	if c.Cache != nil {
+		c.Cache.OnChange(e.changed)
+	}
+	return e
+}
+
+func newExecutor(c Config) *Executor {
 	if c.ObservationTimeout <= 0 {
 		c.ObservationTimeout = 30 * time.Second
 	}
@@ -109,8 +136,5 @@ func New(c Config) *Executor {
 	}
 	e := &Executor{storeConfigured: c.SecretStore.Valid(), captureReady: make(chan struct{}, 1), config: c, tracked: make(map[string]*tracking), recoveryErrors: map[string]string{}, childNotices: map[string]childNotice{}, queue: workqueue.NewTypedRateLimitingQueue(c.RateLimiter)}
 	e.collectionReads = newCollectionReads()
-	if c.Cache != nil {
-		c.Cache.OnChange(e.changed)
-	}
 	return e
 }

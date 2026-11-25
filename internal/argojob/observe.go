@@ -56,6 +56,8 @@ type tracking struct {
 	archiveOnly              bool
 	archiveRetryAt           time.Time
 	archiveFailures          int
+	archiveLive              bool
+	archiveEvidenceUntil     time.Time
 	evidenceUntil            time.Time
 	captures                 map[string]bool
 	pending                  map[string]captureJob
@@ -64,11 +66,13 @@ type tracking struct {
 }
 
 type trackingSeed struct {
-	child       *childObservation
-	steps       []stepmodel.RunStep
-	nodes       []stateport.Node
-	completed   bool
-	archiveOnly bool
+	child                *childObservation
+	steps                []stepmodel.RunStep
+	nodes                []stateport.Node
+	completed            bool
+	archiveOnly          bool
+	historical           bool
+	archiveEvidenceUntil time.Time
 }
 
 func (e *Executor) track(b nativebinding.RunBinding, plan admissioncontract.Plan, seed trackingSeed) {
@@ -78,6 +82,9 @@ func (e *Executor) track(b nativebinding.RunBinding, plan admissioncontract.Plan
 		t = &tracking{binding: b, plan: plan.Clone(), previous: (stepmodel.RunSummary{Steps: seed.steps}).Clone().Steps, previousNodes: seed.nodes, captures: map[string]bool{}, holds: map[string]bool{}}
 		t.child = seed.child
 		t.archiveOnly = seed.archiveOnly
+		t.historical = seed.historical
+		t.archiveEvidenceUntil = seed.archiveEvidenceUntil
+		t.archiveLive = !seed.archiveEvidenceUntil.IsZero()
 		if seed.completed {
 			t.completed = true
 			if !seed.archiveOnly {
@@ -109,10 +116,19 @@ func (e *Executor) retire(t *tracking) {
 
 // Run consumes recovery and native change notifications through the same queue.
 func (e *Executor) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
 	e.queue.Add("")
 	logsDone := e.startCaptures(ctx)
-	defer func() { e.queue.ShutDown(); <-logsDone }()
-	go func() { <-ctx.Done(); e.queue.ShutDown() }()
+	collectionDone := make(chan struct{})
+	defer func() {
+		cancel()
+		e.queue.ShutDown()
+		e.collector.queue.ShutDown()
+		<-logsDone
+		<-collectionDone
+	}()
+	go func() { <-ctx.Done(); e.queue.ShutDown(); e.collector.queue.ShutDown() }()
+	go func() { defer close(collectionDone); e.collector.runCollection(ctx) }()
 	for {
 		name, closed := e.queue.Get()
 		if closed {
@@ -227,17 +243,11 @@ func (e *Executor) process(ctx context.Context, name string) {
 	t := e.tracked[name]
 	e.mu.Unlock()
 	if t == nil {
-		if e.resumeCollection(ctx, name) {
-			return
-		}
-		e.discoverChild(ctx, name)
+		e.discoverRun(ctx, name)
 		return
 	}
-	if t.archiveOnly {
-		if delay := e.collectionDelay(t); delay > 0 {
-			e.queue.AddAfter(name, delay)
-			return
-		}
+	if !e.collectionDue(t) {
+		return
 	}
 	parent := ctx
 	budget := e.observationBudget(t)
@@ -246,6 +256,7 @@ func (e *Executor) process(ctx context.Context, name string) {
 	if e.expired(t) {
 		e.exhausted(parent, t, errors.New("terminal evidence window expired"))
 		e.queue.Forget(name)
+		e.collectFinished(t)
 		e.retire(t)
 		return
 	}
@@ -259,6 +270,9 @@ func (e *Executor) process(ctx context.Context, name string) {
 		return
 	}
 	if t.archiveOnly {
+		if e.liveArchivePending(ctx, t, err) {
+			return
+		}
 		e.archivePending(t, err)
 		return
 	}
@@ -272,6 +286,7 @@ func (e *Executor) process(ctx context.Context, name string) {
 	}
 	e.exhausted(parent, t, err)
 	e.queue.Forget(name)
+	e.collectFinished(t)
 	e.retire(t)
 }
 
@@ -279,6 +294,9 @@ func (e *Executor) observationSucceeded(t *tracking) {
 	t.refusals = 0
 	e.queue.Forget(t.binding.Workflow.Name)
 	if t.settled || t.lost {
+		if !t.lost {
+			e.collectFinished(t)
+		}
 		e.retire(t)
 	}
 }
@@ -326,9 +344,6 @@ func (e *Executor) observeRun(ctx context.Context, t *tracking) error {
 	e.reportHolds(ctx, t, w, pods)
 	t.settled = settled
 	err = errors.Join(terminalError, progressError)
-	if err == nil && settled {
-		err = e.allowCollection(ctx, t.binding, t.historical)
-	}
 	return err
 }
 
@@ -435,9 +450,6 @@ func (e *Executor) exhausted(ctx context.Context, t *tracking, cause error) {
 	defer cancel()
 	e.config.Metrics.IncompleteEvidence.Add(1)
 	err := e.config.Progress.AdvanceNative(ctx, t.binding.RunID)
-	if err == nil && t.completed {
-		err = e.allowCollection(ctx, t.binding, t.historical)
-	}
 	if err != nil && t.completed {
 		e.queue.AddAfter(t.binding.Workflow.Name, time.Second)
 	}

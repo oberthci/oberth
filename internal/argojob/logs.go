@@ -206,9 +206,13 @@ type captureJob struct {
 }
 
 func (e *Executor) startCaptures(ctx context.Context) <-chan struct{} {
+	return e.startCaptureWorkers(ctx, captureWorkers)
+}
+
+func (e *Executor) startCaptureWorkers(ctx context.Context, count int) <-chan struct{} {
 	done := make(chan struct{})
 	var wg sync.WaitGroup
-	for range captureWorkers {
+	for range count {
 		wg.Go(func() {
 			for ctx.Err() == nil {
 				if job, ok := e.nextCapture(); ok {

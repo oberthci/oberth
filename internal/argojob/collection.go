@@ -9,7 +9,6 @@ import (
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/stateport"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -59,38 +58,9 @@ func (e *Executor) restoreCollection(ctx context.Context, r stateport.Run, w *wf
 			return err
 		}
 	}
-	if err = e.restoreSnapshot(ctx, r, child); err != nil {
-		return err
-	}
-	e.mu.Lock()
-	e.tracked[r.Origin.WorkflowName].historical = w.Spec.TTLStrategy == nil && !slices.Contains(w.Finalizers, nativebinding.RecordFinalizer)
-	e.mu.Unlock()
+	b := runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.WorkflowUID})
+	e.track(b, r.Admission.Plan, trackingSeed{child: child, completed: true, archiveOnly: true, historical: w.Spec.TTLStrategy == nil && !slices.Contains(w.Finalizers, nativebinding.RecordFinalizer)})
 	return nil
-}
-
-// A live identity check fences collection to the bound Workflow. Historical
-// Workflows without a TTL get the same one-day debug retention after Finish.
-func (e *Executor) allowCollection(ctx context.Context, b nativebinding.RunBinding, historical bool) error {
-	if err := e.collectionRead(ctx); err != nil {
-		return err
-	}
-	w, err := e.config.Workflows.Get(ctx, b.Workflow.Name, meta.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if err = e.verifyObserved(ctx, b, w); err != nil {
-		return err
-	}
-	if !collectionAllowed(w, historical) {
-		return nil
-	}
-	if err := e.requireArchives(ctx, b, w); err != nil {
-		return err
-	}
-	return e.releaseCollected(ctx, b, w)
 }
 
 func collectionAllowed(w *wf.Workflow, historical bool) bool {

@@ -163,6 +163,8 @@ func TestCollectionRetryBackoffSurvivesWatchEvents(t *testing.T) {
 	var output bytes.Buffer
 	e := New(Config{Now: func() time.Time { return now }, Logger: slog.New(slog.NewTextHandler(&output, nil))})
 	defer e.queue.ShutDown()
+	e = e.collector
+	defer e.queue.ShutDown()
 	track := &tracking{archiveOnly: true, binding: nativebinding.RunBinding{RunID: "run", Workflow: nativebinding.Object{Name: "workflow"}}}
 	e.tracked["workflow"] = track
 	for _, want := range []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 16 * time.Minute, 32 * time.Minute, time.Hour, time.Hour} {

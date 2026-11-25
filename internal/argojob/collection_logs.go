@@ -17,22 +17,6 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Collection cannot turn a timeout, an interrupted copy or a cache miss into
-// permission to delete a native log source. TTL also collects its dependent Pods.
-func (e *Executor) requireArchives(ctx context.Context, b nativebinding.RunBinding, w *wf.Workflow) error {
-	if err := packer.DecompressWorkflow(ctx, w); err != nil {
-		return err
-	}
-	if w.Status.OffloadNodeStatusVersion != "" {
-		return errors.New("native nodes are not available")
-	}
-	entries, err := e.collectionLogEntries(ctx, b, w)
-	if err != nil {
-		return err
-	}
-	return e.archivedEntries(ctx, b, entries)
-}
-
 func (e *Executor) archivedEntries(ctx context.Context, b nativebinding.RunBinding, entries []runlog.ContainerLog) error {
 	if len(entries) == 0 {
 		return nil
@@ -59,11 +43,6 @@ func archivePodFinished(p *core.Pod) bool {
 		return false
 	}
 	return !slices.ContainsFunc(statuses, func(c core.ContainerStatus) bool { return c.State.Running != nil })
-}
-
-func (e *Executor) collectionLogEntries(ctx context.Context, b nativebinding.RunBinding, w *wf.Workflow) ([]runlog.ContainerLog, error) {
-	entries, _, err := e.collectionSources(ctx, b, w)
-	return entries, err
 }
 
 func (e *Executor) collectionSources(ctx context.Context, b nativebinding.RunBinding, w *wf.Workflow) ([]runlog.ContainerLog, []*core.Pod, error) {
@@ -233,7 +212,7 @@ func (e *Executor) observeArchive(ctx context.Context, t *tracking) error {
 		return err
 	}
 	if err = e.archivedEntries(ctx, t.binding, entries); err != nil {
-		return err
+		return &archiveCheckError{err}
 	}
 	if collectionAllowed(w, t.historical) {
 		if err = e.releaseCollected(ctx, t.binding, w); err != nil {
@@ -243,3 +222,7 @@ func (e *Executor) observeArchive(ctx context.Context, t *tracking) error {
 	t.settled = true
 	return nil
 }
+
+type archiveCheckError struct{ error }
+
+func (e *archiveCheckError) Unwrap() error { return e.error }

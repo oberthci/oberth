@@ -27,8 +27,19 @@ func (o *serverOwners) nativePart(ctx context.Context) (Part, error) {
 	o.c.health.watch = hub.Healthy
 	metrics := &argojob.Metrics{}
 	o.c.health.nativeIncomplete = metrics.IncompleteEvidence.Load
-	o.native = argojob.New(argojob.Config{InstanceID: o.c.config.Namespace, SecretStore: o.c.delivery, Children: scheduleChildren{o.c}, ChildRuns: o.c.store, Keeper: o.cache, Metrics: metrics, Workflows: argojob.WorkflowClient{NativeWorkflows: workflows}, Accounts: o.cluster.Kube.CoreV1().ServiceAccounts(ns), Pods: nativePods{PodInterface: pods, owner: o}, Runs: o.c.store, Progress: o.c.store, Reporter: nativeReporter{o}, Logs: o.c.logs, Cache: hub, Now: o.c.clock.Now, Logger: slog.New(slog.NewTextHandler(o.c.diagnostic, nil))})
+	o.native = argojob.New(argojob.Config{InstanceID: o.c.config.Namespace, SecretStore: o.c.delivery, Children: scheduleChildren{o.c}, ChildRuns: o.c.store, Keeper: o.cache, Metrics: metrics, Workflows: argojob.WorkflowClient{NativeWorkflows: workflows}, Accounts: o.cluster.Kube.CoreV1().ServiceAccounts(ns), Pods: nativePods{PodInterface: pods, owner: o}, Collection: o.collectionClients(ns), Runs: o.c.store, Progress: o.c.store, Reporter: nativeReporter{o}, Logs: o.c.logs, Cache: hub, Now: o.c.clock.Now, Logger: slog.New(slog.NewTextHandler(o.c.diagnostic, nil))})
 	return Part{Name: "native execution", Run: o.native.Run}, nil
+}
+
+func (o *serverOwners) collectionClients(namespace string) argojob.NativeClients {
+	kube, argo := o.cluster.collectionKube, o.cluster.collectionArgo
+	if kube == nil {
+		kube = o.cluster.Kube
+	}
+	if argo == nil {
+		argo = o.cluster.Argo
+	}
+	return argojob.NativeClients{Workflows: argojob.WorkflowClient{NativeWorkflows: argo.ArgoprojV1alpha1().Workflows(namespace)}, Pods: nativePods{PodInterface: kube.CoreV1().Pods(namespace), owner: o}}
 }
 
 type nativePods struct {

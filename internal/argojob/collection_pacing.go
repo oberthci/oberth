@@ -9,11 +9,12 @@ import (
 )
 
 const (
-	collectionBatch    = 8
-	collectionInterval = 15 * time.Second
-	collectionQPS      = 5
-	archiveRetryBase   = time.Minute
-	archiveRetryMax    = time.Hour
+	collectionBatch       = 8
+	collectionInterval    = 15 * time.Second
+	CollectionClientQPS   = 5
+	CollectionClientBurst = 1
+	archiveRetryBase      = time.Minute
+	archiveRetryMax       = time.Hour
 )
 
 var (
@@ -70,4 +71,6 @@ func (e *Executor) archivePending(t *tracking, err error) {
 	e.retryArchive(t, err)
 }
 
-func newCollectionReads() *rate.Limiter { return rate.NewLimiter(collectionQPS, 1) }
+func newCollectionReads() *rate.Limiter {
+	return rate.NewLimiter(CollectionClientQPS, CollectionClientBurst)
+}
