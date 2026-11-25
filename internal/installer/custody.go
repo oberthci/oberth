@@ -17,6 +17,7 @@ type Profile struct {
 	Namespace         string `json:"namespace"`
 	PipelineNamespace string `json:"pipeline_namespace,omitempty"`
 	HTTPSNodePort     int    `json:"https_node_port,omitempty"`
+	HTTPSServicePort  int    `json:"https_service_port,omitempty"`
 	SSHNodePort       int    `json:"ssh_node_port,omitempty"`
 	RecoveryKey       string `json:"recovery_key,omitempty"`
 	Version           int    `json:"version"`

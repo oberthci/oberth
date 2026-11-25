@@ -107,7 +107,7 @@ oberth upgrade --yes
 ```
 Upgrades require signed releases; local charts use `oberth install --chart <directory>`.
 After upgrading, replace the administrator CLI with that release's verified client and repoint
-wrappers to it.
+wrappers to it. `--service-port 443` selects in-cluster HTTPS port 443 (default 8443).
 Add `--version <version>` to both commands to select a version. Offline `--release-dir <directory>`
 reads signed files or a parent of version directories (`v0.1.0`, `v0.2.0`). Version directories
 override flat files; invalid directories refuse. Same-schema repair needs both releases; select

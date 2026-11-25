@@ -42,6 +42,7 @@ func (e *Engine) saveProfile(p *Plan, i Identities, a admin) (Profile, error) {
 		BootstrapPending:  true,
 		Ready:             p.previous.Ready,
 		Namespace:         p.choices.Namespace,
+		HTTPSServicePort:  p.choices.HTTPSServicePort,
 		PipelineNamespace: p.choices.PipelineNamespace, HTTPSNodePort: p.choices.HTTPSNodePort, SSHNodePort: p.choices.SSHNodePort,
 	}
 	v, _ := inputs(p.release.chart, p.request.Values, p.choices.Namespace)

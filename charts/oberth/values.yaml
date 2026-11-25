@@ -1,3 +1,4 @@
+servicePort: 8443
 nodePorts:
   https: 30443
   ssh: 30022

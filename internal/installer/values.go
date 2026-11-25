@@ -28,6 +28,9 @@ func values(r Release, c Choices, stored map[string]any) (map[string]any, error)
 	if !allowedOverrides(c.Values) {
 		return nil, problem("choices", nil)
 	}
+	if c.HTTPSServicePort != defaultHTTPSServicePort && r.chart.Values["servicePort"] == nil {
+		return nil, problem("service-port-chart", nil)
+	}
 	saved := operatorValues(stored)
 	if c.replaceValues {
 		saved = nil
@@ -57,6 +60,7 @@ func values(r Release, c Choices, stored map[string]any) (map[string]any, error)
 		return nil, err
 	}
 	v = merge(v, map[string]any{"nodePorts": map[string]any{"https": c.HTTPSNodePort, "ssh": c.SSHNodePort}})
+	v["servicePort"] = c.HTTPSServicePort
 	v["statusOrigins"] = statusOrigins(c, stored)
 	return inputs(r.chart, v, c.Namespace)
 }

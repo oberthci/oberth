@@ -8,7 +8,7 @@ spec:
   type: NodePort
   selector: {app: oberth}
   ports:
-    - {name: https, port: 8443, targetPort: https, nodePort: {{ .Values.nodePorts.https }}}
+    - {name: https, port: {{ .Values.servicePort }}, targetPort: https, nodePort: {{ .Values.nodePorts.https }}}
     - {name: ssh, port: 2222, targetPort: ssh, nodePort: {{ .Values.nodePorts.ssh }}}
 {{- end -}}
 

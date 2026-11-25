@@ -22,6 +22,7 @@ type Choices struct {
 	Context           string
 	URL               string
 	SSHPort           int
+	HTTPSServicePort  int
 	HTTPSNodePort     int
 	SSHNodePort       int
 	Namespace         string
@@ -37,12 +38,17 @@ type Choices struct {
 	Values          map[string]any
 }
 
-const defaultNamespace = "oberth"
+const (
+	defaultNamespace        = "oberth"
+	defaultHTTPSServicePort = 8443
+	sshServicePort          = 2222
+)
 
 func Defaults() Choices {
 	parallel, floor, egress, store := 4, true, true, true
 	return Choices{
 		SSHPort:           30022,
+		HTTPSServicePort:  defaultHTTPSServicePort,
 		HTTPSNodePort:     30443,
 		SSHNodePort:       30022,
 		Namespace:         defaultNamespace,
@@ -64,6 +70,9 @@ func resolve(c Choices, host string) (Choices, error) {
 	}
 	if c.HTTPSNodePort == 0 {
 		c.HTTPSNodePort = d.HTTPSNodePort
+	}
+	if c.HTTPSServicePort == 0 {
+		c.HTTPSServicePort = d.HTTPSServicePort
 	}
 	if c.SSHNodePort == 0 {
 		c.SSHNodePort = d.SSHNodePort
@@ -130,8 +139,10 @@ func validPort(port string) bool {
 		return true
 	}
 	n, err := strconv.Atoi(port)
-	return err == nil && n >= 1 && n <= 65535
+	return err == nil && validTCPPort(n)
 }
+
+func validTCPPort(port int) bool { return port >= 1 && port <= 65535 }
 
 func checkChoices(c Choices) error {
 	if c.Context == "" {
@@ -142,8 +153,12 @@ func checkChoices(c Choices) error {
 	}
 	code := ""
 	switch {
-	case c.SSHPort < 1 || c.SSHPort > 65535:
+	case !validTCPPort(c.SSHPort):
 		code = "ssh-port"
+	case !validTCPPort(c.HTTPSServicePort):
+		code = "service-port"
+	case c.HTTPSServicePort == sshServicePort:
+		code = "service-port-ssh"
 	case !validNodePorts(c):
 		code = "node-port"
 	case c.Parallel != nil && *c.Parallel < 0:
@@ -161,6 +176,9 @@ func deployedChoices(c Choices, stored map[string]any) Choices {
 		c.PipelineNamespace, _ = pipeline["namespace"].(string)
 	}
 	ports, _ := stored["nodePorts"].(map[string]any)
+	if c.HTTPSServicePort == 0 {
+		c.HTTPSServicePort = number(stored["servicePort"])
+	}
 	if c.HTTPSNodePort == 0 {
 		c.HTTPSNodePort = number(ports["https"])
 	}
@@ -189,7 +207,7 @@ func number(v any) int {
 }
 
 func validNodePorts(c Choices) bool {
-	return c.HTTPSNodePort >= 1 && c.HTTPSNodePort <= 65535 && c.SSHNodePort >= 1 && c.SSHNodePort <= 65535 && c.HTTPSNodePort != c.SSHNodePort
+	return validTCPPort(c.HTTPSNodePort) && validTCPPort(c.SSHNodePort) && c.HTTPSNodePort != c.SSHNodePort
 }
 
 func validNamespaces(c Choices) bool {

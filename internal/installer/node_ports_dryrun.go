@@ -22,8 +22,8 @@ func (e *Engine) dryRunNodePorts(ctx context.Context, c Choices, services *corev
 		}
 	}
 	service.Spec.Ports = []corev1.ServicePort{
-		{Name: "https", Protocol: corev1.ProtocolTCP, Port: 443, TargetPort: intstr.FromInt(8443), NodePort: int32(c.HTTPSNodePort)},
-		{Name: "ssh", Protocol: corev1.ProtocolTCP, Port: 22, TargetPort: intstr.FromInt(2222), NodePort: int32(c.SSHNodePort)},
+		{Name: "https", Protocol: corev1.ProtocolTCP, Port: int32(c.HTTPSServicePort), TargetPort: intstr.FromInt(8443), NodePort: int32(c.HTTPSNodePort)},
+		{Name: "ssh", Protocol: corev1.ProtocolTCP, Port: sshServicePort, TargetPort: intstr.FromInt(sshServicePort), NodePort: int32(c.SSHNodePort)},
 	}
 	_, err := e.Cluster.Client.CoreV1().Namespaces().Get(ctx, c.Namespace, metav1.GetOptions{})
 	// A dry-run create uses default until the chosen server namespace exists.

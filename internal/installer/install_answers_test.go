@@ -25,7 +25,7 @@ func TestInterruptedFirstInstallRetainsAnswers(t *testing.T) {
 
 func TestPendingInstallAnswersMustMatchLocalRecord(t *testing.T) {
 	t.Parallel()
-	for _, field := range []string{"namespace", "https", "ssh"} {
+	for _, field := range []string{"namespace", "https", "ssh", "servicePort"} {
 		t.Run(field, func(t *testing.T) {
 			pendingAnswersCase(t, field)
 		})
@@ -35,6 +35,7 @@ func TestPendingInstallAnswersMustMatchLocalRecord(t *testing.T) {
 func interruptedAnswersCase(t *testing.T, stage string) {
 	f := setup(t)
 	f.choices = installer.Choices{Context: "test", Namespace: "second", PipelineNamespace: "jobs", HTTPSNodePort: 31443, SSHNodePort: 31022}
+	f.choices.HTTPSServicePort = 443
 	foreignService(t, f, 30443)
 	service, err := f.client.CoreV1().Services("existing").Get(t.Context(), "front", metav1.GetOptions{})
 	if err != nil {
@@ -64,7 +65,7 @@ func interruptedAnswersCase(t *testing.T, stage string) {
 	f.choices = installer.Choices{Context: "test"}
 	next := prepare(t, f)
 	review := strings.Join(next.Review(), "\n")
-	for _, want := range []string{"Namespaces: second / jobs", "node port 31443", "node port 31022"} {
+	for _, want := range []string{"Namespaces: second / jobs", "node port 31443", "node port 31022", "HTTPS Service port: 443 (--service-port)"} {
 		if !strings.Contains(review, want) {
 			t.Fatal("retry discarded answer", review)
 		}
@@ -74,6 +75,7 @@ func interruptedAnswersCase(t *testing.T, stage string) {
 func pendingAnswersCase(t *testing.T, field string) {
 	f := setup(t)
 	f.choices = installer.Choices{Context: "test", Namespace: "second", PipelineNamespace: "jobs", HTTPSNodePort: 31443, SSHNodePort: 31022}
+	f.choices.HTTPSServicePort = 443
 	p := prepare(t, f)
 	stop := errors.New("interrupted")
 	_, err := f.engine.Apply(t.Context(), p, p.Digest(), func(phase installer.Phase) error {
@@ -86,9 +88,12 @@ func pendingAnswersCase(t *testing.T, field string) {
 		t.Fatal(err)
 	}
 	values := f.charts.Previews[0].Values
-	if field == "namespace" {
+	switch field {
+	case "namespace":
 		values["pipeline"].(map[string]any)[field] = "changed"
-	} else {
+	case "servicePort":
+		values["servicePort"] = 9443
+	default:
 		values["nodePorts"].(map[string]any)[field] = 32001
 	}
 	f.charts.History.Latest = installer.Revision{Number: 1, Kind: "local", Status: "pending-install", Version: "unset", Values: values}

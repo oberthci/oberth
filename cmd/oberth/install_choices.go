@@ -23,6 +23,7 @@ func (r installationRequest) choices() installer.Choices {
 	c := installer.Choices{Context: r.text("context"), URL: r.text("url")}
 	c.Namespace, c.PipelineNamespace = r.text("namespace"), r.text("pipeline-namespace")
 	c.HTTPSNodePort, _ = strconv.Atoi(r.text("https-node-port"))
+	c.HTTPSServicePort, _ = strconv.Atoi(r.text("service-port"))
 	c.SSHNodePort, _ = strconv.Atoi(r.text("ssh-node-port"))
 	c.SSHPort, _ = strconv.Atoi(r.text("ssh-port"))
 	r.flags.Visit(func(f *flag.Flag) {

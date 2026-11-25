@@ -450,6 +450,14 @@
       "type": "integer",
       "minimum": 1
     },
+    "servicePort": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "not": {
+        "const": 2222
+      }
+    },
     "nodePorts": {
       "type": "object",
       "additionalProperties": false,

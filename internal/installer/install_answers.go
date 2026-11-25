@@ -11,7 +11,11 @@ func (p Profile) answersOnly() bool {
 }
 
 func (p Profile) answers() map[string]any {
-	return map[string]any{"pipeline": map[string]any{"namespace": p.PipelineNamespace}, "nodePorts": map[string]any{"https": p.HTTPSNodePort, "ssh": p.SSHNodePort}}
+	values := map[string]any{"pipeline": map[string]any{"namespace": p.PipelineNamespace}, "nodePorts": map[string]any{"https": p.HTTPSNodePort, "ssh": p.SSHNodePort}}
+	if p.HTTPSServicePort != 0 {
+		values["servicePort"] = p.HTTPSServicePort
+	}
+	return values
 }
 
 func (e *Engine) saveInitialAnswers(p *Plan) error {
@@ -26,6 +30,7 @@ func (e *Engine) saveInitialAnswers(p *Plan) error {
 		return problem("custody", err)
 	}
 	record := Profile{Version: 1, Context: p.choices.Context, ClusterUID: p.uid, Namespace: p.choices.Namespace, PipelineNamespace: p.choices.PipelineNamespace, HTTPSNodePort: p.choices.HTTPSNodePort, SSHNodePort: p.choices.SSHNodePort, BootstrapPending: true}
+	record.HTTPSServicePort = p.choices.HTTPSServicePort
 	return e.Credentials.saveProfile(record, p.admin.id)
 }
 
@@ -64,7 +69,7 @@ func checkResumeAnswers(c Choices, record Profile, h History) error {
 	}
 	if strings.HasPrefix(h.Latest.Status, "pending-") && h.Latest.Installer() {
 		pending := deployedChoices(Choices{}, h.Latest.Values)
-		if pending.PipelineNamespace != saved.PipelineNamespace || pending.HTTPSNodePort != saved.HTTPSNodePort || pending.SSHNodePort != saved.SSHNodePort {
+		if pending.PipelineNamespace != saved.PipelineNamespace || pending.HTTPSNodePort != saved.HTTPSNodePort || pending.SSHNodePort != saved.SSHNodePort || servicePort(pending.HTTPSServicePort) != servicePort(saved.HTTPSServicePort) {
 			return problem("install-answers", nil)
 		}
 	}
@@ -72,7 +77,14 @@ func checkResumeAnswers(c Choices, record Profile, h History) error {
 }
 
 func changedPorts(c, saved Choices) bool {
-	return c.HTTPSNodePort != 0 && c.HTTPSNodePort != saved.HTTPSNodePort || c.SSHNodePort != 0 && c.SSHNodePort != saved.SSHNodePort
+	return c.HTTPSNodePort != 0 && c.HTTPSNodePort != saved.HTTPSNodePort || c.SSHNodePort != 0 && c.SSHNodePort != saved.SSHNodePort || c.HTTPSServicePort != 0 && c.HTTPSServicePort != servicePort(saved.HTTPSServicePort)
+}
+
+func servicePort(port int) int {
+	if port == 0 {
+		return defaultHTTPSServicePort
+	}
+	return port
 }
 
 func (e *Engine) installChoices(c Choices, h History) (Choices, error) {

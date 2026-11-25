@@ -23,7 +23,9 @@ The controller reads `runs.parallel` through the parent-owned ConfigMap. Zero
 means unlimited. The chart owns no second limit. The native subchart's ConfigMap
 is disabled, and both its executor argument and the ConfigMap executor image are
 derived from the single `argoNative.executor.image` value. The source endpoint has a separate internal Service;
-only HTTPS and SSH have node ports. Public port mappings belong in the profile.
+only HTTPS and SSH have node ports. HTTPS Service port `servicePort` defaults to 8443;
+443 is explicit. Its target stays 8443 and `nodePorts.https` selects the node port.
+Public mappings belong in the profile.
 
 The controller watches ConfigMaps in its own namespace; they contain public
 configuration. The live walk must upgrade `--parallel 4` to `--parallel 2`, keep

@@ -23,6 +23,7 @@ func TestInstallationAcceptsLowestPorts(t *testing.T) {
 		{"HTTPS URL", installer.Choices{Context: "test", URL: "https://ci.example:1"}},
 		{"public SSH", installer.Choices{Context: "test", SSHPort: 1}},
 		{"HTTPS node port", installer.Choices{Context: "test", HTTPSNodePort: 1}},
+		{"HTTPS Service port", installer.Choices{Context: "test", HTTPSServicePort: 1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

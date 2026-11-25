@@ -42,7 +42,7 @@ func review(p *Plan, release string) []string {
 		"Context: " + p.choices.Context,
 		"Cluster: " + p.address + " (UID: " + p.uid + ")",
 		"Namespaces: " + p.choices.Namespace + " / " + p.choices.PipelineNamespace + "; Pod Security: " + strings.ReplaceAll(p.serverPodSecurity, " (new namespace)", " (new)") + " / " + strings.ReplaceAll(p.podSecurity, " (new namespace)", " (new)"),
-		https, ssh,
+		https, ssh, reviewServicePort(p),
 		"Release: " + release,
 		reviewResources(p, values),
 	}
@@ -129,6 +129,19 @@ func reviewEndpoints(p *Plan) (string, string) {
 	}
 	return fmt.Sprintf("HTTPS: %s -> node port %s", changedAnswer(old.URL, p.choices.URL), changedAnswer(old.HTTPSNodePort, p.choices.HTTPSNodePort)),
 		fmt.Sprintf("SSH: %s:%s -> node port %s", changedAnswer(publicHost(old.URL), publicHost(p.choices.URL)), changedAnswer(old.SSHPort, p.choices.SSHPort), changedAnswer(old.SSHNodePort, p.choices.SSHNodePort))
+}
+
+func reviewServicePort(p *Plan) string {
+	old := p.choices.HTTPSServicePort
+	if hasRevisions(p.history) {
+		old = servicePort(number(p.history.Choices.Values["servicePort"]))
+		if p.history.Choices.Number == 0 && p.history.Latest.Installer() {
+			old = servicePort(number(p.history.Latest.Values["servicePort"]))
+		}
+	} else if p.previous.Namespace != "" {
+		old = servicePort(p.previous.HTTPSServicePort)
+	}
+	return "HTTPS Service port: " + changedAnswer(old, p.choices.HTTPSServicePort) + " (--service-port)"
 }
 func reviewResources(p *Plan, values map[string]any) string {
 	action := "Create/update: "
