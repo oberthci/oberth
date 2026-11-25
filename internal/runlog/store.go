@@ -14,12 +14,13 @@ import (
 // Store is the single owner of a log root. Close follows cancellation and join
 // of its users. Source reads never hold its cancelable append/index gate.
 type Store struct {
-	root      *os.Root
-	directory string
-	limit     int64
-	gate      chan struct{}
-	active    sync.Map
-	following sync.Map
+	root                 *os.Root
+	directory            string
+	limit                int64
+	gate                 chan struct{}
+	active               sync.Map
+	following            sync.Map
+	infrastructureHealth deliveryEvidenceHealth
 }
 
 func Open(ctx context.Context, directory string, limit int64) (*Store, error) {

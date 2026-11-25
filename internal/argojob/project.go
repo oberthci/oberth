@@ -33,13 +33,14 @@ type projected struct {
 
 // Project reads copies and folds retry nodes into the admitted logical paths.
 type Projection struct {
-	RunID          string
-	Infrastructure []runlog.InfrastructureReceipt
-	Plan           admissioncontract.Plan
-	Workflow       *wf.Workflow
-	Pods           []*core.Pod
-	Previous       []stepmodel.RunStep
-	PreviousNodes  []stateport.Node
+	DeliveryEvidenceUnavailable bool
+	RunID                       string
+	Infrastructure              []runlog.InfrastructureReceipt
+	Plan                        admissioncontract.Plan
+	Workflow                    *wf.Workflow
+	Pods                        []*core.Pod
+	Previous                    []stepmodel.RunStep
+	PreviousNodes               []stateport.Node
 }
 
 func Project(ctx context.Context, in Projection) (Observation, error) {
@@ -64,7 +65,7 @@ func Project(ctx context.Context, in Projection) (Observation, error) {
 		if err := ctx.Err(); err != nil {
 			return Observation{}, err
 		}
-		rows = appendPlan(rows, projectionInput{runID: in.RunID, infrastructure: in.Infrastructure, entry: entry, w: w, pods: pods, groups: groups, out: &out, paths: paths, waits: waits, previous: prev, previousNodes: in.PreviousNodes})
+		rows = appendPlan(rows, projectionInput{runID: in.RunID, infrastructure: in.Infrastructure, deliveryEvidenceUnavailable: in.DeliveryEvidenceUnavailable, entry: entry, w: w, pods: pods, groups: groups, out: &out, paths: paths, waits: waits, previous: prev, previousNodes: in.PreviousNodes})
 	}
 	seen := 0
 	for _, nodes := range groups {
@@ -85,17 +86,18 @@ func Project(ctx context.Context, in Projection) (Observation, error) {
 }
 
 type projectionInput struct {
-	runID          string
-	infrastructure []runlog.InfrastructureReceipt
-	entry          admissioncontract.PlanEntry
-	w              *wf.Workflow
-	pods           []*core.Pod
-	groups         map[string][]wf.NodeStatus
-	out            *Observation
-	paths          nativePaths
-	waits          map[string]string
-	previous       []stepmodel.RunStep
-	previousNodes  []stateport.Node
+	deliveryEvidenceUnavailable bool
+	runID                       string
+	infrastructure              []runlog.InfrastructureReceipt
+	entry                       admissioncontract.PlanEntry
+	w                           *wf.Workflow
+	pods                        []*core.Pod
+	groups                      map[string][]wf.NodeStatus
+	out                         *Observation
+	paths                       nativePaths
+	waits                       map[string]string
+	previous                    []stepmodel.RunStep
+	previousNodes               []stateport.Node
 }
 
 func appendPlan(rows []projected, in projectionInput) []projected {

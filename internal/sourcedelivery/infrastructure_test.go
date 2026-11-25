@@ -83,7 +83,7 @@ func TestSourceDatabaseFailureAfterDeliveryDeadlineIsTerminal(t *testing.T) {
 	})
 }
 
-func TestSourceCompletionRecordsSuccessBeforePublishingReceipt(t *testing.T) {
+func TestSourceCompletionSurvivesReceiptWriteFailure(t *testing.T) {
 	c := deliveryRulesConfig()
 	calls := 0
 	c.RecordSuccess = func(context.Context, sourcedelivery.Caller, time.Time) error {
@@ -91,8 +91,8 @@ func TestSourceCompletionRecordsSuccessBeforePublishingReceipt(t *testing.T) {
 		return errors.New("index unavailable")
 	}
 	reply := requestRulesSource(t, sourcedelivery.New(c), sourcecontract.Descriptor{Version: 1, Kind: sourcecontract.Main})
-	if calls != 1 || reply.Header().Get(sourcedelivery.ReceiptTrailer) != "" {
-		t.Fatal("completion published before durable supersession", calls, reply.Header())
+	if calls != 1 || reply.Header().Get(sourcedelivery.ReceiptTrailer) == "" || reply.Body.String() != "source" {
+		t.Fatal("receipt write failure blocked completed delivery", calls, reply.Header())
 	}
 }
 

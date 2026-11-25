@@ -2,6 +2,7 @@ package runlog
 
 import (
 	"context"
+	"slices"
 	"time"
 )
 
@@ -19,6 +20,7 @@ type InfrastructureReceipt struct {
 	StartedAt   time.Time `json:"started_at"`
 	FinishedAt  time.Time `json:"finished_at"`
 	Delivered   bool      `json:"delivered,omitempty"`
+	Uncertain   bool      `json:"-"` // A failed write retained only in this process.
 }
 
 func (r InfrastructureReceipt) valid() bool {
@@ -31,18 +33,25 @@ func (r InfrastructureReceipt) sameDelivery(other InfrastructureReceipt) bool {
 
 // RecordInfrastructure atomically retains the latest completion of each kind in
 // the synced run index. It needs no database connection and shares the log gate.
-func (s *Store) RecordInfrastructure(ctx context.Context, r InfrastructureReceipt) error {
+func (s *Store) RecordInfrastructure(ctx context.Context, r InfrastructureReceipt) (err error) {
 	if !r.valid() {
 		return checkID("")
 	}
+	// Until the index is read, a durable failure for this delivery may exist.
+	masks := true
 	if err := s.lock(ctx); err != nil {
+		s.infrastructureHealth.remember(r, err, masks)
 		return err
 	}
 	defer s.unlock()
+	defer func() {
+		s.infrastructureHealth.remember(r, err, masks)
+	}()
 	saved, err := s.load(r.RunID)
 	if err != nil {
 		return err
 	}
+	masks = slices.ContainsFunc(saved.Infrastructure, func(old InfrastructureReceipt) bool { return old.sameDelivery(r) && !old.Delivered })
 	for i, old := range saved.Infrastructure {
 		if old.sameDelivery(r) {
 			// Persist completion order, including success tombstones. A delayed
@@ -68,11 +77,8 @@ func (s *Store) Infrastructure(ctx context.Context, id string) ([]Infrastructure
 	}
 	defer s.unlock()
 	saved, err := s.load(id)
-	var failures []InfrastructureReceipt
-	for _, r := range saved.Infrastructure {
-		if !r.Delivered {
-			failures = append(failures, r)
-		}
+	if err != nil {
+		return nil, err
 	}
-	return failures, err
+	return s.infrastructureHealth.merge(id, saved.Infrastructure)
 }

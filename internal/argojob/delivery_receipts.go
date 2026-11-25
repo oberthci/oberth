@@ -56,7 +56,10 @@ func (e *Executor) project(ctx context.Context, t *tracking, w *wf.Workflow, pod
 		var err error
 		in.Infrastructure, err = e.config.Infrastructure.Infrastructure(ctx, t.binding.RunID)
 		if err != nil {
-			return Observation{}, err
+			in.Infrastructure, in.DeliveryEvidenceUnavailable = nil, true
+		}
+		if err != nil || slices.ContainsFunc(in.Infrastructure, func(r runlog.InfrastructureReceipt) bool { return r.Uncertain }) {
+			e.config.Logger.ErrorContext(ctx, "Delivery evidence unavailable", "run", t.binding.RunID)
 		}
 		if e.config.Pods != nil && len(in.Infrastructure) > 0 {
 			in.Pods, err = e.deliveryPods(ctx, w, pods, in.Infrastructure)
@@ -99,8 +102,11 @@ func sourceReceiptNeedsPod(r runlog.InfrastructureReceipt, w *wf.Workflow, p *co
 }
 
 func receiptDiagnosis(d diagnosis, in projectionInput, n wf.NodeStatus, p *core.Pod) diagnosis {
-	if n.Phase != wf.NodeFailed && n.Phase != wf.NodeError || d.class == stepmodel.FailureCancelled || d.class == stepmodel.FailureDeadline {
+	if !deliveryFailureMayExplain(d, n) {
 		return d
+	}
+	if in.deliveryEvidenceUnavailable {
+		return uncertainDeliveryDiagnosis(d)
 	}
 	podUID := deliveryPodUID(n, in, p)
 	if podUID == "" {
@@ -109,6 +115,9 @@ func receiptDiagnosis(d diagnosis, in projectionInput, n wf.NodeStatus, p *core.
 	for _, r := range in.infrastructure {
 		if !matchesDeliveryReceipt(r, in, n, podUID) || !deliveryFailedDuring(r, n, p) {
 			continue
+		}
+		if r.Uncertain {
+			return uncertainDeliveryDiagnosis(d)
 		}
 		switch r.Kind {
 		case "source":
@@ -120,6 +129,17 @@ func receiptDiagnosis(d diagnosis, in projectionInput, n wf.NodeStatus, p *core.
 		}
 		d.class = stepmodel.FailureInfrastructure
 		return d
+	}
+	return d
+}
+
+func deliveryFailureMayExplain(d diagnosis, n wf.NodeStatus) bool {
+	return (n.Phase == wf.NodeFailed || n.Phase == wf.NodeError) && d.class != stepmodel.FailureCancelled && d.class != stepmodel.FailureDeadline
+}
+
+func uncertainDeliveryDiagnosis(d diagnosis) diagnosis {
+	if d.class == stepmodel.FailureAuthor || d.class == stepmodel.FailureUnknown {
+		d.reason, d.class = reasonDeliveryEvidence, stepmodel.FailureUnknown
 	}
 	return d
 }

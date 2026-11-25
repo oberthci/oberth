@@ -2,6 +2,7 @@ package runlog
 
 // Reasons fit a complete 40-character line. Detail preserves the full explanation.
 const (
+	deliveryEvidenceUnavailableReason         = "delivery evidence unavailable"
 	bindingRemedy                             = "supply verified node, Pod UID, namespace, Pod name and container identity"
 	cannotAppendLogBytesReason                = "cannot append log bytes"
 	cannotCloseLogIndexReason                 = "cannot close log index"

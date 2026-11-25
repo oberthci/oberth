@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -64,7 +65,11 @@ func (o *serverOwners) recordDelivery(ctx context.Context, caller sourcedelivery
 func (o *serverOwners) persistDelivery(ctx context.Context, r runlog.InfrastructureReceipt) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	return o.c.logs.RecordInfrastructure(ctx, r)
+	err := o.c.logs.RecordInfrastructure(ctx, r)
+	if err != nil {
+		slog.New(slog.NewTextHandler(o.c.diagnostic, nil)).ErrorContext(ctx, "Delivery receipt write failed", "run", r.RunID, "kind", r.Kind, "reason", publicerr.Classify(err).Reason())
+	}
+	return err
 }
 
 func (o *serverOwners) secretDeliveryHandler(authenticate func(context.Context, string) (sourcedelivery.Caller, error)) http.Handler {
@@ -169,15 +174,12 @@ func (o *serverOwners) fetchStepSecret(ctx context.Context, identity runlog.Infr
 	identity.Kind = "secret"
 	identity.StartedAt, identity.FinishedAt, identity.Delivered = started, o.c.clock.Now(), err == nil
 	if err != nil && !errors.Is(ctx.Err(), context.Canceled) && deliveryServerFailure(err) {
-		err = errors.Join(err, o.persistDelivery(ctx, identity))
+		_ = o.persistDelivery(ctx, identity)
 	}
 	if err != nil {
 		return nil, err
 	}
-	if err = o.persistDelivery(ctx, identity); err != nil {
-		clear(values[path])
-		return nil, err
-	}
+	_ = o.persistDelivery(ctx, identity)
 	return values[path], nil
 }
 

@@ -90,5 +90,6 @@ func (s *Store) Purge(ctx context.Context, id string) (int64, error) {
 			removed += size
 		}
 	}
+	s.infrastructureHealth.purge(id)
 	return removed, nil
 }

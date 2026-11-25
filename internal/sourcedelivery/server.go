@@ -357,7 +357,6 @@ func (s *Server) send(ctx context.Context, w http.ResponseWriter, t transfer) {
 	}
 	if t.success != nil && t.success() != nil {
 		s.metric("unavailable", "other")
-		return
 	}
 	w.Header().Set(ReceiptTrailer, value)
 }
