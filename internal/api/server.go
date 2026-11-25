@@ -19,6 +19,7 @@ type Config struct {
 	Views         apicontract.Views
 	Registry      *Registry
 	Streams       Streams
+	AccountBackup AccountSnapshot
 	Enroll        apicontract.Handler[model.InviteRedemption, model.InviteCertificate]
 	Runtime       Runtime
 	Classify      Classifier
@@ -128,6 +129,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /mcp", s.private(s.deleteSession))
 	s.mux.HandleFunc("POST /mcp/enroll", s.enrollment)
 	s.mux.HandleFunc("POST /api/admin/{action}", s.private(s.admin))
+	s.mux.HandleFunc("POST /api/backup/database", s.accountBackup)
 	s.mux.HandleFunc("GET /metrics", s.private(s.metrics))
 	s.mux.HandleFunc("GET /api/runs/{run}/containerlog/stream", s.private(s.nativeStream))
 	s.readRoutes()

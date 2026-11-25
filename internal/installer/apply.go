@@ -96,6 +96,7 @@ func (e *Engine) apply(ctx context.Context, p *Plan, approved string, progress P
 		}
 	}
 	reminder := "Copy " + profile.BackupKey + " off this machine."
+	reminder += "\nCopy the profile's backup_public_key off this machine too."
 	if profile.RecoveryKey != "" {
 		reminder += "\nCopy " + profile.RecoveryKey + " off this machine."
 	}
@@ -161,7 +162,7 @@ func (e *Engine) createCredentials(ctx context.Context, p *Plan, progress Progre
 	if err = emit(progress, Saving); err != nil {
 		return Profile{}, err
 	}
-	profile, err := e.saveProfile(p, ids, p.admin)
+	profile, err := e.saveProfile(ctx, p, ids, p.admin)
 	if err != nil {
 		return Profile{}, problem("custody", err)
 	}

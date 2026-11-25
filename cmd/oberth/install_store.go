@@ -44,13 +44,22 @@ func runStoreOperator(ctx context.Context, r installationRequest, out io.Writer)
 		return err
 	}
 	defer store.Close()
+	if r.enabled("backup-only") && r.text("unseal-file") != "" {
+		if err = setupBackupWithUnseal(ctx, r, store, cfg); err != nil {
+			return err
+		}
+		_, err = io.WriteString(out, "Secret-store backup access configured.\n")
+		return err
+	}
 
 	token, err := client.ReadPrivate(r.text("token-file"))
 	if err != nil {
 		return err
 	}
 	defer clear(token)
-	if r.name == "secretstore setup" {
+	if r.name == "secretstore setup" && r.enabled("backup-only") {
+		err = store.SetupBackup(ctx, token, cfg)
+	} else if r.name == "secretstore setup" {
 		err = store.Setup(ctx, token, cfg)
 	} else {
 		err = store.Check(ctx, token, cfg)
@@ -60,6 +69,18 @@ func runStoreOperator(ctx context.Context, r installationRequest, out io.Writer)
 	}
 	_, err = io.WriteString(out, "Secret-store roles and audience verified.\n")
 	return err
+}
+
+func setupBackupWithUnseal(ctx context.Context, r installationRequest, store *secretstore.Client, cfg secretstore.Config) error {
+	if r.text("token-file") != "" {
+		return installationProblem("Choose one backup setup authority.", "Use --unseal-file for the bundled store, or --token-file for a delegated store administrator.")
+	}
+	share, err := client.ReadPrivate(r.text("unseal-file"))
+	if err != nil {
+		return err
+	}
+	defer clear(share)
+	return store.SetupBackupWithUnseal(ctx, cfg, share)
 }
 
 func (a application) runSecretStep(ctx context.Context, r installationRequest, in io.Reader, out io.Writer) error {

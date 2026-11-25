@@ -101,3 +101,27 @@ func TestBackupJSONOmitsWarningOnCleanResult(t *testing.T) {
 		}
 	}
 }
+
+// A database-only archive cannot be restored, so it must never start retention.
+func TestDatabaseOnlyBackupRefusesRetention(t *testing.T) {
+	for _, args := range [][]string{{"--keep", "1"}, {"--keep=7"}, {"--directory", "backups"}, {"--directory", "backups", "--keep", "2"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			app, out, diagnostic := fixture(t, fake.Bindings())
+			app.install = func(context.Context, installationRequest, io.Reader, io.Writer) error {
+				t.Fatal("database-only retention reached the backup")
+				return nil
+			}
+			if code := app.run(t.Context(), append([]string{"backup", "--database-only"}, args...)); code != 2 || out.Len() != 0 {
+				t.Fatal("database-only retention was not refused", code, out.String())
+			}
+			if !strings.Contains(diagnostic.String(), "Retention needs a full backup.") || !strings.Contains(diagnostic.String(), "run a full backup to apply") {
+				t.Fatal("refusal lost its reason or remedy", diagnostic.String())
+			}
+		})
+	}
+	app, _, diagnostic := fixture(t, fake.Bindings())
+	app.install = func(context.Context, installationRequest, io.Reader, io.Writer) error { return nil }
+	if code := app.run(t.Context(), []string{"backup", "--database-only", "--out", "copy.age"}); code != 0 {
+		t.Fatal("plain database-only backup was refused", code, diagnostic.String())
+	}
+}

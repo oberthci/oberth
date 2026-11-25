@@ -70,7 +70,7 @@ func (p People) validate() error {
 			present++
 		}
 	}
-	if present == 0 {
+	if present == 0 && p.BackupAccount == "" {
 		return nil
 	}
 	if present != len(ports) || p.CAPin == "" || p.PublicURL == "" {

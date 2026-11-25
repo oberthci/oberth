@@ -60,16 +60,17 @@ type ChartRequest struct {
 
 // Engine binds installation to its explicit target and supplied resources.
 type Engine struct {
-	Definitions   DefinitionReader
-	OpenStore     func(context.Context, secretstore.Config) (*secretstore.Client, func(), error)
-	Cluster       kubeconfig.Target
-	Charts        ChartPort
-	Credentials   *ConfigDir
-	Random        io.Reader
-	Now           func() time.Time
-	CheckEndpoint func(context.Context, Profile) error
-	Pause         func(context.Context) error
-	Finalizers    func(context.Context, FinalizerScope) error
+	Definitions     DefinitionReader
+	OpenStore       func(context.Context, secretstore.Config) (*secretstore.Client, func(), error)
+	RestoreDatabase DatabaseRestore
+	Cluster         kubeconfig.Target
+	Charts          ChartPort
+	Credentials     *ConfigDir
+	Random          io.Reader
+	Now             func() time.Time
+	CheckEndpoint   func(context.Context, Profile) error
+	Pause           func(context.Context) error
+	Finalizers      func(context.Context, FinalizerScope) error
 	// GitHelper points the profile's Git helper at the saved profile's key and
 	// returns the files the helper names; false means it could not, so every
 	// earlier credential file is kept.

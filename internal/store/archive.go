@@ -110,11 +110,28 @@ func (w contextWriter) Write(body []byte) (int, error) {
 	return n, errors.Join(err, w.ctx.Err())
 }
 
-func inspectArchive(ctx context.Context, options stateport.Options, in io.Reader, stage string) (stateport.BackupReport, error) {
+func inspectArchive(ctx context.Context, options stateport.Options, in io.Reader, stage string) (report stateport.BackupReport, resultErr error) {
+	file, err := os.OpenFile(filepath.Join(stage, "oberth.sqlite"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return stateport.BackupReport{}, databaseError(err)
+	}
+	defer func() { resultErr = errors.Join(resultErr, file.Close()) }()
+	target := archiveInspection{database: file, verify: func(ctx context.Context, options stateport.Options) (stateport.BackupReport, error) {
+		return verifyDatabase(ctx, filepath.Join(stage, "oberth.sqlite"), options)
+	}}
+	return inspectArchiveTo(ctx, options, in, target)
+}
+
+type archiveInspection struct {
+	database io.Writer
+	verify   func(context.Context, stateport.Options) (stateport.BackupReport, error)
+}
+
+func inspectArchiveTo(ctx context.Context, options stateport.Options, in io.Reader, target archiveInspection) (stateport.BackupReport, error) {
 	limit, _ := options.Limit()
 	counter := contextReader{ctx, io.LimitReader(in, limit+(64<<10)+1)}
 	reader := tar.NewReader(counter)
-	item, err := extractDatabase(ctx, reader, stage, limit)
+	item, err := extractDatabase(ctx, reader, target.database, limit)
 	if err != nil {
 		return stateport.BackupReport{}, err
 	}
@@ -129,7 +146,7 @@ func inspectArchive(ctx context.Context, options stateport.Options, in io.Reader
 	if err != nil {
 		return stateport.BackupReport{}, err
 	}
-	report, err := verifyDatabase(ctx, filepath.Join(stage, "oberth.sqlite"), options)
+	report, err := target.verify(ctx, options)
 	if err != nil {
 		return report, err
 	}
@@ -139,7 +156,7 @@ func inspectArchive(ctx context.Context, options stateport.Options, in io.Reader
 	return report, ctx.Err()
 }
 
-func extractDatabase(ctx context.Context, reader *tar.Reader, stage string, limit int64) (member, error) {
+func extractDatabase(ctx context.Context, reader *tar.Reader, out io.Writer, limit int64) (member, error) {
 	header, err := reader.Next()
 	if err != nil {
 		return member{}, refuse(damagedArchive, err)
@@ -150,13 +167,8 @@ func extractDatabase(ctx context.Context, reader *tar.Reader, stage string, limi
 	if header.Size > limit {
 		return member{}, sizeError(header.Size, limit)
 	}
-	file, err := os.OpenFile(filepath.Join(stage, "oberth.sqlite"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return member{}, databaseError(err)
-	}
 	hash := sha256.New()
-	n, copyErr := io.CopyN(io.MultiWriter(file, hash), contextReader{ctx, reader}, header.Size)
-	err = errors.Join(copyErr, file.Close())
+	n, err := io.CopyN(io.MultiWriter(out, hash), contextReader{ctx, reader}, header.Size)
 	if err != nil {
 		return member{}, archiveError(err)
 	}

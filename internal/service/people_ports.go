@@ -121,6 +121,7 @@ type People struct {
 	Issuer         Issuer
 	Backup         Snapshotter
 	BackupOptions  stateport.Options
+	BackupAccount  string
 	CAPin          string
 	PublicURL      string
 	SSHURL         string

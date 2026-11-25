@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -17,6 +19,7 @@ import (
 	"filippo.io/age"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/secretstore"
+	storefake "github.com/oberthci/oberth/internal/secretstore/fake"
 	authv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -63,13 +66,13 @@ func TestInstallationBackupIncludesSecretsAndStoreAndReviewsOffline(t *testing.T
 	}
 	// The review gets no cluster client and must work after cluster access is gone.
 	f.client.ClearActions()
-	review, err := installer.ReviewRestore(t.Context(), installer.RestoreReviewConfig{Path: path, IdentityPath: installed.Profile.BackupKey, Inspector: database, Options: options})
+	review, err := installer.ReviewRestore(t.Context(), installer.RestoreReviewConfig{Path: path, IdentityPath: installed.Profile.BackupKey, PublicKey: installed.Profile.BackupPublicKey, Inspector: database, Options: options})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertOfflineBackupReview(t, f, review, archive)
 	corrupt := changedSnapshotArchive(t, path, installed.Profile.BackupKey, installed.Profile.BackupRecipient)
-	if _, err = installer.ReviewRestore(t.Context(), installer.RestoreReviewConfig{Path: corrupt, IdentityPath: installed.Profile.BackupKey, Inspector: database, Options: options}); err == nil {
+	if _, err = installer.ReviewRestore(t.Context(), installer.RestoreReviewConfig{Path: corrupt, IdentityPath: installed.Profile.BackupKey, ExpectedSHA256: trustedTestArchiveDigest(t, corrupt), Inspector: database, Options: options}); err == nil {
 		t.Fatal("store snapshot with a mismatched member digest passed review")
 	}
 	raw, err := os.ReadFile(path)
@@ -80,9 +83,21 @@ func TestInstallationBackupIncludesSecretsAndStoreAndReviewsOffline(t *testing.T
 	if err = os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = installer.ReviewRestore(t.Context(), installer.RestoreReviewConfig{Path: path, IdentityPath: installed.Profile.BackupKey, Inspector: database, Options: options}); err == nil {
+	if _, err = installer.ReviewRestore(t.Context(), installer.RestoreReviewConfig{Path: path, IdentityPath: installed.Profile.BackupKey, ExpectedSHA256: trustedTestArchiveDigest(t, path), Inspector: database, Options: options}); err == nil {
 		t.Fatal("tampered final age chunk passed review")
 	}
+}
+
+// Corruption tests explicitly trust their fixture digest so origin rejection
+// cannot mask the independent member and age-authentication guards.
+func trustedTestArchiveDigest(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(raw)
+	return hex.EncodeToString(digest[:])
 }
 
 func assertOfflineBackupReview(t *testing.T, f fixture, review installer.RestoreReview, archive installer.Archive) {
@@ -119,7 +134,11 @@ func changedSnapshotArchive(t *testing.T, path, identityPath, recipientText stri
 		t.Fatal(err)
 	}
 	defer clear(contents)
-	contents = bytes.ReplaceAll(contents, []byte("snapshot-private-fixture"), []byte("snapshot-changed-fixture"))
+	changedSnapshot, err := storefake.Snapshot([]byte("snapshot-changed-fixture"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents = bytes.ReplaceAll(contents, nativeSnapshotFixture(t), changedSnapshot)
 	recipient, err := age.ParseX25519Recipient(recipientText)
 	if err != nil {
 		t.Fatal(err)
@@ -176,7 +195,7 @@ func installationSnapshotResponse(t *testing.T, r *http.Request) (*http.Response
 		if r.Method != "GET" || r.Header.Get("X-Vault-Token") != "snapshot-session-fixture" {
 			t.Fatal("snapshot used unexpected authority")
 		}
-		body = "snapshot-private-fixture"
+		body = string(nativeSnapshotFixture(t))
 	case "/v1/auth/token/revoke-self":
 	default:
 		t.Fatal("unexpected store request", r.URL.Path)
@@ -208,7 +227,7 @@ func assertPrivateBackupContents(t *testing.T, path, identityPath string) {
 			t.Fatal(err)
 		}
 	}
-	if len(members) != 5 || string(members["store.snapshot"]) != "snapshot-private-fixture" || len(members["database.tar"]) == 0 {
+	if len(members) != 5 || !bytes.Equal(members["store.snapshot"], nativeSnapshotFixture(t)) || len(members["database.tar"]) == 0 {
 		t.Fatal("database or store snapshot missing")
 	}
 	for _, name := range []string{"oberth-ca", "oberth-admin", "oberth-forge-key", "oberth-ssh-host", "oberth-store-tls"} {
@@ -216,6 +235,15 @@ func assertPrivateBackupContents(t *testing.T, path, identityPath string) {
 			t.Fatal("installation Secret missing", name)
 		}
 	}
+}
+
+func nativeSnapshotFixture(t *testing.T) []byte {
+	t.Helper()
+	raw, err := storefake.Snapshot([]byte("snapshot-private-fixture"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func privateBackupPlaintext(t *testing.T, path, identityPath string) io.Reader {

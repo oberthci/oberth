@@ -5,12 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/textproto"
 
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/secretstore"
 	"github.com/oberthci/oberth/internal/stateport"
 )
 
@@ -34,6 +36,7 @@ type installationBundle struct {
 	secrets  []byte
 	database SnapshotPort
 	store    snapshotStream
+	manifest *bundleManifest
 }
 
 func (b installationBundle) write(ctx context.Context, out io.Writer, options stateport.Options) (stateport.BackupReport, error) {
@@ -62,14 +65,35 @@ func (b installationBundle) write(ctx context.Context, out io.Writer, options st
 	}
 	if info.StoreIncluded {
 		limit, _ := options.Limit()
-		if err := member("store.snapshot", func(out io.Writer) error { return store(ctx, out, limit) }); err != nil {
+		if err := member("store.snapshot", func(out io.Writer) error {
+			return inspectWhileWriting(out, func(out io.Writer) error { return store(ctx, out, limit) }, func(in io.Reader) error { return secretstore.InspectSnapshot(in, limit) })
+		}); err != nil {
 			return manifest.Report, err
 		}
 	}
 	if _, err := writeBundleMember(w, "manifest.json", func(out io.Writer) error { return json.NewEncoder(out).Encode(manifest) }); err != nil {
 		return manifest.Report, err
 	}
-	return manifest.Report, w.Close()
+	if err := w.Close(); err != nil {
+		return manifest.Report, err
+	}
+	if b.manifest != nil {
+		*b.manifest = manifest
+	}
+	return manifest.Report, nil
+}
+
+func inspectWhileWriting(out io.Writer, write func(io.Writer) error, inspect func(io.Reader) error) error {
+	reader, pipe := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		err := inspect(reader)
+		_ = reader.CloseWithError(err)
+		done <- err
+	}()
+	err := write(io.MultiWriter(out, pipe))
+	_ = pipe.CloseWithError(err)
+	return errors.Join(err, <-done)
 }
 
 type countingWriter struct {

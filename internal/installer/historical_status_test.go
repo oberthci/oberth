@@ -55,12 +55,12 @@ func archivedRelease(t *testing.T, version, digest string) releaseData {
 }
 
 func TestRollbackToReleasedChartUsesItsDeclaredValues(t *testing.T) {
-	rollbackToReleasedChart(t, historicalStatusRelease(t), []string{"statusChosen", "statusOrigins", "statusPodSecurity", "egressNetwork", "servicePort"})
+	rollbackToReleasedChart(t, historicalStatusRelease(t), []string{"statusChosen", "statusOrigins", "statusPodSecurity", "egressNetwork", "servicePort", "restorePending", "restoreMaxBytes"})
 }
 
 func TestRollbackToPreviousReleaseHasNoMissingPriorityClass(t *testing.T) {
 	old := archivedRelease(t, "v0.30.15", "508a087f17d41cc00b710590a840404424859a0346e96b019ea526a38e69effd")
-	rollbackToReleasedChart(t, old, []string{"egressNetwork", "servicePort"})
+	rollbackToReleasedChart(t, old, []string{"egressNetwork", "servicePort", "restorePending", "restoreMaxBytes"})
 }
 
 func rollbackToReleasedChart(t *testing.T, old releaseData, undeclared []string) {
@@ -125,7 +125,7 @@ func setHistoricalRevision(t *testing.T, f fixture, old releaseData) {
 	for _, name := range []string{"policies", "argoNative", "storeNative"} {
 		previous.Values[name] = ch.Values[name]
 	}
-	for _, name := range []string{"egressNetwork", "statusChosen", "statusOrigins", "statusPodSecurity", "servicePort"} {
+	for _, name := range []string{"egressNetwork", "statusChosen", "statusOrigins", "statusPodSecurity", "servicePort", "restorePending", "restoreMaxBytes"} {
 		delete(previous.Values, name)
 	}
 	if _, err = installer.Render(ch, previous.Values, f.choices.Namespace); err != nil {

@@ -25,6 +25,15 @@ func storeRefusal(code string) (string, string) {
 		return "Secret data exceeds its bound or is incomplete.", "Use values at most 1 MiB and complete store responses at most 2 MiB."
 	case "drift":
 		return "Secret store configuration differs from the reviewed policy.", "Inspect the named configuration and reconcile it explicitly before setup."
+	default:
+		return operationRefusal(code)
+	}
+}
+
+func operationRefusal(code string) (string, string) {
+	switch code {
+	case "backup-setup":
+		return "Store backup authorization did not finish.", "Unseal the bundled store, inspect native authorization progress, then retry this explicit backup setup."
 	case "token":
 		return "The projected account token is invalid.", "Use the Pod's readable service-account token file."
 	case "delivery":

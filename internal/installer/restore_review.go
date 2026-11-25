@@ -12,6 +12,7 @@ import (
 
 	"filippo.io/age"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/secretstore"
 	"github.com/oberthci/oberth/internal/stateport"
 )
 
@@ -30,10 +31,12 @@ type RestoreReview struct {
 	Remedy            string                 `json:"remedy"`
 }
 
-const restoreReviewRemedy = "Restore application is not available. Keep this archive and the separate age and unseal keys."
+const restoreReviewRemedy = "Use oberth restore --yes on a fresh cluster; keep the separate age, administrator and unseal files."
 
 type RestoreReviewConfig struct {
 	Path, IdentityPath string
+	PublicKey          string
+	ExpectedSHA256     string
 	Inspector          stateport.Backup
 	Options            stateport.Options
 }
@@ -41,6 +44,10 @@ type RestoreReviewConfig struct {
 // ReviewRestore performs no cluster calls and publishes no restored files.
 // Inspector owns the temporary database validation and removes its scratch files.
 func ReviewRestore(ctx context.Context, config RestoreReviewConfig) (RestoreReview, error) {
+	return readRestore(ctx, config, nil)
+}
+
+func readRestore(ctx context.Context, config RestoreReviewConfig, files *restoreFiles) (RestoreReview, error) {
 	path, identityPath, inspector, options := config.Path, config.IdentityPath, config.Inspector, config.Options
 	var result RestoreReview
 	identity, err := readBackupIdentity(identityPath)
@@ -52,6 +59,10 @@ func ReviewRestore(ctx context.Context, config RestoreReviewConfig) (RestoreRevi
 		return result, restoreProblem()
 	}
 	defer file.Close()
+	expected, err := archiveOrigin(ctx, file, config)
+	if err != nil {
+		return result, err
+	}
 	digest := sha256.New()
 	decrypted, err := age.Decrypt(io.TeeReader(archiveReader{ctx: ctx, in: file}, digest), identity...)
 	if err != nil {
@@ -59,11 +70,11 @@ func ReviewRestore(ctx context.Context, config RestoreReviewConfig) (RestoreRevi
 	}
 	limit, _ := options.Limit()
 	bounded := &io.LimitedReader{R: decrypted, N: limit + (64 << 10) + 1}
-	result, err = inspectInstallationBundle(ctx, bounded, inspector, options)
+	result, err = inspectInstallationBundle(ctx, bundleInspection{in: bounded, inspector: inspector, options: options, files: files})
 	if err == nil {
 		_, err = io.Copy(io.Discard, bounded) // Authenticate the age stream through EOF.
 	}
-	if err != nil || bounded.N == 0 || ctx.Err() != nil {
+	if err != nil || bounded.N == 0 || ctx.Err() != nil || hex.EncodeToString(digest.Sum(nil)) != expected {
 		return RestoreReview{}, restoreProblem()
 	}
 	result.Path, result.SHA256 = path, hex.EncodeToString(digest.Sum(nil))
@@ -87,23 +98,39 @@ func readBackupIdentity(path string) ([]age.Identity, error) {
 	return age.ParseIdentities(file)
 }
 
-func inspectInstallationBundle(ctx context.Context, in io.Reader, inspector stateport.Backup, options stateport.Options) (RestoreReview, error) {
+type bundleInspection struct {
+	in        io.Reader
+	inspector stateport.Backup
+	options   stateport.Options
+	files     *restoreFiles
+}
+
+func inspectInstallationBundle(ctx context.Context, c bundleInspection) (RestoreReview, error) {
 	var result RestoreReview
-	reader, info, err := openInstallationBundle(in)
+	reader, info, err := openInstallationBundle(c.in)
 	if err != nil {
 		return result, restoreProblem()
 	}
-	if err = reader.read("database.tar", func(in io.Reader) error {
-		result.Database, err = inspector.Inspect(ctx, options, in)
+	if err = reader.read("database.tar", c.files.member("database.tar", func(in io.Reader) error {
+		result.Database, err = c.inspector.Inspect(ctx, c.options, in)
+		return err
+	})); err != nil {
+		return result, restoreProblem()
+	}
+	if err = reader.read("installation-secrets.json", func(in io.Reader) error {
+		secrets, err := decodeBackupSecrets(in)
+		if c.files != nil {
+			c.files.secrets = secrets
+		} else {
+			clearBackupSecrets(secrets)
+		}
 		return err
 	}); err != nil {
 		return result, restoreProblem()
 	}
-	if err = reader.read("installation-secrets.json", inspectBackupSecrets); err != nil {
-		return result, restoreProblem()
-	}
 	if info.StoreIncluded {
-		if err = reader.read("store.snapshot", func(in io.Reader) error { _, err := io.Copy(io.Discard, in); return err }); err != nil {
+		limit, _ := c.options.Limit()
+		if err = reader.read("store.snapshot", c.files.member("store.snapshot", func(in io.Reader) error { return secretstore.InspectSnapshot(in, limit) })); err != nil {
 			return result, restoreProblem()
 		}
 	}
@@ -118,6 +145,9 @@ func inspectInstallationBundle(ctx context.Context, in io.Reader, inspector stat
 	result.DryRun, result.ClusterUID, result.Namespace = true, info.ClusterUID, info.Namespace
 	result.PipelineNamespace, result.ServerVersion = info.PipelineNamespace, info.ServerVersion
 	result.StoreIncluded, result.Secrets, result.Remedy = info.StoreIncluded, len(installationSecretNames()), restoreReviewRemedy
+	if c.files != nil {
+		c.files.info = info
+	}
 	return result, nil
 }
 

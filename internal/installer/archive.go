@@ -2,12 +2,14 @@ package installer
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"filippo.io/age"
 	"github.com/oberthci/oberth/internal/stateport"
@@ -35,12 +37,20 @@ type BackupConfig struct {
 	Path         string
 	DryRun       bool
 	Installation bool
+	Directory    string
+	Keep         int
+	Now          time.Time
+	signing      ed25519.PrivateKey
+	manifest     *bundleManifest
 }
 
 // Backup publishes a complete encrypted database without replacing a destination.
 // Write to a local disk with hard-link support, then copy the completed backup.
 // Retries leave prior incomplete files alone.
 func Backup(ctx context.Context, c BackupConfig) (archive Archive, err error) {
+	if c.Directory != "" {
+		return c.directoryBackup(ctx)
+	}
 	if err = c.Options.Validate(); err != nil {
 		return archive, err
 	}
@@ -82,6 +92,12 @@ func (c BackupConfig) write(ctx context.Context, recipient age.Recipient) (archi
 		return archive, backupFailure("backup-staging", statErr, c.Path)
 	}
 	archive, err = c.writeSnapshot(ctx, file, recipient)
+	if err == nil {
+		err = verifyWrittenArchive(ctx, file, archive.SHA256)
+	}
+	if err == nil && c.Installation {
+		err = c.publishOrigin(archive)
+	}
 	opened := file
 	file = nil
 	err = closeBackupBeforePublish(opened, err, c.Path, func() error {

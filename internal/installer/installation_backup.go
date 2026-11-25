@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"io"
 
+	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/secretstore"
 	"github.com/oberthci/oberth/internal/stateport"
-	authv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -59,10 +59,20 @@ func (e *Engine) BackupInstallation(ctx context.Context, c BackupConfig) (Archiv
 	if err = e.Credentials.checkTarget(e.Cluster.Context, uid, profile.Namespace); err != nil {
 		return Archive{}, err
 	}
+	if c.Now.IsZero() && e.Now != nil {
+		c.Now = e.Now()
+	}
 	source, err := e.installationBackupSource(ctx, c.Source, profile, uid)
 	if err != nil {
 		return Archive{}, err
 	}
+	c.signing, _, err = e.backupSigning(ctx, profile.Namespace, profile.BackupPublicKey)
+	if err != nil {
+		return Archive{}, err
+	}
+	defer clear(c.signing)
+	c.manifest = &bundleManifest{}
+	source.manifest = c.manifest
 	c.Source, c.Installation = source, true
 	archive, err := Backup(ctx, c)
 	if archive.SHA256 != "" {
@@ -85,26 +95,44 @@ func (e *Engine) installationBackupSource(ctx context.Context, database Snapshot
 		PipelineNamespace: profile.PipelineNamespace, Values: values,
 		BundledStore: settingText(values, "secretStore", "bundled") == "on",
 	}}
-	if source.info.BundledStore {
-		source.info.StoreIncluded, err = source.snapshotAvailable(ctx)
-	}
+	err = source.requireStore(ctx)
 	return source, err
+}
+
+// requireStore fails a bundled-store backup that cannot include the snapshot:
+// restore refuses such an archive, so it must never publish or drive retention.
+func (s *installationBackupSource) requireStore(ctx context.Context) error {
+	s.info.StoreIncluded = false
+	if !s.info.BundledStore {
+		return nil
+	}
+	available, err := s.snapshotAvailable(ctx)
+	if err != nil {
+		return err
+	}
+	if !available {
+		return storeAccessProblem()
+	}
+	s.info.StoreIncluded = true
+	return nil
 }
 
 func (i installationBackupInfo) storeHint() string {
 	if i.StoreIncluded {
 		return "Includes installation Secrets and the bundled store snapshot."
 	}
-	if i.BundledStore {
-		return "Store snapshot not included; enabling backup access comes in stage 2."
-	}
 	return "Includes installation Secrets; external-store backups remain operator-owned."
+}
+
+func storeAccessProblem() error {
+	return publicerr.New(publicerr.Forbidden, "Store snapshot access is missing.", "Run oberth secretstore setup --backup-only, then back up again; nothing was written or pruned.", nil)
 }
 
 type installationBackupSource struct {
 	database SnapshotPort
 	engine   *Engine
 	info     installationBackupInfo
+	manifest *bundleManifest
 }
 
 func (s installationBackupSource) Snapshot(ctx context.Context, options stateport.Options, out io.Writer) (stateport.BackupReport, error) {
@@ -113,7 +141,7 @@ func (s installationBackupSource) Snapshot(ctx context.Context, options statepor
 		return stateport.BackupReport{}, err
 	}
 	defer clear(private)
-	return (installationBundle{info: s.info, secrets: private, database: s.database, store: s.storeSnapshot}).write(ctx, out, options)
+	return (installationBundle{info: s.info, secrets: private, database: s.database, store: s.storeSnapshot, manifest: s.manifest}).write(ctx, out, options)
 }
 
 func (e *Engine) backupSecrets(ctx context.Context, namespace string) ([]byte, error) {
@@ -145,7 +173,7 @@ func (s installationBackupSource) storeSnapshot(ctx context.Context, out io.Writ
 		return client.Snapshot(ctx, request, out)
 	})
 	if !available && err == nil {
-		return recoveryProblem()
+		return storeAccessProblem()
 	}
 	return err
 }
@@ -164,16 +192,13 @@ func (s installationBackupSource) withBackupStore(ctx context.Context, call func
 		AuthMount: valueText(s.info.Values, "secretStore", "auth_mount"),
 		Audience:  valueText(s.info.Values, "secretStore", "audience"),
 	}
-	expires := int64(600)
-	request := &authv1.TokenRequest{Spec: authv1.TokenRequestSpec{Audiences: []string{cfg.Audience}, ExpirationSeconds: &expires}}
-	issued, err := s.engine.Cluster.Client.CoreV1().ServiceAccounts(cfg.ServerNamespace).CreateToken(ctx, secretstore.BackupRole, request, metav1.CreateOptions{})
+	jwt, err := BackupProjection(ctx, s.engine.Cluster.Client, cfg.ServerNamespace, cfg.Audience)
 	if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
 		return false, nil
 	}
 	if err != nil {
 		return false, recoveryProblem()
 	}
-	jwt := []byte(issued.Status.Token)
 	defer clear(jwt)
 	client, closeClient, err := s.engine.storeClient(ctx, cfg)
 	if err != nil {

@@ -33,6 +33,7 @@ type Profile struct {
 	CAFile            string `json:"ca_file"`
 	KnownHosts        string `json:"known_hosts"`
 	BackupRecipient   string `json:"backup_recipient"`
+	BackupPublicKey   string `json:"backup_public_key"`
 	BackupKey         string `json:"backup_key"`
 	BootstrapPending  bool   `json:"bootstrap_pending"`
 	// Ready records that an apply of this profile's installation reached a

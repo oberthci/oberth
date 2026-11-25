@@ -12,6 +12,10 @@ import (
 func verifyDatabase(ctx context.Context, path string, options stateport.Options) (report stateport.BackupReport, resultErr error) {
 	db := pool(path, "rw", Options{BusyTimeout: 5 * time.Second}, 1)
 	defer func() { resultErr = errors.Join(resultErr, db.Close()) }()
+	return verifyOpenDatabase(ctx, db, options)
+}
+
+func verifyOpenDatabase(ctx context.Context, db *sql.DB, options stateport.Options) (report stateport.BackupReport, resultErr error) {
 	// Verification only receives private staged copies. The embedded engine
 	// skips CHECK-constraint integrity verification for read-only databases.
 	if err := checkProtocol(ctx, db, options); err != nil {

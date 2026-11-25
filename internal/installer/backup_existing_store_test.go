@@ -4,7 +4,9 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,7 +18,9 @@ import (
 	ktesting "k8s.io/client-go/testing"
 )
 
-func TestExistingStoreBackupWithoutServiceAccount(t *testing.T) {
+// A bundled-store archive without its snapshot cannot be restored, so a refused
+// backup role must fail the backup and leave every retained archive in place.
+func TestBundledBackupWithoutServiceAccountFailsAndKeepsArchives(t *testing.T) {
 	f := setup(t)
 	installed := apply(t, f, prepare(t, f))
 	f.client.PrependReactor("create", "serviceaccounts", func(ktesting.Action) (bool, runtime.Object, error) {
@@ -27,13 +31,12 @@ func TestExistingStoreBackupWithoutServiceAccount(t *testing.T) {
 		return nil, nil, nil
 	}
 	database, options := backupFixture(t)
-	archive, err := f.engine.BackupInstallation(t.Context(), installer.BackupConfig{Source: database, Options: options, Recipient: installed.Profile.BackupRecipient, Path: filepath.Join(t.TempDir(), "before-upgrade.age")})
-	if err != nil || archive.SHA256 == "" || !strings.Contains(archive.StoreSnapshotHint, "Store snapshot not included") {
-		t.Fatal("old installation could not back up without its new account", err)
-	}
+	dir, kept := retainedArchiveFixture(t)
+	_, err := f.engine.BackupInstallation(t.Context(), installer.BackupConfig{Source: database, Options: options, Recipient: installed.Profile.BackupRecipient, Directory: dir, Keep: 1})
+	checkStoreAccessRefusal(t, err, dir, kept)
 }
 
-func TestExistingStoreBackupKeepsContentsWithoutSnapshotRole(t *testing.T) {
+func TestBundledBackupWithoutSnapshotRoleFailsAndKeepsArchives(t *testing.T) {
 	for _, status := range []int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound} {
 		f := setup(t)
 		installed := apply(t, f, prepare(t, f))
@@ -48,18 +51,41 @@ func TestExistingStoreBackupKeepsContentsWithoutSnapshotRole(t *testing.T) {
 			return client, func() {}, err
 		}
 		database, options := backupFixture(t)
-		path := filepath.Join(t.TempDir(), "existing-store.age")
-		archive, err := f.engine.BackupInstallation(t.Context(), installer.BackupConfig{Source: database, Options: options, Recipient: installed.Profile.BackupRecipient, Path: path})
-		if err != nil || !strings.Contains(archive.StoreSnapshotHint, "Store snapshot not included") || !strings.Contains(archive.StoreSnapshotHint, "stage 2") {
-			t.Fatal("existing store could not back up remaining installation contents", err, archive.StoreSnapshotHint)
+		dir, kept := retainedArchiveFixture(t)
+		_, err := f.engine.BackupInstallation(t.Context(), installer.BackupConfig{Source: database, Options: options, Recipient: installed.Profile.BackupRecipient, Directory: dir, Keep: 1})
+		checkStoreAccessRefusal(t, err, dir, kept)
+		if strings.Contains(err.Error(), "private-store-response") {
+			t.Fatal("store diagnostic leaked into the refusal")
 		}
-		f.client.ClearActions()
-		review, err := installer.ReviewRestore(t.Context(), installer.RestoreReviewConfig{Path: path, IdentityPath: installed.Profile.BackupKey, Inspector: database, Options: options})
-		if err != nil || review.StoreIncluded || review.Secrets != 5 || review.Database != archive.Report || len(f.client.Actions()) != 0 {
-			t.Fatal("backup omission was dishonest or lost installation contents", review, err)
+	}
+}
+
+func retainedArchiveFixture(t *testing.T) (string, []string) {
+	t.Helper()
+	dir := t.TempDir()
+	kept := []string{"oberth-backup-20260101T000000.000000000Z.age", "oberth-backup-20260101T000000.000000000Z.age.manifest.json"}
+	for _, name := range kept {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("prior-restorable-archive"), 0600); err != nil {
+			t.Fatal(err)
 		}
-		if strings.Contains(jsonOf(t, archive)+jsonOf(t, review), "private-store-response") {
-			t.Fatal("store diagnostic leaked into backup output")
-		}
+	}
+	return dir, kept
+}
+
+func checkStoreAccessRefusal(t *testing.T, err error, dir string, kept []string) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "Store snapshot access is missing") {
+		t.Fatal("bundled backup without its store snapshot counted as good", err)
+	}
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var names []string
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	if !slices.Equal(names, kept) {
+		t.Fatal("refused backup published an archive or pruned a restorable one", names)
 	}
 }

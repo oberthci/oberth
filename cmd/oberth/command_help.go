@@ -22,10 +22,8 @@ func (a application) bespokeHelp(words []string) (int, bool) {
 			return a.nativeHelp(nativeHelpRequest{flow.usage, flow.summary, flowFlags(flow.name), true}), true
 		}
 	}
-	for _, row := range installationCommands() {
-		if helpPrefix(words, row.name) {
-			return a.nativeHelp(nativeHelpRequest{installationSynopsis(row.name), row.summary, installationFlags(row.name), false}), true
-		}
+	if row, ok := installationCommandFor(words); ok {
+		return a.nativeHelp(nativeHelpRequest{installationSynopsis(row.name), row.summary, installationFlags(row.name), false}), true
 	}
 	if helpPrefix(words, "version") {
 		name := "version"

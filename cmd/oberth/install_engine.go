@@ -34,14 +34,8 @@ type installationSession struct {
 }
 
 func (a application) runInstaller(ctx context.Context, r installationRequest, in io.Reader, out io.Writer) error {
-	if r.name == "restore" {
-		return a.reviewRestore(ctx, r, out)
-	}
-	if r.name == "secretstore setup" || r.name == "secretstore check" {
-		return runStoreOperator(ctx, r, out)
-	}
-	if r.name == "secret put" {
-		return a.runSecretPut(ctx, r, in, out)
+	if handled, err := a.runLocalInstaller(ctx, r, in, out); handled {
+		return err
 	}
 	session, err := a.openInstallation(r)
 	if err != nil {
@@ -72,6 +66,26 @@ func (a application) runInstaller(ctx context.Context, r installationRequest, in
 	return session.dispatch(ctx, in, out)
 }
 
+func (a application) runLocalInstaller(ctx context.Context, r installationRequest, in io.Reader, out io.Writer) (bool, error) {
+	switch r.name {
+	case "backup":
+		if r.enabled("print-schedule") {
+			_, err := io.WriteString(out, installer.BackupSchedule)
+			return true, err
+		}
+		if r.enabled("in-cluster") {
+			return true, a.backupInCluster(ctx, r, out)
+		}
+	case "restore", "backup verify":
+		return true, a.reviewRestore(ctx, r, out)
+	case "secretstore setup", "secretstore check":
+		return true, runStoreOperator(ctx, r, out)
+	case "secret put":
+		return true, a.runSecretPut(ctx, r, in, out)
+	}
+	return false, nil
+}
+
 func (a application) openInstallation(r installationRequest) (installationSession, error) {
 	s := installationSession{app: a, request: r, choices: r.choices(), name: installationProfileName(r)}
 	var err error
@@ -90,7 +104,7 @@ func (a application) openInstallation(r installationRequest) (installationSessio
 		return s, installationProblem("Select an installation profile.", "Pass --profile or --context, or select a current administrator profile.")
 	}
 	if dir != "" {
-		s.profile, err = readInstallationProfile(dir, r.name == "install")
+		s.profile, err = readInstallationProfile(dir, r.name == "install" || r.name == "restore")
 		if err != nil {
 			return s, err
 		}
@@ -114,7 +128,7 @@ func installationProfileName(r installationRequest) string {
 func (a application) selectedInstallation(r installationRequest) (client.Profile, string, error) {
 	name := installationProfileName(r)
 	profile, dir, err := client.SelectedProfile(a.base, name)
-	if r.name == "install" && errors.Is(err, fs.ErrNotExist) {
+	if (r.name == "install" || r.name == "restore") && errors.Is(err, fs.ErrNotExist) {
 		err = nil
 	}
 	return profile, dir, err
@@ -288,7 +302,7 @@ func installationOutput(r installationRequest) error {
 	if format != "" && format != "text" && format != "json" {
 		return usageProblems{"--output must be text or json."}
 	}
-	if format == "json" && r.name != "backup" && !r.enabled("dry-run") {
+	if format == "json" && r.name != "backup" && r.name != "backup verify" && r.name != "restore" && !r.enabled("dry-run") {
 		return usageProblems{"--output json requires --dry-run for an installation review."}
 	}
 	return nil

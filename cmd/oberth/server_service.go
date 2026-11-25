@@ -34,6 +34,7 @@ func (o *serverOwners) servicePart(ctx context.Context) (Part, error) {
 	}
 	db := o.c.store
 	people := service.People{IssueWindows: o.settings.issueWindows(), StateMetadata: db, SecretWriter: o.c.storeWriter, ReleaseRoutes: o.settings.Routes, Issues: db, Enrollment: serverPeopleStore{db, o}, Grants: db, Publication: authorityPublication{o}, Cluster: clusterPolicy{o}, Administration: serverAdministration{o}, Admin: serverPeopleStore{db, o}, Issuer: authority, Backup: o.c.backup, BackupOptions: stateport.Options{Protocol: o.c.config.Protocol, Schema: store.Schema}, CAPin: clientcert.Pin(parsed), PublicURL: o.c.config.Public.URL, SSHURL: advertisedSSH(o.c.config), Random: rand.Reader, Schedules: serverSchedules{o}}
+	people.BackupAccount = backupAccountName(o.c.config.Namespace)
 	o.service, err = service.New(ctx, service.Config{People: people, Publications: db, Promotions: db, MovingGit: o.cache, HoldStore: db, Holds: heldRuns{o.native}, Runs: db, Authority: currentAuthority{o}, Catalog: db, Events: db, Git: o, Source: serviceSource{o.wiring, o.settings.DefaultBranch}, Exec: o, Starter: o.wiring, Logs: serverLogs{o}, Now: o.c.clock.Now, NewID: rand.Text, AfterFunc: func(d time.Duration, f func()) service.Timer { return time.AfterFunc(d, f) }, OnError: o.notice})
 	if err != nil {
 		return Part{}, err
@@ -42,6 +43,7 @@ func (o *serverOwners) servicePart(ctx context.Context) (Part, error) {
 	o.c.views = o.service.Views()
 	o.c.enroll = enrollment{o}
 	o.c.streams = serverStreams{o}
+	o.c.accountBackup = serverBackupSnapshot{o}
 	o.c.installAdmin = o.service.InstallAdmin
 	return Part{Name: "service", Shutdown: stopService, Recover: o.service.RecoverPublications, Close: o.service.Shutdown}, nil
 }

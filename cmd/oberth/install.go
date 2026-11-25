@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/installer"
@@ -23,14 +24,23 @@ type installationRequest struct {
 type installationDispatch func(context.Context, installationRequest, io.Reader, io.Writer) error
 
 func (a application) installEntry(ctx context.Context, args []string) (int, bool) {
-	for _, row := range installationCommands() {
-		words := strings.Fields(row.name)
-		if len(args) < len(words) || strings.Join(args[:len(words)], " ") != row.name {
-			continue
-		}
-		return a.runInstallation(ctx, row, args), true
+	row, ok := installationCommandFor(args)
+	if !ok {
+		return 0, false
 	}
-	return 0, false
+	return a.runInstallation(ctx, row, args), true
+}
+
+// installationCommandFor picks the longest command name, so "backup verify" is not "backup".
+func installationCommandFor(args []string) (installationCommand, bool) {
+	var selected installationCommand
+	longest := 0
+	for _, row := range installationCommands() {
+		if words := strings.Fields(row.name); helpPrefix(args, row.name) && len(words) > longest {
+			selected, longest = row, len(words)
+		}
+	}
+	return selected, longest > 0
 }
 
 func (a application) runInstallation(ctx context.Context, row installationCommand, args []string) int {
@@ -113,14 +123,9 @@ func stepExitCode(err error) (int, bool) {
 }
 
 func installationArgs(row installationCommand, flags *flag.FlagSet, args []string) ([]string, error) {
-	if row.name == "upgrade" {
-		for _, arg := range args {
-			if arg == "--chart" || strings.HasPrefix(arg, "--chart=") {
-				return nil, publicerr.New(publicerr.InvalidInput, "Upgrades take signed releases.", "Use oberth install --chart <directory> for a local chart.", nil)
-			}
-		}
+	if err := upgradeChart(row.name, args); err != nil {
+		return nil, err
 	}
-
 	if row.name == "secretstore exec" {
 		separator := slices.Index(args, "--")
 		if separator < 0 || separator == len(args)-1 {
@@ -139,7 +144,37 @@ func installationArgs(row installationCommand, flags *flag.FlagSet, args []strin
 			return nil, err
 		}
 	}
-	return parseFlow(flags, args)
+	rest, err := parseFlow(flags, args)
+	if err == nil && row.name == "backup" {
+		err = databaseOnlyRetention(flags)
+	}
+	return rest, err
+}
+
+func upgradeChart(name string, args []string) error {
+	if name != "upgrade" {
+		return nil
+	}
+	for _, arg := range args {
+		if arg == "--chart" || strings.HasPrefix(arg, "--chart=") {
+			return publicerr.New(publicerr.InvalidInput, "Upgrades take signed releases.", "Use oberth install --chart <directory> for a local chart.", nil)
+		}
+	}
+	return nil
+}
+
+// databaseOnlyRetention refuses retention for a database-only archive, which
+// restore cannot use, so it must never prune a full one.
+func databaseOnlyRetention(flags *flag.FlagSet) error {
+	if only, _ := strconv.ParseBool(flags.Lookup("database-only").Value.String()); !only {
+		return nil
+	}
+	retained := flags.Lookup("directory").Value.String() != ""
+	flags.Visit(func(f *flag.Flag) { retained = retained || f.Name == "keep" })
+	if retained {
+		return installer.DatabaseOnlyRetentionProblem()
+	}
+	return nil
 }
 
 func (a application) installationRunner(name string) installationDispatch {

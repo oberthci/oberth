@@ -1,6 +1,9 @@
 package installer
 
-import "context"
+import (
+	"context"
+	"crypto/ed25519"
+)
 
 import "helm.sh/helm/v3/pkg/action"
 import "helm.sh/helm/v3/pkg/chart"
@@ -24,4 +27,11 @@ func RevisionLabelsForTest(r ChartRequest) map[string]string { return revisionLa
 
 func RevisionBindingForTest(number int, kind, version string) string {
 	return revisionBinding(number, kind, version)
+}
+
+// FullArchiveForTest signs like an installation backup, so retention treats the archive as full.
+func FullArchiveForTest(c BackupConfig) BackupConfig {
+	_, c.signing, _ = ed25519.GenerateKey(nil)
+	c.manifest, c.Installation = &bundleManifest{}, true
+	return c
 }

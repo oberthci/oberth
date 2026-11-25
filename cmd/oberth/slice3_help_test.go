@@ -36,7 +36,7 @@ func assertHumanHelp(t *testing.T, name string, syntax commandSyntax) {
 		t.Fatal("missing command synopsis")
 	}
 	flags := map[string]int{}
-	pattern := regexp.MustCompile(`--[a-z][a-z-]*|(?:^| )-[oh](?: |:|$)`)
+	pattern := regexp.MustCompile(`--[a-z][a-z0-9-]*|(?:^| )-[oh](?: |:|$)`)
 	for _, line := range strings.Split(first, "\n") {
 		if !strings.HasPrefix(line, "-") {
 			continue

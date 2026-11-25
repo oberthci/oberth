@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"time"
 
 	"github.com/oberthci/oberth/internal/installer"
@@ -21,6 +22,8 @@ func (s installationSession) backup(ctx context.Context, out io.Writer) error {
 	}
 	defer source.remote.Close()
 	config := installer.BackupConfig{Source: source, Options: s.options, Recipient: s.profile.BackupRecipient, Path: s.request.text("out"), DryRun: s.request.enabled("dry-run")}
+	config.Directory, config.Now = s.request.text("directory"), s.app.config.Time()
+	config.Keep, _ = strconv.Atoi(s.request.text("keep"))
 	var archive installer.Archive
 	if config.DryRun || s.request.enabled("database-only") {
 		archive, err = installer.Backup(ctx, config)
@@ -38,7 +41,7 @@ func (s installationSession) backupResult(out io.Writer, archive installer.Archi
 	var warning *publicerr.Error
 	if err != nil {
 		var problem *installer.Problem
-		if !errors.As(err, &problem) || (problem.Code != "backup-directory-sync" && problem.Code != "backup-cleanup") {
+		if !errors.As(err, &problem) || (problem.Code != "backup-directory-sync" && problem.Code != "backup-cleanup" && problem.Code != "backup-retention") {
 			return err
 		}
 		warning = publicerr.Classify(installationFailure(err))

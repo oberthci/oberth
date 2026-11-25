@@ -114,7 +114,7 @@ carries interfaces and facts, not an archive format. `BackupReport` exposes only
 [C9's backup contract](c9-install-and-upgrade.md#backup) owns age-format
 encryption and safekeeping; its [command inventory](c9-install-and-upgrade.md#owned-data-and-public-contract)
 owns the shipped maintenance surfaces. C7's offline helper uses the same age
-format and verifies schema, integrity and the local audit chain before replacement. Run history starts fresh. Cutover
+format and verifies schema, integrity and the local audit chain before replacement. Snapshot inspection reads unlinked private files, so no plaintext name outlives the process. Run history starts fresh. Cutover
 is a one-off operator procedure outside the product.
 
 C7 owns canonical run, acceptance, branch deletion, query and event values in

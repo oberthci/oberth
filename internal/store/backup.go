@@ -75,12 +75,14 @@ func (b *Backup) Inspect(ctx context.Context, options stateport.Options, in io.R
 	if err := backupInput(ctx, options, in != nil); err != nil {
 		return report, err
 	}
-	stage, cleanup, err := newStage(filepath.Dir(b.path))
+	file, cleanup, err := anonymousInspection(filepath.Dir(b.path), options)
 	if err != nil {
 		return report, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
-	return inspectArchive(ctx, options, in, stage)
+	return inspectArchiveTo(ctx, options, in, archiveInspection{database: file, verify: func(ctx context.Context, options stateport.Options) (stateport.BackupReport, error) {
+		return verifyInspection(ctx, file, options)
+	}})
 }
 
 func (b *Backup) Restore(ctx context.Context, request stateport.RestoreRequest, in io.Reader) (report stateport.BackupReport, resultErr error) {

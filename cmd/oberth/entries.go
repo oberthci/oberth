@@ -6,6 +6,9 @@ import (
 )
 
 func (a application) entry(ctx context.Context, args []string) (int, bool) {
+	if len(args) > 0 && args[0] == "restore-database" {
+		return a.restoreDatabase(ctx, args[1:]), true
+	}
 	if len(args) > 0 && args[0] == "git-ssh" {
 		return a.gitSSH(ctx, args[1:]), true
 	}

@@ -203,6 +203,11 @@ func backupProblems(catalogue map[string]Problem) map[string]Problem {
 		"backup-cleanup":        {Reason: "Backup is published, but its temporary file could not be removed.", Remedy: "Keep the backup at the shown path and check storage; do not retry there."},
 		"backup-directory-sync": {Reason: "Backup is published, but its directory could not be synced.", Remedy: "Keep the backup at the shown path and check the storage; do not retry there."},
 		"backup-limit":          {Reason: "The database archive exceeds its selected bound.", Remedy: "Use a positive logical limit up to 4 GiB, with enough staging space."},
+		"backup-retention":      {Reason: "Backup is published, but older copies could not be removed.", Remedy: "Keep the completed archive; check directory permissions and remove older copies by hand."},
+		"restore-input":         {Reason: "Installation restore input is incomplete or incompatible.", Remedy: "Use --yes, a fresh cluster, URL and profile, a compatible signed release, and the saved private recovery files."},
+		"restore-occupied":      {Reason: "Restore target is already in use.", Remedy: "Use a fresh cluster and new profile; preserve the existing installation and its volume."},
+		"restore-database":      {Reason: "Database restore did not finish.", Remedy: "The server remains stopped. Preserve its volume; inspect storage and retry in a fresh target."},
+		"restore-store":         {Reason: "Bundled-store restore did not finish.", Remedy: "The server remains stopped. Keep the archive and unseal file; inspect the store before retrying."},
 	} {
 		catalogue[code] = entry
 	}

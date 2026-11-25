@@ -65,15 +65,16 @@ func (r *bundleReader) json(name string, out any, limit int64) error {
 	})
 }
 
-func inspectBackupSecrets(in io.Reader) error {
+func decodeBackupSecrets(in io.Reader) ([]backupSecret, error) {
 	raw, err := io.ReadAll(io.LimitReader(in, (8<<20)+1))
 	defer clear(raw)
 	if err != nil || len(raw) > 8<<20 {
-		return restoreProblem()
+		return nil, restoreProblem()
 	}
 	var secrets []backupSecret
 	if json.Unmarshal(raw, &secrets) != nil || len(secrets) != len(installationSecretNames()) {
-		return restoreProblem()
+		clearBackupSecrets(secrets)
+		return nil, restoreProblem()
 	}
 	seen := map[string]bool{}
 	valid := true
@@ -82,11 +83,19 @@ func inspectBackupSecrets(in io.Reader) error {
 		seen[secret.Name] = true
 		for _, value := range secret.Data {
 			valid = valid && len(value) > 0
-			clear(value)
 		}
 	}
 	if !valid {
-		return restoreProblem()
+		clearBackupSecrets(secrets)
+		return nil, restoreProblem()
 	}
-	return nil
+	return secrets, nil
+}
+
+func clearBackupSecrets(secrets []backupSecret) {
+	for _, secret := range secrets {
+		for _, value := range secret.Data {
+			clear(value)
+		}
+	}
 }

@@ -37,15 +37,19 @@ func TestTopHelpIncludesEveryCatalogueSummary(t *testing.T) {
 	}
 }
 
-func TestRestoreHasOnlyOfflineReview(t *testing.T) {
+func TestRestoreRequiresExplicitReviewOrApplication(t *testing.T) {
 	app, out, diagnostic := fixture(t, fake.Bindings())
-	for _, args := range [][]string{{"restore", "--from", "archive", "--yes"}, {"restore", "archive", "--dry-run"}} {
+	for _, args := range [][]string{{"restore", "--unknown"}, {"restore", "archive", "--dry-run"}} {
 		if code := app.run(t.Context(), args); code != 2 {
 			t.Fatal("invalid restore syntax accepted", code)
 		}
 	}
 	diagnostic.Reset()
-	if code := app.run(t.Context(), []string{"restore", "--from", "archive"}); code != 1 || !strings.Contains(diagnostic.String(), "Restore application is not available.") {
+	if code := app.run(t.Context(), []string{"restore", "--from", "archive", "--identity-file", filepath.Join(t.TempDir(), "missing.age"), "--yes"}); code != 1 {
+		t.Fatal("restore application bypassed archive validation", code)
+	}
+	diagnostic.Reset()
+	if code := app.run(t.Context(), []string{"restore", "--from", "archive"}); code != 1 || !strings.Contains(diagnostic.String(), "Restore needs an explicit choice.") {
 		t.Fatal("restore entered an effect path", code, diagnostic.String())
 	}
 	if code := app.run(t.Context(), []string{"help", "restore"}); code != 0 || !strings.Contains(out.String(), "--dry-run") {

@@ -2,6 +2,8 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "restorePending": {"type": "boolean"},
+    "restoreMaxBytes": {"type": "integer", "minimum": 0, "maximum": 4294967296},
     "runs": {
       "type": "object",
       "additionalProperties": false,

@@ -8,6 +8,8 @@ imageDigest: unset
 sourcePluginImageRepository: europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth-source-plugin
 sourcePluginImageDigest: unset
 targetSchema: 6
+restorePending: false
+restoreMaxBytes: 0
 runs:
   parallel: 4
 policies:

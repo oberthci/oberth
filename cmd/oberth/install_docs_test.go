@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/installer"
 )
 
 func installDocSection(t *testing.T, heading string) string {
@@ -99,7 +101,7 @@ func checkDocumentedRemoval(t *testing.T, section, cleanup string) {
 	}
 	want := "helm\nmark\nreleases\nnamespace\nschedules\nruns\naccounts\n"
 	if cleanup == "Retained namespace" {
-		want = "helm\nclaims\nsecrets\nschedules\nruns\naccounts\n"
+		want = "helm\nclaims\nsecrets\nbackup\nschedules\nruns\naccounts\n"
 	}
 	data, err := os.ReadFile(calls)
 	if err != nil || string(data) != want {
@@ -149,10 +151,11 @@ case "$*" in
   '--context chosen delete namespace second') action=namespace ;;
   "--context chosen -n second delete pvc $claims") action=claims ;;
   "--context chosen -n second delete secret $secrets") action=secrets ;;
+  '--context chosen -n second delete configmap oberth-backup') action=backup ;;
   *) exit 1 ;;
 esac
 printf '%%s\n' "$action" >> "$calls"
-`, strings.Join(names["PVC"], " "), strings.Join(names["Secret"], " ")),
+`, strings.Join(names["PVC"], " "), strings.Join(append([]string{installer.BackupSigningSecret}, names["Secret"]...), " ")),
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0700); err != nil {
 			t.Fatal(err)

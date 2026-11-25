@@ -19,7 +19,8 @@ func installationCommands() []installationCommand {
 		{"upgrade", "Upgrade Oberth using a signed release.", 0, 0},
 		{"rollback", "Roll back the installation to its prior release.", 0, 0},
 		{"backup", "Back up database, store data and installation Secrets.", 0, 0},
-		{"restore", "Review an encrypted installation backup without applying it.", 0, 0},
+		{"backup verify", "Verify backup origin and decrypt contents offline.", 0, 0},
+		{"restore", "Review or restore an encrypted installation backup.", 0, 0},
 		{"unseal", "Unseal the installation's secret store.", 0, 0},
 		{"secret put", "Store a secret value from standard input.", 1, 1},
 		{"secretstore exec", "Run a step command with its admitted secrets.", 1, math.MaxInt},
@@ -54,15 +55,12 @@ func installationFlags(name string) *flag.FlagSet {
 		f.String("repo", "", "Repository receiving the secret.")
 		f.String("file", "", "Authored pipeline file.")
 		f.String("step", "", "Authorized logical step.")
-	case "backup":
-		f.String("out", "", "New backup destination.")
-		f.Bool("dry-run", false, "Print the planned destination without creating a backup.")
-		f.Bool("database-only", false, "Explicitly exclude store data and installation Secrets.")
-	case "restore":
-		f.String("from", "", "Encrypted installation backup to inspect.")
-		f.String("identity-file", "", "Private age identity file; defaults to the selected profile.")
-		f.Bool("dry-run", false, "Review contents and integrity; restore application is not available yet.")
+	case "secretstore setup":
+		f.Bool("backup-only", false, "Provision snapshot access with delegated or saved unseal authority.")
+		f.String("unseal-file", "", "Saved bundled-store share for one-time backup setup without a retained root session.")
+
 	}
+	addArchiveFlags(f, name)
 	addInstallerInputs(f, name)
 	switch name {
 	case "install", "upgrade":
@@ -83,6 +81,33 @@ func installationFlags(name string) *flag.FlagSet {
 		f.Bool("yes", false, "Apply the reviewed operation.")
 	}
 	return f
+}
+
+func addArchiveFlags(f *flag.FlagSet, name string) {
+	switch name {
+	case "backup":
+		f.String("out", "", "New backup destination.")
+		f.Bool("print-schedule", false, "Print an operator-applied CronJob and scoped backup permissions.")
+		f.Bool("in-cluster", false, "Use only the Pod's scoped backup ServiceAccount.")
+		f.String("namespace", "", "Server namespace of the backup ServiceAccount.")
+		f.String("directory", "", "Backup directory; retain only the newest named backups.")
+		f.Int("keep", 7, "Number of directory backups to keep, from 1 to 1000.")
+		f.Bool("dry-run", false, "Print the planned destination without creating a backup.")
+		f.Bool("database-only", false, "Explicitly exclude store data and installation Secrets.")
+	case "restore", "backup verify":
+		f.String("from", "", "Encrypted installation backup to inspect.")
+		f.String("identity-file", "", "Private age identity file; defaults to the selected profile.")
+		f.String("sha256", "", "Independently saved archive SHA-256; alternative to a trusted signing profile.")
+		f.String("backup-profile", "", "Original operator profile holding the trusted backup public key.")
+	}
+	if name == "restore" {
+		f.Bool("dry-run", false, "Review contents and integrity offline.")
+		f.Bool("yes", false, "Restore into a fresh cluster and profile.")
+		f.String("context", "", "Explicit fresh-cluster Kubernetes context.")
+		f.String("url", "", "Public URL on the fresh cluster.")
+		f.String("admin-key-file", "", "Separate saved administrator private file.")
+		f.String("unseal-file", "", "Separate saved store unseal file.")
+	}
 }
 
 // sourcePinFlag collects repeated CONSUMER=PRODUCER pairs in order; the
@@ -110,22 +135,24 @@ func addInstallerInputs(f *flag.FlagSet, name string) {
 		f.String("release-dir", "", "Signed source-release files, or version subdirectories.")
 	}
 	switch name {
-	case "install", "upgrade":
+	case "install", "upgrade", "restore":
 		if name == "install" {
 			f.String("chart", "", "Unverified local chart for development.")
 		}
 		f.String("release-dir", "", "Signed release files, or version subdirectories.")
-		f.String("output", "text", "Review format: text or json; json requires --dry-run.")
+		if name != "restore" {
+			f.String("output", "text", "Review format: text or json; json requires --dry-run.")
+		}
 		if name != "upgrade" {
 			f.String("version", "", "Exact signed release version.")
 		}
 	}
 	switch name {
-	case "install", "upgrade", "rollback", "unseal", "backup", "restore":
+	case "install", "upgrade", "rollback", "unseal", "backup", "backup verify", "restore":
 		f.String("profile", "", "Installation profile; defaults to the selected profile.")
 	}
 	switch name {
-	case "backup", "restore":
+	case "backup", "backup verify", "restore":
 		f.String("config", "", "Installation configuration for its explicit database protocol.")
 	}
 	switch name {
@@ -134,7 +161,7 @@ func addInstallerInputs(f *flag.FlagSet, name string) {
 		f.String("ca-file", "", "Secret-store TLS CA certificate.")
 		f.String("token-file", "", "Private store token, or the step's projected login token.")
 	}
-	if name == "backup" || name == "restore" {
+	if name == "backup" || name == "backup verify" || name == "restore" {
 		f.String("output", "text", "Result format: text or json.")
 	}
 }

@@ -106,6 +106,9 @@ func (e *Engine) storeState(ctx context.Context, p *Plan) (refusal, unread error
 }
 
 func (e *Engine) storeClient(ctx context.Context, cfg secretstore.Config) (*secretstore.Client, func(), error) {
+	if e.Credentials == nil && e.OpenStore != nil { // The in-cluster backup account has no profile.
+		return e.OpenStore(ctx, cfg)
+	}
 	ca, err := e.Credentials.profileCA()
 	if err != nil {
 		return nil, nil, err

@@ -1,7 +1,9 @@
 package installer
 
 import (
+	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net"
@@ -34,7 +36,7 @@ func (c *ConfigDir) profile() (Profile, error) {
 	}
 	return p, nil
 }
-func (e *Engine) saveProfile(p *Plan, i Identities, a admin) (Profile, error) {
+func (e *Engine) saveProfile(ctx context.Context, p *Plan, i Identities, a admin) (Profile, error) {
 	c := e.Credentials
 	profile := Profile{
 		Version: 1, ServerVersion: p.release.Version(), Context: p.choices.Context,
@@ -78,10 +80,19 @@ func (e *Engine) saveProfile(p *Plan, i Identities, a admin) (Profile, error) {
 	if err != nil {
 		return Profile{}, err
 	}
+	signing, err := e.ensureBackupSigning(ctx, p.choices.Namespace, profile.BackupRecipient)
+	if err != nil {
+		return Profile{}, err
+	}
+	defer clear(signing)
+	profile.BackupPublicKey = base64.StdEncoding.EncodeToString(signing[32:])
 	profile.AdminKey, profile.AdminCert = c.pathFor(keyName), c.pathFor(certName)
 	profile.CAFile, profile.KnownHosts = c.pathFor(caName), c.pathFor(hostName)
 	profile.BackupKey = c.pathFor("backup.agekey")
-	return profile, c.saveProfile(profile, a.id)
+	if err = c.saveProfile(profile, a.id); err != nil {
+		return Profile{}, err
+	}
+	return profile, e.saveBackupJob(ctx, p, profile)
 }
 func publicDigest(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
 

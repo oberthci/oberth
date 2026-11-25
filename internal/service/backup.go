@@ -16,6 +16,29 @@ func (s *Service) Backup(ctx context.Context, a actor.Actor, out io.WriteCloser)
 	if err != nil {
 		return report, err
 	}
+	return s.backupSnapshot(ctx, a, out)
+}
+
+// CheckBackupAccount accepts only the live Kubernetes identity authenticated by
+// the dedicated snapshot transport. It grants no other service operation.
+func (s *Service) CheckBackupAccount(ctx context.Context, a actor.Actor) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.ctx.Err() != nil || s.c.People.BackupAccount == "" || a.Identity != s.c.People.BackupAccount || a.AuthMethod != "service-account" || a.Admin {
+		return refuse(forbidden)
+	}
+	return nil
+}
+
+func (s *Service) BackupAccount(ctx context.Context, a actor.Actor, out io.WriteCloser) (stateport.BackupReport, error) {
+	if err := s.CheckBackupAccount(ctx, a); err != nil {
+		return stateport.BackupReport{}, err
+	}
+	return s.backupSnapshot(ctx, a, out)
+}
+
+func (s *Service) backupSnapshot(ctx context.Context, a actor.Actor, out io.WriteCloser) (report stateport.BackupReport, err error) {
 	if out == nil {
 		return report, bad("backup_sink")
 	}

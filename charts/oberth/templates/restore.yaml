@@ -1,0 +1,48 @@
+{{- if .Values.restorePending }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: oberth-restore
+  namespace: {{ .Release.Namespace }}
+spec:
+  restartPolicy: Never
+  activeDeadlineSeconds: 900
+  automountServiceAccountToken: false
+  securityContext:
+    runAsUser: 65534
+    runAsGroup: 65534
+    fsGroup: 65534
+    fsGroupChangePolicy: OnRootMismatch
+  containers:
+    - name: restore
+      image: {{ include "oberth.image" . | quote }}
+      command: [/usr/local/bin/oberth, restore-database]
+      args:
+        - --destination
+        - {{ .Values.database.file | quote }}
+        - --schema-identity
+        - {{ .Values.server.protocol.schema_identity | quote }}
+        - --audit-domain
+        - {{ .Values.server.protocol.audit_domain | quote }}
+        - --max-database-bytes
+        - {{ .Values.restoreMaxBytes | int64 | quote }}
+      stdin: true
+      stdinOnce: true
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: {drop: [ALL]}
+        runAsNonRoot: true
+        readOnlyRootFilesystem: true
+        seccompProfile: {type: RuntimeDefault}
+      resources:
+        requests: {cpu: 250m, memory: 256Mi}
+        limits: {memory: 2Gi}
+      volumeMounts:
+        - {name: data, mountPath: /var/lib/oberth}
+        - {name: tmp, mountPath: /tmp}
+  volumes:
+    - name: data
+      persistentVolumeClaim: {claimName: oberth-data}
+    - name: tmp
+      emptyDir: {sizeLimit: {{ .Values.storage.tmp | quote }}}
+{{- end }}

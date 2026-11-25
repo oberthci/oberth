@@ -15,9 +15,9 @@ func TestInstallGuideStatesEncryptedCoverageAndReviewLimits(t *testing.T) {
 	}
 	guide := string(raw)
 	for heading, required := range map[string][]string{
-		"Keep the recovery files": {"five installation Secrets", "encrypt", "bundled store data", "recovery", "age identity", "review cannot apply a restore yet"},
+		"Keep the recovery files": {"five installation Secrets", "encrypt", "bundled store data", "recovery", "age identity", "administrator private file"},
 		"Back up": {"five installation Secrets", "CA key", "forge deploy key", "SSH host key", "store TLS", "administrator",
-			"--database-only", "No local backup schedule or restore application ships yet", "archive has neither", "Keep age"},
+			"--database-only", "--print-schedule", "--yes", "archive has neither", "Keep age"},
 	} {
 		_, section, found := strings.Cut(guide, "## "+heading+"\n")
 		section, _, _ = strings.Cut(section, "\n## ")

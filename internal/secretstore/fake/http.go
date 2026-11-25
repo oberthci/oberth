@@ -4,6 +4,7 @@
 package fake
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -23,6 +24,7 @@ type Store struct {
 	Resources   map[string]map[string]any
 	Calls       []Call
 	Fail        string
+	Snapshot    []byte
 }
 
 func (s *Store) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -35,6 +37,9 @@ func (s *Store) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	if s.Resources == nil {
 		s.Resources = map[string]map[string]any{}
+	}
+	if path == "/sys/storage/raft/snapshot" && r.Method == "GET" && s.Snapshot != nil {
+		return &http.Response{StatusCode: s.health(), Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(s.Snapshot)), Request: r}, nil
 	}
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {

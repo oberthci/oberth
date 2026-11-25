@@ -1,15 +1,13 @@
 # Install and maintain
 
 Use the [first-build commands](../README.md#first-green-build) on Kubernetes 1.30 or newer.
-
 ## Obtain the CLI
 
 Run `sh <skill-directory>/fetch-oberth` from the [trusted skill](../agent/skills/oberth/SKILL.md).
-The [fetcher](../agent/skills/oberth/fetch-oberth) and CLI read each tag's GitHub release at
-`https://github.com/oberthci/oberth/releases/download`, following redirects only to GitHub's asset
-hosts. They check the signed manifest and digests against the pinned key before replacing a binary;
-missing releases or keys stop them. Use the printed absolute path, never a checkout executable.
-
+The [fetcher](../agent/skills/oberth/fetch-oberth) and CLI read GitHub releases, follow only GitHub
+asset redirects and verify signed manifests/digests against the pinned key before replacement.
+Release base: `https://github.com/oberthci/oberth/releases/download`.
+Missing releases/keys refuse. Use the printed absolute path, never a checkout executable.
 ## Review and install
 
 `oberth install --context <context>` asks for missing answers and approval on a terminal, paging
@@ -36,7 +34,6 @@ The server owns the forge pin; the profile's `SSH trust` file pins the Oberth se
 `--upstream <name>` selects a repository identity, keeping its settings; otherwise it reuses a
 matching upstream or derives a name from the host. Use the printed repository path for step accounts
 and release subjects. After joining, see [checkout binding](agents.md#install-invite-and-join).
-
 ## A second installation in the same cluster
 
 Choose another namespace and two unused node ports. The pipeline namespace defaults to
@@ -60,22 +57,17 @@ Controller and workflows use the server namespace as Argo instance ID; default A
 them. Our controller watches only its pipeline namespace. Cluster-wide permission and policy names
 include custom namespaces. Rollback preserves shared workflow definitions.
 
-Removing the Argo release that owns the workflow definitions keeps them by resource policy, but
-every run object depends on those definitions. Upgrading that release with its chart defaults
-replaces the definitions' contents. The definitions' owner must upgrade only to a version Oberth's
+Removing the Argo release keeps them by resource policy; every run object depends on those
+definitions. Upgrading with chart defaults replaces the definitions' contents; use versions the
 release notes name as compatible. Install and upgrade refuse workflow definitions that would drop
-fields this version submits; after their owner upgrades them, run `oberth upgrade --dry-run` to
-check compatibility again.
-
+fields this version submits; after their owner upgrades them, run `oberth upgrade --dry-run`.
 ## Keep the recovery files
 
-The profile is `~/.config/oberth/<profile>/`; `installation.json` records paths. Copy it, archives,
-`backup.agekey` and `recovery` to private off-machine storage.
-Complete backups encrypt the five installation Secrets and bundled store data. Keep `recovery`
-and the age identity separately: review cannot apply a restore yet.
-Install reuses the administrator key; if missing, it refuses. Select with `OBERTH_PROFILE` or
-`~/.config/oberth/current`; agent joining preserves that selection.
-
+Copy `~/.config/oberth/<profile>/`, archives, `backup.agekey` and `recovery` off-machine privately.
+`installation.json` records paths. Complete backups encrypt the five installation Secrets and
+bundled store data; keep the age identity, administrator private file and recovery material apart.
+Missing administrator keys refuse install. `OBERTH_PROFILE` or `~/.config/oberth/current` selects;
+agent joining preserves selection.
 ## Agent plugins
 
 Once public, add the Claude Code skill and run box with `/plugin marketplace add oberthci/oberth`
@@ -97,7 +89,6 @@ Codex: `codex plugin marketplace add oberthci/oberth`, then `codex plugin add ob
 `codex mcp add oberth -- <line>` ([setup](agents.md#connect-the-tools)). Enable Custom status line
 in `/experimental`, restart, then choose `Oberth runs` in `/statusline`: the box's cells for three
 recent runs, refreshed every 15 seconds. No plugin commands or completion toasts; ask for runs.
-
 ## Upgrade
 
 When the review shows a schema change, take a storage-level copy of the data volume before applying.
@@ -124,50 +115,65 @@ up to ten minutes. After a timeout, wait for `oberth system status` to be ready,
 `oberth upgrade`, which completes a ready target's record unchanged, or `oberth rollback --yes`.
 After a schema change, if it stays down, recovery is manual: keep the encrypted pre-upgrade archive,
 `backup.agekey` and `rollback.json` in `~/.config/oberth/<profile>/` and copy them off-machine.
-
 ## Roll back
 
 Review the saved record with `oberth rollback --dry-run`, then run `oberth rollback --yes` with its
 original profile. A different schema, cluster UID or unexpected revision refuses before writes.
 Repeating resumes rollback; without the record, inspect the deployed revision. Offline, use
 `--release-dir <directory>` with signed source-version files; another version refuses.
-
 ## Back up
 
-`oberth backup --out <new-archive-file>` encrypts the database and five installation Secrets.
-A bundled store snapshot is included when the dedicated backup role is available. Fresh setup
-creates it; older stores still back up everything else and print that the snapshot is not included.
-Enabling backup access on existing stores arrives in stage 2; no root-token remedy is required.
-The Secrets hold the CA key, forge deploy key, SSH host key, store TLS and administrator.
-`--database-only` and pre-upgrade archives exclude them and store data; the default bound is 1 GiB.
-Backup never overwrites. Use local storage with hard links, copy off-machine; `--dry-run` previews.
-No local backup schedule or restore application ships yet; snapshot validation is stage 2.
-`oberth restore --from <archive> --identity-file <private-age-file> --dry-run` reviews offline.
-It checks encryption, database integrity, member digests and inventory; JSON contains public facts.
-Keep age and unseal material separately: the archive has neither. Omit the flag to use the profile.
-For automation, `--output json` publication warnings exit 0: the optional `warning` has `code`,
-`reason`, `remedy`, optional `id`, `context`, `detail`. Warnings also use standard error;
-clean and dry-run results omit `warning`. Keep a published archive and fix its storage problem.
-Keep secure originals to put again: a database-only backup cannot restore store values.
-`oberth access list --repo <repo> --kind store_path --json` lists paths and steps, not values.
-
+`oberth backup --out <new-archive-file>` encrypts the database and five installation Secrets: the CA
+key, forge deploy key, SSH host key, store TLS and administrator public login keys. The writer holds
+only the public age recipient; it checks members while encrypting. Secret `oberth-backup-signing`
+holds that recipient (other ConfigMap copies refuse) and signs `<archive>.manifest.json` (name,
+member hashes, digest); the profile keeps `backup_public_key`. Copy both off-machine unrenamed; save
+the printed SHA256 separately. `--database-only` and pre-upgrade archives exclude store data and
+Secrets; default limit: 1 GiB. Use local hard-link storage; never overwrite. `--dry-run` previews.
+`oberth restore --from <archive> --identity-file <private-age-file> --dry-run` reviews offline;
+`oberth backup verify` takes the same inputs. Both need the original profile's signature
+(`--backup-profile <name>`) or `--sha256 <saved-digest>`; others refuse. Keep age and administrator
+private files and unseal material separately: the archive has neither the age identity nor unseal
+material. Keep secure originals to put again after loss: a database-only backup cannot restore store
+values. `oberth access list --repo <repo> --kind store_path --json` lists paths and steps, not
+values. `--output json` warnings exit 0: optional `warning` has `code`, `reason`, `remedy`, optional
+`id`, `context`, `detail`; also on standard error; clean and dry-run results omit `warning`.
+`oberth backup --directory <dir> --keep 7` prunes other full copies and manifests (1–1000) after
+success, never database-only copies, other names or links; `--database-only` refuses `--keep`.
+`oberth backup --print-schedule` prints a [CronJob, Role and RoleBinding](backup-schedule.yaml).
+Edit image, PVC and schedule, then apply it in the Restricted server namespace; the Job holds no
+profile, kubeconfig or decryption key. Bundled backups fail without store access. Rollback keeps
+ConfigMap `oberth-backup`; across schemas the Job fails until upgrade. For the store role via a
+saved share, set listener `disable_unauthed_generate_root_endpoints=false`, restart/unseal, run:
+`oberth secretstore setup --backup-only --config <config> --ca-file <ca> --unseal-file <share>`
+Revocation failure refuses completion. Restore the listener to `true`, restart/unseal;
+inspect/cancel unfinished attempts before retry. See the [native authorization
+API](https://openbao.org/docs/api/system/generate-root/). Or supply `--token-file <session>` and
+revoke it after setup. Grant read/create/update only on `sys/policies/acl/oberth-backup` and
+`auth/<auth-mount>/role/oberth-backup`; drift refuses. Restore needs a signed release with matching
+schema/protocol (`--release-dir` works offline), a fresh cluster, a new profile and the same
+namespace names.
+```sh
+oberth restore --from <archive> --identity-file <age> --backup-profile <original> \
+  --context <fresh-context> --profile <new-profile> --url <url> \
+  --admin-key-file <admin> --unseal-file <share> --yes
+```
+The server stays stopped until restore passes. All five Secrets and values stay. Occupied targets
+refuse, even with `--yes`. After failure, keep the volume, remove the partial target and use a new
+profile. Bundled archives without a snapshot refuse; external-store recovery is operator-owned.
 ## Unseal after restart
 
-After restart, run `oberth unseal` on the installation machine with its selected profile and saved
-`recovery` file; never print it. Install configures the bundled store's static rules and
-installation audience. For external stores, run `oberth secretstore check` and `oberth secretstore
-setup` in an operator Pod with CLI and store access. Supply `--config` (server configuration and one
-store audience), `--ca-file` (store TLS CA) and `--token-file` (private OpenBao operator token).
-Check needs read access to auth methods, policies and roles; setup needs configure access. The
-administrator profile lacks these files. A projected Kubernetes login token is not an OpenBao
-operator token. The external operator must supply the token and run setup before use; bundled
-install supplies none.
-
+After restart, run `oberth unseal` with the selected profile's `recovery`; never print it.
+Install configures the bundled store's static rules/audience. External stores need an operator Pod:
+run `oberth secretstore check` or `oberth secretstore setup` with `--config` (server/audience),
+`--ca-file` (CA), `--token-file` (private OpenBao operator token). Check reads auth/policies/roles;
+setup needs configure access. The administrator profile lacks these files. A Kubernetes login token
+is not an OpenBao operator token; external operators supply one and run setup before use.
 ## Remove an installation
 
-There's no uninstall command: remove with Helm directly; install, upgrade and roll back with Oberth.
-Set `context` and `namespace`. Stop new runs, back up data, keep secret names and
-original values separately, and copy recovery material and archives to private storage.
+There's no uninstall command: use Helm directly. Set `context`/`namespace`, stop runs and save data,
+secret names, values, recovery files and archives privately. Install/upgrade/rollback with Oberth.
+First `kubectl delete -f` an applied backup schedule; the chart owns its ServiceAccount.
 ```sh
 helm --kube-context "$context" uninstall oberth -n "$namespace" --wait
 ```
@@ -185,10 +191,10 @@ These objects remain in the server namespace; Helm never owned the five Secrets:
 | Secret `oberth-forge-key` | Forge deploy private key and public key. |
 | Secret `oberth-ssh-host` | Server SSH host private key and public key. |
 | Secret `oberth-store-tls` | Store TLS certificate and private key. |
+| Backup ConfigMap and Secret | `oberth-backup` settings; `oberth-backup-signing` private key. |
 
 Save data and keys; choose ONE cleanup. Keep volumes for data; storage class controls reclamation.
 Shared workflow definitions stay, including ours; deleting them deletes every installation's runs.
-
 ### Installation-created namespace
 
 Pre-existing namespaces stay. Namespace deletion removes everything; first check other workloads.
@@ -204,17 +210,15 @@ if [ "$owner" = "oberth/$namespace" ] &&
 fi
 ```
 If either check fails, keep the namespace and use the retained-namespace commands.
-
 ### Retained namespace
 
-Keep a pre-existing shared namespace. In a hand-made namespace, or one now shared with other
-workloads, remove only this installation's two claims and five Secrets by name:
+Keep a pre-existing shared namespace; remove only this installation's claims, Secrets and ConfigMap:
 ```sh
 kubectl --context "$context" -n "$namespace" delete pvc data-oberth-store-0 oberth-data
-kubectl --context "$context" -n "$namespace" delete secret \
+kubectl --context "$context" -n "$namespace" delete secret oberth-backup-signing \
   oberth-admin oberth-ca oberth-forge-key oberth-ssh-host oberth-store-tls
+kubectl --context "$context" -n "$namespace" delete configmap oberth-backup
 ```
-
 ### Retained pipeline namespace
 
 A pre-existing pipeline namespace keeps step ServiceAccounts and run objects after Helm removal.
@@ -228,18 +232,14 @@ kubectl --context "$context" -n "$pipeline_namespace" delete workflows.argoproj.
 kubectl --context "$context" -n "$pipeline_namespace" delete serviceaccounts \
   -l app.kubernetes.io/managed-by=oberth
 ```
-The selector checks the server namespace's controller ID; other runs stay. Deleting Workflows
-removes dependent Pods; keep the pipeline namespace itself.
-
+Selectors keep other runs; Workflow deletion removes dependent Pods. Keep the pipeline namespace.
 ### Local profile
 
 After preserving its recovery material and archives, remove the local profile using its path:
 ```sh
 rm -r -- /absolute/path/to/installation-profile
 ```
-This removes its credentials, recovery material, records and backups. Use `OBERTH_PROFILE` to select
-a remaining installation, or `oberth install --profile <new-profile>` for a fresh install.
-
+This removes credentials, recovery material, records and backups. Select a live `OBERTH_PROFILE`.
 ## Command counts
 
 Counts include the [first green build](../README.md#first-green-build), refused registration

@@ -95,7 +95,7 @@ store's static rules and installation audience; grants need no synchronization o
 complete backup encrypts store data and installation Secrets; database-only archives exclude both.
 Keep secure originals to put again after loss: `recovery` can unseal data but cannot restore it.
 `oberth access list --repo <repo> --kind store_path --json` lists approved paths and steps.
-See [backup and secret recovery](install.md#back-up) for offline review and remaining limitations.
+See [backup and secret recovery](install.md#back-up) for offline review, schedules and restore.
 
 For external stores, run these advanced checks in an operator Pod with store network access:
 
