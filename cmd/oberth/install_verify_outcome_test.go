@@ -31,10 +31,10 @@ func TestInstallVerifyPrintsItsVerdict(t *testing.T) {
 		writeVerificationProfile(t, dir, profile)
 		code := a.run(t.Context(), []string{"install", "--profile=verified", "--verify"})
 		if valid {
-			if code != 0 || out.String() != "Verified: "+profile.ServerURL+"\n" || diagnostic.Len() != 0 {
+			if code != 0 || out.String() != "Verifying profile: verified\nVerified: "+profile.ServerURL+"\n" || diagnostic.Len() != 0 {
 				t.Fatal(code, out.String(), diagnostic.String())
 			}
-		} else if code != 1 || out.Len() != 0 || strings.Count(diagnostic.String(), "\n") != 1 || !strings.Contains(diagnostic.String(), "Check the saved trust") {
+		} else if code != 1 || out.String() != "Verifying profile: verified\n" || strings.Count(diagnostic.String(), "\n") != 1 || !strings.Contains(diagnostic.String(), "Check the saved trust") {
 			t.Fatal(code, out.String(), diagnostic.String())
 		}
 	}
@@ -139,7 +139,7 @@ func TestInstallVerifyRefusesUnsafePipelineNamespace(t *testing.T) {
 				if code != 0 {
 					t.Fatal(code, diagnostic.String())
 				}
-			} else if code != 1 || out.Len() != 0 || !strings.Contains(diagnostic.String(), "oberth-runs") || !strings.Contains(diagnostic.String(), "pod-security.kubernetes.io/enforce=baseline") {
+			} else if code != 1 || out.String() != "Verifying profile: verified\n" || !strings.Contains(diagnostic.String(), "oberth-runs") || !strings.Contains(diagnostic.String(), "pod-security.kubernetes.io/enforce=baseline") {
 				t.Fatal("missing namespace refusal", code, out.String(), diagnostic.String())
 			}
 		})

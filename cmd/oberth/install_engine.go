@@ -51,6 +51,9 @@ func (a application) runInstaller(ctx context.Context, r installationRequest, in
 		return session.backup(ctx, out)
 	}
 	if r.enabled("verify") {
+		if _, err := fmt.Fprintln(out, "Verifying profile: "+safeDisplay(session.name)); err != nil {
+			return err
+		}
 		if err := session.verify(ctx); err != nil {
 			return err
 		}
@@ -83,6 +86,9 @@ func (a application) openInstallation(r installationRequest) (installationSessio
 	if profile.Uplink {
 		return s, installationProblem("An uplink profile cannot own an installation.", "Choose an administrator installation profile with --profile.")
 	}
+	if r.enabled("verify") && dir == "" {
+		return s, installationProblem("Select an installation profile.", "Pass --profile or --context, or select a current administrator profile.")
+	}
 	if dir != "" {
 		s.profile, err = readInstallationProfile(dir, r.name == "install")
 		if err != nil {
@@ -106,7 +112,8 @@ func installationProfileName(r installationRequest) string {
 }
 
 func (a application) selectedInstallation(r installationRequest) (client.Profile, string, error) {
-	profile, dir, err := client.SelectedProfile(a.base, installationProfileName(r))
+	name := installationProfileName(r)
+	profile, dir, err := client.SelectedProfile(a.base, name)
 	if r.name == "install" && errors.Is(err, fs.ErrNotExist) {
 		err = nil
 	}
