@@ -105,7 +105,7 @@ transport failure after a mutation left the client reports "outcome unknown".
 Inspect durable state instead. For `secret put`, check `secret.put.requested` in
 the audit; putting the value again is safe, but the request audit is not proof
 of storage. Check the grant separately when its reply was lost. Observation
-cancellation never cancels a run. `run wait` sends `run_wait
+cancellation never cancels a run. A quiet running step prints once that output will appear here as it arrives. `run wait` sends `run_wait
 {id,until,timeout_s?}` and renders C2's `state`, `run`, `holds`, `waited_s` and optional
 `retry_hint`. `events wait --after-id` sends `after_id` to `events_wait`;
 filtering, retention gaps and the next cursor remain C2's contract.

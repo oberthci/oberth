@@ -136,3 +136,19 @@ func logContainerKey(logs apicontract.LogResult) string {
 func logOutputFinished(run stepmodel.RunSummary, path string, meta logcontract.Meta) bool {
 	return logStepFinished(run, path) && !meta.Copying && (!meta.Follow || logRunFinished(run))
 }
+
+func (s *flowSession) announceRunningLog(logs apicontract.LogResult, run stepmodel.RunSummary, path string, cursor *logCursor) error {
+	if logs.Content != "" {
+		cursor.announced = true
+	}
+	if cursor.announced || logRunFinished(run) {
+		return nil
+	}
+	for _, step := range run.Steps {
+		if step.Path == path && step.Status == stepmodel.StepRunning {
+			cursor.announced = true
+			return s.fact("Step is running; output follows here.")
+		}
+	}
+	return nil
+}

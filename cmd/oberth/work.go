@@ -333,6 +333,7 @@ type logCursor struct {
 	offset    *int64
 	selection string
 	openLine  bool
+	announced bool
 }
 
 func (s *flowSession) currentLogPage(request apicontract.RunLogsArgs, cursor *logCursor) (*apicontract.LogResult, error) {
@@ -372,6 +373,9 @@ func (s *flowSession) followStepLog(request apicontract.RunLogsArgs, step stepmo
 		}
 		run, err := s.logStatus(*logs, request.ID, &cursor)
 		if err != nil {
+			return run, err
+		}
+		if err := s.announceRunningLog(*logs, run, step.Path, &cursor); err != nil {
 			return run, err
 		}
 		if logs.Meta.HasMore && cursor.offset != nil && *cursor.offset == logs.Meta.NextByteOffset {
