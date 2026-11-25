@@ -51,7 +51,7 @@ func pipelineResources(t *testing.T, path string) map[string]pipelineResource {
 
 const (
 	buildResourcesFile = "../../.oberth/pipeline-resources.yaml"
-	walkResourcesFile  = "../../.oberth/walk-vm-resources.yaml"
+	walkResourcesFile  = "../../.oberth/resources/walk-vm.yaml"
 )
 
 // The build's file holds exactly what build and release read; the walk's

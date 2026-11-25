@@ -2,7 +2,7 @@
 
 When launched by `.oberth/walk-vm.yaml`, the hosting installation needs the explicit
 `--egress-allow` operator exception in
-[`walk-vm-resources.yaml`](../../.oberth/walk-vm-resources.yaml): the host cluster Pod
+[walk setup](../../.oberth/resources/walk-vm.yaml): the host cluster Pod
 CIDR, TCP 22. Its install/upgrade Review must name that destination. This opens
 SSH to every Pod in the chosen range; include existing exceptions in the same
 list. The VMI stays in `oberth-walk`. Installing Oberth inside the guest cannot
