@@ -33,6 +33,7 @@ func installationCommands() []installationCommand {
 func installationFlags(name string) *flag.FlagSet {
 	f := flag.NewFlagSet(name, flag.ContinueOnError)
 	f.SetOutput(io.Discard)
+	f.Bool("detail", false, "Show complete public diagnostics.")
 	switch name {
 	case "install":
 		f.String("context", "", "Chosen Kubernetes context.")
@@ -113,7 +114,6 @@ func addInstallerInputs(f *flag.FlagSet, name string) {
 			f.String("chart", "", "Unverified local chart for development.")
 		}
 		f.String("release-dir", "", "Signed release files, or version subdirectories.")
-		f.Bool("detail", false, "Show every reviewed public value.")
 		f.String("output", "text", "Review format: text or json; json requires --dry-run.")
 		if name != "upgrade" {
 			f.String("version", "", "Exact signed release version.")
