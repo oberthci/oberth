@@ -26,8 +26,9 @@ func inputs(ch *chart.Chart, overrides map[string]any, namespace string) (map[st
 	if store != nil && store["bundled"] != false {
 		store["address"] = ""
 	}
-	defaults = namespaceValues(defaults, namespace)
-	return namespaceValues(merge(defaults, overrides), namespace), nil
+	priority := slices.ContainsFunc(ch.Templates, func(file *chart.File) bool { return file.Name == "templates/control-priority.yaml" })
+	defaults = namespaceValues(defaults, namespace, priority)
+	return namespaceValues(merge(defaults, overrides), namespace, priority), nil
 }
 
 func preparedChart(ch *chart.Chart, values map[string]any, namespace string) (*chart.Chart, map[string]any, error) {

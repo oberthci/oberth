@@ -6,7 +6,7 @@ import (
 )
 
 // namespaceValues fills derived defaults once, before native dependency rendering.
-func namespaceValues(v map[string]any, namespace string) map[string]any {
+func namespaceValues(v map[string]any, namespace string, priorityDeclared bool) map[string]any {
 	pipeline, _ := v["pipeline"].(map[string]any)
 	server, _ := v["server"].(map[string]any)
 	runtime, _ := server["runtime"].(map[string]any)
@@ -25,12 +25,8 @@ func namespaceValues(v map[string]any, namespace string) map[string]any {
 		defaultText(store, "address", storeURL(namespace))
 	}
 	defaultText(native, "namespaceOverride", namespace)
-	priority := "oberth-control-" + namespace
-	controller["priorityClassName"] = priority
-	if bundled, ok := v["storeNative"].(map[string]any); ok {
-		if server, ok := bundled["server"].(map[string]any); ok {
-			server["priorityClassName"] = priority
-		}
+	if priorityDeclared {
+		setControlPriority(v, controller, namespace)
 	}
 	pipelineNamespace, ok := pipeline["namespace"].(string)
 	if !ok {
@@ -45,6 +41,16 @@ func namespaceValues(v map[string]any, namespace string) map[string]any {
 	controller["workflowNamespaces"] = []any{pipeline["namespace"]}
 	controller["configMap"] = map[string]any{"create": false, "name": runtime["controller_configmap"]}
 	return v
+}
+
+func setControlPriority(v, controller map[string]any, namespace string) {
+	priority := "oberth-control-" + namespace
+	controller["priorityClassName"] = priority
+	if bundled, ok := v["storeNative"].(map[string]any); ok {
+		if server, ok := bundled["server"].(map[string]any); ok {
+			server["priorityClassName"] = priority
+		}
+	}
 }
 
 // startOnlyChecksum covers the inputs of the controller ConfigMap entries the

@@ -37,6 +37,10 @@ func renderedIn(t *testing.T, values map[string]any, namespace string) []map[str
 	if err != nil {
 		t.Fatal(err)
 	}
+	return chartObjects(t, files)
+}
+func chartObjects(t *testing.T, files map[string]string) []map[string]any {
+	t.Helper()
 	var objects []map[string]any
 	for name, raw := range files {
 		if !strings.HasSuffix(name, ".yaml") {
@@ -45,7 +49,7 @@ func renderedIn(t *testing.T, values map[string]any, namespace string) []map[str
 		dec := kyaml.NewYAMLOrJSONDecoder(strings.NewReader(raw), 4096)
 		for {
 			var object map[string]any
-			err = dec.Decode(&object)
+			err := dec.Decode(&object)
 			if errors.Is(err, io.EOF) {
 				break
 			}
