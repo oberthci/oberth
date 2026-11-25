@@ -44,6 +44,7 @@ func catalogue() map[string][2]string {
 		"trust":            {"Client TLS identity or trust is invalid.", "Check the CA file and matching client certificate and key."},
 		"no_reply":         {"Server is reachable but not answering.", "Check server diagnostics, then read the operation again."},
 		"connect":          {"Cannot reach the server.", "Check the server address and connection, then retry."},
+		"local_dns":        {"Cannot resolve this .local server name.", "Use an IP address or a DNS name this client can resolve, then rerun the command."},
 		"reply":            {"Server reply is invalid.", "Check the server address and version, then read the operation again."},
 		"redirect":         {"Server redirect refused.", "Use the installation's original server address."},
 		"deadline":         {"Request timed out.", "Check the connection and read the operation's current state."},

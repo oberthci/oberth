@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 	"sync"
+
+	"github.com/oberthci/oberth/internal/client"
 )
 
 // endpointTransport owns dial callbacks until verification ends. Closing first
@@ -20,7 +22,7 @@ type endpointTransport struct {
 
 func newEndpointTransport(config *tls.Config, dial func(context.Context, string, string) (net.Conn, error)) *endpointTransport {
 	if dial == nil {
-		dial = (&net.Dialer{}).DialContext
+		dial = client.DialContext
 	}
 	t := &endpointTransport{http: &http.Transport{TLSClientConfig: config}, connect: dial}
 	t.http.DialContext = t.dial

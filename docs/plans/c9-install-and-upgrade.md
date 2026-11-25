@@ -14,7 +14,7 @@ install host prerequisites, manage ingress, schedule runs or rewrite workloads.
 The [Shared contracts](README.md#shared-contracts) define shared values. C2 owns
 authority and grants; C5 owns executor policy content; C7 owns snapshot inspection
 and archive encoding; C11 owns commands, client profiles and certificate renewal.
-C9 uses injected ports and the narrow client, never concrete service or store code.
+C9 uses injected ports and the narrow client, never concrete service or store code. Endpoint verification shares the client's bounded .local host resolver and refuses an unresolved local name with address guidance.
 
 | Surface | Contract |
 | --- | --- |

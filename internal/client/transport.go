@@ -44,7 +44,7 @@ func transport(o Options) (*http.Transport, error) {
 			return &pair, nil
 		}
 	}
-	return &http.Transport{TLSClientConfig: config, DialContext: dialLocal, TLSHandshakeTimeout: 5 * time.Second}, nil
+	return &http.Transport{TLSClientConfig: config, DialContext: DialContext, TLSHandshakeTimeout: 5 * time.Second}, nil
 }
 
 func (c *Client) request(ctx context.Context, body []byte) (*http.Response, error) {

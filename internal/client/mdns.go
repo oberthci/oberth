@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// dialLocal keeps TLS verification bound to the requested host when DNS needs help.
-func dialLocal(ctx context.Context, network, address string) (net.Conn, error) {
+// DialContext uses the host resolver for .local names while TLS keeps the requested name.
+func DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
@@ -21,12 +21,22 @@ func dialWithFallback(ctx context.Context, network, address string, functions di
 	conn, err := functions.dial(ctx, network, address)
 	var dns *net.DNSError
 	host, port, splitErr := net.SplitHostPort(address)
-	if err == nil || splitErr != nil || !strings.HasSuffix(strings.ToLower(host), ".local") || !errors.As(err, &dns) {
+	if err == nil || splitErr != nil || !strings.HasSuffix(strings.TrimSuffix(strings.ToLower(host), "."), ".local") || !errors.As(err, &dns) {
 		return conn, err
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return nil, ctx.Err()
 	}
 	connection, fallbackErr := functions.fallback(ctx, network, net.JoinHostPort(host, port))
 	if fallbackErr != nil {
-		return nil, err
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil, ctx.Err()
+		}
+		var connectionError *net.OpError
+		if errors.As(fallbackErr, &connectionError) {
+			return nil, fallbackErr
+		}
+		return nil, failure("local_dns", errors.Join(err, fallbackErr))
 	}
 	return connection, nil
 }
@@ -43,6 +53,7 @@ func resolveLocal(ctx context.Context, network, address string) (net.Conn, error
 		return nil, err
 	}
 	seen := map[string]bool{}
+	var last error
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	for _, line := range strings.Split(string(data), "\n") {
 		fields := strings.Fields(line)
@@ -54,6 +65,10 @@ func resolveLocal(ctx context.Context, network, address string) (net.Conn, error
 		if dialErr == nil {
 			return conn, nil
 		}
+		last = dialErr
+	}
+	if last != nil {
+		return nil, last
 	}
 	return nil, &net.DNSError{Err: "system resolver failed", Name: host}
 }

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/clientcert"
+	"github.com/oberthci/oberth/internal/publicerr"
 )
 
 // Verify is read-only and checks ordinary TLS name/chain validation plus the CA pin.
@@ -56,6 +57,10 @@ func evaluateEndpoint(ctx context.Context, client *http.Client, address string) 
 	}
 	response, err := client.Do(request)
 	if err != nil {
+		var public *publicerr.Error
+		if errors.As(err, &public) {
+			return nil, public
+		}
 		var certificate *tls.CertificateVerificationError
 		if errors.As(err, &certificate) {
 			return nil, problem("tls", err)
