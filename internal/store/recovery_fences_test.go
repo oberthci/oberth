@@ -35,7 +35,7 @@ func TestRecoveryChecksIntegrityAndForeignKeysAfterMemberHash(t *testing.T) {
 			requireOK(t, db.Close())
 			report := stateport.BackupReport{Schema: Schema, AuditHead: independentHead(t, s.readers), Integrity: true, ForeignKeys: true}
 			var archive bytes.Buffer
-			requireOK(t, emitArchive(t.Context(), archiveOutput{path, backupOptions(s), report, &archive}))
+			requireOK(t, emitArchive(t.Context(), archiveOutput{path, backupOptions(s), report, &archive, nil}))
 			destination := filepath.Join(t.TempDir(), "restored.sqlite")
 			_, err = backupForTest(t, s).Restore(t.Context(), restoreRequest(s, destination), bytes.NewReader(archive.Bytes()))
 			requireCode(t, err, publicerr.SchemaRefused)

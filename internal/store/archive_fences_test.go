@@ -115,7 +115,7 @@ func TestArchiveByteLimitIncludesPartialSQLitePages(t *testing.T) {
 	var archive bytes.Buffer
 	report := stateport.BackupReport{Schema: Schema, AuditHead: independentHead(t, s.readers), Integrity: true, ForeignKeys: true}
 	options := backupOptions(s)
-	requireOK(t, emitArchive(t.Context(), archiveOutput{path, options, report, &archive}))
+	requireOK(t, emitArchive(t.Context(), archiveOutput{path, options, report, &archive, nil}))
 	options.MaxBytes = info.Size()
 	_, err = backupForTest(t, s).Inspect(t.Context(), options, bytes.NewReader(archive.Bytes()))
 	requireCode(t, err, publicerr.InvalidInput)

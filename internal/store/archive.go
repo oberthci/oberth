@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/oberthci/oberth/internal/stateport"
 )
@@ -32,6 +33,41 @@ type archiveOutput struct {
 	options stateport.Options
 	report  stateport.BackupReport
 	out     io.Writer
+	pins    []byte
+}
+
+// The server's forge host pins live beside the database outside it. They were
+// confirmed in a reviewed upstream add, so an archive carries them as an
+// optional member and a restore writes them back.
+const (
+	hostPinsName  = "known_hosts"
+	hostPinsLimit = 64 << 10
+)
+
+// HostPinsPath is the forge host pin file kept beside a database file.
+func HostPinsPath(database string) string {
+	return filepath.Join(filepath.Dir(database), "host-pins", hostPinsName)
+}
+
+func readHostPins(database string) ([]byte, error) {
+	path := HostPinsPath(database)
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil || !info.Mode().IsRegular() || info.Size() > hostPinsLimit {
+		return nil, databaseError(errors.Join(err, errors.New("host pins are not a bounded regular file")))
+	}
+	pins, err := os.ReadFile(path)
+	if err != nil || len(pins) > hostPinsLimit {
+		return nil, databaseError(errors.Join(err, errors.New("host pins changed while read")))
+	}
+	return pins, nil
+}
+
+func pinsMember(pins []byte) member {
+	sum := sha256.Sum256(pins)
+	return member{hostPinsName, int64(len(pins)), hex.EncodeToString(sum[:])}
 }
 
 func emitArchive(ctx context.Context, output archiveOutput) (resultErr error) {
@@ -57,6 +93,9 @@ func emitArchive(ctx context.Context, output archiveOutput) (resultErr error) {
 		BackupReport: output.report,
 		Members:      []member{{"oberth.sqlite", info.Size(), hex.EncodeToString(hash.Sum(nil))}},
 	}
+	if len(output.pins) > 0 {
+		m.Members = append(m.Members, pinsMember(output.pins))
+	}
 	body, err := json.Marshal(m)
 	if err != nil {
 		return err
@@ -68,13 +107,23 @@ func emitArchive(ctx context.Context, output archiveOutput) (resultErr error) {
 	if _, err := io.Copy(archive, contextReader{ctx: ctx, Reader: file}); err != nil {
 		return err
 	}
-	if err := archive.WriteHeader(archiveHeader("manifest.json", int64(len(body)))); err != nil {
-		return err
+	if len(output.pins) > 0 {
+		if err := writeMember(archive, hostPinsName, output.pins); err != nil {
+			return err
+		}
 	}
-	if _, err := archive.Write(body); err != nil {
+	if err := writeMember(archive, "manifest.json", body); err != nil {
 		return err
 	}
 	return errors.Join(archive.Close(), ctx.Err())
+}
+
+func writeMember(archive *tar.Writer, name string, data []byte) error {
+	if err := archive.WriteHeader(archiveHeader(name, int64(len(data)))); err != nil {
+		return err
+	}
+	_, err := archive.Write(data)
+	return err
 }
 
 func archiveHeader(name string, size int64) *tar.Header {
@@ -110,39 +159,42 @@ func (w contextWriter) Write(body []byte) (int, error) {
 	return n, errors.Join(err, w.ctx.Err())
 }
 
-func inspectArchive(ctx context.Context, options stateport.Options, in io.Reader, stage string) (report stateport.BackupReport, resultErr error) {
+// inspectArchive stages the database and returns the archived host pins.
+func inspectArchive(ctx context.Context, options stateport.Options, in io.Reader, stage string) (report stateport.BackupReport, pins []byte, resultErr error) {
 	file, err := os.OpenFile(filepath.Join(stage, "oberth.sqlite"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
-		return stateport.BackupReport{}, databaseError(err)
+		return stateport.BackupReport{}, nil, databaseError(err)
 	}
 	defer func() { resultErr = errors.Join(resultErr, file.Close()) }()
-	target := archiveInspection{database: file, verify: func(ctx context.Context, options stateport.Options) (stateport.BackupReport, error) {
+	target := archiveInspection{database: file, pins: &pins, verify: func(ctx context.Context, options stateport.Options) (stateport.BackupReport, error) {
 		return verifyDatabase(ctx, filepath.Join(stage, "oberth.sqlite"), options)
 	}}
-	return inspectArchiveTo(ctx, options, in, target)
+	report, err = inspectArchiveTo(ctx, options, in, target)
+	return report, pins, err
 }
 
 type archiveInspection struct {
 	database io.Writer
+	pins     *[]byte
 	verify   func(context.Context, stateport.Options) (stateport.BackupReport, error)
 }
 
 func inspectArchiveTo(ctx context.Context, options stateport.Options, in io.Reader, target archiveInspection) (stateport.BackupReport, error) {
 	limit, _ := options.Limit()
-	counter := contextReader{ctx, io.LimitReader(in, limit+(64<<10)+1)}
+	counter := contextReader{ctx, io.LimitReader(in, limit+hostPinsLimit+(64<<10)+1)}
 	reader := tar.NewReader(counter)
 	item, err := extractDatabase(ctx, reader, target.database, limit)
 	if err != nil {
 		return stateport.BackupReport{}, err
 	}
-	body, err := readManifest(reader)
+	pins, body, err := readTrailer(reader)
 	if err != nil {
 		return stateport.BackupReport{}, refuse(damagedArchive, err)
 	}
 	if err := archiveEnd(reader, counter); err != nil {
 		return stateport.BackupReport{}, err
 	}
-	m, err := decodeManifest(body, item)
+	m, err := decodeManifest(body, item, pins)
 	if err != nil {
 		return stateport.BackupReport{}, err
 	}
@@ -152,6 +204,9 @@ func inspectArchiveTo(ctx context.Context, options stateport.Options, in io.Read
 	}
 	if report != m.BackupReport {
 		return report, refuse(damagedArchive, nil)
+	}
+	if target.pins != nil {
+		*target.pins = pins
 	}
 	return report, ctx.Err()
 }
@@ -175,15 +230,26 @@ func extractDatabase(ctx context.Context, reader *tar.Reader, out io.Writer, lim
 	return member{Name: "oberth.sqlite", Size: n, SHA256: hex.EncodeToString(hash.Sum(nil))}, nil
 }
 
-func readManifest(reader *tar.Reader) ([]byte, error) {
+// readTrailer reads the optional host pins member, then the manifest.
+func readTrailer(reader *tar.Reader) (pins, manifest []byte, err error) {
 	header, err := reader.Next()
+	if err == nil && header.Name == hostPinsName {
+		if !validHeader(header, hostPinsName) || header.Size > hostPinsLimit {
+			return nil, nil, refuse(damagedArchive, nil)
+		}
+		if pins, err = io.ReadAll(io.LimitReader(reader, hostPinsLimit+1)); err != nil {
+			return nil, nil, err
+		}
+		header, err = reader.Next()
+	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !validHeader(header, "manifest.json") || header.Size > 8192 {
-		return nil, refuse(damagedArchive, nil)
+		return nil, nil, refuse(damagedArchive, nil)
 	}
-	return io.ReadAll(io.LimitReader(reader, 8193))
+	manifest, err = io.ReadAll(io.LimitReader(reader, 8193))
+	return pins, manifest, err
 }
 
 func validHeader(h *tar.Header, name string) bool {
@@ -204,14 +270,18 @@ func archiveEnd(reader *tar.Reader, counter io.Reader) error {
 	return nil
 }
 
-func decodeManifest(body []byte, item member) (manifest, error) {
+func decodeManifest(body []byte, item member, pins []byte) (manifest, error) {
+	members := []member{item}
+	if pins != nil {
+		members = append(members, pinsMember(pins))
+	}
 	var m manifest
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&m); err != nil {
 		return m, refuse(damagedArchive, err)
 	}
-	if m.Format != "oberth.database-backup/v1" || len(m.Members) != 1 || m.Members[0] != item {
+	if m.Format != "oberth.database-backup/v1" || !slices.Equal(m.Members, members) {
 		return m, refuse(damagedArchive, nil)
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {

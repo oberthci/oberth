@@ -82,6 +82,12 @@ func restoreDatabaseFixture(t *testing.T) (*store.Backup, stateport.Options) {
 	if err = database.RecordAdministration(t.Context(), stateport.Action{Actor: "admin"}, model.AuditAction{Actor: "admin", Action: "restore.fixture", ResourceType: "installation"}); err != nil {
 		t.Fatal(err)
 	}
+	if err = os.MkdirAll(filepath.Dir(store.HostPinsPath(path)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(store.HostPinsPath(path), []byte(restorePinsFixture), 0600); err != nil {
+		t.Fatal(err)
+	}
 	backup, err := store.NewBackup(path)
 	if err != nil {
 		t.Fatal(err)
@@ -133,8 +139,15 @@ func checkRestoredSecrets(t *testing.T, f *restoreFixture) {
 	}
 }
 
+// The server's forge host pins sit beside its database; the reviewed pins
+// come back with it, so forge access works without a new upstream add.
+const restorePinsFixture = "[forge.oberth.ci]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHostPinFixture\n"
+
 func checkRestoredDatabase(t *testing.T, f *restoreFixture) {
 	t.Helper()
+	if pins, err := os.ReadFile(store.HostPinsPath(f.destination)); err != nil || string(pins) != restorePinsFixture {
+		t.Fatal("restore lost the server's forge host pins", err)
+	}
 	restored, err := store.Open(t.Context(), f.destination, store.Options{Protocol: f.config.Archive.Options.Protocol, Clock: setupClock})
 	if err != nil {
 		t.Fatal("restored database cannot reopen", err)

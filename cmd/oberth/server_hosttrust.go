@@ -16,6 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/reponame"
+	"github.com/oberthci/oberth/internal/store"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
@@ -52,7 +53,7 @@ const forgeTrustID = "forge-trust-unconfirmed"
 const forgeTrustReason = "Forge host trust was not confirmed."
 
 func (a serverAdministration) pinsPath() string {
-	return filepath.Join(filepath.Dir(a.owner.c.config.DatabaseFile), "host-pins", "known_hosts")
+	return store.HostPinsPath(a.owner.c.config.DatabaseFile)
 }
 func (a serverAdministration) preparePins(ctx context.Context, endpoint *url.URL, fingerprint string, repin bool) (app.TrustResult, func(context.Context) error, error) {
 	port := endpoint.Port()

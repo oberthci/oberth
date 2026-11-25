@@ -63,7 +63,7 @@ func TestLocalAuditChainContract(t *testing.T) {
 	var incoming bytes.Buffer
 	// Recompute the member hash to prove database verification, not framing, refuses it.
 	report := stateport.BackupReport{Schema: Schema, AuditHead: independentHead(t, s.readers), Integrity: true, ForeignKeys: true}
-	requireOK(t, emitArchive(t.Context(), archiveOutput{stage, backupOptions(s), report, &incoming}))
+	requireOK(t, emitArchive(t.Context(), archiveOutput{stage, backupOptions(s), report, &incoming, nil}))
 	_, err = backupForTest(t, s).Restore(t.Context(), stateport.RestoreRequest{Options: backupOptions(s), Destination: filepath.Join(t.TempDir(), "restore.sqlite")}, bytes.NewReader(incoming.Bytes()))
 	requireCode(t, err, publicerr.SchemaRefused)
 }

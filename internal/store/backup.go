@@ -67,7 +67,11 @@ func (b *Backup) Snapshot(ctx context.Context, options stateport.Options, out io
 	if err != nil {
 		return report, err
 	}
-	err = emitArchive(ctx, archiveOutput{path, options, report, out})
+	pins, err := readHostPins(b.path)
+	if err != nil {
+		return report, err
+	}
+	err = emitArchive(ctx, archiveOutput{path, options, report, out, pins})
 	return report, err
 }
 
@@ -103,12 +107,40 @@ func (b *Backup) Restore(ctx context.Context, request stateport.RestoreRequest, 
 		return report, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
-	report, err = inspectArchive(ctx, request.Options, in, stage)
+	report, pins, err := inspectArchive(ctx, request.Options, in, stage)
 	if err != nil {
+		return report, err
+	}
+	// Pins go first: the database link is the restore's commit point, and a
+	// retry after a failure here may replace them.
+	if err = restoreHostPins(destination, pins); err != nil {
 		return report, err
 	}
 	path := filepath.Join(stage, "oberth.sqlite")
 	return report, b.publishRestore(ctx, path, destination)
+}
+
+func restoreHostPins(destination string, pins []byte) error {
+	if pins == nil {
+		return nil
+	}
+	path := HostPinsPath(destination)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return databaseError(err)
+	}
+	file, err := os.CreateTemp(filepath.Dir(path), ".oberth-")
+	if err != nil {
+		return databaseError(err)
+	}
+	defer func() { _ = os.Remove(file.Name()) }()
+	_, err = file.Write(pins)
+	if err = errors.Join(err, file.Sync(), file.Close()); err != nil {
+		return databaseError(err)
+	}
+	if err = os.Rename(file.Name(), path); err != nil {
+		return databaseError(err)
+	}
+	return syncDirectory(filepath.Dir(path))
 }
 
 func backupInput(ctx context.Context, options stateport.Options, present bool) error {
