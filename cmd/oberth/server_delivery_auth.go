@@ -9,6 +9,7 @@ import (
 	"time"
 
 	wfclient "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned"
+	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/sourcedelivery"
 	auth "k8s.io/api/authentication/v1"
@@ -184,6 +185,9 @@ func addressHost(addr string) string {
 func brokerIdentityFailure(err error) error {
 	var failure *sourcedelivery.Failure
 	var public *publicerr.Error
+	if errors.Is(err, argojob.ErrDeliveryNodePending) {
+		return &sourcedelivery.Failure{Code: "unavailable", Reason: "other"}
+	}
 	if errors.As(err, &failure) || errors.As(err, &public) || apierrors.IsNotFound(err) {
 		return err
 	}

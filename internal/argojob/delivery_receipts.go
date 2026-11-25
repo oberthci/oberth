@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"time"
 
@@ -13,14 +14,23 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// ErrDeliveryNodePending marks a Pod controlled by the Workflow whose node is
+// not yet in the persisted status. Argo saves the node in the pass that creates
+// the Pod, so the caller answers retryably instead of refusing.
+var ErrDeliveryNodePending = errors.New("delivery node is not saved yet")
+
 // DeliveryIdentity derives a receipt key from a live bound Pod and its native
 // Workflow node. Request selectors and container contents supply no identity.
 func DeliveryIdentity(w *wf.Workflow, p *core.Pod) (runlog.InfrastructureReceipt, error) {
 	if w == nil || p == nil || terminalWorkflow(w) || w.Labels[nativebinding.EngineLabel] != nativebinding.EngineValue {
 		return runlog.InfrastructureReceipt{}, ownership(nil)
 	}
-	n, ok := w.Status.Nodes[p.Annotations["workflows.argoproj.io/node-id"]]
+	node := p.Annotations["workflows.argoproj.io/node-id"]
+	n, ok := w.Status.Nodes[node]
 	id := deliveryRunID(w)
+	if !ok && nodePending(w, p, node, id) {
+		return runlog.InfrastructureReceipt{}, unavailable(ErrDeliveryNodePending)
+	}
 	if !ok || n.Type != wf.NodeTypePod || !podOwned(w, n, p) || id == "" {
 		return runlog.InfrastructureReceipt{}, ownership(nil)
 	}
@@ -29,6 +39,11 @@ func DeliveryIdentity(w *wf.Workflow, p *core.Pod) (runlog.InfrastructureReceipt
 		return runlog.InfrastructureReceipt{}, ownership(nil)
 	}
 	return runlog.InfrastructureReceipt{RunID: id, WorkflowUID: string(w.UID), NodeID: n.ID, Step: path.name, PodUID: string(p.UID), PodRestarts: n.FailedPodRestarts}, nil
+}
+
+// nodePending reports an absent node named by a bound run's own Pod.
+func nodePending(w *wf.Workflow, p *core.Pod, node, id string) bool {
+	return node != "" && id != "" && controlledBy(w, p)
 }
 
 func deliveryRunID(w *wf.Workflow) string {

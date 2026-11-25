@@ -30,9 +30,10 @@ func boundPod(w *wf.Workflow, n wf.NodeStatus, pods []*core.Pod) *core.Pod {
 	return found
 }
 func podOwned(w *wf.Workflow, n wf.NodeStatus, p *core.Pod) bool {
-	if p == nil || !podIdentity(w, n, p) {
-		return false
-	}
+	return p != nil && podIdentity(w, n, p) && controlledBy(w, p)
+}
+
+func controlledBy(w *wf.Workflow, p *core.Pod) bool {
 	owner := meta.GetControllerOf(p)
 	controllers := 0
 	for _, o := range p.OwnerReferences {

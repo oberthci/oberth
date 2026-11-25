@@ -4,7 +4,7 @@ Source evidence pin: 5e1200a2. Release oracle: the released v0.23.4 tag once pub
 
 Regenerate: python3 hack/plans/parity.py --reference /path/to/old-checkout --rewrite /path/to/REWRITE.md. Portable self-check: python3 hack/plans/parity.py --check.
 Only extracted REWRITE.md §4 issue-table cells are hashed; unrelated prose/line numbers are not inputs. SHA256 a894a915ff94061a92cc88abdf96f9a76b292cf1e899d3cf96f62a1fa31d64e0.
-Spec input: docs/plans/dispositions.json (override --dispositions); SHA256 244195a1087050841bd979e262b366cb4f53cf3cc9e59eaf26c1914b02dfb60d; 111 marked Delta locations.
+Spec input: docs/plans/dispositions.json (override --dispositions); SHA256 fc6111952c09ccd0049a297c92f0fcbb210b389c0c77b4c15313d3542f132a38; 111 marked Delta locations.
 Sweep input: docs/plans/sweeps.json (override --sweeps, --sweep-dir); SHA256 9491f4c23060f639f680275de382e69e7a25f79de60c40fd611d9bc58b03941e; 32 findings.
 Dependency input: docs/plans/dependencies.json; SHA256 edf3f1ae37e3d478361a22b6a0a43d88cec84093b007cf979c8ee8f234755d42. JSON consumer permissions, recorded reference ownership and intended package acyclicity are checked on every run.
 
