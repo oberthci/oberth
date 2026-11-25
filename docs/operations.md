@@ -1,7 +1,9 @@
 # Operate Oberth
 
 `oberth system status` shows readiness; `oberth commit status <ref>` shows CI; the browser Status
-screen adds version, run counts and detail. [Installation](install.md) covers upgrades, backups and
+screen adds version, run counts and detail. After replacing the signing key, run upgrades with
+the new release's client; an older client pins the earlier key and refuses the new release.
+[Installation](install.md) covers upgrades, backups and
 unseal. Keep Git policy and rewrites compatible with the bound remote; `oberth repo add` rechecks.
 
 ## Read a failure

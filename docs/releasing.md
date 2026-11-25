@@ -115,7 +115,6 @@ Use Linux amd64, Go **go1.26.10**, Python 3, curl, Git, make, grep and `sha256su
 Keep work private. Allow 12 GiB and eight minutes (more cold), plus 0.7 GiB in `$TMPDIR`.
 Have registry write access and a repository release-write token. Choose stable `vMAJOR.MINOR.PATCH`
 above `latest` (404 means no floor):
-
 ```sh
 export RELEASE_ORIGIN=https://github.com/oberthci/oberth/releases/download
 curl --silent https://api.github.com/repos/oberthci/oberth/releases/latest | grep '"tag_name"'
@@ -133,25 +132,23 @@ chmod 700 "$RELEASE_WORK" "$RELEASE_PRIVATE"
 bash hack/release.sh prepare-signing
 export PATH="$RELEASE_PRIVATE:$PATH"
 ```
-
 `go version` must show the pinned version. `prepare-signing` downloads and checks `cosign` v3.1.1:
 https://github.com/sigstore/cosign/releases/download/v3.1.1/cosign-linux-amd64 SHA256
 `ae1ecd212663f3693ad9edf8b1a183900c9a52d3155ba6e354237f9a0f6463fc`; exit 0 means the tool is ready.
 Create an empty-password key, pin its public half, and commit. Save it in encrypted offline custody.
+After replacing the signing key, run upgrades with the new release's client;
+an older client pins the earlier key and refuses the new release.
 The pin command prints the public key hash and updated paths:
-
 ```sh
 COSIGN_PASSWORD= cosign generate-key-pair --output-key-prefix "$RELEASE_WORK/release" </dev/null
 sh hack/release-pin.sh "$RELEASE_WORK/release.pub"
 git add internal/releaseverify/release-cosign.pub agent/skills/oberth/fetch-oberth
 git commit -m "Pin release verification key"
 ```
-
 Publish and test that pin commit on the public default branch, then check out its exact full ID.
 The built commit must be that public pinned commit. These scripts create no tag. Follow the
 [base publication procedure](../hack/base-image/README.md#publish-the-qualified-release-base).
 Keep its public digest readback; fetch the verified base and build twice with independent caches:
-
 ```sh
 git switch --detach "<public-pinned-commit>"
 git rev-parse HEAD
@@ -160,7 +157,6 @@ make release-bytes
 go build -p=2 -buildvcs=false -o "$RELEASE_TOOL" ./cmd/oberth-release
 grep -E '"commit"|sha256:' "$RELEASE_DIR/release.json"
 ```
-
 Base preparation exits 0 after checking its pin; the build prints “Release bytes built.” Compare
 the printed record's commit with HEAD. Deliver the key and sign offline with closed input:
 
