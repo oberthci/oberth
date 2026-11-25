@@ -320,7 +320,7 @@ liveness from external waits and checks the 90-second database readiness bound.
 
 Configured server identities use one bounded regular-target mount reader; projected
 symlinks and replacement targets are accepted. Person-owned profile files retain
-their own stricter reader. Forge and host keys parse before storage or listeners
+their own stricter reader; its public reads (CA, config) also accept kubelet's name -> ..data/name -> ..<version> layout inside the mount, root- or self-owned and not group/other writable, never a link that leaves it. Forge and host keys parse before storage or listeners
 open; Git is an explicit executable regular file. Listen ports are numeric 1–65535.
 The chart supplies runtime defaults; the loader requires every runtime setting.
 C2 supplies all three HTTP views through its existing authority and log owners;

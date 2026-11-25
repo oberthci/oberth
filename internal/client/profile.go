@@ -61,7 +61,12 @@ func directory(path string, private bool) (*os.Root, error) {
 func ReadPrivate(path string) ([]byte, error) { return readFile(path, true) }
 
 // ReadPublic permits readable certificates and metadata, but refuses writable files.
-func ReadPublic(path string) ([]byte, error) { return readFile(path, false) }
+func ReadPublic(path string) ([]byte, error) {
+	if data, ok, err := readKubeletFile(path); ok {
+		return data, err
+	}
+	return readFile(path, false)
+}
 
 func readFile(path string, private bool) ([]byte, error) {
 	root, err := directory(filepath.Dir(path), false)
