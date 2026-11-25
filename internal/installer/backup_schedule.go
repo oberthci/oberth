@@ -1,6 +1,7 @@
 package installer
 
-// BackupSchedule is operator-applied; printing it performs no cluster calls.
+// BackupSchedule is the operator-applied offline example; an installed
+// profile prints it with its running server image (InstalledBackupSchedule).
 const BackupSchedule = `# Apply in the installed server namespace, whose Pod Security policy is Restricted.
 # Edit the namespace, pinned image, schedule, backup PVC and memory bound before applying.
 # Keep operator profiles, decryption keys and unseal files off the cluster.

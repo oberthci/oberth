@@ -70,8 +70,7 @@ func (a application) runLocalInstaller(ctx context.Context, r installationReques
 	switch r.name {
 	case "backup":
 		if r.enabled("print-schedule") {
-			_, err := io.WriteString(out, installer.BackupSchedule)
-			return true, err
+			return true, a.printBackupSchedule(ctx, r, out)
 		}
 		if r.enabled("in-cluster") {
 			return true, a.backupInCluster(ctx, r, out)
@@ -84,6 +83,33 @@ func (a application) runLocalInstaller(ctx context.Context, r installationReques
 		return true, a.runSecretPut(ctx, r, in, out)
 	}
 	return false, nil
+}
+
+// printBackupSchedule pins the selected installation's running server image;
+// without a selected installation it prints the example offline.
+func (a application) printBackupSchedule(ctx context.Context, r installationRequest, out io.Writer) error {
+	_, dir, err := a.selectedInstallation(r)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if dir == "" {
+		_, err = io.WriteString(out, installer.BackupSchedule)
+		return err
+	}
+	session, err := a.openInstallation(r)
+	if err != nil {
+		return err
+	}
+	if err = session.openEngine(); err != nil {
+		return err
+	}
+	defer session.engine.Credentials.Close()
+	schedule, err := session.engine.InstalledBackupSchedule(ctx, session.profile.Namespace)
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(out, schedule)
+	return err
 }
 
 func (a application) openInstallation(r installationRequest) (installationSession, error) {
