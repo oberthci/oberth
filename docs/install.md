@@ -105,8 +105,10 @@ When the review shows a schema change, take a storage-level copy of the data vol
 oberth upgrade --dry-run
 oberth upgrade --yes
 ```
-Upgrades require signed releases; local charts use `oberth install --chart <directory>`. Add
-`--version <version>` to both commands to select a version. Offline `--release-dir <directory>`
+Upgrades require signed releases; local charts use `oberth install --chart <directory>`.
+After upgrading, replace the administrator CLI with that release's verified client and repoint
+wrappers to it.
+Add `--version <version>` to both commands to select a version. Offline `--release-dir <directory>`
 reads signed files or a parent of version directories (`v0.1.0`, `v0.2.0`). Version directories
 override flat files; invalid directories refuse. Same-schema repair needs both releases; select
 their parent. Review preserves settings and shows changed defaults, schema and revision; JSON has
