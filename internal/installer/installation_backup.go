@@ -124,6 +124,25 @@ func (i installationBackupInfo) storeHint() string {
 	return "Includes installation Secrets; external-store backups remain operator-owned."
 }
 
+// An update of a bundled store whose backup role is not set up says once how
+// to enable full backups, which refuse until then.
+const (
+	backupSetupReason = "Full backups need store snapshot access."
+	backupSetupRemedy = "Run oberth secretstore setup --backup-only for full backups; until then use oberth backup --database-only."
+)
+
+func (e *Engine) updateSnapshotHint(ctx context.Context, p *Plan) string {
+	values, err := inputs(p.release.chart, p.request.Values, p.choices.Namespace)
+	if err != nil || settingText(values, "secretStore", "bundled") != "on" {
+		return StoreSnapshotHint
+	}
+	source := installationBackupSource{engine: e, info: installationBackupInfo{Namespace: p.choices.Namespace, Values: values}}
+	if available, err := source.snapshotAvailable(ctx); err == nil && !available {
+		return backupSetupReason + " " + backupSetupRemedy
+	}
+	return StoreSnapshotHint
+}
+
 func storeAccessProblem() error {
 	return publicerr.New(publicerr.Forbidden, "Store snapshot access is missing.", "Run oberth secretstore setup --backup-only, then back up again; nothing was written or pruned.", nil)
 }

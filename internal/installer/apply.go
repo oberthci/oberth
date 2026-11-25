@@ -111,6 +111,7 @@ func (e *Engine) apply(ctx context.Context, p *Plan, approved string, progress P
 	}
 	if result.Updated {
 		result.Next = UpdateNext
+		result.StoreSnapshotHint = e.updateSnapshotHint(ctx, p)
 	}
 	return result, nil
 }
