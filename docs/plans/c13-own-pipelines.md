@@ -168,7 +168,7 @@ Installation policy follows [C9 invariant 7](c9-install-and-upgrade.md#invariant
 
 Automated release publication, enabled after cutover, uses only an admitted
 release run. The GitHub release token reaches only the publish and finalize steps and
-the signing key only its granted signing step.
+the signing key only its granted signing step. Manual publication opens its credential nonblockingly once, checks that opened regular private file and its location, then reads bounded bytes from it.
 One build target produces
 the matching server image, source-plugin image and chart, each with a declared command,
 for local use and release. `ux-gate` records complete command, flag and time baselines

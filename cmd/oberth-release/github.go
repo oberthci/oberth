@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/oberthci/oberth/internal/releaseverify"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
@@ -51,11 +52,13 @@ type apiCall struct {
 }
 
 func publicationFor(o options) (publication, error) {
-	token, err := os.ReadFile(o.token)
-	if err != nil || len(bytes.TrimSpace(token)) == 0 {
+	file, err := os.OpenFile(o.token, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
 		return publication{}, releaseToken
 	}
-	if err := privateTokenFile(o.token, o.dir); err != nil {
+	defer file.Close()
+	token, err := readPublicationCredential(file, o.dir)
+	if err != nil {
 		return publication{}, err
 	}
 	if o.origin != releaseverify.Origin {
@@ -72,16 +75,20 @@ func publicationFor(o options) (publication, error) {
 // privateTokenFile accepts the token file only when group and others have no
 // access to it and it lies outside the release directory, so neither another
 // user nor a publication of that directory can expose it.
-func privateTokenFile(token, dir string) error {
-	info, err := os.Stat(token)
+func privateTokenFile(opened *os.File, dir string) error {
+	info, err := opened.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		return releaseToken
 	}
 	if info.Mode().Perm()&0o077 != 0 {
 		return tokenShared
 	}
-	file, err := realPath(token)
+	file, err := realPath(opened.Name())
 	if err != nil {
+		return releaseToken
+	}
+	current, err := os.Stat(file)
+	if err != nil || !os.SameFile(info, current) {
 		return releaseToken
 	}
 	root, err := realPath(dir)
@@ -92,6 +99,18 @@ func privateTokenFile(token, dir string) error {
 		return tokenInside
 	}
 	return nil
+}
+
+func readPublicationCredential(file *os.File, dir string) ([]byte, error) {
+	if err := privateTokenFile(file, dir); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(io.LimitReader(file, 1<<20+1))
+	if err != nil || len(data) > 1<<20 || len(bytes.TrimSpace(data)) == 0 {
+		clear(data)
+		return nil, releaseToken
+	}
+	return data, nil
 }
 
 func realPath(path string) (string, error) {
