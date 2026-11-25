@@ -248,7 +248,7 @@ C2/C3/C4/C5/C7/C9/C10 import.
 - Static assets are embedded, fixed-map lookups with content-based versions. Shells
   contain no private data. The shell has a same-origin CSP without inline script or style; pages use
   text nodes only. The bearer stays in this origin's browser storage and is sent
-  only in the Authorization header. Asset URLs carry content versions. JSON conditional reads and gzip do not compress
+  only in the Authorization header. Asset URLs carry content versions. A UI revision binds the shell and response headers; a changed revision shows a persistent reload link. JSON conditional reads and gzip do not compress
   streams. Backup writes keep their 30-second idle bound.
 
 **Delta:** C1 never writes a secret, token or private key to logs, events, diagnostics or command

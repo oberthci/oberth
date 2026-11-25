@@ -62,7 +62,7 @@ details { margin: 6px 0; }
 summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 details pre { padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2); font-size: 12px; }
 #notice:empty { display: none; }
-#notice { max-width: 1564px; margin: 16px auto 0; padding: 10px 16px; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; }
+#notice, #upgrade { max-width: 1564px; margin: 16px auto 0; padding: 10px 16px; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; }
 #notice .empty { padding: 0; border: 0; text-align: left; background: none; color: var(--fg); }
 #notice pre { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2); font-family: var(--mono); font-size: 12px; }
 #signin { max-width: 480px; margin: 60px auto; padding: 28px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 30px var(--shadow); }
@@ -265,7 +265,7 @@ a.repo-group .chevron { visibility: hidden; }
  nav a { flex: 1; min-width: 0; }
  main, #signin { padding: 12px 12px 24px; }
  #signin { margin: 24px 12px; }
- #notice { margin: 12px 12px 0; }
+ #notice, #upgrade { margin: 12px 12px 0; }
  .filters label { flex: 1 1 100%; }
  .filters select { flex: 1; }
  .server-name { display: none; }

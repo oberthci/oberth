@@ -44,6 +44,8 @@ async function exchange(path, options = {}) {
   response = await fetch(path, {...request, credentials: "same-origin", redirect: "error", headers: {
     Accept: "application/json", ...(localStorage.getItem("oberth.token") ? {Authorization: "Bearer " + localStorage.getItem("oberth.token")} : {}), ...request.headers,
    }});
+  const revision = response.headers.get("X-Oberth-UI");
+  if (revision && revision !== document.querySelector('meta[name="oberth-ui"]').content) document.querySelector("#upgrade").hidden = false;
   if (!response.ok) value = await response.json();
  } catch (error) { if (error.name !== "AbortError") observe(false); throw error; }
  observe(!unavailable(response.status));
@@ -478,6 +480,6 @@ function readStatus() {
 // A bounded, single status read detects a silent server even during an idle event wait.
 setInterval(readStatus, 2000);
 document.addEventListener("visibilitychange", () => { if (document.hidden) connection.reading?.abort(); else readStatus(); });
-server.querySelector(".reload").addEventListener("click", event => { event.preventDefault(); location.reload(); });
+document.querySelectorAll("#server .reload, #upgrade a").forEach(link => link.addEventListener("click", event => { event.preventDefault(); location.reload(); }));
 if (localStorage.getItem("oberth.token")) readStatus();
 route();

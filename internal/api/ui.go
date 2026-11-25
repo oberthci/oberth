@@ -18,12 +18,14 @@ type uiAsset struct {
 	kind, version string
 }
 type uiBundle struct {
-	shell  []byte
-	assets map[string]uiAsset
+	shell    []byte
+	assets   map[string]uiAsset
+	revision string
 }
 
 func (s *Server) serveUIOrAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Oberth-UI", s.ui.revision)
 	if strings.HasPrefix(r.URL.Path, "/assets/") {
 		if _, ok := s.ui.assets[strings.TrimPrefix(r.URL.Path, "/assets/")]; !ok {
 			http.NotFound(w, r)
@@ -51,7 +53,8 @@ func loadUI() (uiBundle, error) {
 	for name, asset := range b.assets {
 		page = strings.ReplaceAll(page, "/assets/"+name, "/assets/"+name+"?v="+asset.version)
 	}
-	b.shell = []byte(page)
+	b.revision = fmt.Sprintf("%x", sha256.Sum256([]byte(page)))
+	b.shell = []byte(strings.ReplaceAll(page, "__OBERTH_UI__", b.revision))
 	return b, nil
 }
 
