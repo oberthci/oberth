@@ -21,6 +21,7 @@ func (s *Store) beginWrite(ctx context.Context) (*sql.Tx, func(), error) {
 		return nil, nil, refuse(locked, wait.Err())
 	}
 	release := func() { <-s.writes }
+	s.issueWrites, s.auditSpan = nil, [2]int64{}
 	for {
 		tx, err := s.writer.BeginTx(ctx, nil)
 		if err == nil {
@@ -81,7 +82,7 @@ func (s *Store) observe(ctx context.Context, apply func(*sql.Tx) error, events .
 	if err := writeEvents(ctx, tx, events); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commitWrite(ctx, tx); err != nil {
 		return databaseError(err)
 	}
 	s.signalChange()

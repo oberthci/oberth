@@ -37,6 +37,9 @@ type Store struct {
 	uses                                                        chan string
 	usesDone                                                    chan struct{}
 	stopUses                                                    context.CancelFunc
+	issueFacts                                                  issueFacts
+	issueWrites                                                 []int64  // held by the write slot
+	auditSpan                                                   [2]int64 // held by the write slot
 }
 
 // Create exclusively creates the current baseline. It never upgrades a database.

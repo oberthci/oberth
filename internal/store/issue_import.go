@@ -43,7 +43,7 @@ func (s *Store) ImportIssues(ctx context.Context, a stateport.Action, q statepor
 		if found {
 			return unchanged{}
 		}
-		if err := insertImportedIssues(ctx, tx, q, source); err != nil {
+		if err := s.insertImportedIssues(ctx, tx, q, source); err != nil {
 			return err
 		}
 
@@ -68,10 +68,10 @@ func importOutcome(err error) error {
 	return stateport.ImportContext(err, 1, 0)
 }
 
-func insertImportedIssues(ctx context.Context, tx *sql.Tx, q stateport.IssueImport, source model.IssueImportSource) error {
+func (s *Store) insertImportedIssues(ctx context.Context, tx *sql.Tx, q stateport.IssueImport, source model.IssueImportSource) error {
 	for i, v := range q.Records {
 		issue := v.Issue(source)
-		if err := saveIssue(ctx, tx, &issue, true); err != nil {
+		if err := s.saveIssue(ctx, tx, &issue, true); err != nil {
 			return stateport.ImportContext(err, q.Line(i), v.ID)
 		}
 	}

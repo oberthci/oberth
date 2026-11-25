@@ -48,7 +48,7 @@ func (s *Store) change(ctx context.Context, m mutation, apply func(*sql.Tx) erro
 	if err := writeEvents(ctx, tx, events); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commitWrite(ctx, tx); err != nil {
 		return commitFailure{databaseError(err)}
 	}
 	if m.action == "backup.completed" {
@@ -86,8 +86,11 @@ func (s *Store) appendAudit(ctx context.Context, tx *sql.Tx, m mutation) error {
 	if err != nil {
 		return databaseError(err)
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE audit_head SET id=?,hash=? WHERE singleton=1`, action.ID, hash)
-	return databaseError(err)
+	if _, err = tx.ExecContext(ctx, `UPDATE audit_head SET id=?,hash=? WHERE singleton=1`, action.ID, hash); err != nil {
+		return databaseError(err)
+	}
+	s.noteAudit(head.ID, action.ID)
+	return nil
 }
 
 // Audit verifies the returned page and its link to the preceding row.

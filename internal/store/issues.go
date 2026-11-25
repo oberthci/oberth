@@ -30,7 +30,7 @@ func (s *Store) CreateIssue(ctx context.Context, action stateport.Action, issue 
 	issue.CreatedAt = s.options.Clock().UTC()
 	issue.UpdatedAt = issue.CreatedAt
 	err := s.change(ctx, mutation{action.Actor, "issue.create", "issue", "", issue.Title}, func(tx *sql.Tx) error {
-		if err := saveIssue(ctx, tx, &issue, true); err != nil {
+		if err := s.saveIssue(ctx, tx, &issue, true); err != nil {
 			return err
 		}
 		action.ObserveIssue(issue)
@@ -51,7 +51,7 @@ func readIssue(ctx context.Context, tx *sql.Tx, id int64) (model.Issue, error) {
 	return issue, nil
 }
 
-func saveIssue(ctx context.Context, tx *sql.Tx, issue *model.Issue, insert bool) error {
+func (s *Store) saveIssue(ctx context.Context, tx *sql.Tx, issue *model.Issue, insert bool) error {
 	if insert && issue.ID == 0 {
 		if err := tx.QueryRowContext(ctx, `SELECT coalesce((SELECT seq+1 FROM sqlite_sequence WHERE name='issues'),1)`).Scan(&issue.ID); err != nil {
 			return databaseError(err)
@@ -65,8 +65,11 @@ func saveIssue(ctx context.Context, tx *sql.Tx, issue *model.Issue, insert bool)
 	if insert {
 		query = `INSERT INTO issues(revision,upstream,repo,state,value,id) VALUES(?,?,?,?,?,?)`
 	}
-	_, err := tx.ExecContext(ctx, query, args...)
-	return databaseError(err)
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return databaseError(err)
+	}
+	s.noteIssueWrite(issue.ID)
+	return nil
 }
 
 func (s *Store) Issue(ctx context.Context, id int64) (model.Issue, error) {
@@ -110,7 +113,7 @@ func (s *Store) UpdateIssue(ctx context.Context, action stateport.Action, patch 
 			return err
 		}
 		action.ObserveIssue(issue)
-		return saveIssue(ctx, tx, &issue, false)
+		return s.saveIssue(ctx, tx, &issue, false)
 	}, action.Events...)
 	return issue, err
 }
@@ -133,7 +136,7 @@ func (s *Store) ChangeIssueLock(ctx context.Context, action stateport.Action, re
 		}
 		issue.Lock = &model.IssueLock{Owner: request.Owner, AcquiredAt: now, ExpiresAt: now.Add(5 * time.Minute)}
 		action.ObserveIssue(issue)
-		return saveIssue(ctx, tx, &issue, false)
+		return s.saveIssue(ctx, tx, &issue, false)
 	}, action.Events...)
 }
 
@@ -159,7 +162,7 @@ func (s *Store) CloseIssue(ctx context.Context, action stateport.Action, request
 		issue.UpdatedAt = now
 		issue.Revision++
 		action.ObserveIssue(issue)
-		return saveIssue(ctx, tx, &issue, false)
+		return s.saveIssue(ctx, tx, &issue, false)
 	}, action.Events...)
 }
 
@@ -212,7 +215,7 @@ func (s *Store) ReopenIssue(ctx context.Context, action stateport.Action, reques
 		issue.UpdatedAt = now
 		issue.Revision++
 		action.ObserveIssue(issue)
-		return saveIssue(ctx, tx, &issue, false)
+		return s.saveIssue(ctx, tx, &issue, false)
 	}, action.Events...)
 }
 
@@ -240,6 +243,7 @@ func (s *Store) DeleteIssue(ctx context.Context, action stateport.Action, reques
 		if _, err := tx.ExecContext(ctx, `DELETE FROM issues WHERE id=?`, issue.ID); err != nil {
 			return refuse(conflict, err)
 		}
+		s.noteIssueWrite(issue.ID)
 		return nil
 	}, action.Events...)
 }

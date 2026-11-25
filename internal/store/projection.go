@@ -40,7 +40,7 @@ ORDER BY id DESC LIMIT 1`, r.Repo, r.Ref).Scan(&id)
 	}
 	issue = issue.WithCIOutcome(model.CIIssueOutcome{Repo: r.Repo, Ref: r.Ref, RunID: r.ID,
 		Body: encode(r.Failure), Passed: r.Status == stepmodel.RunPassed, At: s.options.Clock().UTC()})
-	err = saveIssue(ctx, tx, &issue, id == 0)
+	err = s.saveIssue(ctx, tx, &issue, id == 0)
 	return issue.ID, err
 }
 

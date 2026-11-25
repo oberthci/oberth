@@ -15,24 +15,48 @@ import (
 // Issues lists the issues of canonical repositories (nil scope: all), newest
 // first; an upstream's repository-less issues follow its repositories.
 func (s *Store) Issues(ctx context.Context, scope []string, filter model.IssueFilter) ([]model.Issue, error) {
-	predicate, args := scopePredicate("repo", scope)
+	page, err := s.issuePage(ctx, repositoryIssueScope(scope), filter)
+	return page.Issues, err
+}
+
+// ScopedIssues lists an upstream scope's issues with the page's totals.
+func (s *Store) ScopedIssues(ctx context.Context, scope stateport.IssueScope, filter model.IssueFilter) (stateport.IssuePage, error) {
+	return s.issuePage(ctx, upstreamIssueScope(scope), filter)
+}
+
+// issueScope is a list scope as SQL and as the same rule over cached facts;
+// without the rule, totals come from the scan.
+type issueScope struct {
+	sql  string
+	args []any
+	in   func(*issueFact) bool
+}
+
+func repositoryIssueScope(scope []string) issueScope {
+	set := issueScope{in: func(*issueFact) bool { return true }}
+	set.sql, set.args = scopePredicate("repo", scope)
 	if scope != nil {
 		upstreams := []string{}
 		for _, repo := range scope {
 			upstreams = append(upstreams, strings.SplitN(repo, "/", 2)[0])
 		}
 		p, a := scopePredicate("upstream", upstreams)
-		predicate = "(" + predicate + " OR (repo='' AND " + p + "))"
-		args = append(args, a...)
+		set.sql = "(" + set.sql + " OR (repo='' AND " + p + "))"
+		set.args = append(set.args, a...)
+		set.in = func(v *issueFact) bool {
+			return slices.Contains(scope, v.repo) || v.repo == "" && slices.Contains(upstreams, v.upstream)
+		}
 	}
-	page, err := s.issuePage(ctx, predicate, args, filter)
-	return page.Issues, err
+	return set
 }
 
-// ScopedIssues lists an upstream scope's issues with the page's totals.
-func (s *Store) ScopedIssues(ctx context.Context, scope stateport.IssueScope, filter model.IssueFilter) (stateport.IssuePage, error) {
-	predicate, args := scopedIssuePredicate(scope)
-	return s.issuePage(ctx, predicate, args, filter)
+func upstreamIssueScope(scope stateport.IssueScope) issueScope {
+	set := issueScope{in: func(v *issueFact) bool {
+		global := v.upstream == "" || v.upstream == "global"
+		return !global && (scope.Upstreams == nil || slices.Contains(scope.Upstreams, v.upstream)) || scope.Global && global
+	}}
+	set.sql, set.args = scopedIssuePredicate(scope)
+	return set
 }
 
 // issueList is one list read: the issue set (scope, repository, kind and
@@ -46,7 +70,7 @@ type issueList struct {
 
 // issuePage reads the page and its totals in one snapshot, so a page's
 // position always agrees with its counts. Scope applies before anything else.
-func (s *Store) issuePage(ctx context.Context, scope string, scopeArgs []any, f model.IssueFilter) (stateport.IssuePage, error) {
+func (s *Store) issuePage(ctx context.Context, scope issueScope, f model.IssueFilter) (stateport.IssuePage, error) {
 	page := stateport.IssuePage{Issues: []model.Issue{}}
 	if err := validateIssueFilter(f); err != nil {
 		return page, err
@@ -57,9 +81,18 @@ func (s *Store) issuePage(ctx context.Context, scope string, scopeArgs []any, f 
 	}
 	defer func() { _ = tx.Rollback() }()
 	list := issueList{tx: tx, filter: f}
-	list.set, list.args = issueSet(scope, scopeArgs, f, s.options.Clock())
+	list.set, list.args = issueSet(scope.sql, scope.args, f, s.options.Clock())
+	var facts []issueFact
+	var cut [2]sql.NullFloat64
+	cached := scope.in != nil && f.Query == ""
+	if cached {
+		facts, cut, cached = s.snapshotFacts(ctx, tx, list.args[:2])
+	}
 	if page.Issues, err = list.rows(ctx); err != nil {
 		return page, err
+	}
+	if cached && list.cachedTotals(&page, facts, cut, scope.in) {
+		return page, nil
 	}
 	return page, list.totals(ctx, &page)
 }
