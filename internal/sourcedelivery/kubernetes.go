@@ -2,6 +2,7 @@ package sourcedelivery
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	authv1 "k8s.io/api/authentication/v1"
@@ -13,8 +14,9 @@ import (
 // bearer authority; the bound Pod UID is checked against a live Pod before
 // deriving the Workflow owner. Request selectors never establish identity.
 type KubernetesAuth struct {
-	Review func(context.Context, *authv1.TokenReview) (*authv1.TokenReview, error)
-	Pod    func(context.Context, string, string) (*corev1.Pod, error)
+	Audience string
+	Review   func(context.Context, *authv1.TokenReview) (*authv1.TokenReview, error)
+	Pod      func(context.Context, string, string) (*corev1.Pod, error)
 }
 
 func (k KubernetesAuth) Authenticate(ctx context.Context, token string) (Caller, error) {
@@ -23,11 +25,18 @@ func (k KubernetesAuth) Authenticate(ctx context.Context, token string) (Caller,
 	}
 	// Both the projection and TokenReview use the API server audience by default.
 	// Kubernetes verifies audience, expiry and Pod binding before returning a user.
-	review, err := k.Review(ctx, &authv1.TokenReview{Spec: authv1.TokenReviewSpec{Token: token}})
+	spec := authv1.TokenReviewSpec{Token: token}
+	if k.Audience != "" {
+		spec.Audiences = []string{k.Audience}
+	}
+	review, err := k.Review(ctx, &authv1.TokenReview{Spec: spec})
 	if err != nil {
 		return Caller{}, &Failure{Code: "unavailable", Reason: "other"}
 	}
 	if review == nil || !review.Status.Authenticated || review.Status.Error != "" {
+		return Caller{}, &Failure{Code: "unauthenticated"}
+	}
+	if k.Audience != "" && !slices.Contains(review.Status.Audiences, k.Audience) {
 		return Caller{}, &Failure{Code: "unauthenticated"}
 	}
 	return k.boundPod(ctx, review.Status.User)
@@ -62,5 +71,5 @@ func podOwner(pod *corev1.Pod, parts []string, uid string) (Caller, error) {
 	if owner == nil || owner.APIVersion != "argoproj.io/v1alpha1" || owner.Kind != "Workflow" || owner.Name == "" || owner.UID == "" {
 		return Caller{}, &Failure{Code: "forbidden"}
 	}
-	return Caller{Namespace: pod.Namespace, Workflow: owner.Name, UID: string(owner.UID)}, nil
+	return Caller{Namespace: pod.Namespace, Workflow: owner.Name, UID: string(owner.UID), Pod: pod.DeepCopy()}, nil
 }

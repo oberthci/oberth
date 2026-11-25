@@ -150,7 +150,7 @@ func TestFailureClassTyped(t *testing.T) {
 			p.Status.ContainerStatuses = nil
 			p.Status.Message = "OOMKilled NodeShutdown DeadlineExceeded"
 		}},
-		{"source", "source delivery failed", stepmodel.FailureInfrastructure, func(p *core.Pod) {
+		{"source", "source delivery failed", stepmodel.FailureAuthor, func(p *core.Pod) {
 			p.Status.InitContainerStatuses = []core.ContainerStatus{{Name: "init-artifact-oberth", State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 1}}}}
 		}},
 		{"init", "init container failed", stepmodel.FailureAuthor, func(p *core.Pod) {

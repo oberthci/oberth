@@ -21,10 +21,13 @@ type SecretStoreAccess struct {
 // SecretDelivery contains only public store connection facts, never a token or value.
 // The server reads CAPEM from its configured store CA mount.
 type SecretDelivery struct {
-	Address    string            `json:"address"`
-	ServerName string            `json:"server_name"`
-	CAPEM      string            `json:"ca_pem"`
-	Access     SecretStoreAccess `json:"access"`
+	BrokerAddress    string            `json:"broker_address,omitempty"`
+	BrokerServerName string            `json:"broker_server_name,omitempty"`
+	BrokerCAPEM      string            `json:"broker_ca_pem,omitempty"`
+	Address          string            `json:"address"`
+	ServerName       string            `json:"server_name"`
+	CAPEM            string            `json:"ca_pem"`
+	Access           SecretStoreAccess `json:"access"`
 }
 
 const (

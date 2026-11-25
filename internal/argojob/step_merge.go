@@ -84,10 +84,19 @@ func mergeDiagnosis(row projected, old stepmodel.RunStep) projected {
 }
 
 func keepDiagnosis(old, current stepmodel.RunStep) bool {
+	// A delivery diagnosis is recomputed from the exact physical Pod receipt.
+	// An observed replacement cannot inherit the old Pod's infrastructure class.
+	if deliveryDiagnosisReplaced(old, current) {
+		return false
+	}
 	if !terminalStep(old.Status) {
 		return false
 	}
 	return mergeStatus(old.Status, current.Status) != current.Status ||
 		current.DisplayReason == reasonFailed || current.DisplayReason == reasonUnknown || current.DisplayReason == reasonStopped ||
 		old.FailureClass != "" && old.FailureClass != stepmodel.FailureUnknown && strings.HasPrefix(current.DisplayReason, "exited with code ")
+}
+
+func deliveryDiagnosisReplaced(old, current stepmodel.RunStep) bool {
+	return old.FailureClass == stepmodel.FailureInfrastructure && (old.DisplayReason == reasonSource || old.DisplayReason == reasonSecret) && current.FailureClass == stepmodel.FailureAuthor
 }

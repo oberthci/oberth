@@ -43,6 +43,11 @@ func decodeIndex(data []byte, id string) (index, error) {
 			return empty, storage(invalidRetainedContainerSpanReason, nil)
 		}
 	}
+	for _, receipt := range saved.Infrastructure {
+		if !receipt.valid() || receipt.RunID != id {
+			return empty, storage(invalidRetainedLogIndexReason, nil)
+		}
+	}
 	return saved, nil
 }
 func (s *Store) save(id string, saved index) error {

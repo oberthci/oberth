@@ -5,6 +5,7 @@ import (
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"github.com/argoproj/argo-workflows/v4/workflow/packer"
 	"github.com/oberthci/oberth/internal/admissioncontract"
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
 	core "k8s.io/api/core/v1"
@@ -32,11 +33,13 @@ type projected struct {
 
 // Project reads copies and folds retry nodes into the admitted logical paths.
 type Projection struct {
-	Plan          admissioncontract.Plan
-	Workflow      *wf.Workflow
-	Pods          []*core.Pod
-	Previous      []stepmodel.RunStep
-	PreviousNodes []stateport.Node
+	RunID          string
+	Infrastructure []runlog.InfrastructureReceipt
+	Plan           admissioncontract.Plan
+	Workflow       *wf.Workflow
+	Pods           []*core.Pod
+	Previous       []stepmodel.RunStep
+	PreviousNodes  []stateport.Node
 }
 
 func Project(ctx context.Context, in Projection) (Observation, error) {
@@ -61,7 +64,7 @@ func Project(ctx context.Context, in Projection) (Observation, error) {
 		if err := ctx.Err(); err != nil {
 			return Observation{}, err
 		}
-		rows = appendPlan(rows, projectionInput{entry: entry, w: w, pods: pods, groups: groups, out: &out, paths: paths, waits: waits, previous: prev, previousNodes: in.PreviousNodes})
+		rows = appendPlan(rows, projectionInput{runID: in.RunID, infrastructure: in.Infrastructure, entry: entry, w: w, pods: pods, groups: groups, out: &out, paths: paths, waits: waits, previous: prev, previousNodes: in.PreviousNodes})
 	}
 	seen := 0
 	for _, nodes := range groups {
@@ -82,15 +85,17 @@ func Project(ctx context.Context, in Projection) (Observation, error) {
 }
 
 type projectionInput struct {
-	entry         admissioncontract.PlanEntry
-	w             *wf.Workflow
-	pods          []*core.Pod
-	groups        map[string][]wf.NodeStatus
-	out           *Observation
-	paths         nativePaths
-	waits         map[string]string
-	previous      []stepmodel.RunStep
-	previousNodes []stateport.Node
+	runID          string
+	infrastructure []runlog.InfrastructureReceipt
+	entry          admissioncontract.PlanEntry
+	w              *wf.Workflow
+	pods           []*core.Pod
+	groups         map[string][]wf.NodeStatus
+	out            *Observation
+	paths          nativePaths
+	waits          map[string]string
+	previous       []stepmodel.RunStep
+	previousNodes  []stateport.Node
 }
 
 func appendPlan(rows []projected, in projectionInput) []projected {
@@ -152,6 +157,7 @@ func projectAttempt(row *projected, in projectionInput, n wf.NodeStatus) {
 	}
 	p := boundPod(in.w, n, in.pods)
 	d := diagnose(n, p, stoppedNode(in, n), nodeTemplate(in.w, n, admissioncontract.MaxNestingDepth))
+	d = receiptDiagnosis(d, in, n, p)
 	row.step.Status, row.step.DisplayReason, row.step.Detail, row.step.FailureClass = nodeStatus(n.Phase), d.reason, d.detail, d.class
 	if lock := waitingLock(n); lock != "" {
 		row.step.DisplayReason = lockReason(lock)
@@ -161,13 +167,13 @@ func projectAttempt(row *projected, in projectionInput, n wf.NodeStatus) {
 		row.step.StartedAt = timePointer(n.StartedAt.Time)
 	}
 	row.step.FinishedAt = timePointer(n.FinishedAt.Time)
-	podName := ""
+	podName, podUID := "", ""
 	if p != nil {
-		podName = p.Name
+		podName, podUID = p.Name, string(p.UID)
 		row.step.Logs = append(row.step.Logs, stepmodel.LogSelector{NodeID: n.ID, PodName: p.Name, Container: d.container})
 	}
 	row.step.Attempts = append(row.step.Attempts, stepmodel.StepAttempt{NodeID: n.ID, PodName: podName, Status: row.step.Status})
-	in.out.Nodes = append(in.out.Nodes, stateport.Node{NodeID: n.ID, Order: append([]int(nil), in.paths[n.ID].order...), Path: row.step.Path, Template: n.TemplateName, Boundary: n.BoundaryID, PodName: podName, Message: d.detail, Attempt: attempt, Status: row.step.Status, NeverRunSkip: neverRunSkip(n, in.pods), PodRestarted: n.FailedPodRestarts > 0, Exit: d.exit, Credential: new(in.entry.CredentialIntent), StartedAt: timePointer(n.StartedAt.Time), FinishedAt: timePointer(n.FinishedAt.Time)})
+	in.out.Nodes = append(in.out.Nodes, stateport.Node{PodUID: podUID, NodeID: n.ID, Order: append([]int(nil), in.paths[n.ID].order...), Path: row.step.Path, Template: n.TemplateName, Boundary: n.BoundaryID, PodName: podName, Message: d.detail, Attempt: attempt, Status: row.step.Status, NeverRunSkip: neverRunSkip(n, in.pods), PodRestarted: n.FailedPodRestarts > 0, Exit: d.exit, Credential: new(in.entry.CredentialIntent), StartedAt: timePointer(n.StartedAt.Time), FinishedAt: timePointer(n.FinishedAt.Time)})
 	if !terminalStep(row.step.Status) || d.exit == nil && n.Phase != wf.NodeSkipped && n.Phase != wf.NodeOmitted {
 		in.out.Complete = false
 	}

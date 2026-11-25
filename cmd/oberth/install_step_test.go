@@ -6,7 +6,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"github.com/oberthci/oberth/internal/runtimeconfig"
@@ -23,16 +22,15 @@ import (
 )
 
 func TestSecretStepDeliversPrivatelyCleansAndPreservesExitStatus(t *testing.T) {
-	backend := &storefake.Store{Resources: map[string]map[string]any{"/kv/steps/step-account/registry/key": {"value": base64.StdEncoding.EncodeToString([]byte("fixture-secret"))}}}
-	server := deliveryHTTPServer(t, backend)
-	cfg, err := decodeConfig(validConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := newDeliveryFixture(t)
+	backend := f.backend
+	backend.Resources["/kv/steps/step-account/registry/key"] = map[string]any{"value": "Zml4dHVyZS1zZWNyZXQ="}
+	server := httptest.NewTLSServer(f.handler(t))
+	t.Cleanup(server.Close)
+	cfg := f.o.c.config
 	cfg.SecretStore.Address = server.URL
 	request := storeOperatorRequest(t, cfg, server.Certificate().Raw)
-	claims := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"system:serviceaccount:pipelines:step-account"}`))
-	if err = os.WriteFile(request.text("token-file"), []byte("e30."+claims+".signature"), 0600); err != nil {
+	if err := os.WriteFile(request.text("token-file"), []byte(f.jwt), 0600); err != nil {
 		t.Fatal(err)
 	}
 	_, token := projectedStepInputs(t, request)
@@ -46,7 +44,7 @@ func TestSecretStepDeliversPrivatelyCleansAndPreservesExitStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, diagnostic := &bytes.Buffer{}, &bytes.Buffer{}
-	delivery := runtimeconfig.SecretDelivery{Address: server.URL, ServerName: "127.0.0.1", CAPEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})), Access: runtimeconfig.SecretStoreAccess(storeConfiguration(cfg))}
+	delivery := runtimeconfig.SecretDelivery{BrokerAddress: server.URL, BrokerServerName: "127.0.0.1", BrokerCAPEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})), Access: runtimeconfig.SecretStoreAccess(storeConfiguration(cfg))}
 	configuration, _ := json.Marshal(delivery)
 	env := map[string]string{runtimeconfig.SecretConfigEnv: string(configuration), runtimeconfig.SecretPathsEnv: `["registry/key"]`, runtimeconfig.SecretTokenEnv: token, runtimeconfig.SecretScratchEnv: parent}
 	app := application{in: &bytes.Buffer{}, out: out, diagnostic: diagnostic, env: func(key string) string { return env[key] }}

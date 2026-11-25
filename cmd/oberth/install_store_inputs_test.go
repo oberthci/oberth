@@ -51,13 +51,13 @@ func TestSecretStepEnvironmentContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := runtimeconfig.SecretDelivery{Address: "https://store.example", ServerName: "store.example", CAPEM: "mounted-ca", Access: runtimeconfig.SecretStoreAccess(storeConfiguration(cfg))}
+	delivery := runtimeconfig.SecretDelivery{BrokerAddress: "https://delivery.example", BrokerServerName: "delivery.example", BrokerCAPEM: "mounted-ca", Access: runtimeconfig.SecretStoreAccess(storeConfiguration(cfg))}
 	raw, err := json.Marshal(delivery)
 	if err != nil {
 		t.Fatal(err)
 	}
 	limit := string(raw) + strings.Repeat(" ", (1<<20)-len(raw))
-	wantInputs := secretStepInputs{connection: secretstore.Connection{URL: delivery.Address, ServerName: delivery.ServerName, CA: []byte(delivery.CAPEM)}, config: storeConfiguration(cfg), paths: []string{"registry/key"}, token: "/mounted/token", scratch: "/mounted/scratch"}
+	wantInputs := secretStepInputs{connection: secretstore.Connection{URL: delivery.BrokerAddress, ServerName: delivery.BrokerServerName, CA: []byte(delivery.BrokerCAPEM)}, paths: []string{"registry/key"}, token: "/mounted/token", scratch: "/mounted/scratch"}
 	for _, row := range []struct{ name, key, value string }{
 		{"valid", "", ""},
 		{"exact limit", runtimeconfig.SecretConfigEnv, limit},

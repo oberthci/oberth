@@ -9396,14 +9396,14 @@
     "docs/plans/c12-agent-client.md": "1839b17c036fa9a854df8097a076a712f84c9660b1945f029d5ae9efe728ddac",
     "docs/plans/c13-own-pipelines.md": "3264a0141755c9fc9b736ad06cc1589d23d855a1c0b51dced00d304a574db790",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
-    "docs/plans/c2-service-actions-and-history.md": "ee18d2e362eaf2575f61d97f545a1ec1dec7d73702c8d9214100a7e36d42ab61",
+    "docs/plans/c2-service-actions-and-history.md": "968a62d77d86794761c1e05f24f22f2ec765fb9d3c12134099b54419a57feb76",
     "docs/plans/c3-wiring-and-submission.md": "a5b809053fd3596f0be3388983bdfe2d6e62be96fa5005f31b43874c8369411b",
     "docs/plans/c4-admission-rules-and-plan.md": "d7c2a5a09ea28c71d5aa853d41db1e0f952cf1701ef8011e4d5db7b9b49f042a",
-    "docs/plans/c5-native-execution.md": "1111dc44764a431556a4ee4175d42786702865b9d12e090464c6bd73fc88ab22",
-    "docs/plans/c6-source-delivery.md": "b234c97f1365905d824a38e469b96433370dfb7ff038f78d3e5efd26a2dac41f",
+    "docs/plans/c5-native-execution.md": "2a662f9ca41a804082fe4fad0adad41838dca3b6b33d46c940219dc26b2bcc0a",
+    "docs/plans/c6-source-delivery.md": "c54459a2bbe8b208a33d3c925b7bc035131f099ce1f44a02d10c80a8999a8e29",
     "docs/plans/c7-durable-state.md": "5a40d02e4b3f726d821943d60f892e37b3f8cd424410bcc1fbf9c971386bba65",
-    "docs/plans/c8-logs.md": "60f21dbc1d3a8677ccf25e8d98e2e871f38713feff40b7fb7128c1d23bf3372f",
-    "docs/plans/c9-install-and-upgrade.md": "2821feeba6e4448f64f463bf950b5b0d7780fee2b8d6606e9682d772baefbf7d"
+    "docs/plans/c8-logs.md": "5e3a89199031575b9f6b9094a9752bdc505ec3e7b82226811295ba2e0ad09e29",
+    "docs/plans/c9-install-and-upgrade.md": "0694940ba5230db899b3314f55f091bc66d28c0421b36d5141a7a5544cb2572f"
   },
   "deltas": [
     {
@@ -10955,7 +10955,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** C9 owns static secret-store setup and checking. Grants change authority, not store policies. C2 accepts secret bytes through its authenticated writer port; the server may write or delete step secrets but may not read them. The tool requires an approved exact grant before writing; the human `secret put` flow grants first. Audit `secret.put.requested` before the write, using only public selectors. A stored value is reported as stored even if revoking the writer session fails.",
+      "basis": "**Delta:** C9 owns static secret-store setup and checking. Grants change authority, not store policies. C2 accepts secret bytes through its authenticated writer port; the server's writer identity may write or delete step secrets but cannot read them. C9's private delivery listener forwards a verified Pod's own reads without widening that identity. The tool requires an approved exact grant before writing; the human `secret put` flow grants first. Audit `secret.put.requested` before the write, using only public selectors. A stored value is reported as stored even if revoking the writer session fails.",
       "rows": [
         {
           "category": "MCP tools",
@@ -14935,7 +14935,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** Store rules are static: the server's writer role can write or delete but not read step secrets; a step's templated policy reads only its own account's subtree. Grants change no store rule. The server creates step accounts through C5. [C4 store grants](c4-admission-rules-and-plan.md#owned-data-and-public-contract) owns the single-account selection and complete exact-grant coverage. Store setup and checks use C9's verified client; store admin credentials never reach the daemon.",
+      "basis": "**Delta:** Store rules are static: the server's writer role can write or delete but not read step secrets; a step's templated policy reads only its own account's subtree. The private delivery listener fetches only with the live verified requesting Pod's identity, never the writer role; its own unavailable failures produce a durable C8 receipt before refusal. Step files remain private memory, and the step session is revoked before command execution. Grants change no store rule. The server creates step accounts through C5. [C4 store grants](c4-admission-rules-and-plan.md#owned-data-and-public-contract) owns the single-account selection and complete exact-grant coverage. Store setup and checks use C9's verified client; store admin credentials never reach the daemon.",
       "rows": [],
       "predicates": [
         {

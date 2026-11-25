@@ -97,7 +97,10 @@ func (c *Client) JSON(ctx context.Context, r Request, out any) (int, error) {
 func decodeResponse(resp *http.Response, out any, accepted int) (int, error) {
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	defer clear(raw)
-	if err != nil || len(raw) > maxBody {
+	if err != nil {
+		return resp.StatusCode, refuse("connect", err)
+	}
+	if len(raw) > maxBody {
 		return resp.StatusCode, refuse("limit", err)
 	}
 	if resp.StatusCode == accepted {
@@ -105,6 +108,9 @@ func decodeResponse(resp *http.Response, out any, accepted int) (int, error) {
 	}
 	if resp.StatusCode == http.StatusServiceUnavailable {
 		return resp.StatusCode, refuse("sealed", nil)
+	}
+	if resp.StatusCode >= 500 {
+		return resp.StatusCode, refuse("connect", nil)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return resp.StatusCode, refuse("request", fmt.Errorf("HTTP %d", resp.StatusCode))
@@ -128,7 +134,7 @@ func refuse(code string, cause error) error {
 		reason, remedy = runtimeconfig.SecretStoreConfiguration()
 	}
 	kind := publicerr.InvalidInput
-	if code == "sealed" || code == "configuration" {
+	if code == "sealed" || code == "configuration" || code == "connect" || code == "broker" || code == "response" {
 		kind = publicerr.Unavailable
 	}
 	return publicerr.New(kind, reason, remedy, cause)

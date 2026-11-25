@@ -328,7 +328,7 @@ func (e *Executor) observeRun(ctx context.Context, t *tracking) error {
 		return e.adoptionFailed(ctx, t, err)
 	}
 	pods := e.config.Cache.Pods(w.Name)
-	o, err := Project(ctx, Projection{Plan: t.plan, Workflow: w, Pods: pods, Previous: t.previous, PreviousNodes: t.previousNodes})
+	o, err := e.project(ctx, t, w, pods)
 	if err != nil {
 		return &nativeReadError{err}
 	}

@@ -31,6 +31,7 @@ const (
 	reasonOOM         = "out of memory"
 	reasonDeadline    = "step timed out"
 	reasonSource      = "source delivery failed"
+	reasonSecret      = "secret delivery failed"
 	reasonKeep        = stateport.ReasonRetentionRefused
 	reasonInit        = "init container failed"
 	reasonShutdown    = "node shut down"
@@ -135,7 +136,7 @@ func diagnosePod(d *diagnosis, p *core.Pod, template *wf.Template) bool {
 			d.container, d.detail, d.reason, d.class = c.Name, c.State.Terminated.Message, reasonInit, stepmodel.FailureAuthor
 			d.exit = new(int(c.State.Terminated.ExitCode))
 			if c.Name == "init-artifact-oberth" {
-				d.reason, d.class = reasonSource, stepmodel.FailureInfrastructure
+				d.reason = reasonSource
 			}
 			return true
 		}

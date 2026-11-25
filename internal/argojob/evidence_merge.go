@@ -32,6 +32,7 @@ func retainNode(n, old stateport.Node) stateport.Node {
 		n.Order = old.Order
 	}
 	n.Message, n.PodName = cmp.Or(n.Message, old.Message), cmp.Or(n.PodName, old.PodName)
+	n.PodUID = cmp.Or(n.PodUID, old.PodUID)
 	n.Exit = cmp.Or(n.Exit, old.Exit)
 	n.StartedAt, n.FinishedAt = cmp.Or(n.StartedAt, old.StartedAt), cmp.Or(n.FinishedAt, old.FinishedAt)
 	if old.Credential != nil && *old.Credential {

@@ -59,9 +59,10 @@ const (
 
 type span struct{ start, end int64 }
 type index struct {
-	RunID      string         `json:"run_id"`
-	Size       int64          `json:"size"`
-	Reason     string         `json:"reason"`
-	Detail     string         `json:"detail,omitempty"`
-	Containers []ContainerLog `json:"containers"`
+	RunID          string                  `json:"run_id"`
+	Size           int64                   `json:"size"`
+	Reason         string                  `json:"reason"`
+	Detail         string                  `json:"detail,omitempty"`
+	Containers     []ContainerLog          `json:"containers"`
+	Infrastructure []InfrastructureReceipt `json:"infrastructure,omitempty"`
 }

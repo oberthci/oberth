@@ -9,6 +9,7 @@ import (
 // Node is raw native attempt evidence, separate from logical plan entries.
 // A nil exit or credential observation remains unknown.
 type Node struct {
+	PodUID                                                      string `json:",omitempty"`
 	NodeID, Path, Template, Boundary, PodName, Message, RetryOf string
 	Attempt                                                     int
 	Order                                                       []int // Native retry ancestry positions, outermost first.

@@ -26,13 +26,23 @@ func (c *Client) Deliver(ctx context.Context, cfg Config, d Delivery) error {
 	return c.deliver(ctx, cfg, d, memoryDirectory)
 }
 func (c *Client) deliver(ctx context.Context, cfg Config, d Delivery, memory func(string) error) (err error) {
+	return deliver(ctx, d, memory, func(ctx context.Context) (map[string][]byte, error) { return c.Fetch(ctx, cfg, d.Token, d.Paths) })
+}
+
+// DeliverBroker fetches with the requesting Pod's identity through the private
+// server listener, then uses the same private-memory delivery contract.
+func (c *Client) DeliverBroker(ctx context.Context, d Delivery) error {
+	return deliver(ctx, d, memoryDirectory, func(ctx context.Context) (map[string][]byte, error) { return c.fetchBroker(ctx, d.Token, d.Paths) })
+}
+
+func deliver(ctx context.Context, d Delivery, memory func(string) error, fetch func(context.Context) (map[string][]byte, error)) (err error) {
 	if d.Run == nil {
 		return refuse("input", nil)
 	}
 	if err = memory(d.Parent); err != nil {
 		return err
 	}
-	values, err := c.Fetch(ctx, cfg, d.Token, d.Paths)
+	values, err := fetch(ctx)
 	if err != nil {
 		return err
 	}

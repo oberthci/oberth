@@ -1,6 +1,13 @@
 package secretstore
 
 func refusal(code string) (string, string) {
+	if code == "broker" {
+		return "Secret delivery is unavailable.", "Read the run diagnosis, restore the unavailable service, then rerun."
+	}
+	return storeRefusal(code)
+}
+
+func storeRefusal(code string) (string, string) {
 	switch code {
 	case "address":
 		return "Secret store address is invalid.", "Use an HTTPS origin without credentials, path, query or fragment."

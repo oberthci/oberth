@@ -77,14 +77,15 @@ func (a application) runSecretStep(ctx context.Context, r installationRequest, i
 		return err
 	}
 	defer clear(token)
-	return store.Deliver(ctx, inputs.config, secretstore.Delivery{Parent: inputs.scratch, Token: token, Paths: inputs.paths, Run: func(ctx context.Context, dir string) error {
+	delivery := secretstore.Delivery{Parent: inputs.scratch, Token: token, Paths: inputs.paths, Run: func(ctx context.Context, dir string) error {
 		command := exec.CommandContext(ctx, r.args[0], r.args[1:]...)
 		command.WaitDelay = 5 * time.Second
 		command.Stdin, command.Stdout, command.Stderr = in, out, a.diagnostic
 		command.Env = append(os.Environ(), "OBERTH_SECRETS_DIR="+dir)
 		err := command.Run()
 		return errors.Join(ctx.Err(), err)
-	}})
+	}}
+	return store.DeliverBroker(ctx, delivery)
 }
 
 func projectedStoreToken(path string) ([]byte, error) {

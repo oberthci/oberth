@@ -187,14 +187,14 @@ source runtime, concrete Store, service, transport or installer imports.
 | ContainerCreating / PodInitializing | `starting containers` | — |
 | main exit N / OOMKilled | `exited with code N` / `out of memory` | author |
 | DeadlineExceeded | `step timed out` | deadline |
-| failed source init / authored init | `source delivery failed` / `init container failed` | infrastructure / author |
+| failed source init / authored init without a server receipt | `source delivery failed` (or `failed before starting`) / `init container failed` | author / author |
 | NodeShutdown / DisruptionTarget | `node shut down` / `Pod disrupted` | infrastructure |
 | Evicted without typed cause | `Pod evicted` | unknown |
 | Stop / Terminate, including exit 143 | `stopped` | cancelled |
 | failed/error without exit or Pod | `ended without an exit code` | unknown |
 | Skipped / Omitted | `skipped by condition` / `omitted` | — |
-| terminal generic start or failed source init; authored containers never ran | `failed before starting` | infrastructure |
-
+| terminal generic start; authored containers never ran | `failed before starting` | infrastructure |
+| failed source or secret request with an exact server receipt | `source delivery failed` / `secret delivery failed` | infrastructure |
 A run is queued until one of its steps has started (a node of it ran or
 failed, in any attempt; a skipped step has not) and running from then on,
 never queued again; its start is the earliest start of a started step. A
@@ -208,7 +208,7 @@ A Pending step whose Pod ran, exited, was evicted, disrupted or timed out says `
 until its node phase advances; waiting for a node and image pull failures keep their waiting reasons.
 Step reasons follow the displayed status after evidence merges; newer Pod exits cannot label queued or running steps as passed or failed.
 
-The never-started fallback requires native waiting states with no prior start or
+A server receipt binds run, Workflow UID, node, step path, physical Pod UID and native Pod restart counter. Only the server records its own delivery failures in C8; step text, images, container names and client-supplied records grant nothing. Failed source/secret steps without a receipt stay author; cancelled and deadline outcomes retain their native class. The never-started fallback requires native waiting states with no prior start or
 restart. Image, deadline, node and authored-init diagnoses retain their typed
 reason, failure class and retry hint.
 

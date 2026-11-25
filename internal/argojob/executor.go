@@ -77,6 +77,7 @@ type Config struct {
 	Progress           ProgressStore
 	Reporter           Reporter
 	Logs               LogStore
+	Infrastructure     InfrastructureStore
 	Workflows          Workflows
 	Accounts           Accounts
 	Pods               Pods

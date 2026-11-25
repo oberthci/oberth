@@ -28,7 +28,7 @@ C9 uses injected ports and the narrow client, never concrete service or store co
 | Maintenance | Results bind cluster/context, namespace, versions, chart revisions, schema, backup and rollback paths. C9 owns backup transfer and encryption. C7 owns database validation and the bounded helper protocol. |
 
 **Delta:** Store rules are static: the server's writer role can write or delete but not read
-step secrets; a step's templated policy reads only its own account's subtree.
+step secrets; a step's templated policy reads only its own account's subtree. The private delivery listener fetches only with the live verified requesting Pod's identity, never the writer role; its own unavailable failures produce a durable C8 receipt before refusal. Step files remain private memory, and the step session is revoked before command execution.
 Grants change no store rule. The server creates step accounts through C5.
 [C4 store grants](c4-admission-rules-and-plan.md#owned-data-and-public-contract)
 owns the single-account selection and complete exact-grant coverage. Store setup

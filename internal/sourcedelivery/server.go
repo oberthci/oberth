@@ -14,15 +14,22 @@ import (
 
 	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/sourcecontract"
+	core "k8s.io/api/core/v1"
 )
 
 // Caller is returned only after bearer verification and a live Pod-owner read.
-type Caller struct{ Namespace, Workflow, UID string }
+type Caller struct {
+	Namespace, Workflow, UID string
+	Pod                      *core.Pod
+}
+
+func (c Caller) owner() Caller { c.Pod = nil; return c }
 
 // Run carries the stored admission projection, without constructing a new seal.
 // Terminal becomes true only when loading must stop; the owner reader retains
 // refs through all native exit handlers.
 type Run struct {
+	caller                   Caller
 	Admission                admissioncontract.PreparedView
 	Namespace, Workflow, UID string
 	Terminal                 bool
@@ -40,6 +47,7 @@ type Config struct {
 	Metric            func(code, reason string)
 	SourceClientBurst int
 	Now               func() time.Time
+	RecordFailure     func(context.Context, Caller) error
 }
 type Server struct {
 	config          Config
@@ -137,10 +145,12 @@ func (s *Server) load(ctx context.Context, w http.ResponseWriter, r *http.Reques
 	}
 	staged, err := s.config.Stage(ctx, binding)
 	if err != nil {
+		err = s.recordFailure(ctx, run.caller, err)
 		s.failure(w, err)
 		return
 	}
 	load := transfer{request: request, admission: run.Admission.Digest, index: index, stage: staged}
+	load.stage.Body = &failureReader{ReadCloser: staged.Body, fail: func(err error) error { return s.recordFailure(ctx, run.caller, err) }}
 	if err := s.checkStagedAuthorization(ctx, r.Header.Get("Authorization"), load); err != nil {
 		_ = staged.Body.Close()
 		s.failure(w, err)
@@ -216,8 +226,9 @@ func (s *Server) authorize(ctx context.Context, header string, request LoadReque
 	id := runID(caller, request.Locator)
 	run, err := s.config.Run(phase, id)
 	if err != nil {
-		return run, empty, 0, err
+		return run, empty, 0, s.recordFailure(ctx, caller, err)
 	}
+	run.caller = caller
 	binding, index, err := selectBinding(run, caller, LoadRequest{Locator: id, Descriptor: request.Descriptor})
 	return run, binding, index, err
 }
@@ -239,7 +250,7 @@ func selectBinding(run Run, caller Caller, request LoadRequest) (sourcecontract.
 	if run.UID == "" {
 		return empty, 0, &Failure{Code: "unavailable", Reason: "other"}
 	}
-	if caller != (Caller{Namespace: run.Namespace, Workflow: run.Workflow, UID: run.UID}) {
+	if caller.owner() != (Caller{Namespace: run.Namespace, Workflow: run.Workflow, UID: run.UID}) {
 		return empty, 0, &Failure{Code: "forbidden"}
 	}
 	view := run.Admission
@@ -268,6 +279,7 @@ func findBinding(bindings []sourcecontract.Binding, descriptor sourcecontract.De
 }
 
 func (s *Server) workflow(c Caller, delta int) bool {
+	c = c.owner()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if delta > 0 && s.workflows[c] >= 2 {

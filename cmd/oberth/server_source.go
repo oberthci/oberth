@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitport"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/secretstore"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/sourcedelivery"
 	"github.com/oberthci/oberth/internal/sshserver"
@@ -27,7 +29,15 @@ func (o *serverOwners) sourcePart(ctx context.Context) (Part, error) {
 	}, Pod: func(ctx context.Context, ns, name string) (*core.Pod, error) {
 		return o.cluster.Kube.CoreV1().Pods(ns).Get(ctx, name, meta.GetOptions{})
 	}}
-	o.c.source = sourcedelivery.New(sourcedelivery.Config{Authenticate: authentication.Authenticate, Run: o.sourceRun, Stage: o.cache.Stage, Now: o.c.clock.Now, SourceClientBurst: o.settings.SourceClientBurst})
+	source := sourcedelivery.New(sourcedelivery.Config{Authenticate: authentication.Authenticate, Run: o.sourceRun, Stage: o.cache.Stage, Now: o.c.clock.Now, SourceClientBurst: o.settings.SourceClientBurst, RecordFailure: func(ctx context.Context, caller sourcedelivery.Caller) error {
+		return o.recordDeliveryFailure(ctx, caller, "source")
+	}})
+	authentication.Audience = o.c.delivery.Access.Audience
+	secrets := o.secretDeliveryHandler(authentication.Authenticate)
+	mux := http.NewServeMux()
+	mux.Handle(secretstore.BrokerPath, secrets)
+	mux.Handle("/", source)
+	o.c.source = mux
 	return Part{Name: "source"}, ctx.Err()
 }
 func (o *serverOwners) sourceRun(ctx context.Context, id string) (sourcedelivery.Run, error) {

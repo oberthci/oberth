@@ -49,7 +49,7 @@ selected repository is checked too. Other scoped actions still check scope.
 
 **Delta:** C9 owns static secret-store setup and checking. Grants change authority,
 not store policies. C2 accepts secret bytes through its authenticated writer port;
-the server may write or delete step secrets but may not read them. The tool requires
+the server's writer identity may write or delete step secrets but cannot read them. C9's private delivery listener forwards a verified Pod's own reads without widening that identity. The tool requires
 an approved exact grant before writing; the human `secret put` flow grants first.
 Audit `secret.put.requested` before the write, using only public selectors. A stored
 value is reported as stored even if revoking the writer session fails.

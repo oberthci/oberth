@@ -52,7 +52,7 @@ those definitions; they do not define rival DTOs.
   compressed length. Missing receipt means failure even after HTTP 200. Pre-stream
   errors are `{version:1,code}`: 400 `invalid_request`, 401 `unauthenticated`, 403
   `forbidden`, 501 `not_configured`, 503 `unavailable` with `Retry-After`. Other methods
-  get 405. After streaming starts, failure withholds the receipt.
+  get 405. After streaming starts, failure withholds the receipt. Authenticated server-side run-read, staging and source-read failures also record C8 infrastructure evidence against the live verified Pod; authorization refusals, authored limits and client disconnects do not.
 - **Plugin process.** `cmd/oberth-source-plugin` receives one absolute Unix socket
   argument. `Load` writes a private adjacent temporary archive and publishes it by
   rename only after EOF, receipt and SHA-256 verification. Argo owns extraction/modes.

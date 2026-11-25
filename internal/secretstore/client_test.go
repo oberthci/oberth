@@ -77,7 +77,7 @@ func TestDefaultTransportHasOnlyExplicitTrust(t *testing.T) {
 	}
 }
 func TestRefusalCatalogueBounds(t *testing.T) {
-	for _, code := range []string{"sealed", "address", "trust", "connect", "request", "response", "limit", "drift", "token", "delivery", "path", "input"} {
+	for _, code := range []string{"broker", "sealed", "address", "trust", "connect", "request", "response", "limit", "drift", "token", "delivery", "path", "input"} {
 		a, b := refusal(code)
 		if len(a) > 80 || len(b) > 120 || strings.HasSuffix(a, "...") {
 			t.Fatal(code)

@@ -153,6 +153,7 @@ func (f *composedFixture) consumeSecretStep(t *testing.T, r stateport.Run, sourc
 	claims, _ := json.Marshal(map[string]string{"sub": "system:serviceaccount:" + f.config.PipelineNamespace + ":" + template.ServiceAccountName})
 	token := filepath.Join(t.TempDir(), "projected-token")
 	jwt := "e30." + base64.RawURLEncoding.EncodeToString(claims) + ".signature"
+	f.prepareComposedSecretRequest(t, r, jwt, env)
 	if err = os.WriteFile(token, []byte(jwt), 0600); err != nil {
 		t.Fatal(err)
 	}

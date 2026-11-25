@@ -21,7 +21,7 @@ those definitions; they do not define rival DTOs.
   `container_name` to an immutable half-open `[start,end)` span, reason, detail and state (waiting/following/copying/captured/interrupted).
   Streams and verified provisional-parent attribution are process-only inputs. An empty captured container has an exact empty span; it differs from an
   uncaptured container. **Delta:** remove the `burn` field and historical marker-range
-  index variant. Internal byte ranges carry offsets, not a second step hierarchy.
+  index variant. Internal byte ranges carry offsets, not a second step hierarchy. The same synced run index retains idempotent server-only infrastructure receipts (run, Workflow UID, node, step path, Pod UID, native restart counter, source/secret kind), independently of the database. They contain no values or step-supplied text, share the 8 MiB index bound and are removed by authorized terminal log purge; C5 owns diagnosis.
 - Keep the narrow tracking, reserve, release-before-open, commit, list, filtered read
   and stored-stream operations. C5 verifies native ownership and opens the source; C3
   wires it. C8 accepts bounded bytes and verified identities, never a caller-selected
