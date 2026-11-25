@@ -104,7 +104,7 @@ func (c *ConfigDir) prune(current Profile, helper []string) error {
 
 // credentialName matches the digest-named files saveProfile writes.
 func credentialName(name string) bool {
-	for _, shape := range [][2]string{{"admin-", ".key"}, {"admin-", ".crt"}, {"ca-", ".crt"}, {"known_hosts-", ""}} {
+	for _, shape := range [][2]string{{"admin-", ".key"}, {"admin-", ".key.tmp"}, {"admin-", ".crt"}, {"ca-", ".crt"}, {"known_hosts-", ""}} {
 		digest, ok := strings.CutPrefix(name, shape[0])
 		digest, cut := strings.CutSuffix(digest, shape[1])
 		if ok && cut && len(digest) == 64 && strings.Trim(digest, "0123456789abcdef") == "" {
