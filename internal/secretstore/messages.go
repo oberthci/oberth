@@ -34,6 +34,8 @@ func operationRefusal(code string) (string, string) {
 	switch code {
 	case "backup-setup":
 		return "Store backup authorization did not finish.", "Unseal the bundled store, inspect native authorization progress, then retry this explicit backup setup."
+	case "backup-root-disabled":
+		return "Store root generation is disabled.", "Set disable_unauthed_generate_root_endpoints = false on the store listener, restart, unseal, then retry."
 	case "token":
 		return "The projected account token is invalid.", "Use the Pod's readable service-account token file."
 	case "delivery":

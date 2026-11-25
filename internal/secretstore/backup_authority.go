@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
+	"net/http"
+	"strings"
 )
 
 type backupGeneration struct {
@@ -32,7 +34,10 @@ func (c *Client) SetupBackupWithUnseal(ctx context.Context, cfg Config, share []
 
 func (c *Client) backupAuthority(ctx context.Context, share []byte) ([]byte, error) {
 	var started backupGeneration
-	_, err := c.JSON(ctx, Request{Method: "PUT", Path: "/sys/generate-root/attempt", Body: map[string]string{}}, &started)
+	status, err := c.JSON(ctx, Request{Method: "PUT", Path: "/sys/generate-root/attempt", Body: map[string]string{}}, &started)
+	if status == http.StatusMethodNotAllowed {
+		return nil, refuse("backup-root-disabled", nil)
+	}
 	if err != nil || started.Nonce == "" || started.Required != 1 || len(started.OTP) < 16 || len(started.OTP) > 128 {
 		return nil, refuse("backup-setup", nil)
 	}
@@ -43,7 +48,9 @@ func (c *Client) backupAuthority(ctx context.Context, share []byte) ([]byte, err
 	if err != nil || !completed.Complete || completed.Nonce != started.Nonce {
 		return nil, refuse("backup-setup", nil)
 	}
-	encoded, err := base64.StdEncoding.DecodeString(completed.EncodedToken)
+	// The store issued a root token here. It encodes it without padding; a
+	// padded form is accepted too, so the token is always recovered and revoked.
+	encoded, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(completed.EncodedToken, "="))
 	defer clear(encoded)
 	if err != nil || len(encoded) != len(pad) {
 		return nil, refuse("backup-setup", nil)
