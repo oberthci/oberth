@@ -1,4 +1,4 @@
-# Objects only the VM install walk (hack/walk-vm.yaml) reads; the build and release
+# Objects only the VM install walk (.oberth/walk-vm.yaml) reads; the build and release
 # need none of them. Apply after .oberth/pipeline-resources.yaml, replacing every
 # REPLACE_WITH_* value. Import the reviewed guest disk into its prepared volume
 # separately (hack/vm-image/README.txt); this file binds that existing volume and

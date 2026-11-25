@@ -16,7 +16,7 @@ import (
 
 // walkFile is the VM install walk, selected only by an explicit push option.
 // Promotions, tags and schedules keep their existing files; the walk uses CI.
-const walkFile = "hack/walk-vm.yaml"
+const walkFile = ".oberth/walk-vm.yaml"
 
 func ownWorkflow(t *testing.T, name string) []byte {
 	t.Helper()

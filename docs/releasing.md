@@ -106,8 +106,8 @@ oberth secret put --repo '<repo>' --file .oberth/release.yaml --step latest-adva
 Missing grants print remedies; creating objects grants none. `secretstore exec` delivers granted
 files below `OBERTH_SECRETS_DIR` without exporting values. Check local YAML against live grants with
 [check](pipelines.md#start-with-a-complete-file). The VM install walk,
-[walk-vm.yaml](../hack/walk-vm.yaml), uses [file selection](pipelines.md). Its objects are in
-[walk-vm-resources.yaml](../hack/walk-vm-resources.yaml), with its VM capability and SSH exception.
+[walk-vm.yaml](../.oberth/walk-vm.yaml), uses [file selection](pipelines.md). Its objects are in
+[walk-vm-resources.yaml](../.oberth/walk-vm-resources.yaml), with its VM capability and SSH exception.
 
 ## First release by hand
 

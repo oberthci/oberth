@@ -34,7 +34,7 @@ func TestValidateEveryPublishedWorkflowOffline(t *testing.T) {
 		}
 	}
 	// The VM install walk is never selected by a run; it stays valid for its return to the gate.
-	t.Run("hack/walk-vm.yaml", func(t *testing.T) { assertPublishedValidation(t, root, "hack/walk-vm.yaml") })
+	t.Run(".oberth/walk-vm.yaml", func(t *testing.T) { assertPublishedValidation(t, root, ".oberth/walk-vm.yaml") })
 }
 
 func assertPublishedValidation(t *testing.T, root, file string) {

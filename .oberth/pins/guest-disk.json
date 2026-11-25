@@ -1,0 +1,11 @@
+{
+  "version": "0.10.4",
+  "url": "https://github.com/abiosoft/colima-core/releases/download/v0.10.4/ubuntu-24.04-minimal-cloudimg-amd64-docker.raw.gz",
+  "sha512": "27652801b6606b457f4f34836358c0e9978aeb98757d0271165e3f09672f930ccc2d957e15726f7e7f22c302b20a3d30c64ead68adaa5f24a4f959cd34b56b5b",
+  "sha256": "4cd967d2c58aa6971621343d372255b14ffbfe28a185cda0e3c34ac8a1eb15e6",
+  "checksum_source": "https://raw.githubusercontent.com/abiosoft/colima/v0.10.3/embedded/images/images.txt",
+  "architecture": "amd64",
+  "format": "raw.gz",
+  "max_download_bytes": 536870912,
+  "max_disk_bytes": 8589934592
+}

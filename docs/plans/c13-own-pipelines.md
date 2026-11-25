@@ -31,7 +31,7 @@ those definitions; they do not define rival DTOs.
   rules. The build document alone supplies branch and promotion evidence; the
   product has no promotion-file selection. The build declares no resource
   template, so admitting it needs no capability; the VM install walk is the
-  separate `hack/walk-vm.yaml`, selected only by explicit push option. There is no new route or
+  separate `.oberth/walk-vm.yaml`, selected only by explicit push option. There is no new route or
   special run class. The walk VMI stays in its separate namespace; its host installation uses the ordinary reviewed `--egress-allow` list for cluster Pod CIDR/TCP 22 access. `.oberth/issues.yaml` retains the
   opt-in `{close_from_trailers: true}` policy; C2 owns its interpretation.
 - **Visible work.** Build has three leaves: `make test`, `make static` and
@@ -153,8 +153,8 @@ Installation policy follows [C9 invariant 7](c9-install-and-upgrade.md#invariant
 5. **Delta:** Release runs no tests. It builds the tagged commit at the default branch's
    head, which a passing build run tested. The release step checks those facts
    and refuses any mismatch. No branch, promotion or release run starts a VM;
-   only the walk's separate document declares one. VM and static-Git base images are locally built
-   and pinned by digest.
+   only the walk's separate document declares one. VM guest sources use versioned public images verified against repository checksums;
+   the static-Git base is locally built and pinned by digest.
 6. Charge source and delivered metadata, writable root, private caches, compiler scratch
    and logs to the appropriate bounded storage. Charge memory-backed volumes to memory.
    Report per-Workflow PVC consumption separately, including build tools/caches; enforce

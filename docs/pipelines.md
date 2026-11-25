@@ -31,7 +31,7 @@ revision, ignoring local edits. Neither starts a run or proves images/source are
 
 Run an optional committed workflow explicitly:
 ```sh
-git push oberth HEAD:refs/heads/walk -o oberth.run=1 -o oberth.file=hack/walk-vm.yaml
+git push oberth HEAD:refs/heads/walk -o oberth.run=1 -o oberth.file=.oberth/walk-vm.yaml
 ```
 Clean repository-relative paths use normal CI admission, exact file/step grants, source retention
 and capability checks. Missing files refuse the push. Reruns retain the file; nothing selects it

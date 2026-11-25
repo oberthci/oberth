@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: guest-disk
+  activeDeadlineSeconds: 1200
+  automountServiceAccountToken: false
+  nodeSelector: {kubernetes.io/arch: amd64}
+  securityContext: {runAsNonRoot: true, runAsUser: 107, runAsGroup: 107, fsGroup: 107, seccompProfile: {type: RuntimeDefault}}
+  volumeClaimTemplates:
+    - metadata: {name: guest}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 10Gi}}
+  # This separate inspection verifies the source pin; it does not qualify boot
+  # or supply the walk's fixture disk. Retain the receipt, then collect the claim.
+  volumeClaimGC: {strategy: OnWorkflowCompletion}
+  templates:
+    - name: guest-disk
+      inputs:
+        artifacts:
+          - name: source
+            path: /work/src
+            mode: 0755
+            plugin: {name: oberth, key: '{{workflow.parameters.oberth-source}}', configuration: '{"version":1,"kind":"main"}'}
+      outputs:
+        parameters:
+          - {name: receipt, valueFrom: {path: /disk/receipt.json}}
+      container:
+        image: golang@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd
+        workingDir: /work/src
+        command: [bash, -ec]
+        args: ['python3 hack/vm-image/prepare.py --output /disk/disk.img > /disk/receipt.json']
+        volumeMounts: [{name: guest, mountPath: /disk}]
+        securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+        resources:
+          requests: {cpu: 100m, memory: 256Mi}
+          limits: {cpu: '1', memory: 256Mi, ephemeral-storage: 512Mi}

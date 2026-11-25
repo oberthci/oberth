@@ -60,7 +60,7 @@ func checkWalkInstallSSHAllowance(t *testing.T, cidr, format string) {
 // the install exception cannot pass merely because the product supports it.
 func walkInstallEgress(t *testing.T, cidr string) []string {
 	t.Helper()
-	body, err := os.ReadFile("../../hack/walk-vm-resources.yaml")
+	body, err := os.ReadFile("../../.oberth/walk-vm-resources.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
