@@ -9403,7 +9403,7 @@
     "docs/plans/c6-source-delivery.md": "69115e36ece3bb9f10b00dc0d24605fc3c9282c3a2a3b81434d80e465f74461f",
     "docs/plans/c7-durable-state.md": "5a40d02e4b3f726d821943d60f892e37b3f8cd424410bcc1fbf9c971386bba65",
     "docs/plans/c8-logs.md": "e98512dfd930f28128d91d0669ef9355a7de785baea132a3c4074b95396be527",
-    "docs/plans/c9-install-and-upgrade.md": "29581d235e62bbac84d505fc5d3f021e29d66ee5c8e4c955d9e1e0072decbaa2"
+    "docs/plans/c9-install-and-upgrade.md": "3d1ef95d77e79ece68133027bae30d010a1d4900b5494962c827c17828fd1057"
   },
   "deltas": [
     {
@@ -14935,7 +14935,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** Store rules are static: the server's writer role can write or delete but not read step secrets; a step's templated policy reads only its own account's subtree. The private delivery listener fetches only with the live verified requesting Pod's identity, never the writer role; its terminal unavailable failures produce a durable C8 receipt before refusal, and success supersedes old secret failures. Step files remain private memory, and the step session is revoked before command execution. Grants change no store rule. The server creates step accounts through C5. [C4 store grants](c4-admission-rules-and-plan.md#owned-data-and-public-contract) owns the single-account selection and complete exact-grant coverage. Store setup and checks use C9's verified client; store admin credentials never reach the daemon.",
+      "basis": "**Delta:** Store rules are static: the server's writer role can write or delete but not read step secrets; a step's templated policy reads only its own account's subtree. The private delivery listener fetches only with the live verified requesting Pod's identity, never the writer role; its terminal unavailable failures produce a durable C8 receipt before refusal, and success supersedes old secret failures. Header and bounded body validation, fresh authentication and the live pipeline-namespace check precede delivery slots: one per Pod, four per run, and source-client-burst divided by three globally (at least one). Capacity returns 503 with Retry-After 1 and creates no receipt; the step client retries only that response with one-to-four-second backoff within its deadline and a thirty-second transport ceiling. Step files remain private memory, and the step session is revoked before command execution. Grants change no store rule. The server creates step accounts through C5. [C4 store grants](c4-admission-rules-and-plan.md#owned-data-and-public-contract) owns the single-account selection and complete exact-grant coverage. Store setup and checks use C9's verified client; store admin credentials never reach the daemon.",
       "rows": [],
       "predicates": [
         {

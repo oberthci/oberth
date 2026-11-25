@@ -1,14 +1,49 @@
 package secretstore
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/oberthci/oberth/internal/publicerr"
 )
+
+func TestBrokerCapacityRetriesAreBoundedByCallerAndTransportDeadline(t *testing.T) {
+	for _, bound := range []time.Duration{3500 * time.Millisecond, 30 * time.Second} {
+		t.Run(bound.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				calls := 0
+				c, err := New(Connection{URL: "https://broker.invalid", Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+					calls++
+					return &http.Response{StatusCode: 503, Header: http.Header{"Retry-After": []string{"1"}}, Body: io.NopCloser(strings.NewReader("private reply"))}, nil
+				})})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx := t.Context()
+				if bound < 30*time.Second {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, bound)
+					defer cancel()
+				}
+				start := time.Now() //nolint:forbidigo // synctest owns this clock; no wall time elapses.
+				_, err = c.fetchBroker(ctx, []byte("private fixture"), []string{"registry/value"})
+				elapsed := time.Since(start) //nolint:forbidigo // Measure the clock controlled by synctest.
+				if err == nil || elapsed != bound || calls < 2 || calls > 9 {
+					t.Fatal("unbounded or absent capacity retry", calls, elapsed, err)
+				}
+				if publicerr.Classify(err).Reason() != "Secret delivery is unavailable." {
+					t.Fatal("capacity used sealed diagnosis", err)
+				}
+			})
+		})
+	}
+}
 
 func TestBrokerRefusalsPreserveRecoveryAndRejectMissingValues(t *testing.T) {
 	for _, test := range []struct {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/oberthci/oberth/internal/argojob"
@@ -63,19 +64,12 @@ func (o *serverOwners) persistDelivery(ctx context.Context, r runlog.Infrastruct
 }
 
 func (o *serverOwners) secretDeliveryHandler(authenticate func(context.Context, string) (sourcedelivery.Caller, error)) http.Handler {
-	slots := make(chan struct{}, max(1, o.settings.SourceClientBurst/3))
+	slots := deliverySlots{limit: max(1, o.settings.SourceClientBurst/3), pods: map[string]int{}, runs: map[string]int{}}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
 			w.WriteHeader(405)
-			return
-		}
-		select {
-		case slots <- struct{}{}:
-			defer func() { <-slots }()
-		default:
-			w.WriteHeader(502)
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
@@ -97,6 +91,17 @@ func (o *serverOwners) secretDeliveryHandler(authenticate func(context.Context, 
 			w.WriteHeader(secretDeliveryStatus(err))
 			return
 		}
+		identity, err := o.deliveryIdentity(ctx, caller)
+		if err != nil {
+			w.WriteHeader(secretDeliveryStatus(err))
+			return
+		}
+		if !slots.acquire(identity) {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(503)
+			return
+		}
+		defer slots.release(identity)
 		value, err := o.fetchStepSecret(ctx, caller, jwt, request.Path)
 		if err != nil {
 			w.WriteHeader(secretDeliveryStatus(err))
@@ -106,6 +111,40 @@ func (o *serverOwners) secretDeliveryHandler(authenticate func(context.Context, 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(secretstore.BrokerResponse{Value: value})
 	})
+}
+
+// Delivery capacity is charged only to a live verified Pod in the pipeline
+// namespace. One Pod may hold one slot; one run may hold at most four.
+type deliverySlots struct {
+	mu            sync.Mutex
+	limit, active int
+	pods, runs    map[string]int
+}
+
+func (s *deliverySlots) acquire(r runlog.InfrastructureReceipt) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active >= s.limit || s.pods[r.PodUID] >= 1 || s.runs[r.RunID] >= 4 {
+		return false
+	}
+	s.active++
+	s.pods[r.PodUID]++
+	s.runs[r.RunID]++
+	return true
+}
+
+func (s *deliverySlots) release(r runlog.InfrastructureReceipt) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.active--
+	s.pods[r.PodUID]--
+	s.runs[r.RunID]--
+	if s.pods[r.PodUID] == 0 {
+		delete(s.pods, r.PodUID)
+	}
+	if s.runs[r.RunID] == 0 {
+		delete(s.runs, r.RunID)
+	}
 }
 
 func (o *serverOwners) fetchStepSecret(ctx context.Context, caller sourcedelivery.Caller, jwt, path string) ([]byte, error) {

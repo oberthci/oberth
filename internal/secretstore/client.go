@@ -91,6 +91,9 @@ func (c *Client) JSON(ctx context.Context, r Request, out any) (int, error) {
 		return 0, refuse("connect", ctxCause(ctx, err))
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if r.Path == brokerPath && resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get("Retry-After") == "1" {
+		return resp.StatusCode, errBrokerCapacity
+	}
 	return decodeResponse(resp, out, r.Accept)
 }
 
