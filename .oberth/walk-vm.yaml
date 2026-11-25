@@ -42,7 +42,10 @@ spec:
           - {name: prepare-base, template: prepare-base}
           - {name: release-bytes-build, template: release-bytes-build, depends: prepare-base}
           - {name: walk-vm-key-generated, template: key}
-          - {name: walk-vm-boots, template: vm, depends: walk-vm-key-generated, arguments: {parameters: [{name: cloud-init, value: '{{tasks.walk-vm-key-generated.outputs.parameters.cloud-init}}'}]}}
+          - {name: guest-disk-pin-read, template: guest-pin}
+          - {name: guest-disk-claimed, template: guest-claim}
+          - {name: guest-disk-verified, template: guest-disk, depends: 'guest-disk-pin-read && guest-disk-claimed', arguments: {parameters: [{name: pin, value: '{{tasks.guest-disk-pin-read.outputs.parameters.pin}}'}, {name: prepare, value: '{{tasks.guest-disk-pin-read.outputs.parameters.prepare}}'}]}}
+          - {name: walk-vm-boots, template: vm, depends: 'walk-vm-key-generated && guest-disk-verified', arguments: {parameters: [{name: cloud-init, value: '{{tasks.walk-vm-key-generated.outputs.parameters.cloud-init}}'}]}}
           - {name: first-run-walk-passes, template: walk, depends: 'walk-vm-boots && release-bytes-build', arguments: {parameters: [{name: address, value: '{{tasks.walk-vm-boots.outputs.parameters.address}}'}]}}
     - name: prepare-base
       inputs:
@@ -65,6 +68,62 @@ spec:
             mkdir -p "$GOTMPDIR"
             candidate=$(git rev-parse HEAD | python3 -c 'import sys; print("v0.0." + str(int(sys.stdin.read().strip()[:15], 16)))')
             make build-bytes VERSION="$candidate"
+    # The pin and script come from this admitted commit; the disk Job verifies
+    # both archive digests before it publishes disk.img for the VMI to boot.
+    - name: guest-pin
+      inputs:
+        artifacts: *source-artifacts
+      outputs:
+        parameters:
+          - {name: pin, valueFrom: {path: /work/src/.oberth/pins/guest-disk.json}}
+          - {name: prepare, valueFrom: {path: /work/src/hack/vm-image/prepare.py}}
+      container:
+        command: ['true']
+        resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: '1', memory: 64Mi}}
+    - name: guest-claim
+      resource:
+        action: create
+        manifest: |
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata: {name: '{{workflow.name}}', namespace: oberth-walk}
+          spec:
+            accessModes: [ReadWriteOnce]
+            resources: {requests: {storage: 10Gi}}
+    - name: guest-disk
+      inputs:
+        parameters: [{name: pin}, {name: prepare}]
+      resource:
+        action: create
+        successCondition: status.succeeded > 0
+        failureCondition: status.failed > 0
+        manifest: |
+          apiVersion: batch/v1
+          kind: Job
+          metadata: {name: '{{workflow.name}}', namespace: oberth-walk}
+          spec:
+            backoffLimit: 0
+            activeDeadlineSeconds: 1200
+            template:
+              metadata: {labels: {oberth.walk/role: guest-disk}}
+              spec:
+                restartPolicy: Never
+                automountServiceAccountToken: false
+                securityContext: {runAsNonRoot: true, runAsUser: 107, runAsGroup: 107, fsGroup: 107, seccompProfile: {type: RuntimeDefault}}
+                containers:
+                  - name: guest-disk
+                    image: golang@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd
+                    command: [bash, -ec, 'base64 -d <<<"$GUEST_PIN" >/tmp/pin.json; base64 -d <<<"$GUEST_PREPARE" >/tmp/prepare.py; python3 -I /tmp/prepare.py --pin /tmp/pin.json --output /disk/disk.img']
+                    env:
+                      - {name: GUEST_PIN, value: "{{=sprig.b64enc(inputs.parameters['pin'])}}"}
+                      - {name: GUEST_PREPARE, value: "{{=sprig.b64enc(inputs.parameters['prepare'])}}"}
+                    volumeMounts: [{name: guest, mountPath: /disk}]
+                    securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+                    resources:
+                      requests: {cpu: 100m, memory: 256Mi}
+                      limits: {cpu: '1', memory: 256Mi, ephemeral-storage: 512Mi}
+                volumes:
+                  - {name: guest, persistentVolumeClaim: {claimName: '{{workflow.name}}'}}
     - name: key
       outputs:
         parameters:
@@ -94,7 +153,7 @@ spec:
         manifest: |
           apiVersion: kubevirt.io/v1
           kind: VirtualMachineInstance
-          metadata: {name: '{{workflow.name}}', namespace: oberth-walk}
+          metadata: {name: '{{workflow.name}}', namespace: oberth-walk, labels: {oberth.walk/role: walk-vm}}
           spec:
             domain:
               cpu: {cores: 4}
@@ -107,7 +166,7 @@ spec:
             networks: [{name: default, pod: {}}]
             volumes:
               - name: root
-                ephemeral: {persistentVolumeClaim: {claimName: oberth-walk-vm}}
+                ephemeral: {persistentVolumeClaim: {claimName: '{{workflow.name}}'}}
               - name: cloudinit
                 cloudInitNoCloud:
                   userDataBase64: "{{=sprig.b64enc(inputs.parameters['cloud-init'])}}"
@@ -124,14 +183,31 @@ spec:
         volumeMounts: [{name: work, mountPath: /work/shared}]
         resources: {requests: {cpu: 100m, memory: 512Mi}, limits: {cpu: '1', memory: 512Mi}}
         env: [{name: WALK_VM_ADDRESS, value: '{{inputs.parameters.address}}'}]
+    # One parallel group: a failed delete cannot skip the others, and claim
+    # protection holds the claim until the VMI and Job Pods are gone.
     - name: cleanup
       steps:
-        - - name: walk-vm-deleted
-            template: delete-vm
+        - - {name: walk-vm-deleted, template: delete-vm}
+          - {name: guest-disk-job-deleted, template: delete-guest-job}
+          - {name: guest-disk-claim-deleted, template: delete-guest-claim}
     - name: delete-vm
       resource:
         action: delete
         manifest: |
           apiVersion: kubevirt.io/v1
           kind: VirtualMachineInstance
+          metadata: {name: '{{workflow.name}}', namespace: oberth-walk}
+    - name: delete-guest-job
+      resource:
+        action: delete
+        manifest: |
+          apiVersion: batch/v1
+          kind: Job
+          metadata: {name: '{{workflow.name}}', namespace: oberth-walk}
+    - name: delete-guest-claim
+      resource:
+        action: delete
+        manifest: |
+          apiVersion: v1
+          kind: PersistentVolumeClaim
           metadata: {name: '{{workflow.name}}', namespace: oberth-walk}

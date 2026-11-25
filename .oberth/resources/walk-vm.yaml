@@ -1,8 +1,21 @@
 # Objects only the VM install walk (.oberth/walk-vm.yaml) reads; the build and release
 # need none of them. Apply after .oberth/pipeline-resources.yaml, replacing every
-# REPLACE_WITH_* value. Import the reviewed guest disk into its prepared volume
-# separately (hack/vm-image/README.txt); this file binds that existing volume and
-# does not create or populate a guest disk.
+# REPLACE_WITH_* value. Applying it needs a cluster admin: it creates the
+# namespace, the executor Role and two NetworkPolicies. Each walk creates its own
+# claim and Job in oberth-walk; the Job verifies .oberth/pins/guest-disk.json
+# before the VMI boots that disk, and the exit handler deletes all three.
+# Egress: the Job (label oberth.walk/role=guest-disk) gets only DNS (port 53) and
+# TCP 443 to download the pin URL from github.com and its release-asset redirect
+# host (release-assets.githubusercontent.com). A NetworkPolicy cannot name hosts,
+# so 443 is open to any address; narrow it with your CNI's FQDN rules if it has
+# them. The VMI (label oberth.walk/role=walk-vm) accepts only SSH from the
+# pipeline namespace and has no egress. These policies only allow; on a
+# default-deny cluster they are enough. If a cluster egress control outside
+# NetworkPolicy (firewall, proxy, CNI cluster policy) blocks the download, the
+# walk fails at guest-disk-verified. Remedy: allow those two hosts on 443 and DNS
+# for oberth-walk, or mirror the archive and change the pin URL in a reviewed
+# commit (the digests stay). Grant oberth-walk to this repository only: another
+# grantee's Pod could mount the claim between verification and boot.
 # Before dispatching the walk, install its HOST installation with this explicit
 # operator exception, or add it through upgrade on an existing installation:
 # oberth install --egress-allow '[{"cidr":"REPLACE_WITH_CLUSTER_POD_CIDR","port":22,"protocol":"TCP"}]'
@@ -15,31 +28,56 @@
 # Check with --dry-run before confirming. This permits SSH to every Pod in the
 # chosen range, including oberth-walk; it grants no other port or protocol.
 # The install INSIDE the guest cannot grant this host-to-VM access. The VMI and
-# its volume stay in oberth-walk, under the normal resource capability rules.
-# The walk also needs the VM API, an
-# executor account in the pipeline namespace with RBAC for VirtualMachineInstances
-# in oberth-walk, and this capability, granted as admin:
+# its disk stay in oberth-walk, under the normal resource capability rules.
+# The walk also needs the VM API, an executor account in the pipeline namespace
+# (bound below to Role walk-executor in oberth-walk), and this capability, granted
+# as admin. Role verbs: create and delete for the steps, get for the success and
+# output polling, list and watch for kubectl delete's wait until the object is gone.
 # oberth workflow capability grant --repo '<repo>' --capability '{
 #   "namespace": "oberth-walk",
 #   "service_account": "REPLACE_WITH_VM_EXECUTOR_ACCOUNT",
-#   "resource_kinds": [{
-#     "api_version": "kubevirt.io/v1", "kind": "VirtualMachineInstance",
-#     "actions": ["create", "delete"]
-#   }]
+#   "resource_kinds": [
+#     {"api_version": "kubevirt.io/v1", "kind": "VirtualMachineInstance", "actions": ["create", "delete"]},
+#     {"api_version": "v1", "kind": "PersistentVolumeClaim", "actions": ["create", "delete"]},
+#     {"api_version": "batch/v1", "kind": "Job", "actions": ["create", "delete"]}
+#   ]
 # }' --reason 'Run the VM install walk'
 apiVersion: v1
 kind: Namespace
 metadata:
   name: oberth-walk
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: oberth-walk-vm
-  namespace: oberth-walk
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: walk-executor, namespace: oberth-walk}
+rules:
+  - {apiGroups: [kubevirt.io], resources: [virtualmachineinstances], verbs: [create, get, list, watch, delete]}
+  - {apiGroups: [''], resources: [persistentvolumeclaims], verbs: [create, get, list, watch, delete]}
+  - {apiGroups: [batch], resources: [jobs], verbs: [create, get, list, watch, delete]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: walk-executor, namespace: oberth-walk}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: walk-executor}
+subjects:
+  - {kind: ServiceAccount, name: REPLACE_WITH_VM_EXECUTOR_ACCOUNT, namespace: REPLACE_WITH_PIPELINE_NAMESPACE}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: walk-guest-disk, namespace: oberth-walk}
 spec:
-  accessModes: [ReadWriteOnce]
-  storageClassName: ''
-  volumeName: REPLACE_WITH_PREPARED_WALK_VOLUME
-  resources:
-    requests: {storage: REPLACE_WITH_WALK_SIZE}
+  podSelector: {matchLabels: {oberth.walk/role: guest-disk}}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - ports: [{protocol: TCP, port: 443}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: walk-vm, namespace: oberth-walk}
+spec:
+  podSelector: {matchLabels: {oberth.walk/role: walk-vm}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: REPLACE_WITH_PIPELINE_NAMESPACE}}}]
+      ports: [{protocol: TCP, port: 22}]

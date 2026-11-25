@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,10 +19,7 @@ type pipelineResource struct {
 	APIVersion string `yaml:"apiVersion"`
 	Kind       string
 	Metadata   struct{ Name, Namespace string }
-	Spec       struct {
-		VolumeName string `yaml:"volumeName"`
-	}
-	Data map[string]string
+	Data       map[string]string
 }
 
 func pipelineResources(t *testing.T, path string) map[string]pipelineResource {
@@ -38,7 +36,7 @@ func pipelineResources(t *testing.T, path string) map[string]pipelineResource {
 			break
 		}
 		key := object.Kind + "/" + object.Metadata.Name
-		if err != nil || object.APIVersion != "v1" || object.Metadata.Name == "" {
+		if err != nil || !slices.Contains([]string{"v1", "rbac.authorization.k8s.io/v1", "networking.k8s.io/v1"}, object.APIVersion) || object.Metadata.Name == "" {
 			t.Fatal("invalid pipeline object", key, err)
 		}
 		if _, exists := objects[key]; exists {
@@ -158,9 +156,9 @@ func assertWalkObjects(t *testing.T, objects map[string]pipelineResource, workfl
 	if objects["Namespace/"+namespace].Metadata.Name != namespace {
 		t.Fatal("walk namespace is not provided", namespace)
 	}
+	// The run creates and verifies its own guest claim; setup holds no disk.
 	claim := manifest.Spec.Volumes[0].Ephemeral.PersistentVolumeClaim.ClaimName
-	object := objects["PersistentVolumeClaim/"+claim]
-	if claim == "" || object.Metadata.Namespace != namespace || object.Spec.VolumeName == "" {
-		t.Fatal("walk claim must bind a separately prepared guest volume", claim)
+	if _, static := objects["PersistentVolumeClaim/"+claim]; static || claim != "{{workflow.name}}" {
+		t.Fatal("walk boots a claim the run did not verify", claim)
 	}
 }

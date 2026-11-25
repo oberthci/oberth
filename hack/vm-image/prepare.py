@@ -11,7 +11,8 @@ import urllib.parse
 import urllib.request
 
 
-PIN = Path(__file__).resolve().parents[2] / ".oberth/pins/guest-disk.json"
+# The walk passes this same reviewed file with --pin when the script runs outside the checkout.
+PIN_FILE = ".oberth/pins/guest-disk.json"
 
 
 def copy_bounded(source, destination, limit):
@@ -64,8 +65,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--archive", type=Path, help="Verify a local copy of the same pinned archive")
+    parser.add_argument("--pin", type=Path, help="Copy of the repository pin file")
     args = parser.parse_args()
-    print(json.dumps(prepare(json.loads(PIN.read_text()), args.output, args.archive), sort_keys=True))
+    pin = args.pin or Path(__file__).resolve().parents[2] / PIN_FILE
+    print(json.dumps(prepare(json.loads(pin.read_text()), args.output, args.archive), sort_keys=True))
 
 
 if __name__ == "__main__":

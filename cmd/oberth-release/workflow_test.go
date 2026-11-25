@@ -70,7 +70,11 @@ func ownPolicy() argoworkflow.Policy {
 // walkPolicy adds the VM capability only the walk asks for.
 func walkPolicy() argoworkflow.Policy {
 	p := ownPolicy()
-	p.Capability = &argoworkflow.Capability{Namespace: "oberth-walk", ServiceAccount: "vm-executor", ResourceKinds: []argoworkflow.ResourceKind{{APIVersion: "kubevirt.io/v1", Kind: "VirtualMachineInstance", Actions: []string{"create", "delete"}}}}
+	p.Capability = &argoworkflow.Capability{Namespace: "oberth-walk", ServiceAccount: "vm-executor", ResourceKinds: []argoworkflow.ResourceKind{
+		{APIVersion: "kubevirt.io/v1", Kind: "VirtualMachineInstance", Actions: []string{"create", "delete"}},
+		{APIVersion: "v1", Kind: "PersistentVolumeClaim", Actions: []string{"create", "delete"}},
+		{APIVersion: "batch/v1", Kind: "Job", Actions: []string{"create", "delete"}},
+	}}
 	return p
 }
 func prepareOwn(t *testing.T, name string, trigger model.RunTrigger) (*admissioncontract.PreparedAdmission, error) {
@@ -129,7 +133,8 @@ func TestOwnPlanStaysSmall(t *testing.T) {
 		want []string
 	}{
 		{"build", []string{"prepare-base", "go-tests-pass-with-race", "release-bytes-build", "lint-and-guards-pass"}},
-		{"walk", []string{"prepare-base", "walk-vm-key-generated", "release-bytes-build", "walk-vm-boots", "first-run-walk-passes", "walk-vm-deleted"}},
+		{"walk", []string{"prepare-base", "walk-vm-key-generated", "guest-disk-pin-read", "guest-disk-claimed", "release-bytes-build", "guest-disk-verified",
+			"walk-vm-boots", "first-run-walk-passes", "walk-vm-deleted", "guest-disk-job-deleted", "guest-disk-claim-deleted"}},
 	} {
 		p, err := prepareOwn(t, tc.name, model.TriggerPromotion)
 		if err != nil {

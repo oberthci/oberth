@@ -3,6 +3,8 @@ import gzip
 import hashlib
 import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -75,8 +77,24 @@ class GuestDiskTests(unittest.TestCase):
         fetch.assert_called_once_with(self.pin["url"], timeout=60)
         self.assertEqual(self.output.read_bytes(), self.data)
 
+    def test_copied_script_uses_the_passed_pin(self):
+        # The walk's disk Job runs a copy of this script with the repository pin.
+        script = self.root / "prepare.py"
+        script.write_bytes(Path(MODULE.__file__).read_bytes())
+        for digest, code in ((self.pin["sha256"], 0), ("0" * 64, 1)):
+            with self.subTest(code=code):
+                pin = self.root / "pin.json"
+                pin.write_text(json.dumps({**self.pin, "sha256": digest}))
+                run = subprocess.run([sys.executable, "-I", script, "--pin", pin, "--archive", self.archive,
+                                      "--output", self.output], capture_output=True, text=True, check=False)
+                self.assertEqual(run.returncode, code, run.stderr)
+                self.assertEqual(self.output.exists(), code == 0)
+                if code == 0:
+                    self.assertEqual(json.loads(run.stdout)["disk_bytes"], len(self.data))
+                    self.output.unlink()
+
     def test_repository_pin_is_versioned_and_bounded(self):
-        pin = json.loads(MODULE.PIN.read_text())
+        pin = json.loads((Path(__file__).resolve().parents[2] / MODULE.PIN_FILE).read_text())
         self.assertIn("/v" + pin["version"] + "/", pin["url"])
         self.assertRegex(pin["sha256"], r"^[a-f0-9]{64}$")
         self.assertRegex(pin["sha512"], r"^[a-f0-9]{128}$")

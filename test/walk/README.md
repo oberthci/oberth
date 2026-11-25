@@ -5,8 +5,8 @@ When launched by `.oberth/walk-vm.yaml`, the hosting installation needs the expl
 [walk setup](../../.oberth/resources/walk-vm.yaml): the host cluster Pod
 CIDR, TCP 22. Its install/upgrade Review must name that destination. This opens
 SSH to every Pod in the chosen range; include existing exceptions in the same
-list. The VMI stays in `oberth-walk`. Installing Oberth inside the guest cannot
-change the host's egress policy.
+list. The VMI boots a run-verified pinned disk in `oberth-walk`. Installing
+Oberth inside the guest cannot change the host's egress policy.
 
 Run `./test/walk/walk` to verify a published signed release from an empty
 local VM cluster through source-consuming CI, observation, promotion and a

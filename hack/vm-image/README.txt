@@ -11,13 +11,12 @@ raw disk under reviewed size bounds, and atomically publishes a new disk.img.
 An existing output refuses. The JSON receipt records archive and raw disk hashes
 and the expanded size. No VM starts and nothing is imported or published.
 
-.oberth/guest-disk.yaml runs this inspection through the normal source plugin
-in a run-owned PVC, records the receipt parameter, and collects the scratch PVC
-on completion. Select it explicitly; build, promotion and release do not need it.
-The receipt proves source integrity, not boot or full walk readiness.
+.oberth/walk-vm.yaml reads this pin and script from the admitted commit and
+runs them with --pin in a run-named Job and claim in oberth-walk. The VMI boots
+only that claim, after the Job succeeded; the exit handler deletes all three.
+A changed digest fails the Job, so the VM never starts.
 
-The raw public image is not the fixture disk consumed by .oberth/walk-vm.yaml.
-That walk still needs its documented command-line tools, a local upstream and
-registry, private disposable identities and /etc/oberth-walk/environment.json.
-Do not import a stock disk into oberth-walk-vm and claim those prerequisites.
+The stock image is not the walk's full fixture. test/walk/walk still needs its
+command-line tools, a local upstream and registry, private disposable
+identities and /etc/oberth-walk/environment.json; without them that step fails.
 Cloud-init supplies only the current run's fresh SSH public key.
