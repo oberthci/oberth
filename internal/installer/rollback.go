@@ -144,7 +144,7 @@ func (m Maintenance) finishRollback(ctx context.Context, r Record, rolled bool) 
 	profile.ServerVersion = r.Source.Version
 	waiting, cancel := context.WithTimeout(ctx, m.Engine.waitLimit())
 	defer cancel()
-	if err = m.Engine.waitReady(waiting, profile); err == nil && rolled {
+	if err = m.Engine.waitReady(waiting, profile, ""); err == nil && rolled {
 		err = m.Engine.waitController(waiting, r.Namespace)
 	}
 	if err != nil {

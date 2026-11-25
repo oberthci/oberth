@@ -3,7 +3,6 @@ package installer
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,10 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"time"
 
-	"github.com/oberthci/oberth/internal/clientcert"
 	"github.com/oberthci/oberth/internal/publicerr"
 )
 
@@ -82,20 +79,14 @@ func evaluateEndpoint(ctx context.Context, client *http.Client, address string) 
 }
 
 func (v EndpointVerifier) tlsConfig(p Profile) (*tls.Config, error) {
-	roots, err := readProfileCA(p, os.ReadFile)
+	pool, err := profileCAPool(p)
 	if err != nil {
 		return nil, err
-	}
-	cert, err := clientcert.ParseCertificate(roots)
-	if err != nil || clientcert.Pin(cert) != p.CAPin {
-		return nil, problem("tls", err)
 	}
 	pair, err := tls.LoadX509KeyPair(p.AdminCert, p.AdminKey)
 	if err != nil {
 		return nil, problem("tls", err)
 	}
-	pool := x509.NewCertPool()
-	pool.AddCert(cert)
 	u, err := url.Parse(p.ServerURL)
 	if err != nil || u.Scheme != "https" || u.User != nil || u.Hostname() == "" {
 		return nil, problem("tls", err)

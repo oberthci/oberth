@@ -198,7 +198,7 @@ func (e *Engine) finish(ctx context.Context, p *Plan, profile Profile, progress 
 	}
 	waiting, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
-	if err := e.waitReady(waiting, profile); err != nil {
+	if err := e.waitReady(waiting, profile, p.previous.ServerURL); err != nil {
 		return err
 	}
 	// A changed controller is ready only when no Pod of the earlier one serves.

@@ -9,7 +9,7 @@ import (
 // ReadinessTimeout allows an image pull and database migration on a loaded node.
 const ReadinessTimeout = 10 * time.Minute
 
-func (e *Engine) waitReady(ctx context.Context, p Profile) error {
+func (e *Engine) waitReady(ctx context.Context, p Profile, previousURL string) error {
 	var last error
 	for {
 		if err := ctx.Err(); err != nil {
@@ -25,19 +25,27 @@ func (e *Engine) waitReady(ctx context.Context, p Profile) error {
 		if err == nil {
 			return nil
 		}
-		var refusal *Problem
-		if !errors.As(err, &refusal) {
-			return err
-		}
-		switch refusal.Code {
-		case "starting", "connect", "ready-version":
-		default:
+		if !e.rolloutPending(err, p, previousURL) {
 			return err
 		}
 		if err = e.pause(ctx); err != nil {
 			return readinessFailure(err, last)
 		}
 	}
+}
+
+func (e *Engine) rolloutPending(err error, p Profile, previousURL string) bool {
+	var refusal *Problem
+	if !errors.As(err, &refusal) {
+		return false
+	}
+	switch refusal.Code {
+	case "starting", "connect", "ready-version":
+		return true
+	case "tls":
+		return e.previousServerCertificate(err, p, previousURL)
+	}
+	return false
 }
 
 func readinessFailure(cause, last error) error {

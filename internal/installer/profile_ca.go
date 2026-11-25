@@ -1,8 +1,26 @@
 package installer
 
 import (
+	"crypto/x509"
+	"os"
 	"path/filepath"
+
+	"github.com/oberthci/oberth/internal/clientcert"
 )
+
+func profileCAPool(p Profile) (*x509.CertPool, error) {
+	raw, err := readProfileCA(p, os.ReadFile)
+	if err != nil {
+		return nil, err
+	}
+	cert, err := clientcert.ParseCertificate(raw)
+	if err != nil || clientcert.Pin(cert) != p.CAPin {
+		return nil, problem("tls", err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(cert)
+	return pool, nil
+}
 
 func readProfileCA(p Profile, read func(string) ([]byte, error)) ([]byte, error) {
 	path := p.CAFile

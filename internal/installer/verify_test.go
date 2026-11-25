@@ -50,6 +50,11 @@ func TestVerifiedInstallationTlsContract(t *testing.T) {
 
 func serverTLS(t *testing.T, f fixture) *tls.Config {
 	t.Helper()
+	return serverTLSForName(t, f, "server.oberth.ci")
+}
+
+func serverTLSForName(t *testing.T, f fixture, name string) *tls.Config {
+	t.Helper()
 	secret, err := f.client.CoreV1().Secrets("oberth").Get(context.Background(), "oberth-ca", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +74,7 @@ func serverTLS(t *testing.T, f fixture) *tls.Config {
 		t.Fatal(err)
 	}
 	now := f.engine.Now()
-	template := &x509.Certificate{SerialNumber: big.NewInt(123), NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), DNSNames: []string{"server.oberth.ci"}, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	template := &x509.Certificate{SerialNumber: big.NewInt(123), NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), DNSNames: []string{name}, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, template, ca, pub, caKey)
 	if err != nil {
 		t.Fatal(err)
