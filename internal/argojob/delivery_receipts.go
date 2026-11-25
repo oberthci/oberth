@@ -2,12 +2,15 @@ package argojob
 
 import (
 	"context"
+	"slices"
+	"time"
 
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/stepmodel"
 	core "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // DeliveryIdentity derives a receipt key from a live bound Pod and its native
@@ -55,12 +58,48 @@ func (e *Executor) project(ctx context.Context, t *tracking, w *wf.Workflow, pod
 		if err != nil {
 			return Observation{}, err
 		}
+		if e.config.Pods != nil && len(in.Infrastructure) > 0 {
+			in.Pods, err = e.deliveryPods(ctx, w, pods, in.Infrastructure)
+			if err != nil {
+				return Observation{}, err
+			}
+		}
 	}
 	return Project(ctx, in)
 }
 
+// A controller can publish Failed before the Pod informer catches up. Source
+// attribution needs the failed init, so confirm it live before freezing a run.
+func (e *Executor) deliveryPods(ctx context.Context, w *wf.Workflow, pods []*core.Pod, receipts []runlog.InfrastructureReceipt) ([]*core.Pod, error) {
+	fresh := slices.Clone(pods)
+	for _, r := range receipts {
+		for i, p := range fresh {
+			if !sourceReceiptNeedsPod(r, w, p) {
+				continue
+			}
+			live, err := e.config.Pods.Get(ctx, p.Name, meta.GetOptions{})
+			if err != nil {
+				return nil, err
+			}
+			if live == nil || live.UID != p.UID || !podOwned(w, w.Status.Nodes[r.NodeID], live) {
+				return nil, ownership(nil)
+			}
+			fresh[i] = live
+		}
+	}
+	return fresh, nil
+}
+
+func sourceReceiptNeedsPod(r runlog.InfrastructureReceipt, w *wf.Workflow, p *core.Pod) bool {
+	if r.Kind != "source" || p == nil || r.PodUID != string(p.UID) || r.WorkflowUID != string(w.UID) {
+		return false
+	}
+	n, ok := w.Status.Nodes[r.NodeID]
+	return ok && p.Annotations["workflows.argoproj.io/node-id"] == n.ID && r.PodRestarts == n.FailedPodRestarts && (n.Phase == wf.NodeFailed || n.Phase == wf.NodeError) && deliveryFailedDuring(r, n, nil) && !deliveryFailedDuring(r, n, p)
+}
+
 func receiptDiagnosis(d diagnosis, in projectionInput, n wf.NodeStatus, p *core.Pod) diagnosis {
-	if !terminalNode(n) || d.class == stepmodel.FailureCancelled || d.class == stepmodel.FailureDeadline {
+	if n.Phase != wf.NodeFailed && n.Phase != wf.NodeError || d.class == stepmodel.FailureCancelled || d.class == stepmodel.FailureDeadline {
 		return d
 	}
 	podUID := deliveryPodUID(n, in, p)
@@ -68,7 +107,7 @@ func receiptDiagnosis(d diagnosis, in projectionInput, n wf.NodeStatus, p *core.
 		return d
 	}
 	for _, r := range in.infrastructure {
-		if !matchesDeliveryReceipt(r, in, n, podUID) {
+		if !matchesDeliveryReceipt(r, in, n, podUID) || !deliveryFailedDuring(r, n, p) {
 			continue
 		}
 		switch r.Kind {
@@ -83,6 +122,41 @@ func receiptDiagnosis(d diagnosis, in projectionInput, n wf.NodeStatus, p *core.
 		return d
 	}
 	return d
+}
+
+// Native timestamps bind the terminal delivery to the failure it diagnoses.
+// A source receipt additionally requires a failed source init: a later command
+// failure cannot be blamed on checkout, even when it happens immediately.
+func deliveryFailedDuring(r runlog.InfrastructureReceipt, n wf.NodeStatus, p *core.Pod) bool {
+	if r.Delivered || r.StartedAt.IsZero() || r.FinishedAt.IsZero() || r.FinishedAt.Before(r.StartedAt) {
+		return false
+	}
+	finished := deliveryFailureTime(r.Kind, n, p)
+	// Kubernetes metav1.Time on the wire has whole-second precision.
+	return !finished.IsZero() && !finished.Before(r.StartedAt.Truncate(time.Second)) && !finished.After(r.FinishedAt.Add(10*time.Second))
+}
+
+func deliveryFailureTime(kind string, n wf.NodeStatus, p *core.Pod) time.Time {
+	finished := n.FinishedAt.Time
+	if p != nil {
+		statuses, name := p.Status.ContainerStatuses, "main"
+		if kind == "source" {
+			statuses, name = p.Status.InitContainerStatuses, "init-artifact-oberth"
+			finished = time.Time{}
+		}
+		for _, c := range statuses {
+			if c.Name == name && c.State.Terminated != nil {
+				if c.State.Terminated.ExitCode == 0 {
+					return time.Time{}
+				}
+				finished = c.State.Terminated.FinishedAt.Time
+				if finished.IsZero() {
+					finished = n.FinishedAt.Time
+				}
+			}
+		}
+	}
+	return finished
 }
 
 func deliveryPodUID(n wf.NodeStatus, in projectionInput, p *core.Pod) string {

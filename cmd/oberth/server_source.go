@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitport"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/secretstore"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/sourcedelivery"
@@ -29,8 +31,10 @@ func (o *serverOwners) sourcePart(ctx context.Context) (Part, error) {
 	}, Pod: func(ctx context.Context, ns, name string) (*core.Pod, error) {
 		return o.cluster.Kube.CoreV1().Pods(ns).Get(ctx, name, meta.GetOptions{})
 	}}
-	source := sourcedelivery.New(sourcedelivery.Config{Authenticate: authentication.Authenticate, Run: o.sourceRun, Stage: o.cache.Stage, Now: o.c.clock.Now, SourceClientBurst: o.settings.SourceClientBurst, RecordFailure: func(ctx context.Context, caller sourcedelivery.Caller) error {
-		return o.recordDeliveryFailure(ctx, caller, "source")
+	source := sourcedelivery.New(sourcedelivery.Config{Authenticate: authentication.Authenticate, Run: o.sourceRun, Stage: o.cache.Stage, Now: o.c.clock.Now, SourceClientBurst: o.settings.SourceClientBurst, RecordFailure: func(ctx context.Context, caller sourcedelivery.Caller, started time.Time) error {
+		return o.recordDelivery(ctx, caller, runlog.InfrastructureReceipt{Kind: "source", StartedAt: started})
+	}, RecordSuccess: func(ctx context.Context, caller sourcedelivery.Caller, started time.Time) error {
+		return o.recordDelivery(ctx, caller, runlog.InfrastructureReceipt{Kind: "source", StartedAt: started, Delivered: true})
 	}})
 	authentication.Audience = o.c.delivery.Access.Audience
 	secrets := o.secretDeliveryHandler(authentication.Authenticate)
@@ -41,7 +45,7 @@ func (o *serverOwners) sourcePart(ctx context.Context) (Part, error) {
 	return Part{Name: "source"}, ctx.Err()
 }
 func (o *serverOwners) sourceRun(ctx context.Context, id string) (sourcedelivery.Run, error) {
-	r, err := o.c.store.Run(ctx, id)
+	r, err := o.deliveryRun(ctx, id)
 	return sourcedelivery.Run{Admission: r.Admission, Namespace: r.Admission.Identity.Namespace, Workflow: r.Origin.WorkflowName, UID: r.Origin.WorkflowUID, Terminal: terminalRun(r.Status)}, err
 }
 func (o *serverOwners) sshIdentity(ctx context.Context, key ssh.PublicKey) (sshserver.Identity, error) {

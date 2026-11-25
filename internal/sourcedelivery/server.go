@@ -47,7 +47,8 @@ type Config struct {
 	Metric            func(code, reason string)
 	SourceClientBurst int
 	Now               func() time.Time
-	RecordFailure     func(context.Context, Caller) error
+	RecordFailure     func(context.Context, Caller, time.Time) error
+	RecordSuccess     func(context.Context, Caller, time.Time) error
 }
 type Server struct {
 	config          Config
@@ -124,6 +125,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) load(ctx context.Context, w http.ResponseWriter, r *http.Request, request LoadRequest) {
+	started := s.config.Now()
 	run, binding, index, err := s.authorize(ctx, r.Header.Get("Authorization"), request)
 	if err != nil {
 		s.failure(w, err)
@@ -145,12 +147,20 @@ func (s *Server) load(ctx context.Context, w http.ResponseWriter, r *http.Reques
 	}
 	staged, err := s.config.Stage(ctx, binding)
 	if err != nil {
-		err = s.recordFailure(ctx, run.caller, err)
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			err = &terminalFailure{s.recordFailure(ctx, run.caller, started, err)}
+		}
 		s.failure(w, err)
 		return
 	}
 	load := transfer{request: request, admission: run.Admission.Digest, index: index, stage: staged}
-	load.stage.Body = &failureReader{ReadCloser: staged.Body, fail: func(err error) error { return s.recordFailure(ctx, run.caller, err) }}
+	load.stage.Body = &failureReader{ReadCloser: staged.Body, fail: func(err error) error { return s.recordFailure(ctx, run.caller, started, err) }}
+	load.success = func() error {
+		if s.config.RecordSuccess != nil {
+			return s.config.RecordSuccess(ctx, run.caller, started)
+		}
+		return nil
+	}
 	if err := s.checkStagedAuthorization(ctx, r.Header.Get("Authorization"), load); err != nil {
 		_ = staged.Body.Close()
 		s.failure(w, err)
@@ -224,9 +234,15 @@ func (s *Server) authorize(ctx context.Context, header string, request LoadReque
 	}
 	defer s.workflow(caller, -1)
 	id := runID(caller, request.Locator)
+	started := s.config.Now()
 	run, err := s.config.Run(phase, id)
 	if err != nil {
-		return run, empty, 0, s.recordFailure(ctx, caller, err)
+		// Immediate database errors remain retryable 503s. Only an exhausted
+		// server delivery phase is terminal and may create a receipt.
+		if errors.Is(phase.Err(), context.DeadlineExceeded) {
+			err = &terminalFailure{s.recordFailure(ctx, caller, started, err)}
+		}
+		return run, empty, 0, err
 	}
 	run.caller = caller
 	binding, index, err := selectBinding(run, caller, LoadRequest{Locator: id, Descriptor: request.Descriptor})
@@ -305,6 +321,7 @@ type transfer struct {
 	admission string
 	index     int
 	stage     Staged
+	success   func() error
 }
 
 func (s *Server) send(ctx context.Context, w http.ResponseWriter, t transfer) {
@@ -338,6 +355,10 @@ func (s *Server) send(ctx context.Context, w http.ResponseWriter, t transfer) {
 		s.metric("unavailable", "other")
 		return
 	}
+	if t.success != nil && t.success() != nil {
+		s.metric("unavailable", "other")
+		return
+	}
 	w.Header().Set(ReceiptTrailer, value)
 }
 
@@ -358,6 +379,12 @@ func (d *deadlineWriter) Write(b []byte) (int, error) {
 	return d.w.Write(b)
 }
 func (s *Server) failure(w http.ResponseWriter, err error) {
+	var terminal *terminalFailure
+	if errors.As(err, &terminal) {
+		s.metric("unavailable", "other")
+		s.fail(w, 502, "delivery_failed", "")
+		return
+	}
 	var f *Failure
 	if !errors.As(err, &f) {
 		s.fail(w, 503, "unavailable", "other")

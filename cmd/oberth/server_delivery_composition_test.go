@@ -72,6 +72,9 @@ func TestComposedSecretOutageFinishesWithInfrastructureRerun(t *testing.T) {
 	if reply.StatusCode != 503 {
 		t.Fatal("step store failure was not refused", reply.StatusCode)
 	}
+	// The composed server uses real time; the native fixture must terminate
+	// after this request, rather than at its frozen startup time.
+	f.clock.Advance(f.deps.clock.Now().Sub(f.clock.Now()))
 	f.endNative(t, run, 1)
 	ended := f.waitRun(t, func(r stateport.Run) bool { return r.Status == stepmodel.RunFailed })
 	if ended.Failure == nil || ended.Failure.Class != stepmodel.FailureInfrastructure || ended.Failure.Retry.Action != stepmodel.RetryRerun {

@@ -160,6 +160,47 @@ func TestSecretRequestStoreOutageWritesDurableInfrastructureReceipt(t *testing.T
 	}
 }
 
+func TestSecretLaterSuccessSupersedesTerminalFailure(t *testing.T) {
+	f := newDeliveryFixture(t)
+	h := f.handler(t)
+	f.backend.Sealed = true
+	if w := deliveryRequest(t, h, f.jwt, `{"path":"registry/value"}`); w.Code != 503 {
+		t.Fatal(w.Code)
+	}
+	f.backend.Sealed = false
+	if w := deliveryRequest(t, h, f.jwt, `{"path":"registry/value"}`); w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	r, err := f.o.c.logs.Infrastructure(t.Context(), f.run.ID)
+	if err != nil || len(r) != 0 {
+		t.Fatal("successful delivery retained failure", r, err)
+	}
+}
+
+func TestSecretFailureReceiptSurvivesNativeCompletionDuringRequest(t *testing.T) {
+	f := newDeliveryFixture(t)
+	c, err := secretstore.New(secretstore.Connection{URL: "https://store.invalid", Transport: testTransport(func(*http.Request) (*http.Response, error) {
+		w := f.w.DeepCopy()
+		w.Status.Phase = wf.WorkflowFailed
+		if _, failure := f.o.cluster.Argo.ArgoprojV1alpha1().Workflows(w.Namespace).Update(t.Context(), w, meta.UpdateOptions{}); failure != nil {
+			t.Error(failure)
+		}
+		return nil, errors.New("connection refused")
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.o.c.storeWriter.Client = c
+	if reply := deliveryRequest(t, f.handler(t), f.jwt, `{"path":"registry/value"}`); reply.Code != 502 {
+		t.Fatal(reply.Code)
+	}
+	r, err := f.o.c.logs.Infrastructure(t.Context(), f.run.ID)
+	if err != nil || len(r) != 1 {
+		t.Fatal("native completion erased delivery evidence", r, err)
+	}
+	f.assertDiagnosis(t, r)
+}
+
 func (f deliveryFixture) fail(t *testing.T, failure string) {
 	t.Helper()
 	switch failure {
@@ -192,8 +233,12 @@ func (f deliveryFixture) assertDiagnosis(t *testing.T, receipts []runlog.Infrast
 	w.Status.Phase = wf.WorkflowFailed
 	n := w.Status.Nodes["node"]
 	n.Phase = wf.NodeFailed
+	n.FinishedAt = meta.NewTime(f.o.c.clock.Now())
 	w.Status.Nodes["node"] = n
-	pod.Status.ContainerStatuses = []core.ContainerStatus{{Name: "main", State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 1}}}}
+	pod.Status.ContainerStatuses = []core.ContainerStatus{{Name: "main", State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 1, FinishedAt: n.FinishedAt}}}}
+	if len(receipts) > 0 && receipts[0].Kind == "source" {
+		pod.Status.InitContainerStatuses = []core.ContainerStatus{{Name: "init-artifact-oberth", State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 64, FinishedAt: n.FinishedAt}}}}
+	}
 	o, err := argojob.Project(t.Context(), argojob.Projection{RunID: f.run.ID, Plan: f.run.Admission.Plan, Workflow: w, Pods: []*core.Pod{pod}, Infrastructure: receipts})
 	if err != nil || o.Failure == nil || o.Failure.Class != stepmodel.FailureInfrastructure || o.Failure.Retry.Action != stepmodel.RetryRerun {
 		t.Fatal("server outage did not classify infrastructure/rerun", o.Failure, err)

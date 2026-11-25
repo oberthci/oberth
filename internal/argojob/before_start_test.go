@@ -54,8 +54,8 @@ func TestEndedSourceFailureWithServerReceiptGrantsRerun(t *testing.T) {
 	w.Status.Nodes[n.ID] = n
 	p := nativePod(w, n, 0)
 	p.Status.ContainerStatuses[0].State = core.ContainerState{Waiting: &core.ContainerStateWaiting{Reason: "PodInitializing"}}
-	p.Status.InitContainerStatuses = []core.ContainerStatus{{Name: "init-artifact-oberth", State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 64, Message: n.Message}}}}
-	r := runlog.InfrastructureReceipt{RunID: "run", WorkflowUID: string(w.UID), NodeID: n.ID, Step: "build", PodUID: string(p.UID), Kind: "source"}
+	p.Status.InitContainerStatuses = []core.ContainerStatus{{Name: "init-artifact-oberth", State: core.ContainerState{Terminated: &core.ContainerStateTerminated{ExitCode: 64, Message: n.Message, FinishedAt: n.FinishedAt}}}}
+	r := runlog.InfrastructureReceipt{RunID: "run", WorkflowUID: string(w.UID), NodeID: n.ID, Step: "build", PodUID: string(p.UID), Kind: "source", StartedAt: n.StartedAt.Time, FinishedAt: n.FinishedAt.Time}
 	out := project(t, argojob.Projection{RunID: "run", Plan: admissioncontract.Plan{Entries: []admissioncontract.PlanEntry{{Path: "build", Name: "build"}}}, Workflow: w, Pods: []*core.Pod{p}, Infrastructure: []runlog.InfrastructureReceipt{r}})
 	if out.Failure == nil || out.Failure.Class != stepmodel.FailureInfrastructure || out.Failure.Retry.Action != stepmodel.RetryRerun || out.Reason != "source delivery failed" {
 		t.Fatal("server source receipt lost its diagnosis", out.Failure)

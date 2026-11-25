@@ -114,6 +114,23 @@ func (f *composedFixture) sourcePod(t *testing.T, r stateport.Run) *core.Pod {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The controller creates the native node before its Pod loads artifacts.
+	// Model both facts so successful delivery can supersede prior evidence.
+	wc := f.argo.ArgoprojV1alpha1().Workflows(pod.Namespace)
+	w, err := wc.Get(t.Context(), name, meta.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Status.Nodes == nil {
+		w.Status.Nodes = wf.Nodes{}
+	}
+	if _, ok := w.Status.Nodes[name]; !ok {
+		w.Status.Nodes[name] = wf.NodeStatus{ID: name, Name: nodeName, TemplateName: r.Admission.Plan.Entries[0].Name, Type: wf.NodeTypePod, Phase: wf.NodeRunning, StartedAt: meta.NewTime(f.clock.Now())}
+		w.Status.Phase = wf.WorkflowRunning
+		if _, err = wc.Update(t.Context(), w, meta.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return pod
 }
 func (f *composedFixture) deliverSource(t *testing.T, r stateport.Run) string {
