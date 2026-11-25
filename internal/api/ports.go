@@ -27,7 +27,7 @@ type Streams interface {
 // AccountSnapshot authenticates a projected account token for this one stream.
 // It cannot grant administrator or ordinary repository access.
 type AccountSnapshot interface {
-	Snapshot(context.Context, string) (io.ReadCloser, error)
+	Snapshot(ctx context.Context, remote, token string) (io.ReadCloser, error)
 }
 
 // Runtime injects time, tick delivery and nonces; Stop must release ticker work.

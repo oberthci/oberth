@@ -97,6 +97,10 @@ type deliveryAuthGate struct {
 	refused map[string]deliveryRefusal
 }
 
+func newAuthGate(limit int, now func() time.Time) *deliveryAuthGate {
+	return &deliveryAuthGate{limit: limit, now: now, remotes: map[string]struct{}{}, refused: map[string]deliveryRefusal{}}
+}
+
 func (g *deliveryAuthGate) acquire(remote, pod string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -144,7 +148,7 @@ func (g *deliveryAuthGate) forgetOldest() {
 }
 
 func (o *serverOwners) boundedDeliveryAuthentication(authenticate func(context.Context, string) (sourcedelivery.Caller, error)) func(context.Context, string, string) (sourcedelivery.Caller, error) {
-	gate := &deliveryAuthGate{limit: max(1, o.settings.SourceClientBurst/3), now: o.c.clock.Now, remotes: map[string]struct{}{}, refused: map[string]deliveryRefusal{}}
+	gate := newAuthGate(max(1, o.settings.SourceClientBurst/3), o.c.clock.Now)
 	podAt := o.podAt
 	return func(ctx context.Context, remote, jwt string) (caller sourcedelivery.Caller, err error) {
 		pod := ""
@@ -165,10 +169,12 @@ func (o *serverOwners) boundedDeliveryAuthentication(authenticate func(context.C
 	}
 }
 
-func remoteHost(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+func remoteHost(r *http.Request) string { return addressHost(r.RemoteAddr) }
+
+func addressHost(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
-		return r.RemoteAddr
+		return addr
 	}
 	return host
 }

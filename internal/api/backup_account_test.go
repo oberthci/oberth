@@ -17,7 +17,7 @@ import (
 
 type accountSnapshotFunc func(context.Context, string) (io.ReadCloser, error)
 
-func (f accountSnapshotFunc) Snapshot(ctx context.Context, token string) (io.ReadCloser, error) {
+func (f accountSnapshotFunc) Snapshot(ctx context.Context, _, token string) (io.ReadCloser, error) {
 	return f(ctx, token)
 }
 
@@ -97,5 +97,28 @@ func TestAccountSnapshotRefusesClientCertificate(t *testing.T) {
 	f.server.Handler().ServeHTTP(w, r)
 	if w.Code != 401 || calls != 0 || strings.Contains(w.Body.String(), "canonical-backup-fixture") {
 		t.Fatal("account snapshot accepted a request carrying a client certificate", w.Code, calls)
+	}
+}
+
+func TestAccountSnapshotRefusesOversizedTokenBeforeReview(t *testing.T) {
+	calls := 0
+	f := setup(t, func(c *api.Config, _ *apicontract.Bindings) {
+		c.AccountBackup = accountSnapshotFunc(func(context.Context, string) (io.ReadCloser, error) {
+			calls++
+			return nil, publicerr.New(publicerr.Forbidden, "Invalid account.", "Use the backup account.", nil)
+		})
+	})
+	for _, size := range []int{64 << 10, 64<<10 + 1} {
+		r := httptest.NewRequest("POST", "/api/backup/database", strings.NewReader("{}"))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Authorization", "Bearer "+strings.Repeat("a", size))
+		w := newStreamWriter()
+		f.server.Handler().ServeHTTP(w, r)
+		if size > 64<<10 && (w.Code != 401 || calls != 1) {
+			t.Fatal("oversized backup token reached authentication", w.Code, calls)
+		}
+	}
+	if calls != 1 {
+		t.Fatal("a token at the cap was not reviewed", calls)
 	}
 }

@@ -9390,7 +9390,7 @@
     }
   },
   "spec_sha256": {
-    "docs/plans/c1-transport-and-tool-registry.md": "4d1a17538589338bb0ebbde6948c65aa9d23f4fa7585ef4b53e634dae9d4342a",
+    "docs/plans/c1-transport-and-tool-registry.md": "48538bef11c4b9188b986fd07ed978f6e09ea378b8924baff18a04bbc21a0965",
     "docs/plans/c10-schedules.md": "78bd7b77d6511426d16b5c7ddf543b8124c47e82d40fb16542cfa8efbac7ca67",
     "docs/plans/c11-cli-and-server-composition.md": "690c48d8d99dde5a17855a6a5524217a37bd769e61cdb92a63b07ac525065977",
     "docs/plans/c12-agent-client.md": "1839b17c036fa9a854df8097a076a712f84c9660b1945f029d5ae9efe728ddac",

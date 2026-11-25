@@ -9,18 +9,36 @@ import (
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/secretstore"
+	"github.com/oberthci/oberth/internal/sourcedelivery"
 	authv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type serverBackupSnapshot struct{ owner *serverOwners }
+// The snapshot endpoint is public, so its TokenReview never draws on the main
+// client's budget: it has its own small one, at most two reviews in flight and
+// one per remote address. An address that presented an invalid token is cooled
+// as broker addresses are. Overflow and cooldown answer a retryable 503 without
+// an API call. A backup Job reviews once per run, far inside this budget.
+const (
+	backupReviewQPS, backupReviewBurst = 1, 2
+	backupReviewsInFlight              = 2
+)
+
+type serverBackupSnapshot struct {
+	owner *serverOwners
+	gate  *deliveryAuthGate
+}
+
+func newServerBackupSnapshot(o *serverOwners) serverBackupSnapshot {
+	return serverBackupSnapshot{owner: o, gate: newAuthGate(backupReviewsInFlight, o.c.clock.Now)}
+}
 
 func backupAccountName(namespace string) string {
 	return "system:serviceaccount:" + namespace + ":" + secretstore.BackupRole
 }
 
-func (s serverBackupSnapshot) Snapshot(ctx context.Context, token string) (io.ReadCloser, error) {
-	a, err := s.authenticatedAccount(ctx, token)
+func (s serverBackupSnapshot) Snapshot(ctx context.Context, remote, token string) (io.ReadCloser, error) {
+	a, err := s.boundedAccount(ctx, addressHost(remote), token)
 	if err != nil {
 		return nil, err
 	}
@@ -33,10 +51,28 @@ func (s serverBackupSnapshot) Snapshot(ctx context.Context, token string) (io.Re
 	}), nil
 }
 
+func (s serverBackupSnapshot) boundedAccount(ctx context.Context, remote, token string) (a actor.Actor, err error) {
+	pod := ""
+	if s.owner.podAt != nil {
+		pod = s.owner.podAt(remote)
+	}
+	if s.gate.acquire(remote, pod) != nil {
+		return actor.Actor{}, publicerr.New(publicerr.Unavailable, "Backup authorization is busy.", "Retry this backup in a few seconds.", nil)
+	}
+	defer func() {
+		outcome := err
+		if err != nil && publicerr.Classify(err).Code() == publicerr.Forbidden {
+			outcome = &sourcedelivery.Failure{Code: "unauthenticated"}
+		}
+		s.gate.release(remote, pod, outcome)
+	}()
+	return s.authenticatedAccount(ctx, token)
+}
+
 func (s serverBackupSnapshot) authenticatedAccount(ctx context.Context, token string) (actor.Actor, error) {
 	check, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	review, err := s.owner.cluster.Kube.AuthenticationV1().TokenReviews().Create(check,
+	review, err := s.owner.cluster.backupReview.AuthenticationV1().TokenReviews().Create(check,
 		&authv1.TokenReview{Spec: authv1.TokenReviewSpec{Token: token, Audiences: []string{apicontract.BackupSnapshotAudience}}}, metav1.CreateOptions{})
 	account := backupAccountName(s.owner.c.config.Namespace)
 	if err != nil || review == nil || review.Status.Error != "" {

@@ -9,6 +9,14 @@ import (
 	"github.com/oberthci/oberth/internal/apicontract"
 )
 
+// accountToken takes only a bearer token without a client certificate. A
+// projected token is far smaller than 64 KiB; a larger one is refused before
+// any cluster call.
+func accountToken(r *http.Request) (string, bool) {
+	token, err := bearerToken(r, false)
+	return token, err == nil && len(token) <= 64<<10 && (r.TLS == nil || len(r.TLS.PeerCertificates) == 0)
+}
+
 func (s *Server) accountBackup(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if s.draining.Load() {
@@ -19,8 +27,8 @@ func (s *Server) accountBackup(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, refusal("forbidden"), 403)
 		return
 	}
-	token, err := bearerToken(r, false)
-	if err != nil || (r.TLS != nil && len(r.TLS.PeerCertificates) != 0) {
+	token, ok := accountToken(r)
+	if !ok {
 		s.writeError(w, r, refusal("auth"), 401)
 		return
 	}
@@ -39,7 +47,7 @@ func (s *Server) accountBackup(w http.ResponseWriter, r *http.Request) {
 	defer stop()
 	ctx, cancel := context.WithTimeout(observing, 10*time.Minute)
 	defer cancel()
-	source, err := s.config.AccountBackup.Snapshot(ctx, token)
+	source, err := s.config.AccountBackup.Snapshot(ctx, r.RemoteAddr, token)
 	if err != nil {
 		s.writeError(w, r, err, 0)
 		return

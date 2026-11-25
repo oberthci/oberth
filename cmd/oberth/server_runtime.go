@@ -92,6 +92,7 @@ type clusterClients struct {
 	deliveryReview kubernetes.Interface
 	deliveryKube   kubernetes.Interface
 	deliveryArgo   wfclient.Interface
+	backupReview   kubernetes.Interface
 }
 
 // The server's cluster clients send at most serverClientQPS requests a second
@@ -130,8 +131,12 @@ func newClusterClients(cfg *rest.Config) (clusterClients, error) {
 	if err != nil {
 		return clusterClients{}, err
 	}
+	backupReview, err := kubernetes.NewForConfig(budget(cfg, backupReviewQPS, backupReviewBurst))
+	if err != nil {
+		return clusterClients{}, err
+	}
 	review, deliveryKube, deliveryArgo, err := deliveryClients(cfg)
-	return clusterClients{Kube: kube, Argo: argo, REST: cfg, collectionKube: collectionKube, collectionArgo: collectionArgo, deliveryReview: review, deliveryKube: deliveryKube, deliveryArgo: deliveryArgo}, err
+	return clusterClients{Kube: kube, Argo: argo, REST: cfg, collectionKube: collectionKube, collectionArgo: collectionArgo, deliveryReview: review, deliveryKube: deliveryKube, deliveryArgo: deliveryArgo, backupReview: backupReview}, err
 }
 
 type serverPlatform struct {

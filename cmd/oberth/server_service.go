@@ -43,7 +43,7 @@ func (o *serverOwners) servicePart(ctx context.Context) (Part, error) {
 	o.c.views = o.service.Views()
 	o.c.enroll = enrollment{o}
 	o.c.streams = serverStreams{o}
-	o.c.accountBackup = serverBackupSnapshot{o}
+	o.c.accountBackup = newServerBackupSnapshot(o)
 	o.c.installAdmin = o.service.InstallAdmin
 	return Part{Name: "service", Shutdown: stopService, Recover: o.service.RecoverPublications, Close: o.service.Shutdown}, nil
 }

@@ -34,8 +34,8 @@ func TestBackupSnapshotRequiresExactLiveAccountAndAudience(t *testing.T) {
 				}
 				return true, &authv1.TokenReview{Status: status}, nil
 			})
-			owner := &serverOwners{c: &composition{config: serverConfig{Namespace: "oberth"}}, cluster: clusterClients{Kube: client}}
-			account, err := (serverBackupSnapshot{owner}).authenticatedAccount(t.Context(), "projection-fixture")
+			owner := &serverOwners{c: &composition{config: serverConfig{Namespace: "oberth"}}, cluster: clusterClients{backupReview: client}}
+			account, err := (serverBackupSnapshot{owner: owner}).authenticatedAccount(t.Context(), "projection-fixture")
 			checkBackupReviewResult(t, scenario, account, err)
 		})
 	}
@@ -82,8 +82,8 @@ func TestBackupSnapshotReviewsAgainAfterRevocation(t *testing.T) {
 		}
 		return true, &authv1.TokenReview{Status: status}, nil
 	})
-	owner := &serverOwners{c: &composition{config: serverConfig{Namespace: "oberth"}}, cluster: clusterClients{Kube: client}}
-	snapshot := serverBackupSnapshot{owner}
+	owner := &serverOwners{c: &composition{config: serverConfig{Namespace: "oberth"}}, cluster: clusterClients{backupReview: client}}
+	snapshot := serverBackupSnapshot{owner: owner}
 	if _, err := snapshot.authenticatedAccount(t.Context(), "projection-fixture"); err != nil {
 		t.Fatal(err)
 	}
