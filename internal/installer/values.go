@@ -2,6 +2,7 @@ package installer
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"net/url"
 	"slices"
@@ -29,7 +30,7 @@ func values(r Release, c Choices, stored map[string]any) (map[string]any, error)
 		return nil, problem("choices", nil)
 	}
 	if c.HTTPSServicePort != defaultHTTPSServicePort && r.chart.Values["servicePort"] == nil {
-		return nil, problem("service-port-chart", nil)
+		return nil, described("service-port-chart", nil, fmt.Sprintf("HTTPS Service port: %d", c.HTTPSServicePort))
 	}
 	saved := operatorValues(stored)
 	if c.replaceValues {

@@ -171,6 +171,7 @@ func operationProblems() map[string]Problem {
 		"node-port":              {Reason: "Service node ports must be distinct and between 1 and 65535.", Remedy: "Set --https-node-port and --ssh-node-port to unused cluster node ports."},
 		"service-port":           {Reason: "HTTPS Service port must be 1 to 65535.", Remedy: "Set --service-port to a valid in-cluster HTTPS port."},
 		"service-port-chart":     {Reason: "This release has a fixed Service port.", Remedy: "Use its default port or select a release with --service-port support."},
+		"rollback-service-port":  {Reason: "Rollback needs the default Service port.", Remedy: "The earlier release serves HTTPS only on 8443: run oberth upgrade --version <earlier-version> --service-port 8443."},
 		"service-port-ssh":       {Reason: "HTTPS and SSH Service ports must differ.", Remedy: "Choose --service-port other than 2222, which is the SSH Service port."},
 		"https-node-port":        {Reason: "HTTPS node port is taken; use --https-node-port.", Remedy: "Choose an unused node port and review the installation again."},
 		"ssh-node-port":          {Reason: "SSH node port is taken; use --ssh-node-port.", Remedy: "Choose an unused node port and review the installation again."},

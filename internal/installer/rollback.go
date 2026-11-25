@@ -105,6 +105,12 @@ func (m Maintenance) rollbackPlan(ctx context.Context, r Record) (*Plan, error) 
 		return nil, described("source-pins", err, "Saved policy: "+err.Error())
 	}
 	p, err := m.Engine.prepare(ctx, earlier, c, earlier.schema())
+	// A chosen HTTPS Service port is carried only to an earlier chart that
+	// declares it; otherwise the earlier release would move it silently.
+	var fixed *Problem
+	if errors.As(err, &fixed) && fixed.Code == "service-port-chart" {
+		return nil, described("rollback-service-port", nil, fixed.Detail+"; earlier release: "+r.Source.Version)
+	}
 	if err != nil {
 		return nil, err
 	}
