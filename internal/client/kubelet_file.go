@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // Kubelet publishes Secret and ConfigMap volumes as name -> ..data/name and
@@ -22,11 +24,16 @@ func readKubeletFile(path string) (data []byte, ok bool, err error) {
 	if link, err := os.Readlink(path); err != nil || link != "..data/"+name {
 		return nil, false, nil
 	}
-	version, err := kubeletVersion(dir)
+	mount, err := openKubeletMount(dir)
 	if err != nil {
 		return nil, true, fileFailure(path, "read", err)
 	}
-	data, err = readKubeletVersion(filepath.Join(dir, version), name)
+	defer mount.Close()
+	version, err := kubeletVersion(mount, name)
+	if err != nil {
+		return nil, true, fileFailure(path, "read", err)
+	}
+	data, err = readKubeletVersion(mount, version, name)
 	if err != nil {
 		return nil, true, fileFailure(path, "read", err)
 	}
@@ -34,15 +41,16 @@ func readKubeletFile(path string) (data []byte, ok bool, err error) {
 }
 
 // kubeletVersion returns the one directory ..data names inside the mount.
-func kubeletVersion(dir string) (string, error) {
-	version, err := os.Readlink(filepath.Join(dir, "..data"))
+func kubeletVersion(mount *os.File, name string) (string, error) {
+	link, err := kubeletLink(mount, name)
+	if err != nil || link != "..data/"+name {
+		return "", errors.Join(err, errKubeletLayout)
+	}
+	version, err := kubeletLink(mount, "..data")
 	if err != nil || version == ".." || !strings.HasPrefix(version, "..") || strings.Contains(version, "/") {
 		return "", errors.Join(err, errKubeletLayout)
 	}
-	if mount, err := os.Lstat(dir); err != nil || !mount.IsDir() || !kubeletOwned(mount, 0) {
-		return "", errors.Join(err, errKubeletLayout)
-	}
-	if target, err := os.Lstat(filepath.Join(dir, version)); err != nil || !target.IsDir() || !kubeletOwned(target, 022) {
+	if info, err := mount.Stat(); err != nil || !info.IsDir() || !kubeletOwned(info, 0) {
 		return "", errors.Join(err, errKubeletLayout)
 	}
 	return version, nil
@@ -50,13 +58,16 @@ func kubeletVersion(dir string) (string, error) {
 
 var errKubeletLayout = errors.New("kubelet volume layout is not safe")
 
-func readKubeletVersion(dir, name string) ([]byte, error) {
-	root, err := os.OpenRoot(dir)
+func readKubeletVersion(mount *os.File, version, name string) ([]byte, error) {
+	dir, err := openKubeletAt(mount, version, true)
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
-	file, err := openClientFile(root, name)
+	defer dir.Close()
+	if info, err := dir.Stat(); err != nil || !info.IsDir() || !kubeletOwned(info, 022) {
+		return nil, errors.Join(err, errKubeletLayout)
+	}
+	file, err := openKubeletAt(dir, name, false)
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +81,52 @@ func readKubeletVersion(dir, name string) ([]byte, error) {
 		return nil, errors.Join(err, errKubeletLayout)
 	}
 	return data, nil
+}
+
+// Pin every directory before resolving the next component. Only the two
+// validated atomic-writer links are read; openat never follows a symlink.
+func openKubeletMount(path string) (*os.File, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	dir, err := os.Open("/")
+	if err != nil {
+		return nil, err
+	}
+	for _, part := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
+		if part == "" {
+			continue
+		}
+		next, openErr := openKubeletAt(dir, part, true)
+		_ = dir.Close()
+		if openErr != nil {
+			return nil, openErr
+		}
+		dir = next
+	}
+	return dir, nil
+}
+
+func openKubeletAt(dir *os.File, name string, directory bool) (*os.File, error) {
+	flags := unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_NONBLOCK | unix.O_CLOEXEC
+	if directory {
+		flags |= unix.O_DIRECTORY
+	}
+	fd, err := unix.Openat(int(dir.Fd()), name, flags, 0)
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(fd), filepath.Join(dir.Name(), name)), nil
+}
+
+func kubeletLink(dir *os.File, name string) (string, error) {
+	var target [4096]byte
+	n, err := unix.Readlinkat(int(dir.Fd()), name, target[:])
+	if err != nil || n == len(target) {
+		return "", errors.Join(err, errKubeletLayout)
+	}
+	return string(target[:n]), nil
 }
 
 func kubeletOwned(info fs.FileInfo, mask fs.FileMode) bool {
