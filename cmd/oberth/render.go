@@ -160,7 +160,7 @@ func (a application) writeRefusal(refusal refusalMessage, detail bool) error {
 	lines := append([]string{refusal.Reason, refusal.Remedy}, refusal.Context...)
 	if refusal.Detail != "" {
 		text := "More detail is available with --detail."
-		if detail {
+		if detail || strings.HasPrefix(refusal.Detail, "Reference: ") {
 			text = refusal.Detail
 		}
 		lines = append(lines, text)
