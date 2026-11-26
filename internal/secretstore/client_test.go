@@ -77,10 +77,10 @@ func TestDefaultTransportHasOnlyExplicitTrust(t *testing.T) {
 	}
 }
 func TestRefusalCatalogueBounds(t *testing.T) {
-	for _, code := range []string{"broker", "sealed", "address", "trust", "connect", "request", "response", "limit", "drift", "token", "delivery", "path", "input"} {
+	for _, code := range []string{"broker", "sealed", "address", "trust", "connect", "request", "response", "limit", "drift", "token", "delivery", "path", "input", "backup-pending", "backup-receipt", "backup-unfinished", "backup-setup", "backup-root-disabled"} {
 		a, b := refusal(code)
-		if len(a) > 80 || len(b) > 120 || strings.HasSuffix(a, "...") {
-			t.Fatal(code)
+		if a == "" || b == "" || len(a) > 80 || len(b) > 120 || strings.HasSuffix(a, "...") || strings.HasSuffix(b, "...") || strings.HasSuffix(a, "…") || strings.HasSuffix(b, "…") {
+			t.Fatal(code, "refusal must be whole and within its bounds")
 		}
 	}
 	checkMountedFileRefusalBounds(t)
