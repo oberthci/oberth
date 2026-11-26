@@ -32,6 +32,8 @@ func storeRefusal(code string) (string, string) {
 
 func operationRefusal(code string) (string, string) {
 	switch code {
+	case "backup-unfinished":
+		return "Store root generation is unfinished.", "Cancel it with DELETE sys/generate-root/attempt, check the saved share, then retry setup."
 	case "backup-pending":
 		return "Store root authorization needs cleanup.", "Follow docs/install.md#back-up to revoke root accessors and cancel generation; remove the pending receipt, then retry."
 	case "backup-receipt":

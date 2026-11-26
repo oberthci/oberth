@@ -29,6 +29,9 @@ func (c *Client) beginBackupAuthorization(ctx context.Context, path string) (bac
 		return backupAuthorizationReceipt{}, 0, err
 	}
 	if status.Started || status.Nonce != "" {
+		if status.Complete != nil && !*status.Complete {
+			return backupAuthorizationReceipt{}, 0, unfinishedBackupAuthorization()
+		}
 		return backupAuthorizationReceipt{}, 0, pendingBackupAuthorization("")
 	}
 	if status.Required != 1 || status.OTPLength < 16 || status.OTPLength > 128 {
@@ -94,6 +97,23 @@ func syncAuthorizationDirectory(path string) error {
 }
 
 func (j backupAuthorizationReceipt) problem() error { return pendingBackupAuthorization(j.Name()) }
+
+// No issuing update succeeded. Native cancellation is sufficient, so discard
+// the receipt that would otherwise require revoking unrelated root sessions.
+func (j backupAuthorizationReceipt) unfinished() error {
+	problem := unfinishedBackupAuthorization()
+	if j.remove() != nil {
+		problem.Context = []string{"After cancellation, remove unused authorization receipt: " + j.Name()}
+	}
+	return problem
+}
+
+func unfinishedBackupAuthorization() *publicerr.Error {
+	reason, remedy := refusal("backup-unfinished")
+	err := publicerr.New(publicerr.Forbidden, reason, remedy, nil)
+	err.Detail = "DELETE sys/generate-root/attempt to cancel unfinished generation, check the saved share, then retry setup. No issued root access needs revocation."
+	return err
+}
 
 func backupReceiptProblem(path string) error {
 	reason, remedy := refusal("backup-receipt")

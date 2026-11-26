@@ -122,7 +122,7 @@ func (s *backupQuorum) generation(r *http.Request) (*http.Response, error) {
 		return quorumReply(405, map[string]any{"errors": []string{"unsupported operation"}}), nil
 	}
 	if s.mode == "in-progress" {
-		return quorumReply(200, map[string]any{"started": true, "nonce": "other-attempt"}), nil
+		return quorumReply(200, map[string]any{"started": true, "nonce": "other-attempt", "complete": false}), nil
 	}
 	if r.Method == "GET" {
 		return quorumReply(200, map[string]any{"required": 1, "otp_length": len(s.authority())}), nil
@@ -132,25 +132,48 @@ func (s *backupQuorum) generation(r *http.Request) (*http.Response, error) {
 		s.t.Fatal("invalid generation request")
 	}
 	if r.URL.Path == "/v1/sys/generate-root/attempt" {
+		if s.mode == "init-loss" {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(lostQuorumReply{})}, nil
+		}
 		s.otp = request["otp"]
 		if len(s.otp) != len(s.authority()) {
 			s.t.Fatal("client did not hold its OTP before generation")
 		}
 		return quorumReply(200, map[string]any{"nonce": "owned-attempt", "required": 1}), nil
 	}
+	return s.update(request), nil
+}
+
+func (s *backupQuorum) update(request map[string]string) *http.Response {
 	if request["nonce"] != "owned-attempt" || request["key"] != "saved-share-fixture" {
 		s.t.Fatal("quorum share did not bind the operation nonce")
 	}
-	if s.mode == "wrong-share" {
-		return quorumReply(403, map[string]any{"errors": []string{"private-share-refusal"}}), nil
+	if s.mode == "wrong-share" || s.mode == "wrong-share-400" {
+		if s.mode == "wrong-share-400" {
+			return quorumReply(400, map[string]any{"errors": []string{"root generation aborted: private-share-refusal"}})
+		}
+		return quorumReply(403, map[string]any{"errors": []string{"private-share-refusal"}})
 	}
-	return s.issue(), nil
+	if s.mode == "unfinished" {
+		return quorumReply(200, map[string]any{"nonce": "owned-attempt", "complete": false})
+	}
+	if s.mode == "update-unavailable" {
+		return quorumReply(503, nil)
+	}
+	if s.mode == "update-400" {
+		s.granted = true
+		return quorumReply(400, map[string]any{"errors": []string{"private-issuance-failure"}})
+	}
+	return s.issue()
 }
 
 func (s *backupQuorum) issue() *http.Response {
 	encoded := make([]byte, len(s.otp))
 	subtle.XORBytes(encoded, []byte(s.authority()), []byte(s.otp))
 	s.granted = true
+	if s.mode == "truncated-completion" {
+		return quorumReply(200, map[string]any{"nonce": "owned-attempt"})
+	}
 	if s.mode == "reply-loss" {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(lostQuorumReply{})}
 	}

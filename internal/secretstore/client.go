@@ -94,10 +94,10 @@ func (c *Client) JSON(ctx context.Context, r Request, out any) (int, error) {
 	if r.Path == brokerPath && resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get("Retry-After") == "1" {
 		return resp.StatusCode, errBrokerCapacity
 	}
-	return decodeResponse(resp, out, r.Accept)
+	return decodeResponse(resp, out, r.Accept, r.Path)
 }
 
-func decodeResponse(resp *http.Response, out any, accepted int) (int, error) {
+func decodeResponse(resp *http.Response, out any, accepted int, path string) (int, error) {
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	defer clear(raw)
 	if err != nil {
@@ -116,7 +116,11 @@ func decodeResponse(resp *http.Response, out any, accepted int) (int, error) {
 		return resp.StatusCode, refuse("connect", nil)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return resp.StatusCode, refuse("request", fmt.Errorf("HTTP %d", resp.StatusCode))
+		problem := refuse("request", fmt.Errorf("HTTP %d", resp.StatusCode))
+		if backupShareRejected(path, resp.StatusCode, raw) {
+			problem.ID = "backup-share-rejected"
+		}
+		return resp.StatusCode, problem
 	}
 	if out != nil && json.Unmarshal(raw, out) != nil {
 		return resp.StatusCode, refuse("response", nil)
@@ -131,7 +135,7 @@ func ctxCause(ctx context.Context, err error) error {
 	return err
 }
 func (c *Client) Close() { c.http.CloseIdleConnections() }
-func refuse(code string, cause error) error {
+func refuse(code string, cause error) *publicerr.Error {
 	reason, remedy := refusal(code)
 	if code == "configuration" {
 		reason, remedy = runtimeconfig.SecretStoreConfiguration()

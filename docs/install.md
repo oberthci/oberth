@@ -145,10 +145,11 @@ upgrade. For store access via a saved share, set listener
 `oberth secretstore setup --backup-only --config <config> --ca-file <ca> --unseal-file <share>` OTP
 stays in memory. Public `<config>.backup-setup.json` records store/nonce before root generation. Use
 a writable persistent config directory; copy a read-only mounted config there. CA/share mounts can
-stay. Revocation removes the receipt; a crash or uncertain reply blocks setup. Cleanup on the
-receipt's store: `DELETE sys/generate-root/attempt` cancels unfinished generation only. Obtain a
-separate native quorum session if needed; keep OTP/reply private. `LIST auth/token/accessors`;
-`POST auth/token/lookup-accessor` with each `accessor`. Coordinate with root-session owners;
+stay. Rejected or unfinished attempts need cancellation only. Uncertain replies block setup.
+Revocation removes the receipt. `DELETE sys/generate-root/attempt` cancels unfinished generation
+only. For uncertain issuance, obtain a separate native quorum session; keep OTP/reply private.
+`LIST auth/token/accessors`; `POST auth/token/lookup-accessor` with each `accessor`.
+Coordinate with root-session owners;
 `POST auth/token/revoke-accessor` for all other root-policy accessors. Revoke cleanup access last
 (`POST auth/token/revoke-self`), remove the receipt, retry, restore listener `true`, restart/unseal.
 Lost issued replies/accessors cannot be recovered by nonce. [Native
