@@ -29,24 +29,24 @@ func TestResumeSourceOriginalLocatorFollowsDurableSuccessors(t *testing.T) {
 	second := f.acceptSourceRun(t, first, true)
 	caller := sourcedelivery.Caller{Namespace: first.Admission.Identity.Namespace, Workflow: first.Origin.WorkflowName, UID: first.Origin.NativeUID(), Pod: f.pod.DeepCopy()}
 	caller.Pod.Status.Phase = core.PodRunning
-	assertResumeSourceLoad(t, f, caller, first.ID, *second.CommitSHA)
+	f.assertResumeSourceLoad(t, caller, first.ID, *second.CommitSHA)
 	third := f.acceptSourceRun(t, second, true)
-	assertResumeSourceLoad(t, f, caller, first.ID, *third.CommitSHA)
-	assertResumeSourceLoad(t, f, caller, second.ID, "")
+	f.assertResumeSourceLoad(t, caller, first.ID, *third.CommitSHA)
+	f.assertResumeSourceLoad(t, caller, second.ID, "")
 	caller.Pod.Status.Phase = core.PodSucceeded
-	assertResumeSourceLoad(t, f, caller, first.ID, "")
+	f.assertResumeSourceLoad(t, caller, first.ID, "")
 	caller.Pod.Status.Phase = core.PodRunning
 	caller.UID = "replacement"
-	assertResumeSourceLoad(t, f, caller, first.ID, "")
+	f.assertResumeSourceLoad(t, caller, first.ID, "")
 	full := f.acceptSourceRun(t, third, false)
 	if full.Origin.Resumed() {
 		t.Fatal("full rerun retained resume lineage")
 	}
 	caller.Workflow, caller.UID = full.Origin.WorkflowName, full.Origin.NativeUID()
-	assertResumeSourceLoad(t, f, caller, full.ID, *full.CommitSHA)
-	assertResumeSourceLoad(t, f, caller, first.ID, "")
+	f.assertResumeSourceLoad(t, caller, full.ID, *full.CommitSHA)
+	f.assertResumeSourceLoad(t, caller, first.ID, "")
 	caller.Workflow, caller.UID = first.Origin.WorkflowName, first.Origin.NativeUID()
-	assertResumeSourceLoad(t, f, caller, full.ID, "")
+	f.assertResumeSourceLoad(t, caller, full.ID, "")
 }
 
 // Acceptance starts from a sealed source binding; Git staging is injected so
@@ -111,7 +111,7 @@ func (f deliveryFixture) bindSourceRun(t *testing.T, r stateport.Run) {
 	}
 }
 
-func assertResumeSourceLoad(t *testing.T, f deliveryFixture, caller sourcedelivery.Caller, locator string, commit string) {
+func (f deliveryFixture) assertResumeSourceLoad(t *testing.T, caller sourcedelivery.Caller, locator string, commit string) {
 	t.Helper()
 	staged := 0
 	h := sourcedelivery.New(sourcedelivery.Config{SourceClientBurst: 3, Now: f.o.c.clock.Now, Run: f.o.sourceRun,

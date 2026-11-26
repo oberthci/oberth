@@ -36,22 +36,27 @@ func TestAdoptConfirmsCachedMismatchOnce(t *testing.T) {
 			if native.Gets-before != wantReads {
 				t.Fatal("unexpected live reads", native.Gets-before, wantReads)
 			}
-			switch state {
-			case "matching", "lagging":
-				compositionOK(t, err)
-			case "foreign":
-				if !errors.As(err, new(*nativebinding.Refusal)) {
-					t.Fatal("foreign live owner accepted", err)
-				}
-			case "unavailable":
-				if err == nil || errors.As(err, new(*nativebinding.Refusal)) || errors.As(err, new(argojob.ErrAbsent)) {
-					t.Fatal("unavailable read established ownership or absence", err)
-				}
-			case "absent":
-				if !errors.As(err, new(argojob.ErrAbsent)) {
-					t.Fatal("live absence lost", err)
-				}
-			}
+			checkAdoptResult(t, state, err)
 		})
+	}
+}
+
+func checkAdoptResult(t *testing.T, state string, err error) {
+	t.Helper()
+	switch state {
+	case "matching", "lagging":
+		compositionOK(t, err)
+	case "foreign":
+		if !errors.As(err, new(*nativebinding.Refusal)) {
+			t.Fatal("foreign live owner accepted", err)
+		}
+	case "unavailable":
+		if err == nil || errors.As(err, new(*nativebinding.Refusal)) || errors.As(err, new(argojob.ErrAbsent)) {
+			t.Fatal("unavailable read established ownership or absence", err)
+		}
+	case "absent":
+		if !errors.As(err, new(argojob.ErrAbsent)) {
+			t.Fatal("live absence lost", err)
+		}
 	}
 }
