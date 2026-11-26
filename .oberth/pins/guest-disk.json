@@ -7,5 +7,6 @@
   "architecture": "amd64",
   "format": "raw.gz",
   "max_download_bytes": 536870912,
-  "max_disk_bytes": 8589934592
+  "max_disk_bytes": 8589934592,
+  "provisioned_disk_bytes": 34359738368
 }

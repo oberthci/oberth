@@ -44,6 +44,18 @@ class GuestDiskTests(unittest.TestCase):
             MODULE.prepare(self.pin, self.output, self.archive)
         self.assertFalse(self.output.exists())
 
+    def test_sparse_growth_preserves_verified_bytes(self):
+        size = 1024 * 1024
+        receipt = MODULE.prepare({**self.pin, "provisioned_disk_bytes": size}, self.output, self.archive)
+        self.assertEqual(receipt["disk_bytes"], size)
+        self.assertEqual(self.output.read_bytes(), self.data + bytes(size - len(self.data)))
+
+    def test_sparse_growth_refuses_shrink_and_unbounded_sizes(self):
+        for size in (1, (64 << 30) + 1):
+            with self.subTest(size=size), self.assertRaisesRegex(ValueError, "size exceeds"):
+                MODULE.prepare({**self.pin, "provisioned_disk_bytes": size}, self.output, self.archive)
+            self.assertFalse(self.output.exists())
+
     def test_each_digest_is_required(self):
         for name in ("sha256", "sha512"):
             with self.subTest(name=name):

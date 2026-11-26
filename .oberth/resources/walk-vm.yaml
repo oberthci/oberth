@@ -9,7 +9,8 @@
 # host (release-assets.githubusercontent.com). A NetworkPolicy cannot name hosts,
 # so 443 is open to any address; narrow it with your CNI's FQDN rules if it has
 # them. The VMI (label oberth.walk/role=walk-vm) accepts only SSH from the
-# pipeline namespace and has no egress. These policies only allow; on a
+# pipeline namespace. Both need DNS and HTTPS for pinned provisioning inputs;
+# the guest also pulls its local cluster's images over HTTPS. These policies only allow; on a
 # default-deny cluster they are enough. If a cluster egress control outside
 # NetworkPolicy (firewall, proxy, CNI cluster policy) blocks the download, the
 # walk fails at guest-disk-verified. Remedy: allow those two hosts on 443 and DNS
@@ -78,6 +79,9 @@ metadata: {name: walk-vm, namespace: oberth-walk}
 spec:
   podSelector: {matchLabels: {oberth.walk/role: walk-vm}}
   policyTypes: [Ingress, Egress]
+  egress:
+    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - ports: [{protocol: TCP, port: 443}]
   ingress:
     - from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: REPLACE_WITH_PIPELINE_NAMESPACE}}}]
       ports: [{protocol: TCP, port: 22}]

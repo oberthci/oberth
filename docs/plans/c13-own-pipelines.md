@@ -153,7 +153,7 @@ Installation policy follows [C9 invariant 7](c9-install-and-upgrade.md#invariant
 5. **Delta:** Release runs no tests. It builds the tagged commit at the default branch's
    head, which a passing build run tested. The release step checks those facts
    and refuses any mismatch. No branch, promotion or release run starts a VM;
-   only the walk's separate document declares one. VM guest sources use versioned public images verified against repository checksums;
+   only the walk's separate document declares one. VM guests use checksum-verified versioned images and tools; the admitted cloud-init provisions their local fixtures and environment, checked before the walk;
    the static-Git base is locally built and pinned by digest.
 6. Charge source and delivered metadata, writable root, private caches, compiler scratch
    and logs to the appropriate bounded storage. Charge memory-backed volumes to memory.

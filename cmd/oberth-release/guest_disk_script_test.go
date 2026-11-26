@@ -14,7 +14,7 @@ func TestGuestDiskScriptContract(t *testing.T) {
 	root := filepath.Join("..", "..")
 	dir := filepath.Join(root, "hack", "vm-image")
 	// Child-process reads must also invalidate the test cache.
-	for _, name := range []string{filepath.Join(dir, "prepare.py"), filepath.Join(dir, "test_prepare.py"), filepath.Join(root, ".oberth", "pins", "guest-disk.json")} {
+	for _, name := range []string{filepath.Join(dir, "prepare.py"), filepath.Join(dir, "test_prepare.py"), filepath.Join(dir, "bootstrap.py"), filepath.Join(dir, "cloud_init.py"), filepath.Join(dir, "test_bootstrap.py"), filepath.Join(root, ".oberth", "pins", "guest-disk.json"), filepath.Join(root, ".oberth", "pins", "walk-tools.json"), filepath.Join(root, ".oberth", "walk-vm.yaml"), filepath.Join(root, "hack", "walk-vm.sh"), filepath.Join(root, "test", "walk", "walkconfig.py")} {
 		if _, err := os.ReadFile(name); err != nil {
 			t.Fatal(err)
 		}

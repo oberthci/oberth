@@ -84,7 +84,7 @@ func assertWalkBinding(t *testing.T, binding rbacv1.RoleBinding) {
 }
 
 // The disk Job reaches only DNS and HTTPS; the VMI accepts only SSH from the
-// pipeline namespace and sends nothing. The labels match the walk manifests.
+// pipeline namespace. Both fetch pinned provisioning inputs over DNS/HTTPS.
 func TestWalkSetupLimitsJobAndVMNetwork(t *testing.T) {
 	s := readWalkSetup(t)
 	disk, vm := s.policies["walk-guest-disk"], s.policies["walk-vm"]
@@ -94,7 +94,7 @@ func TestWalkSetupLimitsJobAndVMNetwork(t *testing.T) {
 		t.Fatal("disk Job network is wider than DNS and HTTPS", disk.Spec)
 	}
 	ssh := vm.Spec.Ingress
-	if len(vm.Spec.Egress) != 0 || len(ssh) != 1 || len(ssh[0].From) != 1 || !slices.Equal(policyPorts(t, nil, ssh[0].Ports...), []string{"TCP/22"}) {
+	if !slices.Equal(policyPorts(t, vm.Spec.Egress), []string{"UDP/53", "TCP/53", "TCP/443"}) || len(ssh) != 1 || len(ssh[0].From) != 1 || !slices.Equal(policyPorts(t, nil, ssh[0].Ports...), []string{"TCP/22"}) {
 		t.Fatal("walk VM network is wider than SSH", vm.Spec)
 	}
 	from := ssh[0].From[0]

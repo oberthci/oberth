@@ -16,7 +16,18 @@ runs them with --pin in a run-named Job and claim in oberth-walk. The VMI boots
 only that claim, after the Job succeeded; the exit handler deletes all three.
 A changed digest fails the Job, so the VM never starts.
 
-The stock image is not the walk's full fixture. test/walk/walk still needs its
-command-line tools, a local upstream and registry, private disposable
-identities and /etc/oberth-walk/environment.json; without them that step fails.
-Cloud-init supplies only the current run's fresh SSH public key.
+Cloud-init embeds bootstrap.py and .oberth/pins/walk-tools.json from the same
+admitted source. It installs digest-verified tools, pulls digest-pinned local
+fixtures, creates disposable identities and /etc/oberth-walk/environment.json.
+The Docker context names only the guest's local socket. Credentials stay in
+the guest; cloud-init contains only public inputs and the fresh SSH public key.
+The disk is sparsely enlarged to 32 GiB; cloud-init grows the root filesystem.
+The claim reserves 40 GiB for the original and ephemeral disk writes.
+The walk waits for cloud-init and checks every required tool and environment
+file before installing the candidate. A failed bootstrap blocks the walk.
+Provisioning needs guest DNS/HTTPS egress, declared in the walk setup policy.
+The reviewed nameservers in walk-tools.json replace the minimal guest's absent
+stub resolver. Git's native SSH commands use a digest-verified distribution
+package and the pinned guest's libc, PCRE and zlib; no package resolver runs.
+No VM is needed for the offline provisioning and missing-tool controls:
+python3 -I -m unittest discover -s hack/vm-image -p 'test_*.py'

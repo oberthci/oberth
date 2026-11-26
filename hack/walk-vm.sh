@@ -14,6 +14,7 @@ for attempt in $(seq 1 60); do
     sleep 2
 done
 remote=(ssh "${common[@]}" -o BatchMode=yes -o PasswordAuthentication=no -i "$key" "walk@$WALK_VM_ADDRESS")
+"${remote[@]}" 'cloud-init status --wait && python3 /etc/oberth-walk/bootstrap.py --check'
 "${remote[@]}" 'mkdir -p "$HOME/candidate/src" "$HOME/evidence"'
 tar -cf - --exclude=.git . | "${remote[@]}" 'tar -xf - -C "$HOME/candidate/src"'
 tar -cf - -C "$work" dist | "${remote[@]}" 'tar -xf - -C "$HOME/candidate"'

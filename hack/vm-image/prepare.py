@@ -53,6 +53,11 @@ def prepare(pin, output, archive=None):
         disk = stage / "disk.img"
         with gzip.open(compressed, "rb") as source, disk.open("xb") as target:
             copy_bounded(source, target, pin["max_disk_bytes"])
+        size = pin.get("provisioned_disk_bytes", disk.stat().st_size)
+        if not disk.stat().st_size <= size <= 64 << 30:
+            raise ValueError("Provisioned guest disk size exceeds its bound.")
+        with disk.open("r+b") as target:
+            target.truncate(size)
         disk.chmod(0o660)
         receipt = {"source": pin["url"], "archive_sha256": pin["sha256"],
                    "disk_sha256": checksums(disk)[0], "disk_bytes": disk.stat().st_size}

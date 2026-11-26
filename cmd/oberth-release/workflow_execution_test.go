@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -239,7 +240,15 @@ func TestWalkKeyUsesRunClaimAndPublicCloudInit(t *testing.T) {
 		t.Fatal("public cloud-init is not safely encoded")
 	}
 	dir := t.TempDir()
-	command := exec.CommandContext(t.Context(), key.Container.Command[0], append(key.Container.Command[1:], key.Container.Args...)...)
+	source, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := append(slices.Clone(key.Container.Command[1:]), key.Container.Args...)
+	for i := range args {
+		args[i] = strings.ReplaceAll(args[i], "/work/src", source)
+	}
+	command := exec.CommandContext(t.Context(), key.Container.Command[0], args...)
 	command.Dir = dir
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatal(err, string(output))

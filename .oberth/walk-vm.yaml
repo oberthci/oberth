@@ -89,7 +89,7 @@ spec:
           metadata: {name: '{{workflow.name}}', namespace: oberth-walk}
           spec:
             accessModes: [ReadWriteOnce]
-            resources: {requests: {storage: 10Gi}}
+            resources: {requests: {storage: 40Gi}}
     - name: guest-disk
       inputs:
         parameters: [{name: pin}, {name: prepare}]
@@ -125,6 +125,8 @@ spec:
                 volumes:
                   - {name: guest, persistentVolumeClaim: {claimName: '{{workflow.name}}'}}
     - name: key
+      inputs:
+        artifacts: *source-artifacts
       outputs:
         parameters:
           - {name: cloud-init, valueFrom: {path: /work/shared/walk-key/cloud-init}}
@@ -137,11 +139,7 @@ spec:
             mkdir -p walk-key
             cd walk-key
             ssh-keygen -q -t ed25519 -N "" -f id_ed25519
-            python3 - <<'PY' > cloud-init
-            import json, pathlib
-            print("#cloud-config")
-            print(json.dumps({"users": [{"name": "walk", "sudo": "ALL=(ALL) NOPASSWD:ALL", "shell": "/bin/bash", "lock_passwd": True, "ssh_authorized_keys": [pathlib.Path("id_ed25519.pub").read_text().strip()]}], "ssh_pwauth": False, "disable_root": True}))
-            PY
+            python3 /work/src/hack/vm-image/cloud_init.py --public id_ed25519.pub > cloud-init
         volumeMounts: [{name: work, mountPath: /work/shared}]
         resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {cpu: '1', memory: 128Mi}}
     - name: vm
