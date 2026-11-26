@@ -35,3 +35,9 @@ python3 -I -m unittest discover -s hack/vm-image -p 'test_*.py'
 Check the registry command with the real pinned parser, without a daemon:
 python3 -I -B hack/vm-image/check_k3d.py --k3d /absolute/pinned/k3d
 This verifies the executable's checksum before executing its help path.
+
+Check remote availability separately from the offline suite (requires crane):
+python3 -I -B hack/vm-image/check_image_pins.py
+This anonymously fetches every exact pinned manifest, verifies its SHA-256,
+and exits nonzero on an unavailable digest, checksum mismatch or network error.
+It reads no operator registry configuration and uses no container daemon.

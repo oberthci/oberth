@@ -10,7 +10,7 @@
     "cluster": "rancher/k3s:v1.35.5-k3s1@sha256:2074403abe1bded11ef3dde09d457e13be8e0b64c218b1c4f8269b4565cfbc65",
     "registry": "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373",
     "upstream": "codeberg.org/forgejo/forgejo:11.0.3@sha256:e2684fd8707d486329084a695ed91999a4072a798e5409d45c1eb8a2911ff4b9",
-    "skopeo": "quay.io/skopeo/stable:v1.20.0@sha256:c46abda8e418cb21724c4844d9786cce946499ee3a856463701c74c984e25a55",
+    "skopeo": "quay.io/skopeo/stable:v1.20.0@sha256:9c68e585103448f7e4abb835132ffe9759d7a962a0fa426035775956e7a1e021",
     "tools": "ghcr.io/k3d-io/k3d-tools:5.9.0@sha256:c57abce697e66feeb826922718738fe186b47779312d49d4e51e6fb9b8a6f34d",
     "proxy": "ghcr.io/k3d-io/k3d-proxy:5.9.0@sha256:7be40abfeb6ac9a81d0d4157a7cbf3aacc68a64a1780ca2efb160f1aea915177"
   }
