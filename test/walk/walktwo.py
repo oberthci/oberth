@@ -163,7 +163,8 @@ def install(s, index):
     home.mkdir(parents=True, mode=0o700)
     baseline = first_identity(s) if index == 1 else None
     cli(s, instance, install_args(s, instance), install=True, timeout=600)
-    cli(s, instance, ["install", "--context", s.config.context, "--verify"], timeout=600)
+    cli(s, instance, ["install", "--context", s.config.context,
+                      "--profile", profile_env(s, instance)["OBERTH_PROFILE"], "--verify"], timeout=600)
     require(crds(s) == s.two_definitions, "Installation changed shared definitions")
     if baseline is not None:
         require(first_identity(s) == baseline, "Second install changed first identity")
