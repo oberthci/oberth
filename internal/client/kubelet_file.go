@@ -83,10 +83,15 @@ func readKubeletVersion(mount *os.File, version, name string) ([]byte, error) {
 	return data, nil
 }
 
-// Pin every directory before resolving the next component. Only the two
-// validated atomic-writer links are read; openat never follows a symlink.
+// Resolve the caller's trusted mount path once, then pin every directory.
+// Below the mount only validated atomic-writer links are read; openat never
+// follows a symlink, even if a component changes after resolution.
 func openKubeletMount(path string) (*os.File, error) {
 	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	path, err = filepath.EvalSymlinks(path)
 	if err != nil {
 		return nil, err
 	}

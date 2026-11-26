@@ -12,6 +12,15 @@ import (
 )
 
 func TestBackupSetupReadsMountedUnsealShare(t *testing.T) {
+	checkBackupMountedShare(t, false)
+}
+
+func TestBackupSetupReadsMountedShareThroughTrustedParent(t *testing.T) {
+	checkBackupMountedShare(t, true)
+}
+
+func checkBackupMountedShare(t *testing.T, linkedParent bool) {
+	t.Helper()
 	mount := t.TempDir()
 	version := filepath.Join(mount, "..2026_11_26")
 	if err := os.Mkdir(version, 0755); err != nil {
@@ -27,6 +36,13 @@ func TestBackupSetupReadsMountedUnsealShare(t *testing.T) {
 	}
 	if err := os.Chmod(mount, 0777); err != nil {
 		t.Fatal(err)
+	}
+	if linkedParent {
+		alias := filepath.Join(t.TempDir(), "run")
+		if err := os.Symlink(filepath.Dir(mount), alias); err != nil {
+			t.Fatal(err)
+		}
+		mount = filepath.Join(alias, filepath.Base(mount))
 	}
 	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
 	flags.String("unseal-file", filepath.Join(mount, "share"), "")
