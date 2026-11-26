@@ -118,14 +118,15 @@ func createRefusal(cause error) error {
 	return err
 }
 
-// Adopt reads the bound object; only live NotFound establishes absence.
+// Adopt uses matching cached ownership; only live reads establish a mismatch
+// or absence, since an informer may still name the predecessor after a resume.
 func (e *Executor) Adopt(ctx context.Context, b nativebinding.RunBinding) (*wf.Workflow, error) {
 	if err := b.Validate(); err != nil {
 		return nil, err
 	}
 	if e.config.Cache != nil {
-		if w, ok := e.config.Cache.Workflow(b.Workflow.Name); ok {
-			return w, e.verifyObserved(ctx, b, w)
+		if w, ok := e.config.Cache.Workflow(b.Workflow.Name); ok && e.verifyObserved(ctx, b, w) == nil {
+			return w, nil
 		}
 	}
 	w, err := e.config.Workflows.Get(ctx, b.Workflow.Name, meta.GetOptions{})
