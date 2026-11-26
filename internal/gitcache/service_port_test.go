@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -206,30 +205,6 @@ func TestPromotionAndTagConflictsAreTyped(t *testing.T) {
 		t.Fatal("tag conflict not typed", err)
 	}
 
-}
-
-func TestPublishReadsBackSuccessAfterLostAcknowledgement(t *testing.T) {
-	t.Parallel()
-	f := gittest.New(t)
-	cfg := reviewConfig(t, f)
-	wrapper := filepath.Join(f.Root, "git-lost-ack")
-	body := "#!/usr/bin/python3\n" +
-		"import subprocess,sys\n" +
-		"r=subprocess.run(['/usr/bin/git']+sys.argv[1:])\n" +
-		"sys.exit(1 if 'push' in sys.argv and r.returncode==0 else r.returncode)\n" +
-		""
-	if err := os.WriteFile(wrapper, []byte(body), 0700); err != nil {
-		t.Fatal(err)
-	}
-	cfg.Binary = wrapper
-	c := reviewNew(t, cfg)
-	if err := c.Init(t.Context(), gittest.Repository); err != nil {
-		t.Fatal(err)
-	}
-	f.Git(t, f.Store(), "update-ref", "refs/heads/topic", f.Commit)
-	if _, err := c.Publish(t.Context(), publicationFor(f, "refs/heads/topic", f.Commit, "")); err != nil {
-		t.Fatal("readback lost confirmed result", err)
-	}
 }
 
 func TestSourceRefusalGuidanceHasPunctuationWithoutInternalLabels(t *testing.T) {

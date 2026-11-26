@@ -20,6 +20,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if filepath.Base(os.Args[0]) == "git-lost-ack" {
+		os.Exit(lostAcknowledgementGit())
+	}
 	if os.Args[0] == "receive-test-disconnect" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		err := gitcache.ReceiveTestDisconnect(ctx)
