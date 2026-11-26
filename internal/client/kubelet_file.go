@@ -12,7 +12,7 @@ import (
 
 // Kubelet publishes Secret and ConfigMap volumes as name -> ..data/name and
 // ..data -> ..<version>, both inside the mount, and swaps ..data atomically.
-// A public read accepts exactly that layout: the version directory and file
+// A public or mounted-secret read accepts that layout: the version directory and file
 // are owned by root or this user and writable by neither group nor others,
 // and the file is opened without following links. Any other link, including
 // one that leaves the mount, takes the ordinary refusal. ok is false when the

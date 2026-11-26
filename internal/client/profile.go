@@ -60,6 +60,15 @@ func directory(path string, private bool) (*os.Root, error) {
 // ReadPrivate refuses links, nonregular files, foreign ownership and public permissions.
 func ReadPrivate(path string) ([]byte, error) { return readFile(path, true) }
 
+// ReadMountedPrivate also accepts a Secret's confined kubelet projection.
+// Ordinary files keep the owner-only rules of ReadPrivate.
+func ReadMountedPrivate(path string) ([]byte, error) {
+	if data, ok, err := readKubeletFile(path); ok {
+		return data, err
+	}
+	return ReadPrivate(path)
+}
+
 // ReadPublic permits readable certificates and metadata, but refuses writable files.
 func ReadPublic(path string) ([]byte, error) {
 	if data, ok, err := readKubeletFile(path); ok {

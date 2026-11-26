@@ -75,7 +75,7 @@ func setupBackupWithUnseal(ctx context.Context, r installationRequest, store *se
 	if r.text("token-file") != "" {
 		return installationProblem("Choose one backup setup authority.", "Use --unseal-file for the bundled store, or --token-file for a delegated store administrator.")
 	}
-	share, err := client.ReadPrivate(r.text("unseal-file"))
+	share, err := client.ReadMountedPrivate(r.text("unseal-file"))
 	if err != nil {
 		return err
 	}
