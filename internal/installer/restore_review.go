@@ -152,5 +152,5 @@ func inspectInstallationBundle(ctx context.Context, c bundleInspection) (Restore
 }
 
 func restoreProblem() error {
-	return publicerr.New(publicerr.InvalidInput, "Installation backup review failed.", "Use a complete installation backup and its owned, private age identity file; keep the originals.", nil)
+	return publicerr.New(publicerr.InvalidInput, "Installation backup review failed.", "Restore with the same or a newer release, a complete installation backup and its private age identity file.", nil)
 }

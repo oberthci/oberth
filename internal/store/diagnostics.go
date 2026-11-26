@@ -63,6 +63,8 @@ func coreDiagnostics() map[refusal]diagnostic {
 			"Free disk space or quota on the database and staging volumes, then retry."},
 		damagedArchive: {publicerr.SchemaRefused, "recovery archive is damaged or inconsistent",
 			"Select another authenticated archive and verify it before restoring."},
+		unsupportedArchive: {publicerr.SchemaRefused, "recovery archive format is unsupported",
+			"Restore with the same or a newer release than the one that wrote this archive."},
 		stageBusy: {publicerr.Conflict, "snapshot staging is in use",
 			"Wait for the other snapshot or restore operation to finish."},
 		exists: {publicerr.Conflict, "destination already exists",

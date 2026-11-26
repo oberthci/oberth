@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/stateport"
 )
 
@@ -189,7 +190,7 @@ func inspectArchiveTo(ctx context.Context, options stateport.Options, in io.Read
 	}
 	pins, body, err := readTrailer(reader)
 	if err != nil {
-		return stateport.BackupReport{}, refuse(damagedArchive, err)
+		return stateport.BackupReport{}, archiveError(err)
 	}
 	if err := archiveEnd(reader, counter); err != nil {
 		return stateport.BackupReport{}, err
@@ -245,6 +246,9 @@ func readTrailer(reader *tar.Reader) (pins, manifest []byte, err error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if header.Name != "manifest.json" {
+		return nil, nil, refuse(unsupportedArchive, nil)
+	}
 	if !validHeader(header, "manifest.json") || header.Size > 8192 {
 		return nil, nil, refuse(damagedArchive, nil)
 	}
@@ -291,6 +295,10 @@ func decodeManifest(body []byte, item member, pins []byte) (manifest, error) {
 }
 
 func archiveError(err error) error {
+	var public *publicerr.Error
+	if errors.As(err, &public) {
+		return err
+	}
 	var path *os.PathError
 	if errors.As(err, &path) {
 		return databaseError(err)

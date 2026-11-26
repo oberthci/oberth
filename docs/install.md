@@ -131,7 +131,7 @@ member hashes, digest); the profile keeps `backup_public_key`. Copy both off-mac
 the printed SHA256 separately. `--database-only` and pre-upgrade archives exclude store data and
 Secrets; default limit: 1 GiB. Use local hard-link storage; never overwrite. `--dry-run` previews.
 `oberth restore --from <archive> --identity-file <private-age-file> --dry-run` reviews offline;
-`oberth backup verify` takes the same inputs. Both need the original profile's signature
+`oberth backup verify` takes the same inputs. Restore with the same or a newer release: v0.30.17 cannot read archives with forge host pins. Both need the original profile's signature
 (`--backup-profile <name>`) or `--sha256 <saved-digest>`; others refuse. Keep age and administrator
 private files and unseal material separately: the archive has neither the age identity nor unseal
 material. Keep secure originals to put again after loss: a database-only backup cannot restore store

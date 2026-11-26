@@ -30,6 +30,7 @@ const (
 	locked
 	diskFull
 	damagedArchive
+	unsupportedArchive
 	stageBusy
 	exists
 	staleRevision
