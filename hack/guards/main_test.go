@@ -427,7 +427,7 @@ func productCallLimits(call *ast.CallExpr, parameters map[string]map[int]int) ma
 	return nil
 }
 func productMessageLimit(name string) int {
-	if strings.HasSuffix(name, "StatusReason") {
+	if strings.HasSuffix(name, "StatusReason") || strings.HasPrefix(name, "ReasonResume") {
 		return 40
 	}
 	if strings.HasSuffix(name, "Reason") {
