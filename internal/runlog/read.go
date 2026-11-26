@@ -64,11 +64,38 @@ func (s *Store) snapshot(ctx context.Context, id string, request ReadRequest) (*
 	if unfiltered(request) {
 		view.spans = []span{{0, info.Size()}}
 	}
-	if err = validSpans(view.spans, info.Size()); err != nil {
+	view, err = boundSnapshot(ctx, file, view, snapshotBound{size: info.Size(), before: request.BeforeMarker, after: request.AfterMarker})
+	if err != nil {
 		_ = file.Close()
 		return nil, view, err
 	}
 	return file, view, nil
+}
+
+type snapshotBound struct {
+	size          int64
+	before, after string
+}
+
+func boundSnapshot(ctx context.Context, file *os.File, view selected, b snapshotBound) (selected, error) {
+	if err := validSpans(view.spans, b.size); err != nil {
+		return view, err
+	}
+	if b.before == "" && b.after == "" {
+		return view, nil
+	}
+	var err error
+	if b.before != "" {
+		view.spans, err = beforeMarker(ctx, file, view.spans, b.before)
+	}
+	if err == nil && b.after != "" {
+		view.spans, err = afterMarker(ctx, file, view.spans, b.after)
+	}
+	view.follow = false
+	if len(view.spans) == 0 {
+		view.reason = "failed-attempt log pending"
+	}
+	return view, err
 }
 
 func validSpans(spans []span, size int64) error {

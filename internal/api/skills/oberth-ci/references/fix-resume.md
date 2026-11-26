@@ -14,3 +14,11 @@ Do not request RF without that consent. A prior authorization for this exact act
 Only RF's passed unassisted exact commit can be promoted. Confirm delivery through publication, not merely the test pass.
 Changed pipelines or grants require a full pushed run. Carried caches and external effects are not fresh evidence.
 Same-Pod behavior remains gated separately and must not be inferred from this retry workflow.
+
+## Dormant same-Pod resume
+
+Held-Pod reruns stay dormant with assist off. They install F's full checkout and Git metadata,
+rerun the authored command, and keep untracked files and processes. Remaining steps must be
+secret-free after inspection or in-Pod rerun. Consumed outputs.result and a symlinked root refuse.
+Native deadlines keep counting; retry advice is advisory. R1 is final at handoff; its failed-step
+logs read R2's archive only before the rerunning marker.

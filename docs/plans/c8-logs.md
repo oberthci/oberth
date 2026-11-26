@@ -164,6 +164,8 @@ full detail. `TestPurgeLeavesNoRecordAndReadUsesCallerFact`,
 Text markers → native attempt/container identities; marker indexes → exact byte spans;
 stream-resume journals → once-only capture receipts.
 
+In-pod handoff leaves R1 final while its held container is still alive. R1's selected failed-step logs read R2's container archive before the exact rerunning-on-F marker; the bound is applied before filtering, tail, pagination and stored streaming. A missing marker exposes no successor output. Repeated in-pod handoffs follow the same physical Pod to its eventual archive, bounded between that attempt's markers. Markers include the successor identity so equal-commit resumes remain distinct. The resume audit records this location; no log-index layout changes.
+
 ## Copy completion
 
 `Meta.Copying` is true while any selected receipt has an active copy, including

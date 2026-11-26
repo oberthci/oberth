@@ -578,11 +578,13 @@
         ],
         "C3": [
           "ReleaseFacts",
-          "IsReleaseParameter"
+          "IsReleaseParameter",
+          "AssistEnabled"
         ],
         "C5": [
           "ChildSpecDigest",
-          "ScheduleParent"
+          "ScheduleParent",
+          "AssistEnabled"
         ],
         "C11": [
           "ReleaseFacts"

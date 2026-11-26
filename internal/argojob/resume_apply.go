@@ -7,6 +7,7 @@ import (
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"slices"
 
+	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
@@ -37,7 +38,11 @@ func (e *Executor) PrepareResume(ctx context.Context, r stateport.Run, id, commi
 		return ResumePlan{}, err
 	}
 	b := runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.NativeUID()})
-	return PlanResume(ctx, ResumeInput{Predecessor: b, Sealed: r.Admission, Workflow: w, Pods: pods, RunID: id, Commit: commit, Now: e.config.Now()})
+	in := ResumeInput{Predecessor: b, Sealed: r.Admission, Workflow: w, Pods: pods, RunID: id, Commit: commit, Now: e.config.Now()}
+	if r.Status == stepmodel.RunRunning {
+		return e.prepareInPod(ctx, r, in)
+	}
+	return PlanResume(ctx, in)
 }
 
 func (e *Executor) resumePodList(ctx context.Context, name string) ([]*core.Pod, error) {
@@ -66,6 +71,12 @@ func (e *Executor) ApplyResume(ctx context.Context, id string) error {
 		return err
 	}
 	r, plan := attempt.run, attempt.plan
+	if plan.InPod != nil {
+		if !admissioncontract.AssistEnabled {
+			return e.failResume(ctx, r, resumeRefusal("assist unavailable", "in-Pod resume is dormant"))
+		}
+		return e.applyInPod(ctx, r, plan)
+	}
 	w, err := e.config.Workflows.Get(ctx, r.Origin.WorkflowName, meta.GetOptions{})
 	if err != nil {
 		return e.failResume(ctx, r, err)
@@ -196,7 +207,11 @@ func (e *Executor) ResumeFailed(ctx context.Context, id string, cause error) err
 	if !r.Origin.Resumed() {
 		return resumeRefusal(ReasonResumeStart, "successor is not resumed")
 	}
-	return e.failResume(ctx, r, cause)
+	var plan ResumePlan
+	if err = json.Unmarshal(r.Origin.ResumePlan, &plan); err != nil {
+		return errors.Join(cause, err)
+	}
+	return e.settleResumeFailure(ctx, r, plan, cause)
 }
 
 func (e *Executor) acceptedResume(ctx context.Context, id string) (*resumeAttempt, error) {
@@ -204,22 +219,36 @@ func (e *Executor) acceptedResume(ctx context.Context, id string) (*resumeAttemp
 	if err != nil {
 		return nil, err
 	}
-	if !r.Origin.Resumed() || !r.Origin.Assisted || terminalChild(r) {
+	if !r.Origin.Resumed() || !r.Origin.Assisted {
 		return nil, resumeRefusal(ReasonResumeStart, "successor is not active")
-	}
-	if stopped, err := e.resumeStopped(ctx, r); stopped || err != nil {
-		return nil, err
-	}
-	if e.config.Keeper != nil {
-		if err = e.config.Keeper.Keep(ctx, r.ID, r.Admission.SourceBindings); err != nil {
-			return nil, e.failResume(ctx, r, err)
-		}
 	}
 	var plan ResumePlan
 	if err = json.Unmarshal(r.Origin.ResumePlan, &plan); err != nil || plan.Workflow == nil {
 		return nil, resumeRefusal(ReasonResumeStart, "missing accepted write")
 	}
+	if terminalChild(r) {
+		e.releaseInPodHold(ctx, r, plan)
+		return nil, resumeRefusal(ReasonResumeStart, "successor is not active")
+	}
+	if stopped, err := e.resumeStopped(ctx, r); stopped || err != nil {
+		if stopped {
+			e.releaseInPodHold(ctx, r, plan)
+		}
+		return nil, err
+	}
+	if e.config.Keeper != nil {
+		if err = e.config.Keeper.Keep(ctx, r.ID, r.Admission.SourceBindings); err != nil {
+			return nil, e.settleResumeFailure(ctx, r, plan, err)
+		}
+	}
 	return &resumeAttempt{run: r, plan: plan}, nil
+}
+
+func (e *Executor) settleResumeFailure(ctx context.Context, r stateport.Run, plan ResumePlan, cause error) error {
+	if plan.InPod != nil {
+		return e.failInPod(ctx, r, plan, cause)
+	}
+	return e.failResume(ctx, r, cause)
 }
 
 func checkResumeWrite(r stateport.Run, plan ResumePlan, w *wf.Workflow) error {

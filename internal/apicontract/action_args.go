@@ -104,7 +104,9 @@ type RunResumeArgs struct {
 }
 
 type ResumeResult struct {
-	Run    string `json:"run"`
-	Mode   string `json:"mode"`
-	Detail string `json:"detail"`
+	Run                 string `json:"run"`
+	Mode                string `json:"mode"`
+	Detail              string `json:"detail"`
+	DeadlineRemainingMS *int64 `json:"deadline_remaining_ms,omitempty"`
+	Advice              string `json:"advice,omitempty"`
 }

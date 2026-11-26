@@ -16,6 +16,10 @@ type ReadRequest struct {
 	PlannedSteps []string
 	OwnOnly      bool
 	Purged       bool
+	// BeforeMarker confines a predecessor read to its failed attempt in the
+	// successor's shared container archive. Filtering happens after this bound.
+	BeforeMarker string
+	AfterMarker  string
 }
 
 // Filter selects a window within the bounded scan. Offset skips selected lines

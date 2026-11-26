@@ -102,6 +102,9 @@ func readNodes(ctx context.Context, tx *sql.Tx, runID string) ([]stateport.Node,
 func (s *Store) CompleteEvidence(ctx context.Context, action stateport.Action, input stateport.EvidenceCompletion) error {
 	runID := input.RunID
 	return s.observe(ctx, func(tx *sql.Tx) error {
+		if err := requireUnhandedRun(ctx, tx, runID); err != nil {
+			return err
+		}
 		if err := requireEvidenceSequence(ctx, tx, input); err != nil {
 			return err
 		}

@@ -163,6 +163,9 @@ func (s *Store) acceptRun(ctx context.Context, tx *sql.Tx, input stateport.Accep
 		return stateport.Run{}, err
 	}
 	if input.Resume != nil {
+		if err := s.finishInPodPredecessor(ctx, tx, input, run); err != nil {
+			return stateport.Run{}, err
+		}
 		if err := s.appendAudit(ctx, tx, mutation{input.Request.Actor.Identity, "run.resume", "run", run.ID, resumeAudit(input, run)}); err != nil {
 			return stateport.Run{}, err
 		}

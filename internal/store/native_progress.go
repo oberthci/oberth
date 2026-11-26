@@ -12,40 +12,55 @@ import (
 
 // SaveProgress persists the native projector's complete result without a control revision.
 func (s *Store) SaveProgress(ctx context.Context, id string, p stateport.Progress) error {
-	steps := p.Steps
 	return s.observe(ctx, func(tx *sql.Tx) error {
-		before, err := readProgress(ctx, tx, id)
-		if err != nil {
+		return s.saveNativeProgress(ctx, tx, id, p)
+	})
+}
+
+func (s *Store) saveNativeProgress(ctx context.Context, tx *sql.Tx, id string, p stateport.Progress) error {
+	steps := p.Steps
+	before, err := mutableProgress(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if !before.run.HasAdmission {
+		return refuse(noAdmission, nil)
+	}
+	plan := before.run.Admission.Plan
+	if !stateport.ValidNativeSteps(plan, steps) || publicerr.CheckMessage(p.Waiting, 40) != nil {
+		return refuse(invalid, nil)
+	}
+	steps = stateport.PlanSteps(plan, steps)
+	counts, err := stepmodel.CountSteps(steps, stateport.NativeStepsExact(plan, steps))
+	if err != nil {
+		return refuse(invalid, err)
+	}
+	next := projectNativeProgress(before.run, stateport.Progress{Steps: steps, Waiting: p.Waiting})
+	next.LogicalStepCounts = counts
+	sameSummary := encode(before.run.RunSummary) == encode(next.RunSummary)
+	if before.steps == encode(steps) && sameSummary {
+		return unchanged{}
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO native_steps VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET value=excluded.value`, id, encode(steps)); err != nil {
+		return databaseError(err)
+	}
+	if !sameSummary {
+		if err = writeProgressSummary(ctx, tx, id, next.RunSummary); err != nil {
 			return err
 		}
-		if !before.run.HasAdmission {
-			return refuse(noAdmission, nil)
-		}
-		plan := before.run.Admission.Plan
-		if !stateport.ValidNativeSteps(plan, steps) || publicerr.CheckMessage(p.Waiting, 40) != nil {
-			return refuse(invalid, nil)
-		}
-		steps = stateport.PlanSteps(plan, steps)
-		counts, err := stepmodel.CountSteps(steps, stateport.NativeStepsExact(plan, steps))
-		if err != nil {
-			return refuse(invalid, err)
-		}
-		next := projectNativeProgress(before.run, stateport.Progress{Steps: steps, Waiting: p.Waiting})
-		next.LogicalStepCounts = counts
-		sameSummary := encode(before.run.RunSummary) == encode(next.RunSummary)
-		if before.steps == encode(steps) && sameSummary {
-			return unchanged{}
-		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO native_steps VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET value=excluded.value`, id, encode(steps)); err != nil {
-			return databaseError(err)
-		}
-		if !sameSummary {
-			if err = writeProgressSummary(ctx, tx, id, next.RunSummary); err != nil {
-				return err
-			}
-		}
-		return s.progressEvent(ctx, tx, next)
-	})
+	}
+	return s.progressEvent(ctx, tx, next)
+}
+
+func mutableProgress(ctx context.Context, tx *sql.Tx, id string) (progressSnapshot, error) {
+	before, err := readProgress(ctx, tx, id)
+	if err != nil {
+		return before, err
+	}
+	if terminal(before.run.Status) {
+		err = requireUnhandedRun(ctx, tx, id)
+	}
+	return before, err
 }
 
 func writeProgressSummary(ctx context.Context, tx *sql.Tx, id string, summary stepmodel.RunSummary) error {
@@ -118,6 +133,9 @@ func (s *Store) Nodes(ctx context.Context, id string) ([]stateport.Node, error) 
 // AdvanceNative invalidates evidence completion without changing the terminal result.
 func (s *Store) AdvanceNative(ctx context.Context, id string) error {
 	return s.observe(ctx, func(tx *sql.Tx) error {
+		if err := requireUnhandedRun(ctx, tx, id); err != nil {
+			return err
+		}
 		if _, err := readPlan(ctx, tx, id); err != nil {
 			return err
 		}

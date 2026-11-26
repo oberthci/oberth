@@ -9,7 +9,7 @@ import (
 	"github.com/oberthci/oberth/internal/publicerr"
 )
 
-const assistEnabled = false // Disabled until the held-step redesign lands.
+const assistEnabled = admissioncontract.AssistEnabled
 
 type message struct{ reason, remedy string }
 

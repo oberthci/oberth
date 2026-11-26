@@ -1,5 +1,9 @@
 package admissioncontract
 
+// AssistEnabled is the single dormant gate, shared by admission and resume.
+// C5's enablement conditions must close before this can change.
+const AssistEnabled = false
+
 type Plan struct {
 	Entries []PlanEntry `json:"entries"`
 	Exact   bool        `json:"exact"`
@@ -15,6 +19,7 @@ type PlanEntry struct {
 	CredentialIntent bool   `json:"credential_intent"`
 	SecretRoute      bool   `json:"secret_route,omitempty"`
 	OutputParameters bool   `json:"output_parameters,omitempty"`
+	ResultConsumed   bool   `json:"result_consumed,omitempty"`
 	HoldArmed        bool   `json:"hold_armed,omitempty"`
 	HoldEligible     bool   `json:"hold_eligible,omitempty"`
 	HoldRefusal      string `json:"hold_refusal,omitempty"`

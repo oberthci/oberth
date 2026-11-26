@@ -94,5 +94,6 @@ func (s *Service) resumeHead(ctx context.Context, r stateport.Run, commit string
 }
 
 func resumableBranch(r stateport.Run) bool {
-	return strings.HasPrefix(r.Ref, "refs/heads/") && r.Origin.ScheduleEntry == "" && r.Status == stepmodel.RunFailed && r.Origin.Trigger == model.TriggerBranch && !r.Release && r.CommitSHA != nil
+	phase := r.Status == stepmodel.RunFailed || r.Status == stepmodel.RunRunning && r.Origin.AssistRequested
+	return strings.HasPrefix(r.Ref, "refs/heads/") && r.Origin.ScheduleEntry == "" && phase && r.Origin.Trigger == model.TriggerBranch && !r.Release && r.CommitSHA != nil
 }

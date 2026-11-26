@@ -267,7 +267,10 @@ func resumeDetail(r stateport.Run, detail string) string {
 			commit = commit[:8]
 		}
 	}
-	text := fmt.Sprintf("from %s at %s; retry; %d steps carried", r.Origin.ResumedFrom, commit, len(plan.Carried))
+	text := fmt.Sprintf("from %s at %s; %s; %d steps carried", r.Origin.ResumedFrom, commit, plan.Mode(), len(plan.Carried))
+	if plan.InPod != nil {
+		text += "; untracked files, inspection state and processes kept; secret-free remaining steps"
+	}
 	if len(plan.SecretSteps) > 0 {
 		text += "; secret steps on F after carried steps: " + strings.Join(plan.SecretSteps, ", ")
 	}

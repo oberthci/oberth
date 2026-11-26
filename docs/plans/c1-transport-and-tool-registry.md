@@ -302,4 +302,4 @@ attempts; historical artifact reads → retained logs.
 
 ### Fix and resume
 
-`run_resume {id,commit}` and `oberth run resume <id> <commit>` return `{run,mode,detail}`. Slice 1 supports native retry only. No new status, event kind or display layout is introduced.
+`run_resume {id,commit}` and `oberth run resume <id> <commit>` return `{run,mode,detail}`. Mode is retry or, only with assist enabled, in-pod. The latter includes deadline_remaining_ms (-1 when no native deadline is set) and advice: retry when remaining time is shorter than the failed command's duration before holding. Advice never refuses or extends a deadline. No new status, event kind or display layout is introduced.

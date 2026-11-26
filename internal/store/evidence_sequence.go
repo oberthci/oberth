@@ -14,6 +14,9 @@ func (s *Store) BeginEvidence(ctx context.Context, action stateport.Action, inpu
 	}
 	var sequence int64
 	err := s.observe(ctx, func(tx *sql.Tx) error {
+		if err := requireUnhandedRun(ctx, tx, input.RunID); err != nil {
+			return err
+		}
 		if _, err := readPlan(ctx, tx, input.RunID); err != nil {
 			return err
 		}
@@ -26,6 +29,9 @@ func (s *Store) BeginEvidence(ctx context.Context, action stateport.Action, inpu
 }
 
 func advanceEvidence(ctx context.Context, tx *sql.Tx, batch stateport.NodeBatch) error {
+	if err := requireUnhandedRun(ctx, tx, batch.RunID); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE runs SET evidence_received=evidence_received+?,
   evidence_complete=0 WHERE id=? AND evidence_sequence=?
   AND evidence_sequence>0 AND evidence_received=? AND evidence_received+?<=evidence_expected`,

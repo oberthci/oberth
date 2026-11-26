@@ -2,9 +2,19 @@ package main
 
 import (
 	"context"
+	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/internal/sourcedelivery"
 	"github.com/oberthci/oberth/internal/stateport"
+	"io"
 )
+
+func (o *serverOwners) resumeExport(ctx context.Context, b sourcecontract.Binding) (io.ReadCloser, error) {
+	stage, err := o.cache.Stage(ctx, b)
+	if err != nil {
+		return nil, err
+	}
+	return stage.Body, nil
+}
 
 func (o *serverOwners) ResumeAncestor(ctx context.Context, repo, previous, fix string) (bool, error) {
 	return o.cache.ResumeAncestor(ctx, repo, previous, fix)

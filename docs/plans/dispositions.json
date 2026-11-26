@@ -9390,19 +9390,19 @@
     }
   },
   "spec_sha256": {
-    "docs/plans/c1-transport-and-tool-registry.md": "ad0f25195e36188600102ef33cc0a16cdbb2a4ed2e58f072491fd648aeb91e7b",
+    "docs/plans/c1-transport-and-tool-registry.md": "ee936fd7d2264ebb5252247c6477f207611b6d4d90f5be028a72ec61c1331e5c",
     "docs/plans/c10-schedules.md": "78bd7b77d6511426d16b5c7ddf543b8124c47e82d40fb16542cfa8efbac7ca67",
     "docs/plans/c11-cli-and-server-composition.md": "2ebbc2b71b8428fca3759ca5f90641b6ccf3bd08d9cb20bfc9738e38b4374530",
     "docs/plans/c12-agent-client.md": "ca882747bf58f807cd9c803cbfeac286378c6a14dbea2dc91b24633e12a50201",
     "docs/plans/c13-own-pipelines.md": "2f1eaa0667e6dcdca40fdfb1b36588265a9a30c0eeeeb60ac772200b2c7eae80",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
-    "docs/plans/c2-service-actions-and-history.md": "b05b6570d5399705c7a6fb71f628cda6a8faee2ba9d9491a82fc9af822d15dc9",
-    "docs/plans/c3-wiring-and-submission.md": "08e366ccb3e3f7bd44e187d0d259c27e81c55e32f75b56eec5315562d2b6d3cc",
-    "docs/plans/c4-admission-rules-and-plan.md": "60a16e5dd4a58d0135d259c0b4eac8645fdde8d3fc894910f9c2f879a1b7b9a4",
-    "docs/plans/c5-native-execution.md": "275ce51c3540ed4718f8c4bb5d8d6c9b4ba6b83ff28325d16c38f5171ff5179a",
-    "docs/plans/c6-source-delivery.md": "7e6caa21b12c4031b345d69bd4ef5bf639f36e361c1c6a7a8741894b0257a9fd",
-    "docs/plans/c7-durable-state.md": "a0bbbdf0fc5cad9a3e2ef117513bcc057e2b30902de9d3a16fafa3669f846216",
-    "docs/plans/c8-logs.md": "4f9fed47b745a741161c694fe423d13ea6cc978e4dafb34e9806da76c97ccc93",
+    "docs/plans/c2-service-actions-and-history.md": "9e4d792f71266374b830a39aaee51eca2ebaed1370cf6001ebd720ebefb5e849",
+    "docs/plans/c3-wiring-and-submission.md": "d508904f4e0da698a196e3b89e4ead193b2239d15842221d6972b3bd76fb6773",
+    "docs/plans/c4-admission-rules-and-plan.md": "87a4343a3f323926a4c94858c45e04e78d58cd3a17d9ce09e536726acf120e94",
+    "docs/plans/c5-native-execution.md": "daf83c978397328dde5eb35e9b48642591875d07188a88fe0a5221391fa207ab",
+    "docs/plans/c6-source-delivery.md": "53305b3ae1eb671d4484c6ffc32489802039d75b8acccf2aae18e25257ed6c64",
+    "docs/plans/c7-durable-state.md": "593abc0472ece21bf43a001d0e3629b4b2bca7ad265a0df3ff671da734a2c83a",
+    "docs/plans/c8-logs.md": "4c1a5c086eefd7ed06d073a1f00602e6bdf21a69ca6a92d3c5da7c8c55eba2ab",
     "docs/plans/c9-install-and-upgrade.md": "6fe3aec865952d36aeb9331e2470a0449d0a99d25bd57dd2d6b79453408a6baa"
   },
   "deltas": [
@@ -13133,7 +13133,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c5-native-execution.md:168",
+      "spec": "docs/plans/c5-native-execution.md:169",
       "markers": [
         "**Delta:**"
       ],
@@ -13142,7 +13142,7 @@
       "rows": []
     },
     {
-      "spec": "docs/plans/c5-native-execution.md:171",
+      "spec": "docs/plans/c5-native-execution.md:172",
       "markers": [
         "**Delta:**"
       ],

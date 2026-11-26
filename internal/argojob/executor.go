@@ -3,6 +3,7 @@ package argojob
 import (
 	"context"
 	"github.com/oberthci/oberth/internal/runtimeconfig"
+	"github.com/oberthci/oberth/internal/sourcecontract"
 	"golang.org/x/time/rate"
 	"io"
 	"log/slog"
@@ -72,6 +73,7 @@ type Config struct {
 	Children           Children
 	ChildRuns          ChildRuns
 	Keeper             Keeper
+	ResumeExport       func(context.Context, sourcecontract.Binding) (io.ReadCloser, error)
 	ObservationTimeout time.Duration
 	Metrics            *Metrics
 	Progress           ProgressStore

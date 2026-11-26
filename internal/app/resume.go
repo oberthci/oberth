@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/oberthci/oberth/internal/admissioncontract"
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/stateport"
+	"github.com/oberthci/oberth/internal/stepmodel"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -35,6 +37,9 @@ func (s *Submitter) ResumeRun(ctx context.Context, q service.ResumeRequest) (api
 		return out, refusal("config", nil)
 	}
 	old := q.Run
+	if old.Status == stepmodel.RunRunning && !assistEnabled {
+		return out, refusal("assist", nil)
+	}
 	request := model.CIRequest{ReceiveID: q.ID, Repo: old.Repo, Ref: old.Ref, ObjectSHA: q.Commit, CommitSHA: &q.Commit, Actor: q.Actor, Trigger: model.TriggerBranch, Assist: old.Origin.AssistRequested, RequestedFile: old.Origin.RequestedFile}
 	r, err := s.d.Resolver.ResolveStart(ctx, service.StartRequest{Request: request, RerunOf: old.ID})
 	if err != nil {
@@ -52,6 +57,10 @@ func (s *Submitter) ResumeRun(ctx context.Context, q service.ResumeRequest) (api
 	if err != nil {
 		return out, err
 	}
+	plan, err = s.prepareResumeCheckout(ctx, old, accepted.Prepared.View(), plan)
+	if err != nil {
+		return out, err
+	}
 	accepted.Prepared, err = argoworkflow.ResumeAdmission(accepted.Prepared, old.Admission)
 	if err != nil {
 		return out, err
@@ -66,6 +75,22 @@ func (s *Submitter) ResumeRun(ctx context.Context, q service.ResumeRequest) (api
 	return s.acceptResume(ctx, accepted, plan, native)
 }
 
+func (s *Submitter) prepareResumeCheckout(ctx context.Context, old stateport.Run, fresh admissioncontract.PreparedView, plan nativebinding.ResumePlan) (nativebinding.ResumePlan, error) {
+	if plan.InPod == nil {
+		return plan, nil
+	}
+	if !assistEnabled {
+		return plan, refusal("assist", nil)
+	}
+	source, ok := s.d.Native.(interface {
+		PrepareResumeCheckout(context.Context, stateport.Run, admissioncontract.PreparedView, nativebinding.ResumePlan) (nativebinding.ResumePlan, error)
+	})
+	if !ok {
+		return plan, refusal("config", nil)
+	}
+	return source.PrepareResumeCheckout(ctx, old, fresh, plan)
+}
+
 func (s *Submitter) acceptResume(ctx context.Context, accepted stateport.Acceptance, plan nativebinding.ResumePlan, native resumeNative) (apicontract.ResumeResult, error) {
 	var out apicontract.ResumeResult
 	request := accepted.Request
@@ -76,7 +101,13 @@ func (s *Submitter) acceptResume(ctx context.Context, accepted stateport.Accepta
 	if len(result.Runs) != 1 {
 		return out, refusal("request", nil)
 	}
-	out = apicontract.ResumeResult{Run: result.Runs[0].ID, Mode: "retry", Detail: resumeReplyDetail(accepted.Resume.ResumedFrom, request.ObjectSHA, plan)}
+	out = apicontract.ResumeResult{Run: result.Runs[0].ID, Mode: plan.Mode(), Detail: resumeReplyDetail(accepted.Resume.ResumedFrom, request.ObjectSHA, plan)}
+	if plan.InPod != nil {
+		out.DeadlineRemainingMS = &plan.InPod.DeadlineRemainingMS
+		if plan.InPod.RetryAdvised {
+			out.Advice = "retry"
+		}
+	}
 	if err = s.keep(ctx, accepted.Prepared.View()); err != nil {
 		return out, errors.Join(err, native.ResumeFailed(ctx, out.Run, err))
 	}
@@ -89,7 +120,10 @@ func resumeChanged(cause error) error {
 }
 
 func resumeReplyDetail(old, commit string, plan nativebinding.ResumePlan) string {
-	detail := fmt.Sprintf("from %s at %s; retry; %d steps carried", old, commit[:8], len(plan.Carried))
+	detail := fmt.Sprintf("from %s at %s; %s; %d steps carried", old, commit[:8], plan.Mode(), len(plan.Carried))
+	if plan.InPod != nil {
+		detail += "; untracked files, inspection state and processes kept; secret-free remaining steps"
+	}
 	if len(plan.SecretSteps) > 0 {
 		detail += "; secret steps on F after carried steps: " + strings.Join(plan.SecretSteps, ", ")
 	}

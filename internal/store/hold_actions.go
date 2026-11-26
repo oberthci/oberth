@@ -25,6 +25,14 @@ func (s *Store) Assist(ctx context.Context, a stateport.Action, q stateport.Hold
 		if err = requirePlanPath(r.Admission.Plan, stateport.Node{Path: q.Step}); err != nil {
 			return err
 		}
+		if terminal(r.Status) {
+			if q.Kind == "exec" {
+				return refuse(terminalRun, nil)
+			}
+			// Release may still close the handed-off physical hold. Its audit
+			// is retained without changing the predecessor's final row.
+			return nil
+		}
 		if q.Kind == "exec" {
 			r.Origin.Assisted = true
 		}

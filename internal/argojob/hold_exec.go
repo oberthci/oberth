@@ -8,6 +8,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/nativebinding"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/stepmodel"
 	"strconv"
 	"sync"
 	"time"
@@ -85,8 +86,42 @@ func (e *Executor) HoldExec(ctx context.Context, r HoldExecRequest) (ExecResult,
 	if err := e.verifyHold(ctx, r.Binding, r.Hold); err != nil {
 		return ExecResult{}, err
 	}
+	if err := e.secretFreeInspection(ctx, r.Binding); err != nil {
+		return ExecResult{}, err
+	}
 	command := []string{holdBinary, "exec", "--pod-uid", r.Hold.PodUID, "--timeout-ms", strconv.FormatInt(r.Timeout.Milliseconds(), 10), "--"}
 	return e.relayHold(ctx, r.Hold, append(command, r.Command...), r.MaxOutput)
+}
+
+// Inspection can invoke the paired helper as the step identity. Enforce S1
+// before arbitrary commands too, so a typed rerun cannot bypass the server's
+// resume checks and let inspected state reach a later secret route.
+func (e *Executor) secretFreeInspection(ctx context.Context, b nativebinding.RunBinding) error {
+	if e.config.Runs == nil {
+		return resumeRefusal(ReasonResumeStart, "inspection plan unavailable")
+	}
+	r, err := e.config.Runs.Run(ctx, b.RunID)
+	if err != nil {
+		return err
+	}
+	w, err := e.unpacked(ctx, b)
+	if err != nil {
+		return err
+	}
+	o, err := Project(ctx, Projection{Plan: r.Admission.Plan, Workflow: w})
+	if err != nil {
+		return err
+	}
+	remaining := []string{}
+	for _, s := range o.Steps {
+		if s.Status != stepmodel.StepPassed || resumeWorkflowHook(s.Path) {
+			remaining = append(remaining, s.Path)
+		}
+	}
+	if len(resumeSecretSteps(r.Admission.Plan, remaining)) > 0 {
+		return publicerr.New(publicerr.InvalidTransition, "secret step after inspection", remedyResume, nil)
+	}
+	return nil
 }
 func (e *Executor) relayHold(ctx context.Context, h model.LiveHold, command []string, limit int) (ExecResult, error) {
 	budget := &outputBudget{remaining: limit}
@@ -117,7 +152,7 @@ func holdReply(data []byte) (holdFrame, []byte, bool) {
 	if at < 0 || json.Unmarshal(bytes.TrimSpace(data[at+len("oberth-hold: "):]), &f) != nil {
 		return f, data, false
 	}
-	return f, data[:at], f.Type == "held" || f.Type == "exit" || f.Type == "closed" || f.Type == "timeout" || f.Type == "refused" || f.Type == "start_failed"
+	return f, data[:at], f.Type == "held" || f.Type == "rerunning" || f.Type == "already_rerun" || f.Type == "exit" || f.Type == "closed" || f.Type == "timeout" || f.Type == "refused" || f.Type == "start_failed"
 }
 
 func execFailure(result ExecResult, code publicerr.Code, cause error) error {

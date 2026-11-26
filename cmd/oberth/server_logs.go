@@ -24,8 +24,8 @@ func (l serverLogs) Read(ctx context.Context, r stateport.Run, q apicontract.Run
 		out.ID = r.ID
 		return out, err
 	}
-	out, err := l.read(ctx, r, q)
-	usage, usageErr := l.Usage(ctx, r)
+	out, source, err := l.read(ctx, r, q)
+	usage, usageErr := l.Usage(ctx, source)
 	if usageErr == nil {
 		out.Usage = &usage
 	}
@@ -35,7 +35,18 @@ func (l serverLogs) Read(ctx context.Context, r stateport.Run, q apicontract.Run
 	return out, err
 }
 
-func (l serverLogs) read(ctx context.Context, r stateport.Run, q apicontract.RunLogsArgs) (apicontract.LogResult, error) {
+func (l serverLogs) read(ctx context.Context, r stateport.Run, q apicontract.RunLogsArgs) (apicontract.LogResult, stateport.Run, error) {
+	if target, request, ok, err := l.failedAttemptLog(ctx, r, q); err != nil {
+		return apicontract.LogResult{}, r, err
+	} else if ok {
+		body, meta, err := l.owner.c.logs.Read(ctx, target.ID, request)
+		return apicontract.LogResult{ID: r.ID, Content: string(body), Meta: meta}, target, err
+	}
+	out, err := l.readOwnedLogs(ctx, r, q)
+	return out, r, err
+}
+
+func (l serverLogs) readOwnedLogs(ctx context.Context, r stateport.Run, q apicontract.RunLogsArgs) (apicontract.LogResult, error) {
 	request := logRequest(q)
 	if q.Containers {
 		return l.listContainers(ctx, r.ID)
@@ -164,6 +175,11 @@ func (s serverStreams) OpenLog(ctx context.Context, c apicontract.Caller, q apic
 	r, err := s.owner.c.store.Run(ctx, q.ID)
 	if err != nil {
 		return nil, err
+	}
+	if target, request, ok, err := serverLogs(s).failedAttemptLog(ctx, r, apicontract.RunLogsArgs{NodeID: q.NodeID, Container: q.Container}); err != nil {
+		return nil, err
+	} else if ok {
+		return s.owner.c.logs.OpenStream(ctx, target.ID, request)
 	}
 	entries, err := s.owner.c.logs.Containers(ctx, q.ID)
 	if err != nil {

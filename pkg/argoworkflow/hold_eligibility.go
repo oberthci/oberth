@@ -1,6 +1,8 @@
 package argoworkflow
 
 import (
+	"encoding/json"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,8 +18,10 @@ func (g *graph) eligibleHoldPlan() admissioncontract.Plan {
 	omitted := map[*call]bool{}
 	plan := g.planWithOmissions(omitted)
 	uses := g.holdInvocationRefusals(plan, omitted)
+	resultConsumed := g.consumesResult()
 	for i := range plan.Entries {
 		e := &plan.Entries[i]
+		e.ResultConsumed = resultConsumed
 		if n := g.byKey[e.Template]; n != nil {
 			e.SecretRoute = e.CredentialIntent || holdReadsSecret(n.template, g.workflow.Spec.Volumes) || n.template.Resource != nil || n.template.ServiceAccountName != ""
 			e.OutputParameters = len(n.template.Outputs.Parameters) > 0
@@ -29,6 +33,28 @@ func (g *graph) eligibleHoldPlan() admissioncontract.Plan {
 		e.HoldEligible = e.HoldRefusal == ""
 	}
 	return plan
+}
+
+var resumeResultReference = regexp.MustCompile(`(?:outputs|\[\s*['"]outputs['"]\s*\])\s*(?:\.\s*result|\[\s*['"]result['"]\s*\])`)
+
+// Include external and inline effective templates. Conservatively refuse every
+// held producer when the graph consumes result; its stdout is append-only.
+func (g *graph) consumesResult() bool {
+	values := []any{g.workflow.Spec}
+	for _, n := range g.nodes {
+		values = append(values, n.template)
+	}
+	for _, v := range values {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return true
+		}
+		// Unescape JSON strings before recognizing expression indexing syntax.
+		if resumeResultReference.MatchString(strings.ReplaceAll(string(b), `\"`, `"`)) {
+			return true
+		}
+	}
+	return false
 }
 func (g *graph) holdRefusal(e admissioncontract.PlanEntry) string {
 	n := g.byKey[e.Template]
@@ -149,6 +175,7 @@ func frozenHoldPlan(observed, authored admissioncontract.Plan) admissioncontract
 	for i := range observed.Entries {
 		frozen := entries[observed.Entries[i].Path]
 		observed.Entries[i].SecretRoute, observed.Entries[i].OutputParameters = frozen.SecretRoute, frozen.OutputParameters
+		observed.Entries[i].ResultConsumed = frozen.ResultConsumed
 		observed.Entries[i].HoldArmed = frozen.HoldArmed
 		observed.Entries[i].HoldEligible, observed.Entries[i].HoldRefusal = frozen.HoldEligible, frozen.HoldRefusal
 	}
