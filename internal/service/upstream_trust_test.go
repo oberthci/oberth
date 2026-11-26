@@ -90,7 +90,7 @@ func TestFailedExplicitProbeLeavesCompletePendingRegistration(t *testing.T) {
 		if !calls.persisted {
 			t.Fatal("probe preceded durable configuration")
 		}
-		out := apicontract.Upstream{Name: "new", Pending: true, DisplayReason: "Git SSH host key does not match the pin."}
+		out := apicontract.Upstream{Name: "new", Pending: new(true), DisplayReason: "Git SSH host key does not match the pin."}
 		if repo != "" {
 			return out, publicerr.New(publicerr.InvalidInput, cause, "Push the first commit with your own forge access, then retry.", nil)
 		}
@@ -120,10 +120,10 @@ func checkPendingUpstreamList(t *testing.T, p *peopleFixture, checked bool) {
 			continue
 		}
 		found = true
-		if !upstream.Pending || upstream.DisplayReason == "" {
-			t.Fatal("unprobed list claimed verification", upstream)
+		if !checked && (upstream.Pending != nil || upstream.DisplayReason != "") {
+			t.Fatal("unprobed list claimed a check result", upstream)
 		}
-		if checked && upstream.DisplayReason != "Git SSH host key does not match the pin." {
+		if checked && (upstream.Pending == nil || !*upstream.Pending || upstream.DisplayReason != "Git SSH host key does not match the pin.") {
 			t.Fatal("pending reason was lost", upstream)
 		}
 	}

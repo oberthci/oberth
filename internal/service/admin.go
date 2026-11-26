@@ -199,7 +199,7 @@ func (s *Service) PrepareAuditList(ctx context.Context, c apicontract.Caller, q 
 	}), nil
 }
 func upstreamResult(v stateport.Upstream) apicontract.Upstream {
-	return apicontract.Upstream{Name: v.Name, Org: v.Org, BaseURL: v.BaseURL, Pending: true, DisplayReason: "Not checked in this request."}
+	return apicontract.Upstream{Name: v.Name, Org: v.Org, BaseURL: v.BaseURL}
 }
 func (s *Service) PrepareUpstreamAdd(ctx context.Context, c apicontract.Caller, q apicontract.UpstreamAddArgs) (apicontract.Call[apicontract.Upstream], error) {
 	return prepareAdmin(s, ctx, c, adminOperation[apicontract.Upstream]{"upstream_add", func(ctx context.Context, a actor.Actor) (apicontract.Upstream, error) {

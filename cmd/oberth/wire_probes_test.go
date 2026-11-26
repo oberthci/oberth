@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"reflect"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ func (f *composedFixture) checkWiredProbes(t *testing.T) {
 	}
 	f.git.Git(t, f.git.Bare, "symbolic-ref", "HEAD", "refs/heads/main")
 	out, err := a.ProbeUpstream(t.Context(), "origin", "team/widget")
-	if err != nil || out.Pending {
+	if err != nil || !reflect.DeepEqual(out.Pending, new(false)) {
 		t.Fatal("successful live probe did not clear refusal", err)
 	}
 	if len(budgets) != 2 || budgets[0] != 15*time.Second || budgets[1] != 15*time.Second {
@@ -75,7 +76,7 @@ func (f *composedFixture) checkUnprobedUpstream(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending, err := a.ProbeUpstream(t.Context(), u.Name, "")
-	if err != nil || !pending.Pending || pending.DisplayReason != "No repository was checked." {
+	if err != nil || pending.Pending == nil || !*pending.Pending || pending.DisplayReason != "No repository was checked." {
 		t.Fatal("unprobed upstream was reported as verified", pending, err)
 	}
 }

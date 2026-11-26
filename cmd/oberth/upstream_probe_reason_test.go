@@ -21,11 +21,11 @@ func TestUpstreamCheckStaysPendingAfterALaterFailure(t *testing.T) {
 		}
 		return nil
 	}
-	out, err := checkEach(apicontract.Upstream{Pending: true}, repos, check, false)
-	if err != nil || !out.Pending || out.DisplayReason != gitport.EmptyForgeReason {
+	out, err := checkEach(apicontract.Upstream{Pending: new(true)}, repos, check, false)
+	if err != nil || out.Pending == nil || !*out.Pending || out.DisplayReason != gitport.EmptyForgeReason {
 		t.Fatal("a failed repository left the upstream verified", out, err)
 	}
-	if out, err = checkEach(apicontract.Upstream{Pending: true}, repos[:1], check, false); err != nil || out.Pending {
+	if out, err = checkEach(apicontract.Upstream{Pending: new(true)}, repos[:1], check, false); err != nil || out.Pending == nil || *out.Pending {
 		t.Fatal("a readable upstream stayed pending", out, err)
 	}
 }

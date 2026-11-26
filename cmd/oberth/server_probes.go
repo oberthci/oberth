@@ -111,7 +111,7 @@ func (a serverAdministration) ProbeUpstream(ctx context.Context, name, checkRepo
 	if err != nil {
 		return apicontract.Upstream{}, err
 	}
-	out := apicontract.Upstream{Name: u.Name, Org: u.Org, BaseURL: u.BaseURL, PublicKey: identity.PublicKey, Pending: true}
+	out := apicontract.Upstream{Name: u.Name, Org: u.Org, BaseURL: u.BaseURL, PublicKey: identity.PublicKey, Pending: new(true)}
 	repos, err := a.probeRepositories(ctx, u, checkRepo)
 	if err != nil {
 		return out, err
@@ -126,7 +126,7 @@ func checkEach(out apicontract.Upstream, repos []stateport.Repository, check fun
 	out.DisplayReason = "No repository was checked."
 	for _, repo := range repos {
 		if err := check(repo); err != nil {
-			out.Pending = true
+			out.Pending = new(true)
 			reason := upstreamProbeStatusReason(err)
 			out.DisplayReason = reason
 			if named {
@@ -134,7 +134,7 @@ func checkEach(out apicontract.Upstream, repos []stateport.Repository, check fun
 			}
 			return out, nil
 		}
-		out.Pending = false
+		out.Pending = new(false)
 		out.DisplayReason = "Repository is readable."
 	}
 	return out, nil

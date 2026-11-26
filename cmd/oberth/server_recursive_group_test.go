@@ -39,7 +39,7 @@ func TestServerRecursiveGroupPassKeepsGitWorking(t *testing.T) {
 		t.Fatal("own-group key refused", err)
 	}
 	result, err := a.ProbeUpstream(t.Context(), "origin", "team/widget")
-	if err != nil || result.Pending {
+	if err != nil || result.Pending == nil || *result.Pending {
 		t.Fatal("Git failed after recursive volume permissions", result.DisplayReason, err)
 	}
 	assertGroupFilesUnchanged(t, []string{key, a.pinsPath()})

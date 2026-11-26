@@ -185,7 +185,7 @@ type Upstream struct {
 	Org           string   `json:"org"`
 	PublicKey     string   `json:"public_key,omitempty"`
 	Fingerprint   string   `json:"fingerprint,omitempty"`
-	Pending       bool     `json:"pending"`
+	Pending       *bool    `json:"pending,omitempty"`
 }
 type UpstreamPage struct {
 	Upstreams []Upstream `json:"upstreams"`
