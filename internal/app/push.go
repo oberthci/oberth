@@ -353,7 +353,7 @@ func (s *Submitter) feedback(runs []stateport.Run) PushResult {
 	var result PushResult
 	for _, r := range runs {
 		out := Outcome{Ref: r.Ref, RunID: r.ID, State: "accepted", File: r.Admission.SelectedFile, WatchURL: strings.TrimRight(s.d.PublicURL, "/") + "/runs/" + r.ID}
-		if r.Origin.WorkflowUID != "" {
+		if r.Origin.NativeUID() != "" {
 			out.State = "started"
 		}
 		if r.Status == stepmodel.RunFailed {

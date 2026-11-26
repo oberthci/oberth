@@ -17,6 +17,13 @@ import (
 type serverLogs struct{ owner *serverOwners }
 
 func (l serverLogs) Read(ctx context.Context, r stateport.Run, q apicontract.RunLogsArgs) (apicontract.LogResult, error) {
+	if old, carried, err := l.carriedLogs(ctx, r, q); err != nil {
+		return apicontract.LogResult{}, err
+	} else if carried {
+		out, err := l.Read(ctx, old, q)
+		out.ID = r.ID
+		return out, err
+	}
 	request := logRequest(q)
 	if q.Containers {
 		return l.listContainers(ctx, r.ID)

@@ -67,7 +67,7 @@ func (s *Service) prepareRerun(ctx context.Context, a actor.Actor, q runAction) 
 	if err != nil {
 		return nil, err
 	}
-	if !terminal(r.Status) || r.Status == stepmodel.RunPassed || r.Origin.Trigger == model.TriggerPromotion {
+	if !rerunnable(r) {
 		return nil, refuse(active)
 	}
 	if r.Release && !a.Admin {
@@ -82,6 +82,9 @@ func (s *Service) prepareRerun(ctx context.Context, a actor.Actor, q runAction) 
 	}
 	if ref.ObjectSHA != r.ObjectSHA {
 		return nil, refuse(moved)
+	}
+	if r.Origin.Resumed() {
+		q.Assist = r.Origin.AssistRequested
 	}
 	request := StartRequest{Request: model.CIRequest{ReceiveID: "rerun:" + s.c.NewID(), Repo: r.Repo, Ref: r.Ref, ObjectSHA: r.ObjectSHA, CommitSHA: r.CommitSHA, Actor: a, Trigger: r.Origin.Trigger, ScheduleEntry: r.Origin.ScheduleEntry, Assist: q.Assist}, RerunOf: r.ID, Reason: q.Reason}
 	return bounded(func(ctx context.Context) (apicontract.Receipt, error) {
@@ -150,3 +153,7 @@ func (s *Service) prepareCheck(ctx context.Context, a actor.Actor, q CheckReques
 }
 
 func releaseLike(r stateport.Run) bool { return r.Release || strings.HasPrefix(r.Ref, "refs/tags/") }
+
+func rerunnable(r stateport.Run) bool {
+	return terminal(r.Status) && (r.Status != stepmodel.RunPassed || r.Origin.Resumed()) && r.Origin.Trigger != model.TriggerPromotion
+}

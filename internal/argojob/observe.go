@@ -111,7 +111,13 @@ func (e *Executor) retire(t *tracking) {
 	if e.config.Logs != nil {
 		e.config.Logs.KeepFollowing(t.binding.RunID, nil)
 	}
-	e.Untrack(t.binding.Workflow.Name)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	name := t.binding.Workflow.Name
+	if e.tracked[name] == t {
+		delete(e.tracked, name)
+		delete(e.recoveryErrors, name)
+	}
 }
 
 // Run consumes recovery and native change notifications through the same queue.
@@ -169,7 +175,7 @@ func (e *Executor) recoverStatus(ctx context.Context, status stepmodel.RunStatus
 			return errors.Join(append(failures, err)...)
 		}
 		for _, r := range rows {
-			if r.Origin.WorkflowUID != "" {
+			if r.Origin.NativeUID() != "" {
 				if err = e.restore(ctx, r); err != nil {
 					failures = append(failures, err)
 					e.mu.Lock()
@@ -213,12 +219,15 @@ func (e *Executor) restore(ctx context.Context, r stateport.Run) error {
 			return err
 		}
 	}
+	if r.Origin.Resumed() {
+		return e.ApplyResume(ctx, r.ID)
+	}
 	return e.restoreSnapshot(ctx, r, child)
 }
 
 func (e *Executor) restoreSnapshot(ctx context.Context, r stateport.Run, child *childObservation) error {
 	if terminalChild(r) {
-		b := runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.WorkflowUID})
+		b := runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.NativeUID()})
 		e.track(b, r.Admission.Plan, trackingSeed{child: child, completed: true, archiveOnly: true})
 		return nil
 	}
@@ -234,7 +243,7 @@ func (e *Executor) restoreSnapshot(ctx context.Context, r stateport.Run, child *
 		}
 
 	}
-	b := runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.WorkflowUID})
+	b := runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.NativeUID()})
 	e.track(b, r.Admission.Plan, seed)
 	return nil
 }

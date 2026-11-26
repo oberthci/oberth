@@ -252,3 +252,7 @@ competition.
 **Delta:** Source custody tables → stored admission and write-once native identity;
 transplanted migration catalog → numbered forward steps; per-mutation audit verification →
 read/backup/restore checks.
+
+### Fix and resume
+
+The existing origin JSON stores resumed_from, resume_uid and the accepted resume_plan write intent. workflow_uid stays empty, so workflow_identity remains unique without any schema object or schema bump. NativeUID returns resume_uid for a resumed run. Insertion marks Assisted and checks for an existing successor through run_ref in the same BEGIN IMMEDIATE write transaction. This serialization relies on one server process, todays deployment; another writer design needs a unique successor index. Two concurrent inserts have one winner. Ordinary unbound recovery excludes resumed_from; native resume recovery owns it.

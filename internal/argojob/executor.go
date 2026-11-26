@@ -89,6 +89,7 @@ type Config struct {
 	Now                func() time.Time
 }
 type Executor struct {
+	resumeMu         sync.Mutex
 	collector        *Executor
 	live             *Executor
 	storeConfigured  bool

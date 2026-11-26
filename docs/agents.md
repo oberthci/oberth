@@ -5,7 +5,6 @@ declaration cannot widen its access. Use the [agent skill](../agent/skills/obert
 setup.
 
 ## Install, invite and join
-
 The person chooses the Kubernetes context. Use the [install guide](install.md#review-and-install) to
 show the review before applying; reuse consent already given for the same concrete change. Show the
 deploy key and next actions, including the separate private recovery copies.
@@ -51,7 +50,6 @@ commit. `oberth renew` renews a certificate within its permitted renewal period.
 revocation, get a new invitation.
 
 ## Connect the tools
-
 MCP means Model Context Protocol, the request protocol used by the agent's tools. The supported
 connection is the standard-input/output bridge `oberth mcp`. Join prints an absolute executable path
 with the uplink profile explicitly selected:
@@ -66,7 +64,6 @@ setup instructions and no tools; it does not try another installation.
 The optional [agent plugins](install.md#agent-plugins) add a run box and run/watch commands.
 
 ## Push, observe and respond
-
 Review the commit and obtain consent before pushing a new branch:
 
 ```sh
@@ -80,7 +77,6 @@ Without tools, follow `oberth log <run>` in a background shell, then use `oberth
 read the state. Exit zero means the wait completed, not that CI passed.
 
 ## Show the evidence
-
 When builds come up, paste the bridge's rendered display block verbatim in a code block. Without
 tools, paste the output of `oberth run list` or `oberth run get <run>` whole. Show complete reasons
 and keep full Kubernetes detail separate. Show both the accepted pushed object and the exact tested
@@ -88,7 +84,6 @@ commit when they differ. An assisted run is never promotion evidence; obtain an 
 before promoting.
 
 ## Promote and release
-
 After consent, run `oberth promote <tested-commit-sha>`. Show the tested run, resulting
 default-branch commit and that commit's CI result. If promotion is refused, follow its remedy; do
 not push the default branch as a workaround. Follow [agent promotion](releasing.md#agent-promotion)
@@ -96,3 +91,12 @@ for the administrator's policy change and [project release steps](releasing.md#r
 for secret grants, saving local work, checkout synchronization and passing CI on the resulting
 default commit. After release consent, run `oberth release <tag>` and show its commit, run result
 and publication. A lost mutation reply means read the object's state before repeating the action.
+
+## Resume a failed run
+After consent, commit and push a late fix without `oberth.run`, then call
+`run_resume {id,commit}` (CLI: `oberth run resume <id> <commit>`). Argo retries the
+failed part on F, retaining passed artifacts, outputs and workspace volumes.
+The resumed run is Assisted and never evidence. Watch `run.finished`; if it fails,
+fix and resume again. After a pass and consent, call `run_rerun` once, then promote
+only its unassisted pass. Changed pipelines or grants require a full pushed run.
+Carried state may include old caches and external effects; fix-in-held-Pod is unavailable.

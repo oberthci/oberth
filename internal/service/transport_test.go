@@ -24,7 +24,7 @@ func TestRealTransportBindingsCompile(t *testing.T) {
 		}
 		n++
 	}
-	if n != 74 {
+	if n != 75 {
 		t.Fatalf("bindings %d", n)
 	}
 }

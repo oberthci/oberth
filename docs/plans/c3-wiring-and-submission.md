@@ -111,3 +111,7 @@ handoff and adoption without replacement. `TestStopIntentDuringCreate` and
 contracts include mixed fingerprints, unrelated lines and out-of-order replies.
 The push/grant walks prove actual quarantine integration and a repeated push
 succeeding after the printed grant command. `TestMessageCatalogue` checks limits.
+
+### Fix and resume
+
+Resume prepares F with inherited assist intent as the current caller, compares C4 execution inputs, plans the native write, accepts an Assisted successor, keeps F, then applies the retry. No Workflow is created. The accepted write intent is retained in existing origin JSON for recovery across the insert/delete/relabel window. Recovery keeps F and applies that exact intent once while labels name the predecessor, or observes the successor when labels already moved. A stop cancels it; missing, deleting or changed native objects fail it without a new retry.

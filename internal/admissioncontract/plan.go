@@ -13,6 +13,8 @@ type PlanEntry struct {
 	Dynamic          bool   `json:"dynamic"`
 	ParallelGroup    int    `json:"parallel_group,omitempty"`
 	CredentialIntent bool   `json:"credential_intent"`
+	SecretRoute      bool   `json:"secret_route,omitempty"`
+	OutputParameters bool   `json:"output_parameters,omitempty"`
 	HoldArmed        bool   `json:"hold_armed,omitempty"`
 	HoldEligible     bool   `json:"hold_eligible,omitempty"`
 	HoldRefusal      string `json:"hold_refusal,omitempty"`

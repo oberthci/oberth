@@ -162,7 +162,7 @@ func (s *deliverySlots) release(r runlog.InfrastructureReceipt) {
 func (o *serverOwners) fetchStepSecret(ctx context.Context, identity runlog.InfrastructureReceipt, jwt, path string) ([]byte, error) {
 	started := o.c.clock.Now()
 	run, err := o.deliveryRun(ctx, identity.RunID)
-	if err == nil && (terminalRun(run.Status) || run.Origin.WorkflowUID != identity.WorkflowUID || run.Admission.Identity.Namespace != o.c.config.PipelineNamespace) {
+	if err == nil && (terminalRun(run.Status) || run.Origin.NativeUID() != identity.WorkflowUID || run.Admission.Identity.Namespace != o.c.config.PipelineNamespace) {
 		return nil, &sourcedelivery.Failure{Code: "forbidden"}
 	}
 	var values map[string][]byte

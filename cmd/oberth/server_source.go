@@ -44,8 +44,8 @@ func (o *serverOwners) sourcePart(ctx context.Context) (Part, error) {
 	return Part{Name: "source"}, ctx.Err()
 }
 func (o *serverOwners) sourceRun(ctx context.Context, id string) (sourcedelivery.Run, error) {
-	r, err := o.deliveryRun(ctx, id)
-	return sourcedelivery.Run{Admission: r.Admission, Namespace: r.Admission.Identity.Namespace, Workflow: r.Origin.WorkflowName, UID: r.Origin.WorkflowUID, Terminal: terminalRun(r.Status)}, err
+	r, err := o.sourceOwner(ctx, id)
+	return sourcedelivery.Run{Locator: id, Admission: r.Admission, Namespace: r.Admission.Identity.Namespace, Workflow: r.Origin.WorkflowName, UID: r.Origin.NativeUID(), Terminal: terminalRun(r.Status)}, err
 }
 func (o *serverOwners) sshIdentity(ctx context.Context, key ssh.PublicKey) (sshserver.Identity, error) {
 	who, err := (currentAuthority{o}).byFingerprint(ctx, ssh.FingerprintSHA256(key), "ssh")

@@ -13,6 +13,7 @@ import (
 
 // Acceptance binds the receipt, attributed request and the exact sealed admission.
 type Acceptance struct {
+	Resume      *model.RunOrigin
 	Rejected    *RejectedAdmission
 	Actions     []model.AuditAction
 	Request     model.CIRequest

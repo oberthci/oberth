@@ -14,6 +14,7 @@ import (
 )
 
 type acceptedBinding struct {
+	Resume                      *model.RunOrigin `json:",omitempty"`
 	Request                     model.CIRequest
 	RunID, Admission, Rejection string
 	Release                     bool
@@ -161,6 +162,11 @@ func (s *Store) acceptRun(ctx context.Context, tx *sql.Tx, input stateport.Accep
 	if err := s.appendAudit(ctx, tx, mutation{input.Request.Actor.Identity, "run.accept", "run", run.ID, details}); err != nil {
 		return stateport.Run{}, err
 	}
+	if input.Resume != nil {
+		if err := s.appendAudit(ctx, tx, mutation{input.Request.Actor.Identity, "run.resume", "run", run.ID, resumeAudit(input, run)}); err != nil {
+			return stateport.Run{}, err
+		}
+	}
 	for _, action := range input.Actions {
 		m, err := actionMutation(action)
 		if err != nil {
@@ -218,7 +224,7 @@ func loadReceivedRuns(ctx context.Context, tx *sql.Tx, id string) ([]stateport.R
 }
 
 func bindingFor(input stateport.Acceptance, view admissioncontract.PreparedView) acceptedBinding {
-	binding := acceptedBinding{PromotionID: input.PromotionID, Request: input.Request, RunID: view.RunID, Admission: view.Digest, Release: input.Release,
+	binding := acceptedBinding{Resume: input.Resume, PromotionID: input.PromotionID, Request: input.Request, RunID: view.RunID, Admission: view.Digest, Release: input.Release,
 		RerunOf: input.RerunOf, Child: input.Child, Actions: input.Actions}
 	if input.Rejected != nil {
 		binding.RunID = input.Rejected.ID

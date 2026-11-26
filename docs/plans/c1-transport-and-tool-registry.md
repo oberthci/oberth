@@ -59,7 +59,7 @@ The tool registry exposes these operation families:
 | Family | Surface |
 | --- | --- |
 | Run observation and evidence | `status`, `wait`, `logs`, `run_list`, `run_get`, `run_logs`, `system_status` |
-| Run actions and assistance | `run_check`, `run_cancel`, `run_rerun`, `run_purge`, `run_hold_list`, `run_hold_exec`, `run_hold_abandon` |
+| Run actions and assistance | `run_check`, `run_cancel`, `run_rerun`, `run_resume`, `run_purge`, `run_hold_list`, `run_hold_exec`, `run_hold_abandon` |
 | Publication and promotion | `sync`, `promote`, `promotion_list`, `promote_status`, `promote_retry`, `publish_retry`, `publication_abandon` |
 | Issues | `issue_create`, `issue_get`, `issue_get_many`, `issue_list`, `issue_update`, `issue_append`, `issue_close`, `issue_reopen`, `issue_delete`, `issue_lock`, `issue_import` |
 | Identity and repository administration | `uplink_add`, `uplink_scope`, `uplink_invite`, `uplink_cert`, `client_renew`, `uplink_list`, `uplink_revoke`, `uplink_rotate`, `upstream_add`, `upstream_list`, `upstream_remove`, `upstream_provide_key`, `repo_add`, `repo_verify`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive` |
@@ -301,3 +301,7 @@ steps, status and logs. `ux-gate` calls each component's complete catalog test, 
 
 Reflective wire aliases → explicit snake_case values; phase grouping → steps and native
 attempts; historical artifact reads → retained logs.
+
+### Fix and resume
+
+`run_resume {id,commit}` and `oberth run resume <id> <commit>` return `{run,mode,detail}`. Slice 1 supports native retry only. No new status, event kind or display layout is introduced.

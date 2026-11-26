@@ -244,3 +244,7 @@ Open follow-ups:
 
 Pipeline DSL and fragments → native Workflow YAML and namespaced templates; source
 injection → authored input artifacts; phase groups → logical steps.
+
+### Fix and resume
+
+`SameExecution` compares the full prepared native spec, plans, current grants, accounts, defaults, templates and pinned sources. Only the main source binding and source locator may differ; F retains fresh checkout inventory. Changed definitions, grant inputs or revoked grants refuse with `pipeline changed; push for a full run`. Each entry freezes `SecretRoute` and `OutputParameters` before native injections. Secret routes include declared secrets, identities and resource accounts; an uninspected retry may reach them exactly when a fresh admission of F would.

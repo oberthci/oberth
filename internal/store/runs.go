@@ -63,6 +63,14 @@ func (s *Store) insertRun(ctx context.Context, tx *sql.Tx, input stateport.Accep
 		return stateport.Run{}, err
 	}
 	result := s.admittedRun(input, repoID)
+	if input.Resume != nil {
+		origin, err := resumeOrigin(ctx, tx, input)
+		if err != nil {
+			return stateport.Run{}, err
+		}
+		result.Origin.ResumedFrom, result.Origin.ResumeUID, result.Origin.WorkflowName = origin.ResumedFrom, origin.ResumeUID, origin.WorkflowName
+		result.Origin.ResumePlan, result.Origin.Assisted = origin.ResumePlan, true
+	}
 	var admission any
 	if input.Prepared != nil {
 		body, err := json.Marshal(input.Prepared)

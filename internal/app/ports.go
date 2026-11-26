@@ -50,6 +50,7 @@ type Keeper interface {
 	Keep(context.Context, string, []sourcecontract.Binding) error
 }
 type Scope struct {
+	Actor        actor.Actor
 	Mode         admissioncontract.Mode
 	RepositoryID int64
 	nativebinding.Preparation

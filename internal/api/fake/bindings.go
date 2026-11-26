@@ -40,6 +40,7 @@ func bindAction(b *apicontract.Bindings) {
 	b.RunHoldExec.Handler = &Handler[apicontract.RunHoldExecArgs, apicontract.ExecResult]{Value: apicontract.ExecResult{}}
 	b.RunHoldList.Handler = &Handler[apicontract.RunHoldListArgs, apicontract.HoldPage]{Value: apicontract.HoldPage{Holds: []model.LiveHold{}}}
 	b.RunPurge.Handler = &Handler[apicontract.RunPurgeArgs, apicontract.Receipt]{Value: apicontract.Receipt{}}
+	b.RunResume.Handler = &Handler[apicontract.RunResumeArgs, apicontract.ResumeResult]{Value: apicontract.ResumeResult{}}
 	b.RunRerun.Handler = &Handler[apicontract.RunRerunArgs, apicontract.Receipt]{Value: apicontract.Receipt{}}
 	b.RunWait.Handler = &Handler[apicontract.RunWaitArgs, apicontract.WaitResult]{Value: apicontract.WaitResult{}}
 	b.Sync.Handler = &Handler[apicontract.SyncArgs, apicontract.Receipt]{Value: apicontract.Receipt{}}

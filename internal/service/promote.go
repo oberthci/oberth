@@ -115,8 +115,11 @@ func (s *Service) promotionSource(ctx context.Context, repo, sha string, allowUn
 	}
 	selected, err := s.c.Runs.RunByCommit(ctx, []string{repo}, sha)
 	if err != nil {
-		if !isMissing(err) || !allowUntested {
+		if !isMissing(err) {
 			return selected, err
+		}
+		if !allowUntested {
+			return selected, s.resumePromotionHint(ctx, repo, sha, err)
 		}
 		if (gitport.Ref{Name: "refs/heads/source", ObjectSHA: sha, CommitSHA: sha}).Validate() != nil {
 			return selected, bad("sha")
@@ -124,7 +127,7 @@ func (s *Service) promotionSource(ctx context.Context, repo, sha string, allowUn
 		selected = stateport.Run{RunSummary: stepmodel.RunSummary{Repo: repo, ObjectSHA: sha, CommitSHA: new(sha)}}
 	}
 	if selected.CommitSHA == nil {
-		return selected, refuse(promotionEvidence)
+		return selected, promotionRunEvidence(selected)
 	}
 	rows, err := s.latestBuild(ctx, repo, *selected.CommitSHA)
 	if err != nil {
@@ -136,11 +139,11 @@ func (s *Service) promotionSource(ctx context.Context, repo, sha string, allowUn
 			selected.Status = ""
 			return selected, nil
 		}
-		return selected, refuse(promotionEvidence)
+		return selected, promotionRunEvidence(selected)
 	}
 	source := rows[0]
 	if source.Status != stepmodel.RunPassed || source.Origin.HasAssistance() {
-		return source, refuse(promotionEvidence)
+		return source, promotionRunEvidence(selected)
 	}
 	return source, nil
 }
@@ -224,4 +227,24 @@ func (s *Service) startPromotionRun(ctx context.Context, p model.Promotion, reas
 		return out, errors.Join(err, s.c.Promotions.FinishPromotion(write, a, u))
 	}
 	return out, err
+}
+
+func promotionRunEvidence(r stateport.Run) error {
+	if r.Origin.Resumed() && r.Status == stepmodel.RunPassed {
+		return publicerr.New(publicerr.Forbidden, "An unassisted pass is required.", "Start an unassisted run: run_rerun "+r.ID, nil)
+	}
+	return refuse(promotionEvidence)
+}
+
+func (s *Service) resumePromotionHint(ctx context.Context, repo, sha string, cause error) error {
+	rows, err := s.c.Runs.Runs(ctx, stateport.RunFilter{Repositories: []string{repo}, CommitSHA: sha, Limit: 200})
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
+		if r.Origin.Resumed() && r.Status == stepmodel.RunPassed {
+			return promotionRunEvidence(r)
+		}
+	}
+	return cause
 }

@@ -264,3 +264,7 @@ runs that are no result (grey), never green; no new status, letter or colour.
 
 Run get/list expose an explicit workflow choice as `selected_file` from the persisted
 request, including refused admissions and reruns, without another admission read.
+
+### Fix and resume
+
+Resume requires rerun visibility and fresh push authority on a non-default branch. The fix is its exact head and descends from the failed commit; equal commits require a resumed predecessor. Cancelled, passed, release, tag, schedule and promotion runs refuse. Passed resumed runs allow one explicit ordinary rerun; they never authorize promotion or publication. Promotion advises `Start an unassisted run: run_rerun <id>`. The finish event data includes `resumed_from`; detail names carried work and secret-bearing remaining steps.

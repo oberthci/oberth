@@ -86,7 +86,7 @@ func (s *Service) waitHolds(ctx context.Context, r stateport.RunState, o *waitOp
 	if o.until != "held" && o.until != "any" || !o.run.Origin.AssistRequested || terminal(r.Status) {
 		return nil, nil
 	}
-	if o.run.Origin.WorkflowUID == "" {
+	if o.run.Origin.NativeUID() == "" {
 		latest, err := s.c.Runs.Run(ctx, r.ID)
 		if err != nil {
 			return nil, err

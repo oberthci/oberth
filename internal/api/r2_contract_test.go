@@ -59,7 +59,7 @@ func TestRemovedToolsHaveNoAuthorityOrCatalogue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listTools(t, r, admin())) != 74 {
+	if len(listTools(t, r, admin())) != 75 {
 		t.Fatal("removed tools changed the wrong tool count")
 	}
 }

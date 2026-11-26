@@ -39,7 +39,7 @@ func TestAuthorityClassesAndUnknownActions(t *testing.T) {
 }
 func TestRequiredUsesEveryDeclaration(t *testing.T) {
 	definitions := apicontract.Definitions(apicontract.Bindings{})
-	if len(definitions) != 74 {
+	if len(definitions) != 75 {
 		t.Fatal("tool inventory changed", len(definitions))
 	}
 	for _, d := range definitions {

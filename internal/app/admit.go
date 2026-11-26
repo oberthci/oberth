@@ -46,7 +46,7 @@ func (s *Submitter) admit(ctx context.Context, r Request, source Source, opts ad
 			r.Trigger = model.TriggerTag
 		}
 	}
-	scope := Scope{Mode: opts.mode, RepositoryID: r.RepositoryID, Preparation: s.d.Preparation}
+	scope := Scope{Actor: r.Actor.Clone(), Mode: opts.mode, RepositoryID: r.RepositoryID, Preparation: s.d.Preparation}
 	scope.Trigger = string(r.Trigger)
 	scope.Repository, scope.File, scope.Release, scope.Assist = r.Repository, selected, release, r.Assist && assistEnabled
 	q, policy, err := s.d.Authority.Load(ctx, scope)

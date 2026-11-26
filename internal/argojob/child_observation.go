@@ -21,7 +21,7 @@ type childObservation struct {
 }
 
 func boundChild(r stateport.Run, proof nativebinding.ChildBinding) (*childObservation, error) {
-	b := runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.WorkflowUID})
+	b := runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.NativeUID()})
 	if err := b.Verify(proof.Run); err != nil {
 		return nil, ownership(err)
 	}

@@ -36,8 +36,8 @@ func (f *Runs) BindWorkflow(ctx context.Context, a stateport.Action, b nativebin
 		if !nativeBindingMatches(r, b) {
 			return runProblem(publicerr.Conflict)
 		}
-		if r.Origin.WorkflowUID != "" {
-			if r.Origin.WorkflowUID == b.Workflow.UID && r.Origin.WorkflowName == b.Workflow.Name {
+		if r.Origin.NativeUID() != "" {
+			if r.Origin.NativeUID() == b.Workflow.UID && r.Origin.WorkflowName == b.Workflow.Name {
 				return noRunChange{}
 			}
 			return runProblem(publicerr.Conflict)

@@ -1,8 +1,11 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/oberthci/oberth/internal/nativebinding"
+	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
@@ -205,6 +208,9 @@ func isMissing(err error) bool {
 func view(r stateport.Run) stepmodel.RunSummary {
 	v := summary(r.RunSummary)
 	evidenceReason(&v, r.Origin)
+	if r.Origin.Resumed() {
+		v.Detail = resumeDetail(r, v.Detail)
+	}
 	return v
 }
 
@@ -249,4 +255,27 @@ func runReason(status stepmodel.RunStatus) string {
 		return reasonCancelled
 	}
 	return reasonUnknown
+}
+
+func resumeDetail(r stateport.Run, detail string) string {
+	var plan nativebinding.ResumePlan
+	_ = json.Unmarshal(r.Origin.ResumePlan, &plan)
+	commit := ""
+	if r.CommitSHA != nil {
+		commit = *r.CommitSHA
+		if len(commit) > 8 {
+			commit = commit[:8]
+		}
+	}
+	text := fmt.Sprintf("from %s at %s; retry; %d steps carried", r.Origin.ResumedFrom, commit, len(plan.Carried))
+	if len(plan.SecretSteps) > 0 {
+		text += "; secret steps on F after carried steps: " + strings.Join(plan.SecretSteps, ", ")
+	}
+	if detail != "" {
+		text += "; " + detail
+	}
+	if r.Status == stepmodel.RunPassed {
+		text += "; next: run_rerun " + r.ID
+	}
+	return text
 }

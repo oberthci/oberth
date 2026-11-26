@@ -132,6 +132,7 @@ type RunCancellation struct {
 
 // Clone detaches the returned projection and immutable admission from the reader.
 func (r Run) Clone() Run {
+	r.Origin.ResumePlan = append(r.Origin.ResumePlan[:0:0], r.Origin.ResumePlan...)
 	r.RunSummary = r.RunSummary.Clone()
 	r.Admission = r.Admission.Clone()
 	r.Findings = slices.Clone(r.Findings)

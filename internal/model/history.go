@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"slices"
 	"time"
 
@@ -29,7 +30,9 @@ type RunOrigin struct {
 	WorkflowUID   string `json:"workflow_uid"`
 	// ResumedFrom names the failed run whose Workflow this run resumed on a
 	// fixed commit. It is write-once; a resumed run is never evidence.
-	ResumedFrom string `json:"resumed_from,omitempty"`
+	ResumedFrom string          `json:"resumed_from,omitempty"`
+	ResumeUID   string          `json:"resume_uid,omitempty"`
+	ResumePlan  json.RawMessage `json:"resume_plan,omitempty"`
 }
 
 // ReleaseReceipt identifies a delivered release, never a merely passing run.
@@ -143,3 +146,11 @@ func (o RunOrigin) HasAssistance() bool { return o.Assisted || o.Resumed() }
 // Resumed reports a run that resumed a failed run's Workflow. It is no build
 // of its commit in either direction: it neither gives nor blocks evidence.
 func (o RunOrigin) Resumed() bool { return o.ResumedFrom != "" }
+
+// NativeUID returns the Workflow identity of an ordinary run or a resume owner.
+func (o RunOrigin) NativeUID() string {
+	if o.Resumed() {
+		return o.ResumeUID
+	}
+	return o.WorkflowUID
+}

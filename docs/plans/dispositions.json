@@ -9390,20 +9390,20 @@
     }
   },
   "spec_sha256": {
-    "docs/plans/c1-transport-and-tool-registry.md": "48538bef11c4b9188b986fd07ed978f6e09ea378b8924baff18a04bbc21a0965",
+    "docs/plans/c1-transport-and-tool-registry.md": "6520cc0a0985ceaeeec37a73ee080f687bc0bae9c8b9a74624b4da0db1ab193c",
     "docs/plans/c10-schedules.md": "78bd7b77d6511426d16b5c7ddf543b8124c47e82d40fb16542cfa8efbac7ca67",
     "docs/plans/c11-cli-and-server-composition.md": "1a5c66ef67a5bc66712957a208efef4d602a4f7d6c1c24ec61a94f434c6a5af6",
-    "docs/plans/c12-agent-client.md": "96d076906037fb7c14e275675f3f74d3cb868821f473b9b5857d94596aa60002",
+    "docs/plans/c12-agent-client.md": "4ae9d796277502ec23eef27dc7632c8a732e162fd3107837715256af9e7f97ac",
     "docs/plans/c13-own-pipelines.md": "2f1eaa0667e6dcdca40fdfb1b36588265a9a30c0eeeeb60ac772200b2c7eae80",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
-    "docs/plans/c2-service-actions-and-history.md": "0cb7f07f23fdd87c6d110ddcf3d4eeb52bd3eea15e32d102388635ad6171fe16",
-    "docs/plans/c3-wiring-and-submission.md": "a5b809053fd3596f0be3388983bdfe2d6e62be96fa5005f31b43874c8369411b",
-    "docs/plans/c4-admission-rules-and-plan.md": "d7c2a5a09ea28c71d5aa853d41db1e0f952cf1701ef8011e4d5db7b9b49f042a",
-    "docs/plans/c5-native-execution.md": "26a67ae6d30fc158198579623084427e3fd2bba2a5ff29eeb0350956795a6b58",
-    "docs/plans/c6-source-delivery.md": "e9bad89cc5b9f7827f80c483a44c85e9c9e65a1fa280981901887d77a64f66b2",
-    "docs/plans/c7-durable-state.md": "38ed35a9e08d956b33029bb78b2a94b5725e9db8fb653c7cef7d392b71f371f3",
+    "docs/plans/c2-service-actions-and-history.md": "77a8e3aaae2ecf4b426fb64bd4310ed87bbefc47fbf9bc7a74504dab1f47ab9d",
+    "docs/plans/c3-wiring-and-submission.md": "a7f31513945051bff19a8b740428b24c03ea4e93bafb58cefa6a3f905996240a",
+    "docs/plans/c4-admission-rules-and-plan.md": "34537d0a23fd49462ceb67f82ba41560e7dfeb6308c7409093c7f96f0b78c49f",
+    "docs/plans/c5-native-execution.md": "fa21b314e3977c111be17f5c15234f0bdbbb611ebcf805d8c74eb2e8b1da4c58",
+    "docs/plans/c6-source-delivery.md": "8cd148e49163ef169281a9da8cb62e07d5e356f4a748003b8e5c1da1a3026232",
+    "docs/plans/c7-durable-state.md": "bb86cfc4b71bf0378da0ee52f7bed2c3fdd5e35a70eaefeaa6a1945a4b2d17ac",
     "docs/plans/c8-logs.md": "e3abe52381fbea22eb5222cb5260ee63835e7be69c8266d2f3ff5367135f5700",
-    "docs/plans/c9-install-and-upgrade.md": "c47ac82f09e9667b5211a08192a9cbc60ef79ba033c7baac9f20722a3044d7e2"
+    "docs/plans/c9-install-and-upgrade.md": "5620f9001f616ae9acb8f35b5e0592f4d962229d0fd9174da34401389890b8da"
   },
   "deltas": [
     {

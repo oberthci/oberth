@@ -106,9 +106,9 @@ func (o *serverOwners) ListRefs(ctx context.Context, repo string) ([]gitport.Ref
 	return o.cache.ListRefs(ctx, repo)
 }
 func (o *serverOwners) Cancel(ctx context.Context, r stateport.Run, force bool) error {
-	b, found, err := o.native.Find(ctx, r)
-	if err != nil || !found {
-		return err
+	b := nativebinding.RunBinding{Workflow: nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.NativeUID()}, RepositoryID: r.RepositoryID, RunID: r.ID, Revision: r.Admission.SourceReceipt.Revision, Ref: r.Ref, Trigger: string(r.Origin.Trigger), Identity: r.Admission.Digest, SpecSHA256: r.Admission.SpecDigest}
+	if b.Workflow.UID == "" {
+		return nil
 	}
 	if force {
 		return o.native.Terminate(ctx, b)

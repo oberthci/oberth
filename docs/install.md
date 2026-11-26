@@ -22,7 +22,6 @@ UID, namespaces, version, endpoints, run cap, store, policies and files. Images 
 prevents cross-cluster recovery; signatures and digests are checked first. The chart includes the
 server, Argo and secret store. Keep the profile path, SSH fingerprint, deploy key and CA pin, which
 authenticates HTTPS. Check the endpoint with `oberth system status`.
-
 Follow [repository registration](../README.md#first-green-build) to add the deploy key and verify
 the forge fingerprint. Use the forge's SSH URL with its own user and path, such as
 `ssh://<user>@<forge>/<path>/<repo>.git`; `<user>@<forge>:<path>` is in its home, `git@` from root.
@@ -52,7 +51,6 @@ Required schema fields and served/storage versions must match our pinned control
 workflows use the server namespace as Argo instance ID; default Argo controllers skip them. Our
 controller watches only its pipeline namespace. Cluster-wide permission and policy names include
 custom namespaces. Rollback preserves shared workflow definitions.
-
 Removing the Argo release keeps them by resource policy; every run object depends on those
 definitions. Upgrading with chart defaults replaces the definitions' contents; use versions the
 release notes name as compatible. Install and upgrade refuse workflow definitions that would drop
@@ -108,6 +106,8 @@ wait for `oberth system status` to be ready, then run `oberth upgrade`, which co
 target's record unchanged, or `oberth rollback --yes`. After a schema change, if it stays down,
 recovery is manual: keep the encrypted pre-upgrade archive, `backup.agekey` and `rollback.json` in
 `~/.config/oberth/<profile>/` and copy them off-machine.
+Before downgrading, cancel non-terminal resumed runs or wait for them to finish.
+An orphaned resumed Workflow needs its `oberth.ci/record` finalizer removed by hand.
 ## Roll back
 Review the saved record with `oberth rollback --dry-run`, then run `oberth rollback --yes` with its
 original profile. A different schema, cluster UID or unexpected revision refuses before writes.
@@ -124,10 +124,9 @@ off-machine unrenamed; save SHA256 separately. Use local hard links; never overw
 Secrets. `oberth restore --from <archive> --identity-file <private-age-file> --dry-run` reviews
 offline; `oberth backup verify` uses the same inputs. Both need `--backup-profile <name>` or saved
 `--sha256 <saved-digest>`. Restore with the same or a newer release:
-v0.30.17 cannot read archives with forge host pins.
-Keep age, administrator and unseal files apart: the archive has neither age
-identity nor unseal material. A database-only backup cannot restore store values; keep secure
-originals to put again. Separate `recovery` can unseal data.
+v0.30.17 cannot read archives with forge host pins. Keep age, administrator and unseal files apart:
+the archive has neither age identity nor unseal material. A database-only backup cannot restore
+store values; keep secure originals to put again. Separate `recovery` can unseal data.
 `oberth access list --repo <repo> --kind store_path --json` lists paths/steps, never values.
 `--output json` warnings exit 0: optional `warning` has `code`, `reason`, `remedy`, optional `id`,
 `context`, `detail`; also on standard error; clean and dry-run results omit `warning`.
@@ -148,13 +147,12 @@ a writable persistent config directory; copy a read-only mounted config there. C
 stay. Rejected or unfinished attempts need cancellation only. Uncertain replies block setup.
 Revocation removes the receipt. `DELETE sys/generate-root/attempt` cancels unfinished generation
 only. For uncertain issuance, obtain a separate native quorum session; keep OTP/reply private.
-`LIST auth/token/accessors`; `POST auth/token/lookup-accessor` with each `accessor`.
-Coordinate with root-session owners;
-`POST auth/token/revoke-accessor` for all other root-policy accessors. Revoke cleanup access last
-(`POST auth/token/revoke-self`), remove the receipt, retry, restore listener `true`, restart/unseal.
-Lost issued replies/accessors cannot be recovered by nonce. [Native
-API](https://openbao.org/docs/api/system/generate-root/). Or use `--token-file <session>` and revoke
-it afterward. Grant read/create/update only on `sys/policies/acl/oberth-backup` and
+`LIST auth/token/accessors`; `POST auth/token/lookup-accessor` with each `accessor`. Coordinate with
+root-session owners; `POST auth/token/revoke-accessor` for all other root-policy accessors. Revoke
+cleanup access last (`POST auth/token/revoke-self`), remove the receipt, retry, restore listener
+`true`, restart/unseal. Lost issued replies/accessors cannot be recovered by nonce.
+[Native API](https://openbao.org/docs/api/system/generate-root/). Or use `--token-file <session>`
+and revoke it afterward. Grant read/create/update only on `sys/policies/acl/oberth-backup` and
 `auth/<auth-mount>/role/oberth-backup`; drift refuses. Restore needs a signed
 matching-schema/protocol release (`--release-dir` works offline), fresh cluster, new profile and the
 same namespaces:

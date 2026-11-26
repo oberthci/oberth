@@ -18,6 +18,10 @@ func (g *graph) eligibleHoldPlan() admissioncontract.Plan {
 	uses := g.holdInvocationRefusals(plan, omitted)
 	for i := range plan.Entries {
 		e := &plan.Entries[i]
+		if n := g.byKey[e.Template]; n != nil {
+			e.SecretRoute = e.CredentialIntent || holdReadsSecret(n.template, g.workflow.Spec.Volumes) || n.template.Resource != nil || n.template.ServiceAccountName != ""
+			e.OutputParameters = len(n.template.Outputs.Parameters) > 0
+		}
 		e.HoldRefusal = uses[e.Template]
 		if e.HoldRefusal == "" {
 			e.HoldRefusal = g.holdRefusal(*e)
@@ -144,6 +148,7 @@ func frozenHoldPlan(observed, authored admissioncontract.Plan) admissioncontract
 	}
 	for i := range observed.Entries {
 		frozen := entries[observed.Entries[i].Path]
+		observed.Entries[i].SecretRoute, observed.Entries[i].OutputParameters = frozen.SecretRoute, frozen.OutputParameters
 		observed.Entries[i].HoldArmed = frozen.HoldArmed
 		observed.Entries[i].HoldEligible, observed.Entries[i].HoldRefusal = frozen.HoldEligible, frozen.HoldRefusal
 	}

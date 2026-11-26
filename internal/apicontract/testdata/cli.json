@@ -385,6 +385,25 @@
     "SensitiveResult": null
   },
   {
+    "Name": "run_resume",
+    "Summary": "Resume a failed run on a pushed fix.",
+    "Command": "run resume",
+    "CommandFlow": false,
+    "Arguments": [
+      {
+        "Name": "id",
+        "Sensitive": false,
+        "Position": 1
+      },
+      {
+        "Name": "commit",
+        "Sensitive": false,
+        "Position": 2
+      }
+    ],
+    "SensitiveResult": null
+  },
+  {
     "Name": "run_rerun",
     "Summary": "Submit another run of an authorized recorded source.",
     "Command": "run rerun",

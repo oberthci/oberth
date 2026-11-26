@@ -12,7 +12,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parent.parent
-FIELD_NAMES = set("after_id next_after_id timeout_s failed_step latest_id object_sha commit_sha timed_out retry_hint".split())
+FIELD_NAMES = set("after_id next_after_id timeout_s failed_step latest_id object_sha commit_sha timed_out retry_hint resumed_from".split())
 
 
 @functools.lru_cache(maxsize=1)

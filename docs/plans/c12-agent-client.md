@@ -196,3 +196,7 @@ registration rule and the fetcher's publication. C11 separately checks its print
 profile selection, pinned transport and bridge display. The walk
 executes the guidance through install review, join, repo binding, a real source
 push, wait, promotion and release, without host trust changes.
+
+### Fix and resume
+
+For a late failure, obtain consent, push the committed fix parked, call run_resume and watch run.finished. Its resumed_from data selects the resume loop: fix and resume again on failure, or after consent run_rerun once on a pass. Promote only the passing unassisted run. The run box keeps its existing status, reason and grey other kind.

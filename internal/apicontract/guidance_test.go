@@ -61,7 +61,7 @@ func TestDeclaredMutationHasExactlyOneReadTool(t *testing.T) {
  issue_import issue_append issue_close issue_create issue_delete issue_lock issue_reopen issue_update
  promote promote_retry publication_abandon publish_retry receive_outbox
  repo_add repo_archive repo_remove repo_unarchive
- run_cancel run_hold_abandon run_hold_exec run_purge run_rerun
+ run_cancel run_hold_abandon run_hold_exec run_purge run_rerun run_resume
  schedule_pause schedule_resume schedule_trigger sync secret_put
  uplink_add uplink_cert uplink_invite uplink_revoke uplink_rotate uplink_scope
  upstream_add upstream_provide_key upstream_remove

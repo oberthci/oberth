@@ -37,7 +37,7 @@ func TestAdministrativeScopeTable(t *testing.T) {
 			}
 		}
 	}
-	if n != 74 {
+	if n != 75 {
 		t.Fatal("handler count", n)
 	}
 }

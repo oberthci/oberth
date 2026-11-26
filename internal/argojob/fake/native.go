@@ -123,6 +123,13 @@ func (f *Pods) Get(_ context.Context, name string, _ meta.GetOptions) (*core.Pod
 	}
 	return f.Object.DeepCopy(), nil
 }
+func (f *Pods) List(ctx context.Context, _ meta.ListOptions) (*core.PodList, error) {
+	list := &core.PodList{}
+	if f.Object != nil {
+		list.Items = append(list.Items, *f.Object.DeepCopy())
+	}
+	return list, ctx.Err()
+}
 func (f *Pods) Delete(_ context.Context, _ string, o meta.DeleteOptions) error {
 	if o.Preconditions == nil || o.Preconditions.UID == nil || f.Object == nil || *o.Preconditions.UID != f.Object.UID {
 		return fmt.Errorf("UID precondition failed")

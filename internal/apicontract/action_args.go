@@ -97,3 +97,14 @@ type PublicationListArgs struct {
 	Before string `json:"before,omitempty" desc:"Continue an older page using the record-ID cursor from the preceding reply." sensitive:"false" position:"0"`
 	Limit  int    `json:"limit,omitempty" desc:"Bound the number of records returned; continue with the cursor in the reply." min:"0" max:"200" default:"50" sensitive:"false" position:"0"`
 }
+
+type RunResumeArgs struct {
+	ID     string `json:"id,omitempty" required:"true" desc:"Select the failed run to resume." sensitive:"false" position:"1"`
+	Commit string `json:"commit,omitempty" required:"true" desc:"Select the full pushed fix commit at the branch head." sensitive:"false" position:"2"`
+}
+
+type ResumeResult struct {
+	Run    string `json:"run"`
+	Mode   string `json:"mode"`
+	Detail string `json:"detail"`
+}

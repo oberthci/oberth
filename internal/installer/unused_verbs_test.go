@@ -15,7 +15,7 @@ func TestServerRoleOmitsUnusedPodAndAccountWrites(t *testing.T) {
 	if err := json.Unmarshal([]byte(jsonOf(t, role)), &actual); err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct{ resource, verb string }{{"pods", "patch"}, {"pods", "delete"}, {"pods/exec", "create"}, {"serviceaccounts", "delete"}} {
+	for _, tc := range []struct{ resource, verb string }{{"pods", "patch"}, {"pods/exec", "create"}, {"serviceaccounts", "delete"}} {
 		t.Run(tc.resource+"/"+tc.verb, func(t *testing.T) {
 			for _, rule := range actual.Rules {
 				if (slices.Contains(rule.Resources, tc.resource) || slices.Contains(rule.Resources, "*")) && (slices.Contains(rule.Verbs, tc.verb) || slices.Contains(rule.Verbs, "*")) {

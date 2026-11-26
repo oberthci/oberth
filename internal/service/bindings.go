@@ -30,6 +30,7 @@ func (s *Service) bindRunsTools() apicontract.RunsTools {
 		RunList:        bindTool(s.PrepareRunList),
 		RunLogs:        bindTool(s.PrepareRunLogs),
 		RunPurge:       bindTool(s.PrepareRunPurge),
+		RunResume:      bindTool(s.PrepareRunResume),
 		RunRerun:       bindTool(s.PrepareRunRerun),
 		RunWait:        bindTool(s.PrepareRunWait),
 		Status:         bindTool(s.PrepareStatus),

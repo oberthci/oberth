@@ -320,3 +320,7 @@ writable plugin scratch, main history and pinned-source contents.
 
 Source manifests and lease journals → sealed admission and Git keep refs;
 checked-binding proof → run Workflow name/UID; fragments → native templates.
+
+### Fix and resume
+
+Load keeps the original locator embedded in the shared Workflow and follows accepted successors to serve the current owners F binding. Native namespace, name and NativeUID still match the authenticated Pod owner. Pending/Running Pods alone can load; carried terminal Pods cannot obtain F. An ordinary rerun stamps its own locator and has no resume origin. Main bindings move to F; pinned bindings remain equal.

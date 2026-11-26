@@ -28,7 +28,7 @@ func Native(t *testing.T, setup func(*testing.T) NativeFixture) {
 			t.Fatal(first, err)
 		}
 		stored, err := f.Stored(ctx, f.Run.ID)
-		if err != nil || stored.Origin.WorkflowUID != first.Workflow.UID {
+		if err != nil || stored.Origin.NativeUID() != first.Workflow.UID {
 			t.Fatal("native Create did not bind", stored, err)
 		}
 		again, err := f.Port.Create(ctx, f.Prepared)

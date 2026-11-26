@@ -29,6 +29,7 @@ func (c Caller) owner() Caller { c.Pod = nil; return c }
 // Terminal becomes true only when loading must stop; the owner reader retains
 // refs through all native exit handlers.
 type Run struct {
+	Locator                  string
 	caller                   Caller
 	Admission                admissioncontract.PreparedView
 	Namespace, Workflow, UID string
@@ -226,6 +227,7 @@ func (s *Server) authorize(ctx context.Context, header string, request LoadReque
 	if err != nil {
 		return Run{}, empty, 0, err
 	}
+
 	if caller.UID == "" || caller.Workflow == "" || caller.Namespace == "" {
 		return Run{}, empty, 0, &Failure{Code: "unauthenticated"}
 	}
@@ -260,6 +262,9 @@ func runID(caller Caller, locator string) string {
 }
 func selectBinding(run Run, caller Caller, request LoadRequest) (sourcecontract.Binding, int, error) {
 	empty := sourcecontract.Binding{}
+	if run.Locator != "" && run.Locator != run.Admission.RunID && caller.Pod != nil && caller.Pod.Status.Phase != core.PodPending && caller.Pod.Status.Phase != core.PodRunning {
+		return empty, 0, &Failure{Code: "forbidden"}
+	}
 	if run.Terminal {
 		return empty, 0, &Failure{Code: "forbidden"}
 	}
@@ -270,7 +275,11 @@ func selectBinding(run Run, caller Caller, request LoadRequest) (sourcecontract.
 		return empty, 0, &Failure{Code: "forbidden"}
 	}
 	view := run.Admission
-	if view.RunID != request.Locator || view.Digest == "" {
+	locator := run.Locator
+	if locator == "" {
+		locator = view.RunID
+	}
+	if locator != request.Locator || view.Digest == "" {
 		return empty, 0, &Failure{Code: "forbidden"}
 	}
 	return findBinding(view.SourceBindings, request.Descriptor)

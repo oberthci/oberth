@@ -90,7 +90,7 @@ func TestToolRegistryAndDecodeContract(t *testing.T) {
 	}
 	request(f, "POST", "/mcp", []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`))
 	tools := listTools(t, r, admin())
-	if len(tools) != 74 {
+	if len(tools) != 75 {
 		t.Fatalf("incomplete inventory: %d", len(tools))
 	}
 	for _, tool := range tools {

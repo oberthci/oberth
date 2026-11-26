@@ -93,7 +93,7 @@ func (e *Executor) startChild(ctx context.Context, r stateport.Run, child *child
 	if kept != nil {
 		// Terminate first: until it succeeds the child stays untracked, so the
 		// next notice comes back here and terminates again.
-		if err := e.Terminate(ctx, runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.WorkflowUID})); err != nil {
+		if err := e.Terminate(ctx, runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.NativeUID()})); err != nil {
 			return err
 		}
 		detail := kept.Error()

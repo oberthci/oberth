@@ -376,6 +376,8 @@
       "symbols": {
         "C3": [
           "Prepare",
+          "SameExecution",
+          "ResumeAdmission",
           "Policy",
           "AdmissionError",
           "ValidateNativeSchema"

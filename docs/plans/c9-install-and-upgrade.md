@@ -289,3 +289,7 @@ parallelism is the only run cap.
 The store SDK exports its bounded regular-target reader for configured server
 mounts. File refusals retain their field and safe state; trust refusals retain the
 store's public reason with the CA field, without bytes or private causes.
+
+### Fix and resume
+
+Pipeline Pod delete is the only additional server permission. Argo retry is pinned to v4.0.15. Before downgrading, cancel non-terminal resumed runs or wait for them to finish. An earlier server fails the successor record closed but can orphan its relabelled Workflow; remove oberth.ci/record by hand if needed. Schema and baseline layout remain 6. Residual: a server defect can delete any Pod in the pipeline namespace within its existing native execution authority.

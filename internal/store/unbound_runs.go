@@ -9,7 +9,7 @@ import (
 )
 
 const unboundQuery = `SELECT id FROM runs INDEXED BY run_unbound WHERE status IN ('queued','running') AND admission IS NOT NULL AND
-json_extract(origin,'$.workflow_uid')=''`
+json_extract(origin,'$.workflow_uid')='' AND COALESCE(json_extract(origin,'$.resumed_from'),'')=''`
 
 // UnboundRuns pages admitted, nonterminal runs awaiting a Workflow identity.
 // Each admission is a detached full value, read in the same snapshot as its run.

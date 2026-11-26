@@ -58,7 +58,7 @@ func (e *Executor) restoreCollection(ctx context.Context, r stateport.Run, w *wf
 			return err
 		}
 	}
-	b := runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.WorkflowUID})
+	b := runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: r.Admission.Identity.Namespace, Name: r.Origin.WorkflowName, UID: r.Origin.NativeUID()})
 	e.track(b, r.Admission.Plan, trackingSeed{child: child, completed: true, archiveOnly: true, historical: w.Spec.TTLStrategy == nil && !slices.Contains(w.Finalizers, nativebinding.RecordFinalizer)})
 	return nil
 }

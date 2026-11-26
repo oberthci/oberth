@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -119,5 +120,9 @@ func (s *Service) recordFinished(ctx context.Context, f finishedRecord) error {
 }
 
 func (s *Service) event(r stateport.Run, kind model.EventKind, reason, key string) stateport.EventWrite {
-	return stateport.EventWrite{Event: model.AgentEvent{Kind: string(kind), At: s.c.Now(), Repo: r.Repo, RunID: r.ID, Ref: r.Ref, ObjectSHA: r.ObjectSHA, CommitSHA: r.CommitSHA, Summary: reason}, Dedupe: string(kind) + ":" + r.ID + ":" + key}
+	data := json.RawMessage(nil)
+	if kind == model.EventRunFinished && r.Origin.Resumed() {
+		data, _ = json.Marshal(map[string]string{"resumed_from": r.Origin.ResumedFrom})
+	}
+	return stateport.EventWrite{Event: model.AgentEvent{Data: data, Kind: string(kind), At: s.c.Now(), Repo: r.Repo, RunID: r.ID, Ref: r.Ref, ObjectSHA: r.ObjectSHA, CommitSHA: r.CommitSHA, Summary: reason}, Dedupe: string(kind) + ":" + r.ID + ":" + key}
 }

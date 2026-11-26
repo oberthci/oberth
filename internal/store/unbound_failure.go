@@ -19,7 +19,7 @@ func (s *Store) FailUnbound(ctx context.Context, action stateport.Action, input 
 		if !r.HasAdmission {
 			return refuse(noAdmission, nil)
 		}
-		if r.Origin.WorkflowUID != "" {
+		if r.Origin.NativeUID() != "" {
 			return refuse(workflowBound, nil)
 		}
 		summary := r.RunSummary

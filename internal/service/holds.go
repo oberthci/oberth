@@ -24,7 +24,7 @@ type holdLease struct {
 }
 
 func (s *Service) liveHolds(ctx context.Context, r stateport.Run) ([]model.LiveHold, error) {
-	if !r.Origin.AssistRequested || r.Origin.WorkflowUID == "" {
+	if !r.Origin.AssistRequested || r.Origin.NativeUID() == "" {
 		return []model.LiveHold{}, nil
 	}
 	return s.c.Holds.List(ctx, r)

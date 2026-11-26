@@ -105,7 +105,7 @@ func TestNativeServerVerbsContract(t *testing.T) {
 	want := []rbacv1.PolicyRule{
 		{APIGroups: []string{"argoproj.io"}, Resources: []string{"workflows"}, Verbs: []string{"create", "get", "list", "watch", "patch"}},
 		{APIGroups: []string{"argoproj.io"}, Resources: []string{"workflowtemplates"}, Verbs: []string{"get"}},
-		{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list", "watch"}},
+		{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list", "watch", "delete"}},
 		{APIGroups: []string{""}, Resources: []string{"pods/log"}, Verbs: []string{"get"}},
 		{APIGroups: []string{""}, Resources: []string{"serviceaccounts"}, Verbs: []string{"get", "create"}},
 		{APIGroups: []string{"argoproj.io"}, Resources: []string{"cronworkflows"}, Verbs: []string{"get", "list", "create", "update", "delete"}},

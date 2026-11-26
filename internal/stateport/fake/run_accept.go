@@ -52,6 +52,7 @@ func (f *Runs) AcceptBatch(ctx context.Context, b stateport.BatchAcceptance) (st
 
 func receiptBinding(b stateport.BatchAcceptance) string {
 	type accepted struct {
+		Resume      *model.RunOrigin `json:",omitempty"`
 		Request     model.CIRequest
 		ID, Digest  string
 		Rejected    *stateport.RejectedAdmission
@@ -71,7 +72,7 @@ func receiptBinding(b stateport.BatchAcceptance) string {
 			v := a.Prepared.View()
 			id, digest = v.RunID, v.Digest
 		}
-		rows = append(rows, accepted{r, id, digest, a.Rejected, a.Release, a.RerunOf, a.PromotionID, a.Actions})
+		rows = append(rows, accepted{a.Resume, r, id, digest, a.Rejected, a.Release, a.RerunOf, a.PromotionID, a.Actions})
 	}
 	return jsonValue(struct {
 		Repository string
@@ -87,18 +88,17 @@ func (m *runMemory) acceptRun(b stateport.BatchAcceptance, a stateport.Acceptanc
 		return stateport.Run{}, err
 	}
 	r := a.Request
-	if r.RequestedFile != "" && workflowpolicy.ValidateFile(r.RequestedFile) != nil {
-		return stateport.Run{}, runProblem(publicerr.InvalidInput)
-	}
-	if r.ReceiveID == "" {
-		r.ReceiveID = b.ReceiveID
-	}
-	if r.ReceiveID != b.ReceiveID || r.Repo != b.Repository || jsonValue(r.Actor) != jsonValue(b.Actor) {
-		return stateport.Run{}, runProblem(publicerr.InvalidInput)
+	if err := bindAcceptedRequest(b, &r); err != nil {
+		return stateport.Run{}, err
 	}
 	result := stateport.Run{RunSummary: stepmodel.RunSummary{Repo: r.Repo, Ref: r.Ref, ObjectSHA: r.ObjectSHA, CommitSHA: r.CommitSHA, Status: stepmodel.RunQueued, CreatedAt: at.UTC()}, Origin: model.RunOrigin{RunCause: model.RunCause{Actor: r.Actor.Identity, Trigger: r.Trigger, ScheduleEntry: r.ScheduleEntry, AssistRequested: r.Assist, RerunOf: a.RerunOf}, RequestedFile: r.RequestedFile}, Revision: 1, Release: a.Release, RepositoryID: m.repos[r.Repo].ID}
 	if err := applyFakeAdmission(&result, a); err != nil {
 		return result, err
+	}
+	if a.Resume != nil {
+		if err := m.resumeOrigin(a, &result); err != nil {
+			return result, err
+		}
 	}
 	if _, ok := m.runs[result.ID]; ok {
 		return result, runProblem(publicerr.Conflict)
@@ -249,6 +249,34 @@ func (m *runMemory) recordAcceptActions(actions []model.AuditAction) error {
 		}
 		action.ID = int64(len(m.audits) + 1)
 		m.audits = append(m.audits, action)
+	}
+	return nil
+}
+
+func (m *runMemory) resumeOrigin(a stateport.Acceptance, result *stateport.Run) error {
+	old, ok := m.runs[a.Resume.ResumedFrom]
+	if !ok || old.Status != stepmodel.RunFailed || old.Repo != result.Repo || old.Ref != result.Ref || old.Origin.NativeUID() != a.Resume.NativeUID() {
+		return runProblem(publicerr.Conflict)
+	}
+	for _, row := range m.runs {
+		if row.Origin.ResumedFrom == old.ID {
+			return runProblem(publicerr.Conflict)
+		}
+	}
+	result.Origin.ResumedFrom, result.Origin.ResumeUID, result.Origin.WorkflowName = old.ID, a.Resume.ResumeUID, a.Resume.WorkflowName
+	result.Origin.Assisted, result.Origin.ResumePlan = true, append(a.Resume.ResumePlan[:0:0], a.Resume.ResumePlan...)
+	return nil
+}
+
+func bindAcceptedRequest(b stateport.BatchAcceptance, r *model.CIRequest) error {
+	if r.RequestedFile != "" && workflowpolicy.ValidateFile(r.RequestedFile) != nil {
+		return runProblem(publicerr.InvalidInput)
+	}
+	if r.ReceiveID == "" {
+		r.ReceiveID = b.ReceiveID
+	}
+	if r.ReceiveID != b.ReceiveID || r.Repo != b.Repository || jsonValue(r.Actor) != jsonValue(b.Actor) {
+		return runProblem(publicerr.InvalidInput)
 	}
 	return nil
 }
