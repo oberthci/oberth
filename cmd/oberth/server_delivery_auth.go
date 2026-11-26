@@ -65,8 +65,9 @@ func (o *serverOwners) brokerAuthentication() sourcedelivery.KubernetesAuth {
 		}}
 }
 
-// Authentication slots are capped in total and held at most once per remote
-// address. A flooding Pod then holds one place in the review budget's queue,
+// Authentication slots are capped in total and held at most once per
+// Pod where the watch knows it, otherwise per address. A flooding Pod then holds
+// one place across both IP stacks in the review budget's queue,
 // and the rest of its requests get a retryable 503 without an API call. An
 // address that presented an invalid token is cooled for 30 s, doubling to
 // 5 min, until it presents a valid one: it gets the same retryable 503 without
@@ -108,17 +109,18 @@ func (g *deliveryAuthGate) acquire(remote, pod string) error {
 	if r, ok := g.refused[remote]; ok && g.now().Before(r.until) && r.cools(pod) {
 		return &sourcedelivery.Failure{Code: "unavailable", Reason: "auth-cap"}
 	}
-	if _, busy := g.remotes[remote]; busy || len(g.remotes) >= g.limit {
+	slot := deliveryAuthSlot(remote, pod)
+	if _, busy := g.remotes[slot]; busy || len(g.remotes) >= g.limit {
 		return &sourcedelivery.Failure{Code: "unavailable", Reason: "auth-cap"}
 	}
-	g.remotes[remote] = struct{}{}
+	g.remotes[slot] = struct{}{}
 	return nil
 }
 
 func (g *deliveryAuthGate) release(remote, pod string, err error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	delete(g.remotes, remote)
+	delete(g.remotes, deliveryAuthSlot(remote, pod))
 	var failure *sourcedelivery.Failure
 	switch {
 	case err == nil:
@@ -136,6 +138,13 @@ func (g *deliveryAuthGate) release(remote, pod string, err error) {
 		r.until = r.at.Add(r.wait)
 		g.refused[remote] = r
 	}
+}
+
+func deliveryAuthSlot(remote, pod string) string {
+	if pod != "" {
+		return "pod:" + pod
+	}
+	return "address:" + remote
 }
 
 func (g *deliveryAuthGate) forgetOldest() {
