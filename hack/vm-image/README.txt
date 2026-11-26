@@ -31,3 +31,7 @@ stub resolver. Git's native SSH commands use a digest-verified distribution
 package and the pinned guest's libc, PCRE and zlib; no package resolver runs.
 No VM is needed for the offline provisioning and missing-tool controls:
 python3 -I -m unittest discover -s hack/vm-image -p 'test_*.py'
+
+Check the registry command with the real pinned parser, without a daemon:
+python3 -I -B hack/vm-image/check_k3d.py --k3d /absolute/pinned/k3d
+This verifies the executable's checksum before executing its help path.

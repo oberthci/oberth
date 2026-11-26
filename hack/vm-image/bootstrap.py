@@ -62,6 +62,11 @@ def environment(images, gateway):
             "signing_public": "private/signing.pub", "signing_password": "private/signing.password"}
 
 
+def registry_command(image):
+    return ("k3d", "registry", "create", "walk-registry", "--port", "127.0.0.1:5001",
+            "--image", image, "--delete-enabled", "--no-help")
+
+
 def check(root=None):
     root = root or ROOT
     for tool in TOOLS:
@@ -99,9 +104,7 @@ def provision(pin):
     for name in ("tools", "proxy"):
         run("docker", "tag", images[name], images[name].split("@")[0])
     write(BIN / "skopeo", "#!/bin/sh\nexec docker --context walk run --rm --network host -v /home/walk/candidate:/home/walk/candidate:ro " + images["skopeo"] + ' "$@"\n', 0o755)
-    registry = ROOT / "registry.yaml"
-    write(registry, json.dumps({"version": 0.1, "storage": {"filesystem": {"rootdirectory": "/var/lib/registry"}, "delete": {"enabled": True}}, "http": {"addr": ":5000"}}), 0o644)
-    run("k3d", "registry", "create", "walk-registry", "--port", "127.0.0.1:5001", "--image", images["registry"], "--config", str(registry), "--no-help")
+    run(*registry_command(images["registry"]))
     gateway = run("docker", "network", "inspect", "bridge", "--format", "{{(index .IPAM.Config 0).Gateway}}")
     provision_upstream(images["upstream"], gateway, private)
     password = secrets.token_urlsafe(32)
