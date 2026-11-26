@@ -137,9 +137,6 @@ func ctxCause(ctx context.Context, err error) error {
 func (c *Client) Close() { c.http.CloseIdleConnections() }
 func refuse(code string, cause error) *publicerr.Error {
 	reason, remedy := refusal(code)
-	if code == "configuration" {
-		reason, remedy = runtimeconfig.SecretStoreConfiguration()
-	}
 	kind := publicerr.InvalidInput
 	if code == "sealed" || code == "configuration" || code == "connect" || code == "broker" || code == "response" {
 		kind = publicerr.Unavailable

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/publicerr"
 )
 
 type roundTrip func(*http.Request) (*http.Response, error)
@@ -77,9 +79,9 @@ func TestDefaultTransportHasOnlyExplicitTrust(t *testing.T) {
 	}
 }
 func TestRefusalCatalogueBounds(t *testing.T) {
-	for _, code := range []string{"broker", "sealed", "address", "trust", "connect", "request", "response", "limit", "drift", "token", "delivery", "path", "input", "backup-pending", "backup-receipt", "backup-unfinished", "backup-setup", "backup-root-disabled"} {
+	for code := range refusalCatalogue() {
 		a, b := refusal(code)
-		if a == "" || b == "" || len(a) > 80 || len(b) > 120 || strings.HasSuffix(a, "...") || strings.HasSuffix(b, "...") || strings.HasSuffix(a, "…") || strings.HasSuffix(b, "…") {
+		if a == "" || b == "" || publicerr.CheckMessage(a, 80) != nil || publicerr.CheckMessage(b, 120) != nil {
 			t.Fatal(code, "refusal must be whole and within its bounds")
 		}
 	}
