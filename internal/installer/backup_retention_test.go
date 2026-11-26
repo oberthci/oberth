@@ -209,10 +209,15 @@ func TestDirectoryRetentionCountsOnlyFullArchives(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	full := []string{"oberth-backup-20261001T000000.000000000Z.age", "oberth-backup-20261001T000000.000000000Z.age.manifest.json"}
 	partial := []string{"oberth-backup-20261002T000000.000000000Z.age", "oberth-backup-20261003T000000.000000000Z.age"}
-	writeRetained(t, dir, append(full, partial...)...)
-	c := installer.FullArchiveForTest(installer.BackupConfig{Source: source, Options: options, Recipient: identity.Recipient().String(), Directory: dir, Keep: 2, Now: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)})
+	writeRetained(t, dir, partial...)
+	c := installer.FullArchiveForTest(installer.BackupConfig{Source: source, Options: options, Recipient: identity.Recipient().String(), Directory: dir, Keep: 2, Now: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)})
+	prior, err := installer.Backup(t.Context(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := []string{filepath.Base(prior.Path), filepath.Base(prior.Path) + ".manifest.json"}
+	c.Now = c.Now.AddDate(0, 1, 0)
 	first, err := installer.Backup(t.Context(), c)
 	if err != nil {
 		t.Fatal(err)

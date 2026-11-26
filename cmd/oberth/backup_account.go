@@ -82,7 +82,7 @@ func (a application) backupInCluster(ctx context.Context, r installationRequest,
 	engine := accountBackupEngine(client, access, config)
 	keep, _ := strconv.Atoi(r.text("keep"))
 	archive, err := engine.BackupAccount(ctx, config, installer.BackupConfig{Source: accountDatabase{client: client, config: config, http: httpClient, inspector: inspector},
-		Path: r.text("out"), Directory: r.text("directory"), Keep: keep, Now: a.config.Time()})
+		Path: r.text("out"), Directory: r.text("directory"), Keep: keep, Now: a.config.Time(), AllowSharedDirectory: r.enabled("allow-shared-directory")})
 	return (installationSession{app: a, request: r}).backupResult(out, archive, err)
 }
 

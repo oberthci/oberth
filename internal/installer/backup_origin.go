@@ -21,9 +21,11 @@ const backupOriginDomain = "oberth-backup-manifest/v1\n"
 // backupOrigin binds the archive's own file name, which carries its time in a
 // backup directory, so a genuine older archive cannot pass as a newer name.
 type backupOrigin struct {
-	Name     string         `json:"archive_name"`
-	SHA256   string         `json:"archive_sha256"`
-	Manifest bundleManifest `json:"manifest"`
+	InstallationID string         `json:"installation_id,omitempty"`
+	Full           bool           `json:"full,omitempty"`
+	Name           string         `json:"archive_name"`
+	SHA256         string         `json:"archive_sha256"`
+	Manifest       bundleManifest `json:"manifest"`
 }
 
 type signedBackupOrigin struct {
@@ -53,7 +55,7 @@ func (c BackupConfig) publishOrigin(archive Archive) error {
 	if len(c.signing) != ed25519.PrivateKeySize || c.manifest == nil {
 		return backupSigningProblem()
 	}
-	origin := backupOrigin{Name: filepath.Base(archive.Path), SHA256: archive.SHA256, Manifest: *c.manifest}
+	origin := backupOrigin{InstallationID: base64.StdEncoding.EncodeToString(c.signing.Public().(ed25519.PublicKey)), Full: c.Installation, Name: filepath.Base(archive.Path), SHA256: archive.SHA256, Manifest: *c.manifest}
 	raw, err := json.Marshal(origin)
 	if err != nil {
 		return backupSigningProblem()
@@ -112,18 +114,28 @@ func verifyOriginProof(config RestoreReviewConfig, digest string) error {
 		return backupOriginProblem()
 	}
 	defer proofFile.Close()
-	raw, err := io.ReadAll(io.LimitReader(proofFile, (1<<20)+1))
-	var proof signedBackupOrigin
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err != nil || len(raw) > 1<<20 || decoder.Decode(&proof) != nil || decoder.Decode(new(any)) != io.EOF || proof.Origin.SHA256 != digest || proof.Origin.Name != filepath.Base(config.Path) {
-		return backupOriginProblem()
-	}
-	message, err := json.Marshal(proof.Origin)
-	if err != nil || !ed25519.Verify(public, append([]byte(backupOriginDomain), message...), proof.Signature) {
+	proof, err := readBackupOrigin(proofFile)
+	if err != nil || proof.Origin.SHA256 != digest || !proof.valid(public, filepath.Base(config.Path)) {
 		return backupOriginProblem()
 	}
 	return nil
+}
+
+func readBackupOrigin(in io.Reader) (signedBackupOrigin, error) {
+	raw, err := io.ReadAll(io.LimitReader(in, (1<<20)+1))
+	var proof signedBackupOrigin
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err != nil || len(raw) > 1<<20 || decoder.Decode(&proof) != nil || decoder.Decode(new(any)) != io.EOF {
+		return proof, backupOriginProblem()
+	}
+	return proof, nil
+}
+
+func (proof signedBackupOrigin) valid(public ed25519.PublicKey, name string) bool {
+	message, err := json.Marshal(proof.Origin)
+	return err == nil && len(public) == ed25519.PublicKeySize && proof.Origin.Name == name &&
+		ed25519.Verify(public, append([]byte(backupOriginDomain), message...), proof.Signature)
 }
 
 func backupOriginProblem() error {

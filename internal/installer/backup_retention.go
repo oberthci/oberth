@@ -2,6 +2,7 @@ package installer
 
 import (
 	"context"
+	"crypto/ed25519"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -34,13 +35,21 @@ func (c BackupConfig) directoryBackup(ctx context.Context) (Archive, error) {
 	if err = syscall.Flock(int(dir.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return Archive{}, retentionProblem()
 	}
+	names, err := c.retainedArchives(root)
+	if err != nil {
+		return Archive{}, err
+	}
 	c.Path = filepath.Join(c.Directory, retainedBackupPrefix+c.Now.UTC().Format(backupTimeFormat)+".age")
 	c.Directory = ""
 	archive, err := Backup(ctx, c)
 	if err != nil || c.DryRun {
 		return archive, err
 	}
-	if err = pruneBackups(root, filepath.Base(c.Path), c.Keep); err != nil {
+	proof, ok := retainedOrigin(root, filepath.Base(c.Path))
+	if !ok || proof.Origin.InstallationID != c.installationID() {
+		return archive, backupFailure("backup-retention", backupOriginProblem(), c.Path)
+	}
+	if err = pruneBackups(root, names, c.Keep); err != nil {
 		return archive, backupFailure("backup-retention", err, c.Path)
 	}
 	return archive, backupDirectorySyncFailure(dir.Sync(), c.Path)
@@ -56,37 +65,52 @@ func (c BackupConfig) retentionInput() error {
 	return nil
 }
 
-func pruneBackups(root *os.Root, current string, keep int) error {
+func (c BackupConfig) retainedArchives(root *os.Root) ([]string, error) {
+	if c.DryRun {
+		return nil, nil
+	}
+	if len(c.signing) != ed25519.PrivateKeySize {
+		return nil, backupSigningProblem()
+	}
 	entries, err := fs.ReadDir(root.FS(), ".")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var names []string
 	for _, entry := range entries {
 		stamp, ok := strings.CutPrefix(entry.Name(), retainedBackupPrefix)
 		stamp, suffix := strings.CutSuffix(stamp, ".age")
 		_, parse := time.Parse(backupTimeFormat, stamp)
-		if entry.Type().IsRegular() && ok && suffix && parse == nil && entry.Name() != current && fullArchive(root, entry.Name()) {
-			names = append(names, entry.Name())
+		if !entry.Type().IsRegular() || !ok || !suffix || parse != nil {
+			continue
 		}
+		proof, valid := retainedOrigin(root, entry.Name())
+		if !valid {
+			continue
+		}
+		if proof.Origin.InstallationID != c.installationID() {
+			if !c.AllowSharedDirectory {
+				return nil, sharedBackupDirectoryProblem()
+			}
+			continue
+		}
+		names = append(names, entry.Name())
 	}
+	return names, nil
+}
+
+func pruneBackups(root *os.Root, names []string, keep int) error {
 	slices.Sort(names)
 	slices.Reverse(names)
 	for _, name := range names[min(keep-1, len(names)):] {
-		if err = root.Remove(name); err != nil {
+		if err := root.Remove(name); err != nil {
 			return err
 		}
-		if err = removeRetainedOrigin(root, name); err != nil {
+		if err := removeRetainedOrigin(root, name); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// fullArchive reports a signed installation archive; only those are restorable.
-func fullArchive(root *os.Root, archive string) bool {
-	info, err := root.Lstat(archive + ".manifest.json")
-	return err == nil && info.Mode().IsRegular()
 }
 
 func removeRetainedOrigin(root *os.Root, archive string) error {

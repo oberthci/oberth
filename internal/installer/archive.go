@@ -31,17 +31,18 @@ type Archive struct {
 	Report            stateport.BackupReport `json:"report,omitzero"`
 }
 type BackupConfig struct {
-	Source       SnapshotPort
-	Options      stateport.Options
-	Recipient    string
-	Path         string
-	DryRun       bool
-	Installation bool
-	Directory    string
-	Keep         int
-	Now          time.Time
-	signing      ed25519.PrivateKey
-	manifest     *bundleManifest
+	Source               SnapshotPort
+	Options              stateport.Options
+	Recipient            string
+	Path                 string
+	DryRun               bool
+	Installation         bool
+	Directory            string
+	Keep                 int
+	AllowSharedDirectory bool
+	Now                  time.Time
+	signing              ed25519.PrivateKey
+	manifest             *bundleManifest
 }
 
 // Backup publishes a complete encrypted database without replacing a destination.

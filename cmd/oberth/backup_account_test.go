@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"filippo.io/age"
 	"github.com/oberthci/oberth/internal/apicontract"
@@ -220,10 +221,16 @@ func TestBackupAccountRetentionPrunesOnlyFullArchives(t *testing.T) {
 	f := newAccountBackupFixture(t)
 	full := "oberth-backup-20260101T000000.000000000Z.age"
 	partial := "oberth-backup-20260102T000000.000000000Z.age"
-	for _, name := range []string{full + ".manifest.json", partial} {
-		if err := os.WriteFile(filepath.Join(f.backup.Directory, name), []byte("prior-archive"), 0600); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.Remove(filepath.Join(f.backup.Directory, full)); err != nil {
+		t.Fatal(err)
+	}
+	prior := f.backup
+	prior.Now = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := f.engine.BackupAccount(t.Context(), f.job, prior); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.backup.Directory, partial), []byte("prior-archive"), 0600); err != nil {
+		t.Fatal(err)
 	}
 	archive, err := f.engine.BackupAccount(t.Context(), f.job, f.backup)
 	if err != nil {

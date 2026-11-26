@@ -23,6 +23,7 @@ func (s installationSession) backup(ctx context.Context, out io.Writer) error {
 	defer source.remote.Close()
 	config := installer.BackupConfig{Source: source, Options: s.options, Recipient: s.profile.BackupRecipient, Path: s.request.text("out"), DryRun: s.request.enabled("dry-run")}
 	config.Directory, config.Now = s.request.text("directory"), s.app.config.Time()
+	config.AllowSharedDirectory = s.request.enabled("allow-shared-directory")
 	config.Keep, _ = strconv.Atoi(s.request.text("keep"))
 	var archive installer.Archive
 	if config.DryRun || s.request.enabled("database-only") {

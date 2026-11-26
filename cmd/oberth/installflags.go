@@ -86,6 +86,7 @@ func installationFlags(name string) *flag.FlagSet {
 func addArchiveFlags(f *flag.FlagSet, name string) {
 	switch name {
 	case "backup":
+		f.Bool("allow-shared-directory", false, "Allow other installations' backups; prune only this installation's signed full archives.")
 		f.String("out", "", "New backup destination.")
 		f.Bool("print-schedule", false, "Print an operator-applied CronJob and scoped backup permissions.")
 		f.Bool("in-cluster", false, "Use only the Pod's scoped backup ServiceAccount.")
