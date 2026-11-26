@@ -109,11 +109,12 @@ def check_paths(source):
 
 
 class RunBoxContract(unittest.TestCase):
-    def test_resumed_reason_is_the_server_reason(self):
+    def test_not_evidence_reasons_are_the_server_reasons(self):
         model = (AGENT / "hooks/model.ts").read_text()
         server = (ROOT / "internal/service/reasons.go").read_text()
-        shown = re.search(r"export const RESUMED_REASON = '([^']+)'", model).group(1)
-        self.assertEqual(re.search(r'\breasonResumed\s+= "([^"]+)"', server).group(1), shown)
+        for shown, constant in (("RESUMED_REASON", "reasonResumed"), ("ASSISTED_REASON", "reasonAssistedRun")):
+            words = re.search(r"export const " + shown + r" = '([^']+)'", model).group(1)
+            self.assertEqual(re.search(r'\b' + constant + r'\s+= "([^"]+)"', server).group(1), words)
 
     def test_one_profile_option_for_single_and_merged_views(self):
         manifest = json.loads((AGENT / ".claude-plugin/plugin.json").read_text())

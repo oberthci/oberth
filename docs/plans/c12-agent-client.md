@@ -79,9 +79,10 @@ line without a full-width frame, hidden only when its whole reason cannot fit th
 Without a selection it explains setup once and stays hidden.
 It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.
 
-A resumed run is never evidence, so its row says so in every state, passed included:
-the box adds C2's `resumed run; not evidence` after the step name, and `/oberth-runs`
-prints it as the row's reason. A contract test binds the shown words to C2's reason.
+Resumed and assisted runs are never evidence, so their rows say so, passed included:
+the box adds C2's `resumed run; not evidence` or `assisted run; not evidence` after
+the step name, and `/oberth-runs` prints it as the row's reason. A contract test binds
+the shown words to C2's reasons.
 
 One timer discovers idle runs every 15 seconds. While a shown or pinned run is live,
 one public `run wait --until any --timeout-s 1` per round replaces the sleep between

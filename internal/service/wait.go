@@ -51,7 +51,7 @@ func (s *Service) wait(ctx context.Context, r stateport.RunState, o waitOptions)
 	first := true
 	for {
 		current := summary(r.RunSummary)
-		resumedReason(&current, o.run.Origin)
+		evidenceReason(&current, o.run.Origin)
 		result := apicontract.WaitResult{Run: &current}
 		holds, err := s.waitHolds(wait, r, &o)
 		if err != nil {

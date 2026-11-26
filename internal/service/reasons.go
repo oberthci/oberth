@@ -36,6 +36,7 @@ const (
 	reasonRetestNotStarted         = "default branch moved; retest not started"
 	reasonAssisted                 = "run is assisted"
 	reasonResumed                  = "resumed run; not evidence"
+	reasonAssistedRun              = "assisted run; not evidence"
 
 	reasonHoldAbandon = "hold release requested"
 
@@ -199,17 +200,30 @@ func isMissing(err error) bool {
 	return errors.As(err, &p) && p.Code() == publicerr.NotFound
 }
 
-// view is a run's public summary: a resumed run says so in every state.
+// view is a run's public summary. A resumed run says so in every state, and
+// an assisted run is never shown as plainly passed.
 func view(r stateport.Run) stepmodel.RunSummary {
 	v := summary(r.RunSummary)
-	resumedReason(&v, r.Origin)
+	evidenceReason(&v, r.Origin)
 	return v
 }
 
-func resumedReason(v *stepmodel.RunSummary, o model.RunOrigin) {
-	if o.Resumed() {
-		v.DisplayReason = reasonResumed
+func evidenceReason(v *stepmodel.RunSummary, o model.RunOrigin) {
+	if reason := notEvidence(o, v.Status); reason != "" {
+		v.DisplayReason = reason
 	}
+}
+
+// notEvidence is the reason that replaces a run's own when it can never be
+// evidence: always for a resumed run, and on a pass for an assisted one.
+func notEvidence(o model.RunOrigin, status stepmodel.RunStatus) string {
+	switch {
+	case o.Resumed():
+		return reasonResumed
+	case o.Assisted && status == stepmodel.RunPassed:
+		return reasonAssistedRun
+	}
+	return ""
 }
 
 // summary keeps reasons that add information beyond the status; detail stays whole.

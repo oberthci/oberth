@@ -254,7 +254,10 @@ way: promotion and the release build check skip it, so it never shadows the full
 run, and it never counts as evidence. Selection by commit or ref (status, wait,
 run get) skips it; only its ID names it. Every view says `resumed run; not
 evidence` in every state, passed included; its verdict stores that reason with
-retry hint `none`, since an unassisted run of that commit may be active.
+retry hint `none`, since an unassisted run of that commit may be active. An
+Assisted run is never shown as plainly passed: a passed one says `assisted run;
+not evidence` in every view and in its finished event, and a failed one keeps
+its own reason.
 
 Run get/list expose an explicit workflow choice as `selected_file` from the persisted
 request, including refused admissions and reruns, without another admission read.

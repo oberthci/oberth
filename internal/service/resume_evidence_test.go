@@ -140,3 +140,37 @@ func finishedSummaries(t *testing.T, f *fixture, id string) []string {
 	}
 	return out
 }
+
+// An assisted run is never shown as plainly passed: views and its finished
+// event say so. A failed assisted run keeps its own reason.
+func TestAssistedRunNeverPlainPassed(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	r := f.seed(stepmodel.RunRunning)
+	r.Origin.Assisted = true
+	f.store.native.SeedRun(r)
+	if err := f.s.Finished(t.Context(), service.FinishedRun{RunID: runID, Status: stepmodel.RunPassed}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.s.RunGet(t.Context(), caller(), viewQuery{ID: runID})
+	if err != nil || got.Status != stepmodel.RunPassed || got.DisplayReason != "assisted run; not evidence" {
+		t.Fatal("run_get", got.RunSummary, err)
+	}
+	s, err := f.s.Status(t.Context(), caller(), viewQuery{Repo: repository, Ref: "topic"})
+	if err != nil || s.DisplayReason != "assisted run; not evidence" {
+		t.Fatal("status", s, err)
+	}
+	if out := waitRun(t, f, apicontract.WaitArgs{ID: runID}); out.DisplayReason != "assisted run; not evidence" {
+		t.Fatal("wait", out)
+	}
+	if summaries := finishedSummaries(t, f, runID); len(summaries) != 1 || summaries[0] != "assisted run; not evidence" {
+		t.Fatal("finished event", summaries)
+	}
+	failed := setup(t)
+	r = failed.seed(stepmodel.RunFailed)
+	r.Origin.Assisted, r.DisplayReason = true, "exited with code 2"
+	failed.store.native.SeedRun(r)
+	if got, err := failed.s.RunGet(t.Context(), caller(), viewQuery{ID: runID}); err != nil || got.DisplayReason != "exited with code 2" {
+		t.Fatal("failed assisted run lost its reason", got.RunSummary, err)
+	}
+}
