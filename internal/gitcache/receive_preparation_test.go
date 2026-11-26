@@ -13,6 +13,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitcache/gittest"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
 )
 
@@ -22,7 +23,7 @@ type referencePreparationCase struct {
 }
 
 func TestReceiveRequiresReferencePreparation(t *testing.T) {
-	unchecked := "push refused; receive gate did not run"
+	unchecked := "push refused; refs were not prepared"
 	busy := "another push is in progress"
 	cases := []referencePreparationCase{
 		{name: "intact", input: "change"},
@@ -116,7 +117,7 @@ func receiveWithReferenceHook(t *testing.T, c *gitcache.Cache, f *gittest.Fixtur
 	if push.test.damage != "" && push.test.refusal != "" {
 		t.Logf("damaged reference hook refusal (%d): %s", len(err.Error()), err)
 		feedback := publicerr.Classify(err).Error()
-		if feedback != "invalid_input: push refused; receive gate did not run - Restore the receive hook and try the push again." {
+		if feedback != "invalid_input: push refused; refs were not prepared - Try the push again; if it repeats, ask the operator to inspect the server Git log and receive hooks." {
 			t.Fatal("unchecked receive feedback changed", feedback)
 		}
 		t.Logf("push feedback (%d): %s", len(feedback), feedback)
@@ -142,6 +143,11 @@ func changeReferenceHook(t *testing.T, f *gittest.Fixture, damage string) {
 
 func pauseReferencePublication(t *testing.T, c *gitcache.Cache, f *gittest.Fixture) func() {
 	t.Helper()
+	return pauseExactPublication(t, c, f, publicationFor(f, "refs/heads/topic", f.Commit, ""))
+}
+
+func pauseExactPublication(t *testing.T, c *gitcache.Cache, f *gittest.Fixture, publication model.Publication) func() {
+	t.Helper()
 	reviewFault(t, f, map[string]any{"args": []string{"push"}, "stop": true})
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	done := make(chan error, 1)
@@ -152,7 +158,7 @@ func pauseReferencePublication(t *testing.T, c *gitcache.Cache, f *gittest.Fixtu
 			<-done
 		}
 	})
-	go func() { _, err := c.Publish(ctx, publicationFor(f, "refs/heads/topic", f.Commit, "")); done <- err }()
+	go func() { _, err := c.Publish(ctx, publication); done <- err }()
 	pid, err := strconv.Atoi(strings.TrimSpace(string(reviewWait(t, filepath.Join(f.Root, "stopped")))))
 	if err != nil {
 		t.Fatal(err)

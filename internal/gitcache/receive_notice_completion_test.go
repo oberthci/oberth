@@ -31,7 +31,7 @@ func TestFailedTransportCompletionStillNamesRestoredReference(t *testing.T) {
 	if err := c.Receive(t.Context(), r); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatal("transport did not fail after refs moved", err)
 	}
-	want := "unprepared reference restored. Restore the receive hook and try the push again. Reference: refs/heads/second.\n"
+	want := "unprepared reference restored. Try the push again; if it repeats, ask the operator to inspect the server Git log and receive hooks. Reference: refs/heads/second.\n"
 	if !strings.Contains(status.String(), "ok refs/heads/second") || feedback.String() != want {
 		t.Fatal("completion lost the restored reference notice", status.String(), feedback.String())
 	}

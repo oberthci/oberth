@@ -119,7 +119,7 @@ func receiveAndCheckRestoredFeedback(t *testing.T, c *gitcache.Cache, f *gittest
 		if !strings.Contains(status.String(), "ok "+ref) {
 			t.Fatal("probe did not receive a native ok", status.String())
 		}
-		want := "unprepared reference restored. Restore the receive hook and try the push again. Reference: " + ref + ".\n"
+		want := "unprepared reference restored. Try the push again; if it repeats, ask the operator to inspect the server Git log and receive hooks. Reference: " + ref + ".\n"
 		if !strings.Contains(feedback.String(), want) {
 			t.Fatal("restored reference and remedy were not sent to the pusher", feedback.String())
 		}
@@ -145,7 +145,7 @@ func TestReceiveEmptyPreparationNamesRestoredReference(t *testing.T) {
 	if err := c.Receive(t.Context(), r); err != nil {
 		t.Fatal(err)
 	}
-	want := "push refused; receive gate did not run. Restore the receive hook and try the push again. Reference: refs/heads/topic.\n"
+	want := "push refused; refs were not prepared. Try the push again; if it repeats, ask the operator to inspect the server Git log and receive hooks. Reference: refs/heads/topic.\n"
 	if !strings.Contains(status.String(), "ok refs/heads/topic") || feedback.String() != want {
 		t.Fatal("native ok was not corrected with the reference and remedy", status.String(), feedback.String())
 	}

@@ -44,7 +44,7 @@ func TestFourthOrdinaryRefusalShowsOneReason(t *testing.T) {
 	t.Logf("client: %q", res.client)
 	t.Logf("server text: %q", res.ssh)
 	t.Logf("server result: %v", res.err)
-	if res.err == nil || strings.Contains(combined, "receive gate did not run") ||
+	if res.err == nil || strings.Contains(combined, "refs were not prepared") || strings.Contains(combined, "receive gate did not run") ||
 		strings.Contains(combined, "Restore the receive hook") {
 		t.Fatal("a pusher refused for the default branch is told the receive hook did not run")
 	}
@@ -110,8 +110,8 @@ func checkMissingHookPush(t *testing.T, change string) {
 		want = ""
 	}
 	res := e.push(t, agent(e.f), remote, spec)
-	if res.err == nil || !strings.Contains(res.ssh, "receive gate did not run") {
-		t.Fatal("unchecked change lacked hook guidance", res.err, res.client, res.ssh)
+	if res.err == nil || !strings.Contains(res.ssh, "refs were not prepared") {
+		t.Fatal("unchecked change lacked preparation guidance", res.err, res.client, res.ssh)
 	}
 	if got := e.f.Git(t, e.f.Store(), "for-each-ref", "--format=%(objectname)", ref); got != want {
 		t.Fatal("unchecked client push survived", got, want)

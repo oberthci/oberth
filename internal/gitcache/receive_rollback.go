@@ -22,7 +22,7 @@ func (c *Cache) completeReceive(ctx context.Context, store string, files *receiv
 	var persistence, refusal error
 	if !accepted {
 		files.rejected = true
-		refusal = receiveRejection(record)
+		refusal = result.rejection(record)
 		persistence = markReceiveRejected(store, &record)
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.budgets.cleanup)
@@ -46,7 +46,7 @@ func (c *Cache) completeReceive(ctx context.Context, store string, files *receiv
 	}
 	ref, rollback := c.rollbackReservation(ctx, store, record)
 	if ref != "" && refusal == nil {
-		refusal = &RefusalError{reason: reasonUnchecked, remedy: remedyUnchecked, Detail: ref}
+		refusal = result.uncheckedRefusal(ref)
 	}
 	return errors.Join(persistence, cleanup, refusal, rollback)
 }
@@ -94,14 +94,24 @@ func (c *Cache) rollbackReceiveRefs(ctx context.Context, store string, before ma
 	}
 	return flush()
 }
-func receiveRejection(record Reservation) error {
+
+func (result receiveCompletion) rejection(record Reservation) error {
 	switch record.State {
 	case "ready":
-		return &RefusalError{reason: reasonUnchecked, remedy: remedyUnchecked}
+		return result.uncheckedRefusal("")
 	case "rejected":
 		return &reportedError{refuse("receive gate failed")}
 	}
 	return nil
+}
+
+// The joined gate owns its failure reason, including a refusal after an earlier
+// transaction committed. Missing preparation cannot explain away that failure.
+func (result receiveCompletion) uncheckedRefusal(ref string) error {
+	if result.gate != nil && result.gate.err != nil {
+		return nil
+	}
+	return &RefusalError{reason: reasonUnchecked, remedy: remedyUnchecked, Detail: ref}
 }
 
 func receiveCleanupResult(err error, accepted bool) error {
