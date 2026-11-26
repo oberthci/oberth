@@ -47,4 +47,9 @@ func TestResumedRunNeverSelectedByCommitOrRef(t *testing.T) {
 	if !byID.Origin.Resumed() || byID.Origin.ResumedFrom != first.ID || len(rows) != 2 || !rows[0].Origin.Resumed() {
 		t.Fatal("resumed run not readable by ID or history", byID.Origin, rows)
 	}
+	marks, err := s.RecentRuns(t.Context(), scope)
+	requireOK(t, err)
+	if strip := marks[first.Repo]; len(strip) != 2 || strip[0].Origin.Resumed() || strip[1].Origin.ResumedFrom != first.ID {
+		t.Fatal("recent runs lost the origin", strip)
+	}
 }

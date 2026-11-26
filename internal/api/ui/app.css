@@ -82,6 +82,7 @@ details pre { padding: 10px 12px; border: 1px solid var(--line); border-radius: 
 .passed { color: var(--passed); }
 .failed { color: var(--failed); }
 .running { color: var(--running); }
+.passed.noevidence, .bar.noevidence { color: var(--running); }
 
 /* tables: runs, repositories, issues */
 .runs:has(> .row), .repos:has(> .row), .issues:has(> .row) { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: 0 10px 30px var(--shadow); }

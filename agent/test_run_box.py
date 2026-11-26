@@ -115,6 +115,10 @@ class RunBoxContract(unittest.TestCase):
         for shown, constant in (("RESUMED_REASON", "reasonResumed"), ("ASSISTED_REASON", "reasonAssistedRun")):
             words = re.search(r"export const " + shown + r" = '([^']+)'", model).group(1)
             self.assertEqual(re.search(r'\b' + constant + r'\s+= "([^"]+)"', server).group(1), words)
+            self.assertLessEqual(len(words), 22)
+            # The footer and the web page draw the same passes amber with the same words.
+            self.assertIn('"' + words + '"', (ROOT / "internal/client/bridge_statusline.go").read_text())
+            self.assertIn('"' + words + '"', (ROOT / "internal/api/ui/app.js").read_text())
 
     def test_one_profile_option_for_single_and_merged_views(self):
         manifest = json.loads((AGENT / ".claude-plugin/plugin.json").read_text())

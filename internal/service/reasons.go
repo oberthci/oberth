@@ -35,8 +35,8 @@ const (
 	reasonPromoteAgain             = "default branch moved; promote again"
 	reasonRetestNotStarted         = "default branch moved; retest not started"
 	reasonAssisted                 = "run is assisted"
-	reasonResumed                  = "resumed run; not evidence"
-	reasonAssistedRun              = "assisted run; not evidence"
+	reasonResumed                  = "resumed; not evidence"
+	reasonAssistedRun              = "assisted; not evidence"
 
 	reasonHoldAbandon = "hold release requested"
 

@@ -110,6 +110,11 @@ type RunMark struct {
 	Status    stepmodel.RunStatus `json:"status"`
 	Ref       string              `json:"ref"`
 	CreatedAt time.Time           `json:"created_at"`
+	// DisplayReason is C2's not-evidence reason for a resumed run, or for a
+	// passed assisted one; it is empty otherwise.
+	DisplayReason string `json:"display_reason,omitempty"`
+	// Origin stays private; C2 derives DisplayReason from it.
+	Origin model.RunOrigin `json:"-"`
 }
 
 // RunState is the summary-only waiter view; it contains no admission or nodes.

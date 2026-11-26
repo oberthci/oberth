@@ -83,6 +83,7 @@ func TestRepositoryRecentRunsReadAsOneLine(t *testing.T) {
 	for i, status := range []stepmodel.RunStatus{stepmodel.RunPassed, stepmodel.RunFailed, stepmodel.RunCancelled, stepmodel.RunQueued, stepmodel.RunRunning} {
 		marks = append(marks, stateport.RunMark{ID: strconv.Itoa(11111111 * (i + 1)), Status: status, Ref: "refs/heads/main", CreatedAt: at})
 	}
+	marks = append(marks, stateport.RunMark{ID: "66666666", Status: stepmodel.RunPassed, Ref: "refs/heads/main", CreatedAt: at, DisplayReason: "assisted; not evidence"})
 	data, err := json.Marshal(apicontract.RepoPage{Repositories: []apicontract.Repository{
 		{Repo: "acme/app", RecentRuns: marks}, {Repo: "acme/quiet", RecentRuns: []stateport.RunMark{}}, {Repo: "acme/plain"},
 	}})
@@ -93,7 +94,7 @@ func TestRepositoryRecentRunsReadAsOneLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := out.String()
-	if !strings.Contains(text, "repositories[0] / recent runs: PF-RR (oldest first)\n") || !strings.Contains(text, "repositories[1] / recent runs: no runs\n") ||
+	if !strings.Contains(text, "repositories[0] / recent runs: PF-RRA (oldest first)\n") || !strings.Contains(text, "repositories[1] / recent runs: no runs\n") ||
 		strings.Contains(text, "repositories[2] / recent runs") || strings.Contains(text, "11111111") || strings.Contains(text, "refs/heads") {
 		t.Fatalf("recent runs not one line per repository: %q", text)
 	}

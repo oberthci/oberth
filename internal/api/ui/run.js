@@ -16,7 +16,7 @@ function runHeader(run, actions, open) {
  const counts = [run.passed + "/" + (run.steps_planned_exact ? "" : ">=") + run.step_count + " passed", run.failed && run.failed + " failed", run.pending && run.pending + " pending"].filter(Boolean).map((text, index) => h("span", {}, (index ? " · " : "") + text));
  const origin = runOrigin(run);
  const cancel = ["queued", "running"].includes(run.status) ? actions.querySelector("button") : null;
- const row = h("div", {class: "run-summary"}, h("h1", {title: run.repo + " · " + run.ref}, state(run.status)), run.started_at ? clock(run) : null, h("span", {class: "run-counts"}, counts), cancel);
+ const row = h("div", {class: "run-summary"}, h("h1", {title: run.repo + " · " + run.ref}, state(run.status, run.display_reason)), run.started_at ? clock(run) : null, h("span", {class: "run-counts"}, counts), cancel);
  new ResizeObserver((_, observer) => { if (row.isConnected) fitRunHeader(row); else observer.disconnect(); }).observe(row);
  return [row,
   run.selected_file ? h("p", {class: "run-file"}, "Workflow: " + run.selected_file) : null,

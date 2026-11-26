@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Register, Timer } from 'claude-code'
-import type { Snapshot } from '../types'
+import type { ObservedRun as Run, Snapshot } from '../types'
 import { checkedExecutable, get, list, profiles, SETUP, waitForChange } from './client'
-import { active, boxRows, limit, outcome, profileProblems, PROFILE_REASON, REFRESH_MS, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
+import { active, boxRows, limit, notEvidence, outcome, profileProblems, PROFILE_REASON, REFRESH_MS, shown, SHOWN_REASON, SHOWN_REMEDY, table, visible } from './model'
 
 const empty: Snapshot = { recent: [], pins: [], reachable: false, now: 0, singleProfile: false }
 const snapshot = atom({ plugin: 'oberth', key: 'snapshot' } as const, empty, { shape: 'runs-1' })
@@ -178,10 +178,11 @@ export const register: Register = (on, options) => {
     const [header, ...lines] = boxRows(state, loop.count, e.props.bodyColumns - FRAME)
     const { Box, Text } = $.ui.resolve(e)
     if (compact && !rows.length) return <Text wrap="truncate-end" color="yellow">{PROFILE_REASON}</Text>
-    const color = (status: string) => status === 'passed' ? 'green' : status === 'failed' ? 'red' : status === 'cancelled' ? 'gray' : 'yellow'
+    // A pass that is not evidence is amber, never green.
+    const color = (run: Run) => run.status === 'passed' ? (notEvidence(run) ? 'yellow' : 'green') : run.status === 'failed' ? 'red' : run.status === 'cancelled' ? 'gray' : 'yellow'
     return <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor="gray" paddingX={1} width={problems.length && !compact ? problemWidth : undefined}>
       {rows.length > 0 && <Text wrap="truncate-end" dimColor>{header}</Text>}
-      {rows.map((run, index) => <Text wrap="truncate-end" color={color(run.status)}>{lines[index]}</Text>)}
+      {rows.map((run, index) => <Text wrap="truncate-end" color={color(run)}>{lines[index]}</Text>)}
       {problems.map(problem => <Text wrap={compact ? 'truncate-end' : 'wrap'} color="yellow">{problem}</Text>)}
     </Box>
   })

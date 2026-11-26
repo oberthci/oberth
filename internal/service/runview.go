@@ -239,7 +239,7 @@ func (s *Service) runFacts(ctx context.Context, repos []stateport.Repository, sc
 	}
 	out := []apicontract.Repository{}
 	for _, r := range repos {
-		v := apicontract.Repository{Repo: r.Canonical, Archived: r.Archived, RecentRuns: recent[r.Canonical]}
+		v := apicontract.Repository{Repo: r.Canonical, Archived: r.Archived, RecentRuns: markReasons(recent[r.Canonical])}
 		if wanted && v.RecentRuns == nil {
 			v.RecentRuns = []stateport.RunMark{}
 		}
@@ -253,6 +253,17 @@ func (s *Service) runFacts(ctx context.Context, repos []stateport.Repository, sc
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+// markReasons gives each recent run its not-evidence reason, so no strip
+// shows a resumed or assisted pass as an ordinary one.
+func markReasons(marks []stateport.RunMark) []stateport.RunMark {
+	for i := range marks {
+		if reason := notEvidence(marks[i].Origin, marks[i].Status); reason != "" {
+			marks[i].DisplayReason = reason
+		}
+	}
+	return marks
 }
 
 func (s *Service) branchCount(ctx context.Context, v *apicontract.Repository) {

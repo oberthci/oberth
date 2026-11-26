@@ -28,7 +28,7 @@ func (f *Runs) RecentRuns(ctx context.Context, repositories []string) (map[strin
 	slices.SortFunc(rows, func(a, b stateport.Run) int { return cmp.Compare(a.Sequence, b.Sequence) })
 	out := map[string][]stateport.RunMark{}
 	for _, r := range rows {
-		marks := append(out[r.Repo], stateport.RunMark{ID: r.ID, Status: r.Status, Ref: r.Ref, CreatedAt: r.CreatedAt})
+		marks := append(out[r.Repo], stateport.RunMark{ID: r.ID, Status: r.Status, Ref: r.Ref, CreatedAt: r.CreatedAt, Origin: r.Origin})
 		out[r.Repo] = marks[max(0, len(marks)-stateport.RecentRunLimit):]
 	}
 	return out, nil

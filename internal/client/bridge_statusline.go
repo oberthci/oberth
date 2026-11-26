@@ -93,7 +93,7 @@ func footerStatus(status string) (string, string) {
 }
 
 // footerRows shows the run box's cells on one wrapping line: id, repository, ref, status,
-// steps, time, age and a failed run's step.
+// steps, time, age and a failed run's step, then a not-evidence reason whole.
 func footerRows(page apicontract.RunPage, err error, now time.Time) json.RawMessage {
 	if err != nil {
 		return footerText("red", "Oberth: "+clean(publicerr.Classify(err).Reason()))
@@ -107,7 +107,15 @@ func footerRows(page apicontract.RunPage, err error, now time.Time) json.RawMess
 	children := []any{map[string]any{"type": "bold", "children": []any{"Oberth"}}}
 	for _, run := range page.Runs {
 		text, color := footerRun(run, page.Runs, now)
+		reason := notEvidence(run)
+		if reason != "" && run.Status == "passed" {
+			color = "yellow"
+		}
 		children = append(children, map[string]any{"type": "text", "props": map[string]any{"color": color}, "children": []any{text}})
+		if reason != "" {
+			// Its own cell, so the row wraps before the reason and never cuts it.
+			children = append(children, map[string]any{"type": "text", "props": map[string]any{"color": color}, "children": []any{reason}})
+		}
 	}
 	data, _ := json.Marshal(map[string]any{"type": "row", "props": map[string]any{"gap": 2, "wrap": "wrap"}, "children": children})
 	return data
@@ -139,6 +147,19 @@ func footerRun(run apicontract.RunRecord, runs []apicontract.RunRecord, now time
 		cells = append(cells, run.Failure.Name)
 	}
 	return clean(strings.Join(cells, " ")), color
+}
+
+// C2's reasons for a run that is never evidence; a pass with one is amber.
+const (
+	reasonResumed  = "resumed; not evidence"
+	reasonAssisted = "assisted; not evidence"
+)
+
+func notEvidence(run apicontract.RunRecord) string {
+	if run.DisplayReason == reasonResumed || run.DisplayReason == reasonAssisted {
+		return run.DisplayReason
+	}
+	return ""
 }
 
 func footerText(color, text string) json.RawMessage {

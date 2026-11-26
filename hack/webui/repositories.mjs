@@ -5,9 +5,10 @@ import {check} from './cdp.mjs';
 // the example's spelled order (p passed, f failed, r running, q queued, c
 // cancelled); every bar links to its run with status, ref and time as its title;
 // a repository without runs says so. One read serves every row, and each row
-// stays one line from 1024px.
-const spelled={'origin/team/api':'pfpppcfppppfrppppqfp','origin/team/web':'ppfpr','mirror/tools/cli':''};
-const colour={p:'passed',f:'failed',r:'running',q:'running',c:'other'};
+// stays one line from 1024px. A pass that is not evidence (a) is amber, with its
+// reason ending the bar title and in place of the latest-run cell's status word.
+const spelled={'origin/team/api':'pfpppcfppppfrppppqfp','origin/team/web':'ppapr','mirror/tools/cli':''};
+const colour={p:'passed',a:'noevidence',f:'failed',r:'running',q:'running',c:'other'};
 
 export async function repositories(client){
  const results=[];
@@ -37,6 +38,8 @@ export async function repositories(client){
   // The example carries stored refs (refs/heads/...) and a latest run from an earlier day; the row
   // prints branch names as the run list does.
   check(api.latest==='failed  · w5/own-m3 · Nov 15 15:00'&&api.branch==='main','latest run or default branch not shown as a branch name '+JSON.stringify(api));
+  const web=page.rows.find(row=>row.key==='origin/team/web');
+  check(web.latest.startsWith('assisted; not evidence  · search · ')&&web.bars[2].title.endsWith(' · assisted; not evidence')&&!web.bars[1].title.includes('evidence'),'not-evidence pass not named '+JSON.stringify(web));
   check(api.bars[0].title==='passed · topic-0 · Nov 15 19:00'&&api.bars[19].title==='passed · topic-19 · 14:00'&&api.bars[5].title.startsWith('cancelled · ')&&api.bars[17].title.startsWith('queued · '),'bar titles wrong '+JSON.stringify(api.bars.map(bar=>bar.title)));
   const capture=await client.cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{x:0,y:0,width,height:Math.max(900,await client.evaluate('document.documentElement.scrollHeight')),scale:1}});
   await writeFile(`${client.artifacts}/repositories-strip-${width}-light.png`,Buffer.from(capture.data,'base64'));
@@ -48,7 +51,10 @@ export async function repositories(client){
  // The mono theme draws running hollow, as its status mark, so it differs from white failed.
  const mono=await barLooks(client,'mono'),look=bar=>bar.fill+'|'+bar.edge,running=mono.find(bar=>bar.kind==='running');
  check(new Set(mono.map(look)).size===4&&running.fill==='rgba(0, 0, 0, 0)'&&running.edge.startsWith('solid ')&&mono.every(bar=>bar.fill!=='rgba(0, 0, 0, 0)'||bar.edge.startsWith('solid ')),'mono bars not four visible looks '+JSON.stringify(mono));
- results.push({light,mono});
+ // A pass that is not evidence is drawn amber, as running, never as a green pass.
+ const amber=await client.evaluate(`(()=>{const fill=kind=>getComputedStyle(document.querySelector('.repos .bar.'+kind)).backgroundColor;return {noevidence:fill('noevidence'),running:fill('running'),passed:fill('passed')};})()`);
+ check(amber.noevidence===amber.running&&amber.noevidence!==amber.passed,'not-evidence pass not amber '+JSON.stringify(amber));
+ results.push({light,mono,amber});
  // A row link's accessible name is its text cells, as on a page without bars: aria-hidden does not
  // take descendants out of a name, so the row names itself and no bar title may appear in it. An
  // unread default branch leaves no gap in the label (the tree collapses spaces, so the label is read too).

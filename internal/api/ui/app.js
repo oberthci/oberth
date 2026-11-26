@@ -105,7 +105,15 @@ function runWhen(run) {
  return h("span", {class: "when", title: fullTimes(run)}, word && h("span", {class: "at-word"}, word), h("time", {datetime: at, title: fullTime(at)}, time(at)), run.started_at ? [" · ", clock(run)] : null);
 }
 function refName(ref) { return ref.startsWith("refs/tags/") ? "tag " + ref.slice(10) : ref.replace(/^refs\/heads\//, ""); }
-function state(status) { return h("span", {class: "state " + status}, h("span", {class: "mark " + status, "aria-hidden": "true"}), status + " "); }
+// A pass that is not evidence is amber; where a cell has room for one word only, its
+// reason takes the status word's place (named), so the cell still reads as one line.
+function state(status, reason, named) {
+ const amber = status === "passed" && notEvidence(reason), kind = status + (amber ? " noevidence" : "");
+ return h("span", {class: "state " + kind}, h("span", {class: "mark " + kind, "aria-hidden": "true"}), (amber && named ? reason : status) + " ");
+}
+// C2's reasons for a run that is never evidence: such a pass is amber, never green.
+const notEvidenceReasons = ["resumed; not evidence", "assisted; not evidence"];
+function notEvidence(reason) { return notEvidenceReasons.includes(reason); }
 setInterval(() => document.querySelectorAll("[data-start]").forEach(node => { node.textContent = duration(node.dataset.start, node.dataset.end); }), 1000);
 function replace(region, nodes) {
  const key = region.contains(document.activeElement) ? document.activeElement.dataset.key : null;
@@ -257,7 +265,7 @@ async function runsScreen(view) {
   const page = await get("/api/runs?" + params({limit: 50, repo: query.get("repo"), ref: query.get("ref"), status: query.get("status"), before: query.get("before")}), signal);
   if (signal.aborted) return;
   replace(region, page.runs.length ? [h("div", {class: "row head", "aria-hidden": "true"}, ["STATUS", "REPOSITORY", "REF", "WHEN", "MESSAGE"].map(text => h("span", {}, text))),
-   ...page.runs.map(run => h("a", {class: "row", href: "/runs/" + encodeURIComponent(run.id), "data-key": run.id}, state(run.status), h("b", {class: "repo", title: run.repo}, labels.get(run.repo) || run.repo),
+   ...page.runs.map(run => h("a", {class: "row", href: "/runs/" + encodeURIComponent(run.id), "data-key": run.id}, state(run.status, run.display_reason), h("b", {class: "repo", title: run.repo}, labels.get(run.repo) || run.repo),
     h("span", {class: "ref", title: run.ref}, refName(run.ref)), runWhen(run), h("span", {class: "message", title: runMessage(run) || null}, runMessage(run)))),
    page.next_cursor ? h("a", {class: "pager", href: "/runs?" + params({...Object.fromEntries(query), before: page.next_cursor})}, "Older runs") : null].filter(Boolean) : [empty(query.size ? copy.filteredRuns : copy.emptyRuns)]);
  };
@@ -383,21 +391,23 @@ function reposScreen(view) {
 // every bar's title.
 function repoRow(repo) {
  const cells = [h("span", {class: "mono"}, repo.repo), h("span", {class: "mono"}, repo.default_branch && refName(repo.default_branch)),
-  h("span", {}, repo.latest_run ? [state(repo.latest_run.status), " · " + refName(repo.latest_run.ref) + " · " + time(repo.latest_run.created_at)] : "no runs"),
+  h("span", {}, repo.latest_run ? [state(repo.latest_run.status, repo.latest_run.display_reason, true), " · " + refName(repo.latest_run.ref) + " · " + time(repo.latest_run.created_at)] : "no runs"),
   h("span", {}, repo.branch_count === null ? "unknown" : String(repo.branch_count))];
  return h("a", {class: "row", href: "/runs?" + params({repo: repo.repo}), "data-key": repo.repo, "aria-label": cells.map(cell => cell.textContent.replace(/\s+/g, " ").trim()).filter(Boolean).join(" ")},
   cells.slice(0, 3), recentRuns(repo.recent_runs || []), cells[3]);
 }
 // A repository's last runs as bars, oldest left: green passed, red failed, yellow
-// queued or running, grey cancelled. Each bar opens its run and names it in its
+// queued or running, amber a pass that is not evidence (its reason ends the title),
+// grey cancelled. Each bar opens its run and names it in its
 // title. The bars sit inside the row's link, which stays the one stop for the
 // keyboard and for assistive technology: the strip is hidden from the tree, the
 // row's name leaves it out, and the bars take no tab stops.
 const barColours = {passed: "passed", failed: "failed", queued: "running", running: "running"};
 function recentRuns(runs) {
  return h("span", {class: "recent", "aria-hidden": "true"}, runs.map(run => {
-  const words = run.status + " · " + refName(run.ref) + " · " + time(run.created_at);
-  return h("a", {class: "bar " + (barColours[run.status] || "other"), href: "/runs/" + encodeURIComponent(run.id), title: words, tabindex: "-1"});
+  const words = run.status + " · " + refName(run.ref) + " · " + time(run.created_at) + (run.display_reason ? " · " + run.display_reason : "");
+  const colour = run.status === "passed" && notEvidence(run.display_reason) ? "noevidence" : barColours[run.status] || "other";
+  return h("a", {class: "bar " + colour, href: "/runs/" + encodeURIComponent(run.id), title: words, tabindex: "-1"});
  }));
 }
 function statusScreen(view) {

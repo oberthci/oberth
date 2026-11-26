@@ -176,6 +176,39 @@ func TestBridgeCodexFooterRows(t *testing.T) {
 	}
 }
 
+// A resumed or assisted pass is amber, never green, and its reason is a cell
+// of its own, whole; a failed resumed run keeps its red with the reason.
+func TestBridgeFooterNotEvidenceReason(t *testing.T) {
+	t.Parallel()
+	now := fake.NewClock().Now()
+	page := footerPage(now)
+	for _, c := range []struct{ status, reason, color string }{{"passed", "assisted; not evidence", "yellow"}, {"passed", "resumed; not evidence", "yellow"}, {"failed", "resumed; not evidence", "red"}, {"passed", "", "green"}} {
+		page.Runs[0].Status, page.Runs[0].DisplayReason = stepmodel.RunStatus(c.status), c.reason
+		var row struct {
+			Children []struct {
+				Props    struct{ Color string }
+				Children []string
+			}
+		}
+		if err := json.Unmarshal(footerRows(page, nil, now), &row); err != nil {
+			t.Fatal(err)
+		}
+		run := row.Children[1]
+		if run.Props.Color != c.color || strings.Contains(run.Children[0], "not evidence") {
+			t.Fatal("run cell", c, run)
+		}
+		if c.reason == "" {
+			if len(row.Children) != 3 {
+				t.Fatal("plain pass gained a cell", row)
+			}
+			continue
+		}
+		if reason := row.Children[2]; len(row.Children) != 4 || reason.Children[0] != c.reason || reason.Props.Color != c.color {
+			t.Fatal("reason cell", c, row)
+		}
+	}
+}
+
 func TestBridgeFooterDurationNeverExceedsAge(t *testing.T) {
 	t.Parallel()
 	now := fake.NewClock().Now()

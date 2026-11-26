@@ -121,21 +121,26 @@ func uiExample(t *testing.T) *fixture {
 func exampleRepositories(runs []apicontract.RunRecord, at time.Time) []apicontract.Repository {
 	api, web := runs[1].RunSummary, runs[2].RunSummary
 	api.Ref, api.CreatedAt = "refs/heads/w5/own-m3", at.Add(-24*time.Hour)
-	web.Ref = "refs/heads/feature/search"
+	web.Ref, web.Status, web.DisplayReason = "refs/heads/search", stepmodel.RunPassed, "assisted; not evidence"
 	return []apicontract.Repository{
 		{Repo: runs[0].Repo, DefaultBranch: "refs/heads/main", BranchCount: new(3), LatestRun: &api, RecentRuns: exampleMarks(at, "pfpppcfppppfrppppqfp")},
-		{Repo: runs[2].Repo, DefaultBranch: "refs/heads/main", LatestRun: &web, RecentRuns: exampleMarks(at, "ppfpr")},
+		{Repo: runs[2].Repo, DefaultBranch: "refs/heads/main", LatestRun: &web, RecentRuns: exampleMarks(at, "ppapr")},
 		{Repo: runs[3].Repo},
 	}
 }
 
 // exampleMarks spells a repository strip oldest first, one letter per run:
-// p passed, f failed, r running, q queued, c cancelled.
+// p passed, f failed, r running, q queued, c cancelled, a a pass that is not
+// evidence.
 func exampleMarks(at time.Time, spelled string) []stateport.RunMark {
-	statuses := map[rune]stepmodel.RunStatus{'p': stepmodel.RunPassed, 'f': stepmodel.RunFailed, 'r': stepmodel.RunRunning, 'q': stepmodel.RunQueued, 'c': stepmodel.RunCancelled}
+	statuses := map[rune]stepmodel.RunStatus{'p': stepmodel.RunPassed, 'a': stepmodel.RunPassed, 'f': stepmodel.RunFailed, 'r': stepmodel.RunRunning, 'q': stepmodel.RunQueued, 'c': stepmodel.RunCancelled}
 	marks := []stateport.RunMark{}
 	for i, letter := range spelled {
-		marks = append(marks, stateport.RunMark{ID: fmt.Sprintf("%032x", 0x7700+i), Status: statuses[letter], Ref: "refs/heads/topic-" + fmt.Sprint(i), CreatedAt: at.Add(time.Duration(i-len(spelled)) * time.Hour)})
+		mark := stateport.RunMark{ID: fmt.Sprintf("%032x", 0x7700+i), Status: statuses[letter], Ref: "refs/heads/topic-" + fmt.Sprint(i), CreatedAt: at.Add(time.Duration(i-len(spelled)) * time.Hour)}
+		if letter == 'a' {
+			mark.DisplayReason = "assisted; not evidence"
+		}
+		marks = append(marks, mark)
 	}
 	return marks
 }

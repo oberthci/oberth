@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/oberthci/oberth/internal/stateport"
@@ -11,7 +12,7 @@ import (
 // recentRunsQuery walks the run_history index once per named repository and
 // stops after its newest runs, so the read costs the same however long a
 // history is. Rows come oldest first within each repository.
-const recentRunsQuery = `SELECT repositories.canonical,runs.id,runs.status,runs.ref,json_extract(runs.summary,'$.created_at')
+const recentRunsQuery = `SELECT repositories.canonical,runs.id,runs.status,runs.ref,json_extract(runs.summary,'$.created_at'),runs.origin
 FROM repositories JOIN runs ON runs.sequence IN(SELECT recent.sequence FROM runs AS recent
 WHERE recent.repo_id=repositories.id ORDER BY recent.sequence DESC LIMIT ?)
 WHERE `
@@ -34,9 +35,13 @@ func (s *Store) RecentRuns(ctx context.Context, repositories []string) (map[stri
 	for rows.Next() {
 		var repo string
 		var created sql.NullString
+		var origin string
 		var mark stateport.RunMark
-		if err := rows.Scan(&repo, &mark.ID, &mark.Status, &mark.Ref, &created); err != nil {
+		if err := rows.Scan(&repo, &mark.ID, &mark.Status, &mark.Ref, &created, &origin); err != nil {
 			return nil, databaseError(err)
+		}
+		if err := json.Unmarshal([]byte(origin), &mark.Origin); err != nil {
+			return nil, refuse(corrupt, err)
 		}
 		if created.Valid {
 			if mark.CreatedAt, err = time.Parse(time.RFC3339Nano, created.String); err != nil {

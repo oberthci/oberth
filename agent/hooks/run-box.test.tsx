@@ -459,9 +459,40 @@ test('resumed and assisted runs say so on passed rows in the box and /oberth-run
   const box = await boxLines($, 'terminal', 120)
   const lines = (await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text!.split('\n')
   for (const rows of [box, lines]) {
-    expect(rows.find(line => line.startsWith('aaaaaaaa'))).toMatch(/✓ passed .* resumed run; not evidence$/)
-    expect(rows.find(line => line.startsWith('cccccccc'))).toMatch(/✓ passed .* assisted run; not evidence$/)
+    expect(rows.find(line => line.startsWith('aaaaaaaa'))).toMatch(/✓ passed .* resumed; not evidence$/)
+    expect(rows.find(line => line.startsWith('cccccccc'))).toMatch(/✓ passed .* assisted; not evidence$/)
     expect(rows.find(line => line.startsWith('bbbbbbbb'))).toMatch(/ \d+[smh]$/)
+  }
+})
+
+test('a not-evidence reason stays whole at 60 and 80 columns and its pass is amber', { options: { ...options, runs: 5 } }, async ($, on) => {
+  bottom(on)
+  mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+  const long = { repo: 'github/oberthci/repository-with-a-long-name', ref: 'refs/heads/w6/fix-resume-long-branch' }
+  const finished = { ...long, status: 'passed', finished_at: '2026-11-18T00:00:45Z' } as const
+  cli(on, () => [
+    { ...run('aaaaaaaa000000000000000000000000'), ...finished, display_reason: RESUMED_REASON },
+    { ...run('cccccccc000000000000000000000000'), ...finished, display_reason: ASSISTED_REASON, selected_file: 'hack/walk-vm.yaml' },
+    { ...run('bbbbbbbb000000000000000000000000'), ...finished, display_reason: '' },
+    { ...run('dddddddd000000000000000000000000'), ...long, status: 'failed', display_reason: RESUMED_REASON, failure: lintFailure },
+  ])
+  await startSession($, on)
+  for (const columns of [60, 80]) {
+    const ui = await $.ui.mount({ ...band, props: { ...band.props, bodyColumns: columns }, surface: 'terminal' })
+    const drawn = await ui.findAll({ type: 'Text' })
+    await ui.unmount()
+    const row = (id: string) => drawn.find(line => line.text.startsWith(id))!
+    for (const line of drawn) expect(line.text.length).toBeLessThanOrEqual(columns - 4)
+    expect(row('aaaaaaaa').text).toEndWith(RESUMED_REASON)
+    expect(row('cccccccc').text).toEndWith(ASSISTED_REASON)
+    expect(row('dddddddd').text).toContain(RESUMED_REASON)
+    expect(row('bbbbbbbb').text).not.toContain('evidence')
+    expect([row('aaaaaaaa').props.color, row('cccccccc').props.color, row('bbbbbbbb').props.color, row('dddddddd').props.color]).toEqual(['yellow', 'yellow', 'green', 'red'])
+    const listed = (await $.command.run({ ...commandInput, presentation: { isFullscreen: false, columns }, command: 'oberth-runs', args: '' })).text!.split('\n')
+    for (const line of listed) expect(line.length).toBeLessThanOrEqual(columns)
+    expect(listed.find(line => line.startsWith('aaaaaaaa'))).toContain(RESUMED_REASON)
+    expect(listed.find(line => line.startsWith('cccccccc'))).toContain(ASSISTED_REASON)
+    expect(listed.find(line => line.startsWith('dddddddd'))).toContain(RESUMED_REASON)
   }
 })
 

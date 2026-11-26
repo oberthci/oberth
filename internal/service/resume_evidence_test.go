@@ -3,16 +3,19 @@ package service_test
 import (
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/stateport"
+	statefake "github.com/oberthci/oberth/internal/stateport/fake"
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
 const resumedID = "abcdef01000000000000000000000002"
-const resumedReason = "resumed run; not evidence"
+const resumedReason = "resumed; not evidence"
 
 // resumed seeds R2, newer than the fixture's run: it resumed R1 on the same
 // commit and is Assisted from its insert.
@@ -121,7 +124,7 @@ func TestResumedRunFinishHint(t *testing.T) {
 	if err != nil || r.DisplayReason != resumedReason || r.Failure == nil || r.Failure.Retry.Action != stepmodel.RetryNone || failure.Retry.Action != stepmodel.RetryRerun {
 		t.Fatal("finish", r.RunSummary, r.Failure, err)
 	}
-	if summaries := finishedSummaries(t, f, resumedID); len(summaries) != 1 || !strings.Contains(summaries[0], "resumed run") {
+	if summaries := finishedSummaries(t, f, resumedID); len(summaries) != 1 || !strings.Contains(summaries[0], "resumed; not evidence") {
 		t.Fatal("finished events", summaries)
 	}
 }
@@ -153,17 +156,17 @@ func TestAssistedRunNeverPlainPassed(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := f.s.RunGet(t.Context(), caller(), viewQuery{ID: runID})
-	if err != nil || got.Status != stepmodel.RunPassed || got.DisplayReason != "assisted run; not evidence" {
+	if err != nil || got.Status != stepmodel.RunPassed || got.DisplayReason != "assisted; not evidence" {
 		t.Fatal("run_get", got.RunSummary, err)
 	}
 	s, err := f.s.Status(t.Context(), caller(), viewQuery{Repo: repository, Ref: "topic"})
-	if err != nil || s.DisplayReason != "assisted run; not evidence" {
+	if err != nil || s.DisplayReason != "assisted; not evidence" {
 		t.Fatal("status", s, err)
 	}
-	if out := waitRun(t, f, apicontract.WaitArgs{ID: runID}); out.DisplayReason != "assisted run; not evidence" {
+	if out := waitRun(t, f, apicontract.WaitArgs{ID: runID}); out.DisplayReason != "assisted; not evidence" {
 		t.Fatal("wait", out)
 	}
-	if summaries := finishedSummaries(t, f, runID); len(summaries) != 1 || summaries[0] != "assisted run; not evidence" {
+	if summaries := finishedSummaries(t, f, runID); len(summaries) != 1 || summaries[0] != "assisted; not evidence" {
 		t.Fatal("finished event", summaries)
 	}
 	failed := setup(t)
@@ -173,4 +176,71 @@ func TestAssistedRunNeverPlainPassed(t *testing.T) {
 	if got, err := failed.s.RunGet(t.Context(), caller(), viewQuery{ID: runID}); err != nil || got.DisplayReason != "exited with code 2" {
 		t.Fatal("failed assisted run lost its reason", got.RunSummary, err)
 	}
+}
+
+// A passed assisted run recorded before the reason existed has none stored;
+// every read still shows it as not evidence: status by ref and commit, wait,
+// the run list and the repository's latest and recent runs.
+func TestLegacyAssistedPassShowsReason(t *testing.T) {
+	t.Parallel()
+	f := setup(t)
+	r := f.seed(stepmodel.RunPassed)
+	r.Origin.Assisted, r.DisplayReason = true, ""
+	f.store.native.SeedRun(r)
+	const want = "assisted; not evidence"
+	for _, q := range []viewQuery{{Repo: repository, Ref: "topic"}, {Repo: repository, SHA: head[:12]}} {
+		if s, err := f.s.Status(t.Context(), caller(), q); err != nil || s.DisplayReason != want {
+			t.Fatal("status", q, s.DisplayReason, err)
+		}
+	}
+	if out := waitRun(t, f, apicontract.WaitArgs{ID: runID}); out.DisplayReason != want {
+		t.Fatal("wait", out.DisplayReason)
+	}
+	if page, err := f.s.RunList(t.Context(), caller(), viewQuery{Repo: repository, Limit: 10}); err != nil || page.Runs[0].DisplayReason != want {
+		t.Fatal("run_list", page, err)
+	}
+	checkRepositoryReason(t, f, want)
+}
+
+// checkRepositoryReason: repo_list's latest run and recent-run mark both say why.
+func checkRepositoryReason(t *testing.T, f *fixture, want string) {
+	t.Helper()
+	call, err := f.s.PrepareRepoList(t.Context(), apicontract.Caller{Actor: caller()}, apicontract.RepoListArgs{RecentRuns: true})
+	out, err := execute(t.Context(), call, err)
+	if err != nil || len(out.Repositories) != 1 {
+		t.Fatal("repo_list", out, err)
+	}
+	repo := out.Repositories[0]
+	if repo.LatestRun == nil || repo.LatestRun.DisplayReason != want || len(repo.RecentRuns) != 1 || repo.RecentRuns[0].DisplayReason != want {
+		t.Fatal("repo_list latest or recent run", repo.LatestRun, repo.RecentRuns)
+	}
+}
+
+// Waiting for any change on a resumed run reads its state again after the
+// change and still names it; with no change it times out instead of seeing
+// its own reason as a change.
+func TestResumedWaitAnyAcrossChange(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		for _, changed := range []bool{true, false} {
+			f := setup(t)
+			f.resumed(stepmodel.RunRunning, runID)
+			call, err := f.s.PrepareWait(t.Context(), caller(), viewQuery{ID: resumedID, Until: "any"}, time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if changed {
+				if err := f.store.native.Progress(t.Context(), statefake.NativeProgress{ID: resumedID, Revision: 1, Status: stepmodel.RunRunning, Detail: "changed"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := call(t.Context())
+			if err != nil || result.Run == nil || result.Run.DisplayReason != resumedReason || result.TimedOut == changed {
+				t.Fatal("wait any", changed, result, err)
+			}
+			if changed && result.Run.Detail != "changed" {
+				t.Fatal("returned before the change", result.Run)
+			}
+		}
+	})
 }

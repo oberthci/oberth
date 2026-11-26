@@ -252,12 +252,14 @@ A resumed run (fix and resume re-runs the failed part of a failed run; its
 write-once `resumed_from` is in the run origin) is no build of its commit either
 way: promotion and the release build check skip it, so it never shadows the full
 run, and it never counts as evidence. Selection by commit or ref (status, wait,
-run get) skips it; only its ID names it. Every view says `resumed run; not
+run get) skips it; only its ID names it. Every view says `resumed; not
 evidence` in every state, passed included; its verdict stores that reason with
 retry hint `none`, since an unassisted run of that commit may be active. An
-Assisted run is never shown as plainly passed: a passed one says `assisted run;
-not evidence` in every view and in its finished event, and a failed one keeps
-its own reason.
+Assisted run is never shown as plainly passed: a passed one says `assisted; not
+evidence` in every view (rows without a stored reason too) and in its finished
+event, and a failed one keeps its own reason. Recent-run marks carry the same
+reason. Both reasons fit any reason cell whole (at most 22 characters); every
+surface keeps them whole and draws such a pass amber, never green.
 
 Run get/list expose an explicit workflow choice as `selected_file` from the persisted
 request, including refused admissions and reruns, without another admission read.

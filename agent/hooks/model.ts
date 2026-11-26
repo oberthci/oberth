@@ -115,22 +115,27 @@ function cut(text: string, width: number): string {
   return kept + '…'
 }
 
-// The last column: its header, each run's text, and whether it gives way before the names.
-type Last = { label: string; text: (run: Run) => string; first: boolean }
+// The last column: its header, each run's text, the part of it kept whole, and whether it
+// gives way before the names.
+type Last = { label: string; text: (run: Run) => string; kept: (run: Run) => string; first: boolean }
 
 // A width that is not a usable number of cells (absent, not a number, under 2) lays out at 80.
 const FALLBACK_WIDTH = 80
 
 // Aligned single lines of at most width cells. The last column and the names give way in
 // the order Last says (the last column goes when it cannot keep NARROWEST), then lines are cut.
-function fit(table: string[][], requested: number, first: boolean): string[] {
+// A kept reason is never cut: the last column keeps it whole while the names give way, and
+// when the row still cannot fit, the reason takes the place of its status word and the cells
+// after it, beside the status icon.
+function fit(table: string[][], requested: number, first: boolean, kept: string[]): string[] {
   const width = Number.isFinite(requested) && requested >= 2 ? Math.floor(requested) : FALLBACK_WIDTH
   const widths = table[0]!.map((_, index) => Math.max(...table.map(row => cells(row[index]!))))
   const last = widths.length - 1
+  const floor = Math.max(0, ...kept.map(cells))
   // Cells the shown columns and the spaces between them take beyond the width.
   const over = () => widths.filter(Boolean).reduce((sum, size) => sum + size + 1, -1) - width
   const shrinkLast = () => {
-    while (over() > 0 && widths[last]) widths[last] = widths[last]! > NARROWEST ? widths[last]! - 1 : 0
+    while (over() > 0 && widths[last]! > floor) widths[last] = widths[last]! > Math.max(NARROWEST, floor) ? widths[last]! - 1 : floor
   }
   const shrinkNames = () => {
     while (over() > 0) {
@@ -140,8 +145,15 @@ function fit(table: string[][], requested: number, first: boolean): string[] {
     }
   }
   for (const shrink of first ? [shrinkLast, shrinkNames] : [shrinkNames, shrinkLast]) shrink()
-  return table.map(row => cut(row.flatMap((cell, index) =>
-    widths[index] ? [pad(cut(cell, widths[index]!), widths[index]!)] : []).join(' ').trimEnd(), width))
+  const replace = floor > 0 && over() > 0
+  if (replace) widths[last] = 0
+  // A cut keeps all but the last cell, so a kept reason exactly as wide as its column shows alone.
+  const fitted = (cell: string, size: number, keep: string) => cells(cell) > size && keep && size <= cells(keep) ? keep : cut(cell, size)
+  const shown = (row: string[], upto: number, keep: string) => row.slice(0, upto).flatMap((cell, index) =>
+    widths[index] ? [pad(fitted(cell, widths[index]!, index === last ? keep : ''), widths[index]!)] : [])
+  return table.map((row, index) => cut((replace && kept[index]
+    ? [...shown(row, 3, ''), `${Array.from(row[3]!)[0]} ${kept[index]}`]
+    : shown(row, row.length, kept[index]!)).join(' ').trimEnd(), width))
 }
 
 // The header and one line per run, shared by the box and /oberth-runs.
@@ -149,31 +161,37 @@ function rows(runs: Run[], now: number, width: number, last: Last): string[] {
   return fit([[...HEADER, last.label], ...runs.map(run => [
     shortID(run.id, runs), shortRepo(run.repo), shortRef(run.ref), `${ICON[run.status]} ${run.status}`,
     progress(run), duration(run, now), age(run, now), last.text(run),
-  ].map(clean))], width, last.first)
+  ].map(clean))], width, last.first, ['', ...runs.map(run => clean(last.kept(run)))])
 }
 
 const selected = (run: Run) => run.selected_file ? `${run.selected_file} selected` : ''
 
-// A resumed or assisted run is never evidence: its row says so, passed rows included.
-export const RESUMED_REASON = 'resumed run; not evidence'
-export const ASSISTED_REASON = 'assisted run; not evidence'
-const notEvidence = (run: Run) => run.display_reason === RESUMED_REASON || run.display_reason === ASSISTED_REASON ? run.display_reason : ''
+// A resumed or assisted run is never evidence: its row says so whole, passed rows included,
+// and such a pass is not drawn as an ordinary one.
+export const RESUMED_REASON = 'resumed; not evidence'
+export const ASSISTED_REASON = 'assisted; not evidence'
+export const notEvidence = (run: Run) => run.display_reason === RESUMED_REASON || run.display_reason === ASSISTED_REASON ? run.display_reason : ''
 
-// The box's watched mark, selection and failed step give way before the names.
+// The box's watched mark, selection and failed step give way before the names; a
+// not-evidence reason, with the watched mark before it, stays whole.
 export function boxRows(state: Snapshot, count: number, width: number): string[] {
   const runs = visible(state, count)
   const watched = (run: Run) => state.pins.some(pin => pin.run.id === run.id) ? '●' : ''
-  const text = (run: Run) => [watched(run), selected(run), failedStep(run), notEvidence(run)].filter(Boolean).join(' ')
-  return runs.length ? rows(runs, state.now, width, { label: '', text, first: true }) : []
+  const kept = (run: Run) => notEvidence(run) ? [watched(run), notEvidence(run)].filter(Boolean).join(' ') : ''
+  const text = (run: Run) => [kept(run) || watched(run), selected(run), failedStep(run)].filter(Boolean).join(' ')
+  return runs.length ? rows(runs, state.now, width, { label: '', text, kept, first: true }) : []
 }
 
-// /oberth-runs ends a failed row with its failed step and reason, and a cancelled or
-// not-evidence row with its reason, kept before the names; other reasons only repeat the status word.
-const explained = (run: Run) => run.status === 'failed' || run.status === 'cancelled' || notEvidence(run) !== ''
-const reason = (run: Run) => [selected(run), explained(run) ? [failedStep(run), run.display_reason].filter(Boolean).join(': ') : ''].filter(Boolean).join(' · ')
+// /oberth-runs ends a failed row with its failed step and reason and a cancelled row with
+// its reason, kept before the names; a not-evidence row leads with its reason, whole;
+// other reasons only repeat the status word.
+const explained = (run: Run) => run.status === 'failed' || run.status === 'cancelled'
+const reason = (run: Run) => notEvidence(run)
+  ? [notEvidence(run), selected(run), failedStep(run)].filter(Boolean).join(' · ')
+  : [selected(run), explained(run) ? [failedStep(run), run.display_reason].filter(Boolean).join(': ') : ''].filter(Boolean).join(' · ')
 
 export function table(runs: Run[], now: number, width: number): string {
-  return runs.length ? rows(runs, now, width, { label: 'REASON', text: reason, first: false }).join('\n') : 'No runs.'
+  return runs.length ? rows(runs, now, width, { label: 'REASON', text: reason, kept: notEvidence, first: false }).join('\n') : 'No runs.'
 }
 
 export function limit(value: unknown): number {
