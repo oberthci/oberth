@@ -51,31 +51,22 @@ func checkMountedReadThroughParent(t *testing.T, read func(string) ([]byte, erro
 	clear(data)
 }
 
-func TestMountedReadPinsTrustedMountBeforeAliasChanges(t *testing.T) {
-	path := kubeletMount(t, "..2026_11_25_19_40_09.1")
-	alias := filepath.Join(t.TempDir(), "mount")
-	if err := os.Symlink(filepath.Dir(path), alias); err != nil {
-		t.Fatal(err)
+func TestMountedReadsRefuseLinkedMount(t *testing.T) {
+	for _, read := range []struct {
+		name string
+		file func(string) ([]byte, error)
+	}{{"private", ReadMountedPrivate}, {"public", ReadPublic}} {
+		t.Run(read.name, func(t *testing.T) {
+			path := kubeletMount(t, "..2026_11_25_19_40_09.1")
+			alias := filepath.Join(t.TempDir(), "mount")
+			if err := os.Symlink(filepath.Dir(path), alias); err != nil {
+				t.Fatal(err)
+			}
+			data, err := read.file(filepath.Join(alias, filepath.Base(path)))
+			defer clear(data)
+			if err == nil || len(data) != 0 {
+				t.Fatal("linked mount directory was accepted", err)
+			}
+		})
 	}
-	mount, err := openKubeletMount(alias)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer mount.Close()
-	next := alias + "-next"
-	if err := os.Symlink(t.TempDir(), next); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(next, alias); err != nil {
-		t.Fatal(err)
-	}
-	version, err := kubeletVersion(mount, filepath.Base(path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := readKubeletVersion(mount, version, filepath.Base(path))
-	if err != nil || string(data) != "ca-fixture" {
-		t.Fatal("mount alias change redirected a pinned read", err)
-	}
-	clear(data)
 }
