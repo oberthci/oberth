@@ -45,14 +45,18 @@ func (c BackupConfig) directoryBackup(ctx context.Context) (Archive, error) {
 	if err != nil || c.DryRun {
 		return archive, err
 	}
-	proof, ok := retainedOrigin(root, filepath.Base(c.Path))
-	if !ok || proof.Origin.InstallationID != c.installationID() {
-		return archive, backupFailure("backup-retention", backupOriginProblem(), c.Path)
-	}
-	if err = pruneBackups(root, names, c.Keep); err != nil {
+	if err = c.pruneVerifiedBackups(root, names); err != nil {
 		return archive, backupFailure("backup-retention", err, c.Path)
 	}
 	return archive, backupDirectorySyncFailure(dir.Sync(), c.Path)
+}
+
+func (c BackupConfig) pruneVerifiedBackups(root *os.Root, names []string) error {
+	proof, ok := retainedOrigin(root, filepath.Base(c.Path))
+	if !ok || proof.Origin.InstallationID != c.installationID() {
+		return backupOriginProblem()
+	}
+	return pruneBackups(root, names, c.Keep)
 }
 
 func (c BackupConfig) retentionInput() error {
