@@ -10,17 +10,17 @@ def write_json(path, value):
     temporary.replace(path)
 
 
-def redact(message, secrets, paths):
+def redact(message, secrets, paths, *, limit=4000):
     if isinstance(message, dict):
-        return {key: redact(value, secrets, paths) for key, value in message.items()}
+        return {key: redact(value, secrets, paths, limit=limit) for key, value in message.items()}
     if isinstance(message, list):
-        return [redact(value, secrets, paths) for value in message]
+        return [redact(value, secrets, paths, limit=limit) for value in message]
     if isinstance(message, str):
-        return redact_text(message, secrets, paths)
+        return redact_text(message, secrets, paths, limit=limit)
     return message
 
 
-def redact_text(message, secrets, paths):
+def redact_text(message, secrets, paths, *, limit=4000):
     message = re.sub(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", "<private material>", message, flags=re.S)
     for value in sorted((str(v) for v in secrets if v), key=len, reverse=True):
         message = message.replace(value, "<private>")
@@ -28,7 +28,7 @@ def redact_text(message, secrets, paths):
         message = message.replace(path, "<private path>")
     if re.search(r"(?i)(?:token|password|passphrase|private[_ -]?key)\s*[:=]", message):
         return "Credential-related diagnostic withheld; reproduce the recorded command with private output."
-    return message[:4000]
+    return message[:limit]
 
 
 def unsafe_evidence(out, secrets):

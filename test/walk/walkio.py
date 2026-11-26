@@ -94,7 +94,7 @@ class Session:
     def canonical(self):
         return "walk/" + self.config["upstream_owner"] + "/" + self.data.name
 
-    def clean(self, text):
+    def clean(self, text, *, limit=4000):
         keys = (
             "state",
             "private",
@@ -105,7 +105,7 @@ class Session:
             "signing_password",
         )
         paths = [self.private, self.config.root, HERE, *(self.config.path(key) for key in keys)]
-        return redact(text, self.secrets, paths)
+        return redact(text, self.secrets, paths, limit=limit)
 
     def check_operation(self, argv, operation):
         if operation is not None:

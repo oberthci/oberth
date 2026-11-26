@@ -20,6 +20,7 @@ import walkcleanup as cleanup
 import walkevidence as evidence
 import walksetup as setup
 import walkruns as checks
+from walkmessages import collect
 
 
 @dataclass(frozen=True)
@@ -240,6 +241,7 @@ class Walk:
     def publish(self):
         try:
             result = self.flush()
+            write_json(self.out / "messages.json", collect(self.s))
         except Exception as error:
             result = {"schema_version": 3, "verdict": "FAIL", "evidence_error": self.s.clean(str(error))}
             write_json(self.out / "result.json", result)
