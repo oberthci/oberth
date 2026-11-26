@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import tarfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -13,6 +14,7 @@ from walkcommands import render
 from walkconfig import Environment
 from walkhost import Runtime
 from walklib import Walk, main, parser
+import test_candidate as candidate_tests
 import walktwo as two
 import walktwoacceptance as acceptance
 
@@ -263,6 +265,84 @@ class TwoTests(unittest.TestCase):
                         items + [{"kind": "CronWorkflow", "metadata": {"uid": "unobserved"}}]):
             with self.assertRaises(Failure):
                 acceptance.unique_occurrences(changed)
+
+    def test_schedule_stage_executes_both_installation_observations(self):
+        self.s.args.two_installations = "schedule"
+
+        def user(name, values=None, **kwargs):
+            if name == "two-controller-log":
+                return 0, b"unrelated-workflow", b""
+            self.assertEqual(name, "two-objects")
+            namespace = values["namespace"].removesuffix("-runs")
+            items = [{"kind": "CronWorkflow", "metadata": {"uid": namespace, "name": namespace + "-cron",
+                      "labels": {acceptance.LABEL: namespace}}}]
+            for index in (1, 2):
+                items.append({"kind": "Workflow", "metadata": {"name": namespace + str(index),
+                    "labels": {acceptance.LABEL: namespace},
+                    "ownerReferences": [{"kind": "CronWorkflow", "uid": namespace}],
+                    "annotations": {"workflows.argoproj.io/scheduled-time": f"2030-01-01T00:0{index}:00Z"}}})
+            return 0, json.dumps({"items": items}).encode(), b""
+
+        self.s.user.side_effect = user
+        with patch.object(two, "preflight", return_value={}), patch.object(two, "target", return_value={}), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.walk.execute(), 0)
+        self.assertEqual([call.args[0] for call in self.s.user.call_args_list],
+                         ["two-objects", "two-objects", "two-controller-log"])
+        self.assertEqual(self.s.results[2]["facts"]["native_occurrences"], {"first": 2, "second": 2})
+
+    def test_install_stage_installs_the_pinned_independent_controller(self):
+        charts = self.s.private / "candidate-chart/oberth/charts"
+        charts.mkdir(parents=True)
+        dependency = charts / "argo-workflows-1.2.3.tgz"
+        with tarfile.open(dependency, "w:gz") as archive:
+            body = b"version: 1.2.3\n"
+            header = tarfile.TarInfo("argo-workflows/Chart.yaml")
+            header.size = len(body)
+            archive.addfile(header, io.BytesIO(body))
+        items = [{"metadata": {"name": name, "uid": name,
+                  "labels": {"app.kubernetes.io/managed-by": "Helm"},
+                  "annotations": {"meta.helm.sh/release-name": "plain", "meta.helm.sh/release-namespace": "independent"}},
+                  "spec": {}} for name in sorted(two.CRDS)]
+        self.s.user.return_value = (0, json.dumps({"items": items}).encode(), b"")
+        self.s.two_candidate = {"commit": "c" * 40}
+        two.receipt(self.s).parent.mkdir(parents=True)
+        with patch.object(two, "preflight", return_value={}), patch.object(two, "target", return_value={}), \
+             patch.object(two, "install", return_value={}), patch.object(two, "default_collision", return_value={}), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.walk.execute(), 0, self.s.results)
+        self.assertEqual([call.args[0] for call in self.s.user.call_args_list], ["two-argo-install", "two-crds"])
+        self.assertEqual(self.s.user.call_args_list[0].args[1], {
+            "release": "plain", "namespace": "independent", "chart": dependency, "chart_version": "1.2.3"})
+        self.assertEqual(self.s.results[2]["facts"], {"chart_version": "1.2.3", "shared_definitions": 8})
+
+    def test_observation_stages_stage_real_candidate_without_registry_writes(self):
+        fixture = candidate_tests.CandidateTests().fixture(self.root)
+        self.s.args.candidate = fixture.args.candidate
+        manifest = self.s.args.candidate / "SHA256SUMS"
+        saved = {"commit": "a" * 40, "cli_sha256": digest(self.s.args.candidate / "oberth-linux-amd64"),
+                 "manifest_sha256": digest(manifest), "configuration": two.configuration(self.s)}
+        two.receipt(self.s).parent.mkdir(parents=True)
+        two.receipt(self.s).write_text(json.dumps(saved))
+        for stage in ("controllers", "schedule"):
+            self.s.private = self.root / (stage + "-private")
+            self.s.private.mkdir()
+            self.s.binary = self.s.private / "oberth"
+            self.s.args.two_installations = stage
+            self.s.results = []
+            self.s.run.reset_mock()
+            self.s.run.side_effect = None
+            self.s.run.return_value = (0, b"v1.2.3", b"")
+            with self.subTest(stage=stage), patch.object(two, "preflight", return_value={}), \
+                 patch.object(two, stage, return_value={}), patch("walksetup.tools_image") as tools, \
+                 patch("walkcleanup.close_local"), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(self.walk.execute(), 0)
+            self.assertEqual([call.args[0] for call in self.s.run.call_args_list], [[self.s.binary, "version"]])
+            self.assertEqual(self.s.binary.read_bytes(), b"CLI")
+            self.assertTrue((self.s.private / "candidate-chart/oberth/Chart.yaml").is_file())
+            self.assertEqual(self.s.two_candidate, saved)
+            tools.assert_not_called()
 
     def test_scope_guard_blocks_before_any_environment_command(self):
         self.s.k = Mock(return_value=(0, b'{"items":[]}', b""))
