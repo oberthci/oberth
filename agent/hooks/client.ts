@@ -61,9 +61,21 @@ async function json($: EngineInterface, connection: Connection, args: string[]):
   const out = await $.process.run(argv, { timeoutMs: 3500, env: { OBERTH_PROFILE: connection.profile } })
   if (out.isStdoutTruncated || out.isStderrTruncated) throw new Error('Run output exceeded the host output limit.')
   if (out.exitCode !== 0) {
+    if (out.exitCode === 1 && args[0] === 'run' && args[1] === 'wait' && failedWait(out.stdout)) return JSON.parse(out.stdout)
     throw new Error(out.stderr.trim() || out.stdout.trim() || 'Oberth is unreachable. Check the selected CLI profile.')
   }
   return JSON.parse(out.stdout)
+}
+
+function failedWait(text: string): boolean {
+  try {
+    const page: unknown = JSON.parse(text)
+    if (!page || typeof page !== 'object' || !('timed_out' in page) || typeof page.timed_out !== 'boolean' || !('run' in page)) return false
+    const run = decodeRun(page.run)
+    return run.status === 'failed' || run.status === 'cancelled'
+  } catch {
+    return false
+  }
 }
 
 function readFailure(error: unknown): string {

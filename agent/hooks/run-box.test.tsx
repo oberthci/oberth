@@ -1,10 +1,10 @@
 // Rendering is a manual gate: run `claude plugin test ./agent`; the build image has no host JavaScript runtime.
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
 import type { Run, Snapshot } from '../types'
 import { age, boxRows, decodeRun, duration, progress, PROFILE_REASON, PROFILE_REMEDY, ASSISTED_REASON, REFRESH_MS, RESUMED_REASON, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, span, table, visible, WINDOW_MS } from './model'
-import { SETUP } from './client'
+import { SETUP, waitForChange } from './client'
 import { hostProps, hostValues } from './host-elements'
 
 // Check the floor contract even when the current harness accepts newer values.
@@ -1591,3 +1591,28 @@ test('a missing default executable notifies once and never runs it', async ($, o
   expect((await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text).toBe(SETUP)
   await noBox($)
 })
+
+function waitClient(stdout: string, stderr: string): EngineInterface {
+  return {
+    env: { get: async () => undefined }, session: { root: async () => '/checkout' },
+    fs: { stat: async (path: string) => ({ kind: path === '/checkout' ? 'dir' : 'file', realPath: path }) },
+    process: { run: async () => ({ exitCode: 1, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false }) },
+  } as unknown as EngineInterface
+}
+
+for (const status of ['failed', 'cancelled'] as const) {
+  test(`a ${status} CLI wait with exit 1 remains a successful observation`, { options }, async () => {
+    const ended = run('deadbeef', status)
+    const client = waitClient(JSON.stringify({ run: ended, timed_out: false }), 'Waiting for run deadbeef.')
+    await waitForChange(client, options, ended.id, options.profile)
+  })
+}
+
+for (const stdout of ['', '{', JSON.stringify({ run: run(), timed_out: false })]) {
+  test(`an unsuccessful CLI wait cannot hide a read failure: ${stdout}`, { options }, async () => {
+    let reason = ''
+    try { await waitForChange(waitClient(stdout, 'Run is unavailable.'), options, 'deadbeef', options.profile) }
+    catch (error) { reason = (error as Error).message }
+    expect(reason).toBe('Run is unavailable.')
+  })
+}

@@ -77,8 +77,8 @@ decoration.
 
 Exit codes are 0 for successful command completion, 1 for operational refusal or
 failure, 2 for usage, 3 when `repo add` registered the repository but the forge has not accepted its deploy key, and 130 for
-interactive cancellation. A successful `run wait` observation exits 0 even for a failed
-run; consumers inspect its result. Pending installation is not reported as complete.
+interactive cancellation. `run wait` exits 1 for failed or cancelled runs and 0 for other observations, including timeout.
+JSON stays unchanged; MCP wait returns the observed run without a refusal. Pending installation is not reported as complete.
 
 **Delta:** Public JSON has explicit snake_case tags and collection envelopes, such as
 `{"runs":[]}` and `{"issues":[],"next_before":123,"total":456}` when another page

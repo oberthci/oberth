@@ -151,7 +151,7 @@ func (a application) remote(ctx context.Context, row command, input []byte, opti
 	if refused {
 		return 1
 	}
-	return 0
+	return observationExitCode(row.definition.Name, data)
 }
 
 func (a application) toolList(rows []command, problems []string) int {

@@ -62,6 +62,9 @@ func (a application) help(rows []command, words, problems []string) int {
 func (a application) commandHelp(row command) int {
 	fields := helpFields(row)
 	lines := []string{commandSynopsis(row, fields), row.definition.Summary}
+	if row.definition.Name == "run_wait" {
+		lines = append(lines, "Exit codes: 0 observed (including timeout); 1 failed/cancelled run or refusal; 2 usage; 130 interrupted.")
+	}
 	sensitive := false
 	for _, f := range fields {
 		lines = append(lines, argumentHelp(f))
