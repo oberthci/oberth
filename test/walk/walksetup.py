@@ -16,7 +16,7 @@ from workflows import fixtures
 from walkcleanup import registry_ready
 
 
-def preflight(s):
+def preflight(s, *, tools=()):
     config = s.config
     load = s.runtime.load.sample()
     if load[0] >= 16:
@@ -27,7 +27,7 @@ def preflight(s):
         fcntl.flock(s.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as error:
         raise Blocked("Slot is owned by another walk; wait for that invocation to finish") from error
-    for tool in ("curl", "cosign", "docker", "k3d", "kubectl", "git", "ssh", "ssh-keygen", "openssl"):
+    for tool in ("curl", "cosign", "docker", "k3d", "kubectl", "git", "ssh", "ssh-keygen", "openssl", *tools):
         if not shutil.which(tool, path=s.env["PATH"]):
             raise Blocked("Install the required executable: " + tool)
     for key in ("upstream_token", "known_hosts", "signing_key", "signing_public", "signing_password"):

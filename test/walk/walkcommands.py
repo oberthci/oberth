@@ -16,6 +16,14 @@ class Command:
 
 
 COMMANDS = MappingProxyType({
+    'two-install': Command('product', ('oberth', '{arguments}')),
+    'two-read': Command('verification', ('oberth', '{arguments}')),
+    'two-argo-install': Command('harness', ('helm', '--kubeconfig', '{kube}', '--kube-context', '{context}', 'install', '{release}', '{chart}', '--namespace', '{namespace}', '--create-namespace', '--version', '{chart_version}', '--set', 'server.enabled=false', '--set', 'crds.install=true', '--set', 'crds.keep=true', '--set', 'crds.full=false', '--wait', '--timeout', '5m')),
+    'two-crds': Command('verification', ('kubectl', '--kubeconfig', '{kube}', '--context', '{context}', 'get', 'crds', '-o', 'json')),
+    'two-helm-status': Command('verification', ('helm', '--kubeconfig', '{kube}', '--kube-context', '{context}', 'status', 'oberth', '-n', '{namespace}', '-o', 'json')),
+    'two-identity': Command('verification', ('kubectl', '--kubeconfig', '{kube}', '--context', '{context}', 'get', '{kind}', '{object}', '-n', '{namespace}', '-o', 'json')),
+    'two-objects': Command('verification', ('kubectl', '--kubeconfig', '{kube}', '--context', '{context}', 'get', 'workflows,cronworkflows,pods', '-n', '{namespace}', '-o', 'json')),
+    'two-controller-log': Command('verification', ('kubectl', '--kubeconfig', '{kube}', '--context', '{context}', 'logs', '-n', '{namespace}', '-l', 'app.kubernetes.io/instance={release}', '--all-containers=true', '--tail=-1')),
     'key': Command('product', ('ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-C', TEST_IDENTITY, '-f', '{private}/{key}')),
     'csr': Command('product', ('openssl', 'req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-keyout', '{private}/{client}.key', '-out', '{private}/{client}.csr', '-subj', "/CN=" + TEST_NAME)),
     'fingerprint': Command('product', ('ssh-keygen', '-lf', '{known_hosts}')),

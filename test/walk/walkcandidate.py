@@ -6,7 +6,7 @@ import urllib.parse
 from walkassert import require, digest
 
 
-def target(s):
+def target(s, *, fixture=True, publish=True):
     directory = s.args.candidate.resolve()
     listed = dict(line.split("  ", 1)[::-1] for line in (directory / "SHA256SUMS").read_text().splitlines())
     require(set(p.name for p in directory.iterdir()) == set(listed) | {"SHA256SUMS", "oberth.oci", "oberth-source-plugin.oci"},
@@ -16,7 +16,7 @@ def target(s):
     record = json.loads((directory / "release.json").read_text())
     s.args.version = record["version"]
     host = urllib.parse.urlsplit(s.config["registry_http"]).netloc
-    for name in ("oberth", "oberth-source-plugin"):
+    for name in ("oberth", "oberth-source-plugin") if publish else ():
         s.run(["skopeo", "copy", "--all", "--preserve-digests", "--dest-tls-verify=false",
                "oci:" + str(directory / (name + ".oci")) + ":" + record["version"],
                "docker://" + host + "/" + name + ":" + record["commit"]])
@@ -30,6 +30,8 @@ def target(s):
         archive.extractall(chart, filter="data")
     require((chart / "oberth/Chart.yaml").is_file(), "Candidate chart is missing")
     from walksetup import tools_image
-    tools_image(s)
+    if fixture:
+        tools_image(s)
     return {"candidate_commit": record["commit"], "cli_sha256": s.data.cli_sha256,
+            "manifest_sha256": digest(directory / "SHA256SUMS"),
             "unsigned_local_chart": True, "images": record["images"]}

@@ -87,6 +87,19 @@ STEPS = (
 
 
 class Walk:
+    @property
+    def steps(self):
+        if getattr(self.args, "two_installations", None):
+            from walktwo import steps
+            return steps(self.args.two_installations)
+        return STEPS
+
+    @property
+    def target(self):
+        if getattr(self.args, "candidate", None):
+            return "unsigned local candidate " + self.args.version
+        return "published signed release " + self.args.version
+
     def __init__(self, args, config, runtime):
         self.args, self.clock, self.started = args, runtime.clock, runtime.clock()
         self.out = args.out.resolve()
@@ -169,7 +182,7 @@ class Walk:
             return "FAIL"
         if "skipped" in statuses and "blocked" not in statuses:
             return "FAIL"
-        if len(rows) != len(STEPS):
+        if len(rows) != len(self.steps):
             return "BLOCKED" if "blocked" in statuses else "INCOMPLETE"
         if self.s.runtime.load.busy and not self.args.counts_only and all(only_host_block(r) for r in rows):
             return "INCONCLUSIVE"
@@ -180,7 +193,8 @@ class Walk:
         result = self.s.clean(
             {
                 "schema_version": 2,
-                "target": "published signed release " + self.args.version,
+                "target": self.target,
+                "candidate_stage": getattr(self.args, "two_installations", None),
                 "target_kind": self.s.kind,
                 "cli_sha256": self.s.data.cli_sha256,
                 "host_busy": self.s.runtime.load.busy,
@@ -214,7 +228,7 @@ class Walk:
 
     def execute(self):
         try:
-            for spec in STEPS:
+            for spec in self.steps:
                 self.step(spec)
         except KeyboardInterrupt:
             self.lifecycle_failure("blocked", "Interrupted; rerun after inspection")
@@ -223,7 +237,7 @@ class Walk:
         finally:
             try:
                 if not any(row["name"] == "cleanup" for row in self.s.results):
-                    self.step(next(spec for spec in STEPS if spec.name == "cleanup"))
+                    self.step(next(spec for spec in self.steps if spec.name == "cleanup"))
             except Exception as error:
                 self.lifecycle_failure("fail", str(error))
         result = self.publish()
@@ -290,6 +304,8 @@ def parser():
     result.add_argument("--mode", choices=("fresh", "warm"), default="fresh")
     result.add_argument("--version", default="v0.23.4")
     result.add_argument("--candidate", type=Path, help="Unsigned bytes from this admitted run")
+    result.add_argument("--two-installations", choices=("install", "controllers", "schedule"),
+                        help="Coordinator-invoked candidate stage in an already running capped VM")
     result.add_argument("--counts-only", action="store_true", help="Record times without enforcing a time gate")
     result.add_argument("--out", type=Path)
     result.add_argument("--run-timeout", type=int, default=600)
@@ -306,14 +322,21 @@ def parser():
 def main(argv=None):
     os.umask(0o077)
     args = parser().parse_args(argv)
+    if args.two_installations and not args.candidate:
+        parser().error("--two-installations requires --candidate")
     if args.plan:
+        specs = STEPS
+        if args.two_installations:
+            from walktwo import steps
+            specs = steps(args.two_installations)
         print(
             json.dumps(
                 {
-                    "target": "published signed release " + args.version,
+                    "target": ("unsigned local candidate " if args.candidate else "published signed release ") + args.version,
+                    "candidate_stage": args.two_installations,
                     "slot": args.slot,
                     "mode": args.mode,
-                    "steps": [{"name": x.name, "assertion": x.assertion, "needs": x.needs} for x in STEPS],
+                    "steps": [{"name": x.name, "assertion": x.assertion, "needs": x.needs} for x in specs],
                 },
                 indent=2,
             )

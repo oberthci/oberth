@@ -23,6 +23,47 @@ stops or resizes a VM. Capacity checks and organizational scheduling belong to
 the invoker. The runner has no train-workspace paths, coordination parser or
 external bootstrap-script dependency.
 
+The same entry point also provides coordinator-invoked two-installation candidate
+stages. Merge `two-installations.example.json` into the external environment.
+Provide a fresh, already running VM cluster in the selected slot, its kubeconfig,
+and four distinct client forwards to the two HTTPS/SSH NodePort pairs. This path
+does not create or reset the cluster. Invoke it inside a cgroup v2 scope with
+`MemoryMax` at most 8 GiB and `MemorySwapMax=0`; provision the VM in its own capped
+scope before invoking the walk.
+Candidate stages additionally need `helm` and `skopeo` on PATH.
+
+```sh
+./test/walk/walk --candidate /absolute/candidate/dist --two-installations install \
+  --env /absolute/private/env.json --out /absolute/evidence/install
+./test/walk/walk --candidate /absolute/candidate/dist --two-installations controllers \
+  --env /absolute/private/env.json --out /absolute/evidence/controllers
+./test/walk/walk --candidate /absolute/candidate/dist --two-installations schedule \
+  --env /absolute/private/env.json --out /absolute/evidence/schedule
+```
+
+Use `--plan` with any stage for an offline ordered assertion table. `install`
+installs the candidate's pinned independent Argo chart at its default cluster-wide
+scope, installs the first candidate once, checks both no-answer collision refusals,
+then installs the second once. Shared definition UID/spec/ownership and the first
+installation's revision, administrator Secret and Deployment must stay unchanged.
+Profiles persist under `state/<slot>-two/<name>` in separate homes; select
+`OBERTH_PROFILE=<context>-<namespace>` there. A successful stage saves a candidate
+receipt in that state directory; observations require the same bytes and layout.
+The coordinator then registers and pushes one independently authored fixture per
+installation and adds its exact `repo`, `run_id` and `commit_sha` to each instance
+description. `controllers` requires passing product runs, matching native
+Workflows, isolated lists and refused foreign lookups. `schedule` reads existing
+authored CronWorkflows and requires two unique native occurrences per parent in
+each installation. Both require exact controller labels and a silent independent
+controller. The runner never authors a schedule, polls for occurrences or retries.
+Installation removal and fixture preparation stay with the coordinator's approved
+walk. Missing prerequisites fail the stage. These stages do not calibrate the
+published-release UX baseline. Every invocation also writes `messages.json` with
+distinct complete CLI messages, occurrence counts and character/UTF-8 lengths;
+private material is redacted and diagnostic truncation is disabled for this table.
+Lengths measure the original logical messages before redaction; if redaction
+merges distinct texts, the table retains the largest observed lengths.
+
 Copy `env.example` to a private directory outside the checkout and fill in
 its values. Paths resolve relative to that configuration file; absolute paths
 are also accepted as operator input. Set restrictive permissions on the file

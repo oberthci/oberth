@@ -1,0 +1,17 @@
+{
+  "two_installations": {
+    "argo": {"namespace": "independent-argo", "release": "plain-argo"},
+    "instances": [
+      {
+        "name": "first", "namespace": "oberth", "pipeline_namespace": "oberth-runs",
+        "url": "https://localhost:34443", "ssh_port": 34022,
+        "https_node_port": 30443, "ssh_node_port": 30022
+      },
+      {
+        "name": "second", "namespace": "second", "pipeline_namespace": "second-runs",
+        "url": "https://localhost:35443", "ssh_port": 35022,
+        "https_node_port": 31443, "ssh_node_port": 31022
+      }
+    ]
+  }
+}
