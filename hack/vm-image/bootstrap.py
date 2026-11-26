@@ -8,7 +8,6 @@ from pathlib import Path
 import secrets
 import shutil
 import subprocess
-import tempfile
 import urllib.request
 
 
@@ -38,14 +37,6 @@ def install_tool(pin, directory):
         body = source.read(MAX_TOOL_BYTES + 1)
     if len(body) > MAX_TOOL_BYTES or hashlib.sha256(body).hexdigest() != pin["sha256"]:
         raise ValueError("Walk tool checksum differs: " + pin["name"])
-    if pin.get("format") == "deb":
-        # Native Git/SSH uses the same distribution's libc, PCRE and zlib
-        # already present in the pinned guest; no package resolver runs.
-        with tempfile.TemporaryDirectory(dir=directory) as temporary:
-            package = Path(temporary) / "tool.deb"
-            package.write_bytes(body)
-            run("dpkg-deb", "--extract", str(package), "/")
-        return
     path = directory / pin["name"]
     path.write_bytes(body)
     path.chmod(0o755)
@@ -92,7 +83,7 @@ def provision(pin):
     write(RESOLV, "".join("nameserver " + address + "\n" for address in pin["nameservers"]), 0o644)
     for tool in pin["tools"]:
         install_tool(tool, BIN)
-    run("git", "--version")
+    run("git", "--version")  # Native Git is already fixed by the guest digest.
     run("systemctl", "start", "docker")
     docker_config = HOME / ".docker"
     docker_config.mkdir(mode=0o700, exist_ok=True)

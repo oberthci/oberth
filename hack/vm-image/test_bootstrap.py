@@ -52,6 +52,8 @@ class GuestProvisioningTest(unittest.TestCase):
             self.assertFalse(resolv.is_symlink())
             self.assertEqual(resolv.read_text(), "nameserver 1.1.1.1\nnameserver 8.8.8.8\n")
             self.assertEqual(install.call_count, len(pins["tools"]))
+            self.assertEqual({call.args[0]["name"] for call in install.call_args_list}, {"k3d", "kubectl", "cosign"})
+            self.assertIn(("git", "--version"), calls)
             self.assertEqual([args[2] for args in calls if args[:2] == ("docker", "pull")], list(pins["images"].values()))
             self.assertIn(bootstrap.registry_command(pins["images"]["registry"]), calls)
             script = (root / "bin/skopeo").read_text()
@@ -74,7 +76,7 @@ class GuestProvisioningTest(unittest.TestCase):
 
     def test_every_download_and_container_has_a_fixed_digest(self):
         pins = json.loads((ROOT / ".oberth/pins/walk-tools.json").read_text())
-        self.assertEqual({tool["name"] for tool in pins["tools"]}, {"git", "k3d", "kubectl", "cosign"})
+        self.assertEqual({tool["name"] for tool in pins["tools"]}, {"k3d", "kubectl", "cosign"})
         for tool in pins["tools"]:
             self.assertIn(tool["version"], tool["url"])
             self.assertRegex(tool["sha256"], r"^[0-9a-f]{64}$")
@@ -119,18 +121,6 @@ class GuestProvisioningTest(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, "checksum differs"):
                             bootstrap.install_tool(pin, Path(temporary))
                         self.assertFalse((Path(temporary) / "tool").exists())
-
-    def test_verified_git_package_is_extracted_without_a_package_resolver(self):
-        body = b"synthetic package"
-        pin = {"name": "git", "format": "deb", "url": "https://oberth.ci/git.deb", "sha256": hashlib.sha256(body).hexdigest()}
-        with tempfile.TemporaryDirectory() as temporary:
-            response = io.BytesIO(body)
-            response.geturl = lambda: pin["url"]
-            with patch.object(bootstrap.urllib.request, "urlopen", return_value=response), patch.object(bootstrap, "run") as run:
-                bootstrap.install_tool(pin, Path(temporary))
-            self.assertEqual(run.call_args.args[:2], ("dpkg-deb", "--extract"))
-            self.assertEqual(run.call_args.args[-1], "/")
-            self.assertEqual(list(Path(temporary).iterdir()), [])
 
     def environment(self, root):
         pins = json.loads((ROOT / ".oberth/pins/walk-tools.json").read_text())

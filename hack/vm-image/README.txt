@@ -27,8 +27,9 @@ The walk waits for cloud-init and checks every required tool and environment
 file before installing the candidate. A failed bootstrap blocks the walk.
 Provisioning needs guest DNS/HTTPS egress, declared in the walk setup policy.
 The reviewed nameservers in walk-tools.json replace the minimal guest's absent
-stub resolver. Git's native SSH commands use a digest-verified distribution
-package and the pinned guest's libc, PCRE and zlib; no package resolver runs.
+stub resolver. Native Git 2.43.0 (Ubuntu 1:2.43.0-1ubuntu7.3) and its libraries
+come from the checksum-pinned guest. Its init -b, commit, clone, fetch, push,
+annotated tag and checkout commands cover the walk; no second Git is installed.
 No VM is needed for the offline provisioning and missing-tool controls:
 python3 -I -m unittest discover -s hack/vm-image -p 'test_*.py'
 
