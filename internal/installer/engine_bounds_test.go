@@ -42,7 +42,7 @@ func TestPinnedImagesAndInternalSourceService(t *testing.T) {
 		t.Fatal(cm)
 	}
 	controller := object(t, objects, "Deployment", "oberth-controller-workflow-controller")
-	if !strings.Contains(jsonOf(t, controller), "quay.io/argoproj/argoexec:v4.0.15@sha256:985c24ef182e066842c424f5aff5ee0a838ca359d78ee2beb415229737fa99a8") || !strings.Contains(jsonOf(t, controller), "quay.io/argoproj/workflow-controller:v4.0.15@sha256:7014032b9d4b70ff87e279800781b74238a18955d8acba5437424359c530ccde") {
+	if !strings.Contains(jsonOf(t, controller), "quay.io/argoproj/argoexec:v4.0.16@sha256:4c7d54e02d98b8d46d8785d026052bdb59c0bf401483a292d25722ea7488431d") || !strings.Contains(jsonOf(t, controller), "quay.io/argoproj/workflow-controller:v4.0.16@sha256:cf4f1972039caad6e3bf932dd0936acf9a92d9e41bc3ddbc4f6cbad8721f4451") {
 		t.Fatal(controller)
 	}
 	store := object(t, objects, "StatefulSet", "oberth-store")

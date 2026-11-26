@@ -12,6 +12,16 @@ import (
 
 func TestPinnedSemaphoreWaiterWakes(t *testing.T) {
 	t.Parallel()
+	testPinnedSync(t, "TestOberthSemaphoreWaiterWakes")
+}
+
+func TestPinnedFailedWorkflowReleasesEveryPermit(t *testing.T) {
+	t.Parallel()
+	testPinnedSync(t, "TestOberthFailedWorkflowReleasesEveryPermit")
+}
+
+func testPinnedSync(t *testing.T, test string) {
+	t.Helper()
 	ctx := controllerContext(t)
 	module := controllertest.Module(ctx, t)
 	entries, err := os.ReadDir(filepath.Join(module, "workflow/sync"))
@@ -41,8 +51,9 @@ func TestPinnedSemaphoreWaiterWakes(t *testing.T) {
 		copyFile(filepath.Join("../..", name), name)
 	}
 	copyFile("testdata/semaphore_wakeup_test.go", "oberth_wakeup_test.go")
+	copyFile("testdata/failed_workflow_locks_test.go", "oberth_failed_locks_test.go")
 	command := exec.CommandContext(ctx, "go", "test", "-race", "-mod=readonly", "-p=1", "-buildvcs=false",
-		"-count=1", "-timeout=120s", "-run=^TestOberthSemaphoreWaiterWakes$", "-v", ".")
+		"-count=1", "-timeout=120s", "-run=^"+test+"$", "-v", ".")
 	command.Dir = directory
 	if raw, err := controllerOutput(command); err != nil {
 		t.Fatalf("pinned semaphore reproduction: %v\n%s", err, raw)

@@ -229,7 +229,7 @@ The `waiters wake` walk fills global parallelism and any authored Argo semaphore
 cancels one running step and lets another fail. Every waiting run must start within
 one minute without a controller restart. If the pinned controller loses waiters,
 install pins a version that wakes them or configures native resync to retry them.
-The controller, executor and Go module pin upstream Argo v4.0.15 (#16642/#16567). Oberth adds no lock implementation.
+The controller, executor and Go module pin upstream Argo v4.0.16 (#16642/#16567, #17304 releases every holder on workflow cleanup). Oberth adds no lock implementation.
 
 ## Inspections
 
@@ -292,4 +292,4 @@ store's public reason with the CA field, without bytes or private causes.
 
 ### Fix and resume
 
-Pipeline Pod delete is the only additional server permission. Argo retry is pinned to v4.0.15. Before downgrading, cancel non-terminal resumed runs or wait for them to finish. An earlier server fails the successor record closed but can orphan its relabelled Workflow; remove oberth.ci/record by hand if needed. Schema and baseline layout remain 6. Residual: a server defect can delete any Pod in the pipeline namespace within its existing native execution authority.
+Pipeline Pod delete is the only additional server permission. Argo retry is pinned to v4.0.16. Before downgrading, cancel non-terminal resumed runs or wait for them to finish. An earlier server fails the successor record closed but can orphan its relabelled Workflow; remove oberth.ci/record by hand if needed. Schema and baseline layout remain 6. Residual: a server defect can delete any Pod in the pipeline namespace within its existing native execution authority.
