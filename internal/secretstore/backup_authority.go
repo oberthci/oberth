@@ -2,47 +2,74 @@ package secretstore
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"strings"
 )
 
 type backupGeneration struct {
 	Nonce        string `json:"nonce"`
-	OTP          string `json:"otp"`
+	Started      bool   `json:"started"`
+	OTPLength    int    `json:"otp_length"`
 	Required     int    `json:"required"`
 	Complete     bool   `json:"complete"`
 	EncodedToken string `json:"encoded_token"`
 }
 
+type BackupAuthorization struct {
+	Config  Config
+	Share   []byte
+	Receipt string
+}
+
 // SetupBackupWithUnseal uses the bundled store's single-share native quorum.
 // No root session is supplied, printed or saved; received authority is revoked
 // after the two backup resources are checked, including on setup failure.
-func (c *Client) SetupBackupWithUnseal(ctx context.Context, cfg Config, share []byte) (err error) {
-	if cfg.Validate() != nil || len(share) == 0 || len(share) > 64<<10 {
+func (c *Client) SetupBackupWithUnseal(ctx context.Context, request BackupAuthorization) (err error) {
+	if request.Config.Validate() != nil || len(request.Share) == 0 || len(request.Share) > 64<<10 || request.Receipt == "" {
 		return refuse("input", nil)
 	}
-	authority, err := c.backupAuthority(ctx, share)
+	journal, length, err := c.beginBackupAuthorization(ctx, request.Receipt)
 	if err != nil {
 		return err
 	}
+	defer journal.Close()
+	authority, err := c.backupAuthority(ctx, request.Share, journal, length)
+	if err != nil {
+		return journal.problem()
+	}
 	defer clear(authority)
-	defer func() { err = joinRevoke(ctx, c, authority, err) }()
-	return c.SetupBackup(ctx, authority, cfg)
+	defer func() {
+		revoke := joinRevoke(ctx, c, authority, nil)
+		if revoke == nil {
+			revoke = journal.remove()
+		}
+		err = errors.Join(err, revoke)
+		if revoke != nil {
+			err = errors.Join(err, journal.problem())
+		}
+	}()
+	return c.SetupBackup(ctx, authority, request.Config)
 }
 
-func (c *Client) backupAuthority(ctx context.Context, share []byte) ([]byte, error) {
-	var started backupGeneration
-	status, err := c.JSON(ctx, Request{Method: "PUT", Path: "/sys/generate-root/attempt", Body: map[string]string{}}, &started)
-	if status == http.StatusMethodNotAllowed {
-		return nil, refuse("backup-root-disabled", nil)
+func (c *Client) backupAuthority(ctx context.Context, share []byte, journal backupAuthorizationReceipt, length int) ([]byte, error) {
+	var otp string
+	for len(otp) < length {
+		otp += rand.Text()
 	}
-	if err != nil || started.Nonce == "" || started.Required != 1 || len(started.OTP) < 16 || len(started.OTP) > 128 {
+	pad := []byte(otp[:length])
+	defer clear(pad)
+	var started backupGeneration
+	_, err := c.JSON(ctx, Request{Method: http.MethodPut, Path: "/sys/generate-root/attempt", Body: map[string]string{"otp": string(pad)}}, &started)
+	if err != nil || started.Nonce == "" || started.Required != 1 {
 		return nil, refuse("backup-setup", nil)
 	}
-	pad := []byte(started.OTP)
-	defer clear(pad)
+	if err = journal.record(c.address, started.Nonce); err != nil {
+		return nil, err
+	}
 	var completed backupGeneration
 	_, err = c.JSON(ctx, Request{Method: "PUT", Path: "/sys/generate-root/update", Body: map[string]string{"key": string(share), "nonce": started.Nonce}}, &completed)
 	if err != nil || !completed.Complete || completed.Nonce != started.Nonce {

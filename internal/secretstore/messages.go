@@ -32,6 +32,10 @@ func storeRefusal(code string) (string, string) {
 
 func operationRefusal(code string) (string, string) {
 	switch code {
+	case "backup-pending":
+		return "Store root authorization needs cleanup.", "Follow docs/install.md#back-up to revoke root accessors and cancel generation; remove the pending receipt, then retry."
+	case "backup-receipt":
+		return "Authorization receipt cannot be saved.", "Copy --config into a writable persistent directory; keep its .backup-setup.json receipt until setup confirms revocation."
 	case "backup-setup":
 		return "Store backup authorization did not finish.", "Unseal the bundled store, inspect native authorization progress, then retry this explicit backup setup."
 	case "backup-root-disabled":

@@ -146,9 +146,15 @@ profile, kubeconfig or decryption key. Bundled backups fail without store access
 ConfigMap `oberth-backup`; across schemas the Job fails until upgrade. For the store role via a
 saved share, set listener `disable_unauthed_generate_root_endpoints=false`, restart/unseal, run:
 `oberth secretstore setup --backup-only --config <config> --ca-file <ca> --unseal-file <share>`
-Revocation failure refuses completion. Restore the listener to `true`, restart/unseal;
-inspect/cancel unfinished attempts before retry. See the [native authorization
-API](https://openbao.org/docs/api/system/generate-root/). Or supply `--token-file <session>` and
+The CLI chooses its OTP before generation and saves only store/nonce metadata in `<config>.backup-setup.json`; revocation removes it.
+Keep the config and receipt in a writable persistent directory; copy a mounted read-only config there before setup. Unseal/CA files may stay mounted.
+An uncertain reply or crash leaves this receipt and blocks setup. Without an administrator session, cancel unfinished generation and use the native quorum API to create one; keep its OTP and reply private.
+On the receipt's store, with that separate administrator session, `LIST auth/token/accessors`,
+then `POST auth/token/lookup-accessor` with each `accessor`; coordinate with root-session owners and revoke every other root-policy accessor
+using `POST auth/token/revoke-accessor` with that `accessor`. The native API cannot recover a lost issued reply or identify its accessor by nonce.
+`DELETE sys/generate-root/attempt` cancels unfinished generation only. Revoke the cleanup session last (`POST auth/token/revoke-self`),
+remove the receipt, retry and restore the listener to `true`, restart/unseal.
+See the [native authorization API](https://openbao.org/docs/api/system/generate-root/). Or supply `--token-file <session>` and
 revoke it after setup. Grant read/create/update only on `sys/policies/acl/oberth-backup` and
 `auth/<auth-mount>/role/oberth-backup`; drift refuses. Restore needs a signed release with matching
 schema/protocol (`--release-dir` works offline), a fresh cluster, a new profile and the same

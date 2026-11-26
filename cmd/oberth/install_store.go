@@ -39,6 +39,9 @@ func openCommandStore(r installationRequest) (*secretstore.Client, secretstore.C
 }
 
 func runStoreOperator(ctx context.Context, r installationRequest, out io.Writer) error {
+	if err := checkPendingStoreSetup(r); err != nil {
+		return err
+	}
 	store, cfg, err := openCommandStore(r)
 	if err != nil {
 		return err
@@ -71,6 +74,13 @@ func runStoreOperator(ctx context.Context, r installationRequest, out io.Writer)
 	return err
 }
 
+func checkPendingStoreSetup(r installationRequest) error {
+	if r.name == "secretstore setup" && r.text("config") != "" {
+		return secretstore.CheckBackupAuthorization(r.text("config") + ".backup-setup.json")
+	}
+	return nil
+}
+
 func setupBackupWithUnseal(ctx context.Context, r installationRequest, store *secretstore.Client, cfg secretstore.Config) error {
 	if r.text("token-file") != "" {
 		return installationProblem("Choose one backup setup authority.", "Use --unseal-file for the bundled store, or --token-file for a delegated store administrator.")
@@ -80,7 +90,7 @@ func setupBackupWithUnseal(ctx context.Context, r installationRequest, store *se
 		return err
 	}
 	defer clear(share)
-	return store.SetupBackupWithUnseal(ctx, cfg, share)
+	return store.SetupBackupWithUnseal(ctx, secretstore.BackupAuthorization{Config: cfg, Share: share, Receipt: r.text("config") + ".backup-setup.json"})
 }
 
 func (a application) runSecretStep(ctx context.Context, r installationRequest, in io.Reader, out io.Writer) error {
