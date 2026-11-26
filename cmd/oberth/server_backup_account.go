@@ -75,7 +75,7 @@ func (s serverBackupSnapshot) authenticatedAccount(ctx context.Context, token st
 	review, err := s.owner.cluster.backupReview.AuthenticationV1().TokenReviews().Create(check,
 		&authv1.TokenReview{Spec: authv1.TokenReviewSpec{Token: token, Audiences: []string{apicontract.BackupSnapshotAudience}}}, metav1.CreateOptions{})
 	account := backupAccountName(s.owner.c.config.Namespace)
-	if err != nil || review == nil || review.Status.Error != "" {
+	if err != nil || review == nil || review.Status.Authenticated && review.Status.Error != "" {
 		return actor.Actor{}, publicerr.New(publicerr.Unavailable, "Backup authorization is unavailable.", "Check the Kubernetes API and backup account; retry this backup explicitly.", nil)
 	}
 	if !review.Status.Authenticated || review.Status.User.Username != account || review.Status.User.UID == "" || len(review.Status.Audiences) != 1 || review.Status.Audiences[0] != apicontract.BackupSnapshotAudience {
