@@ -5,10 +5,11 @@ import {check} from './cdp.mjs';
 // the example's spelled order (p passed, f failed, r running, q queued, c
 // cancelled); every bar links to its run with status, ref and time as its title;
 // a repository without runs says so. One read serves every row, and each row
-// stays one line from 1024px. A pass that is not evidence (a) is amber, with its
-// reason ending the bar title and in place of the latest-run cell's status word.
+// stays one line from 1024px. A pass that is not evidence (a) is drawn as other
+// runs that are no result, with its reason ending the bar title and as the
+// latest-run cell's title; the cell keeps the status word.
 const spelled={'origin/team/api':'pfpppcfppppfrppppqfp','origin/team/web':'ppapr','mirror/tools/cli':''};
-const colour={p:'passed',a:'noevidence',f:'failed',r:'running',q:'running',c:'other'};
+const colour={p:'passed',a:'other',f:'failed',r:'running',q:'running',c:'other'};
 
 export async function repositories(client){
  const results=[];
@@ -18,7 +19,7 @@ export async function repositories(client){
   await client.cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
   const mark=client.requests.length;
   await client.loaded('/repos','.repos a.row');
-  const page=await client.evaluate(`({scroll:document.documentElement.scrollWidth,head:Array.from(document.querySelectorAll('.repos .head span')).map(node=>node.textContent),rows:Array.from(document.querySelectorAll('.repos a.row')).map(row=>({key:row.dataset.key,height:row.getBoundingClientRect().height,latest:row.children[2].textContent,hidden:row.children[3].getAttribute('aria-hidden'),branch:row.children[1].textContent,cells:Array.from(row.children).map(cell=>cell.getBoundingClientRect().height),bars:Array.from(row.querySelectorAll('.bar')).map(bar=>({colour:bar.classList[1],href:bar.getAttribute('href'),title:bar.title,label:bar.getAttribute('aria-label'),tab:bar.tabIndex,left:bar.getBoundingClientRect().left,width:bar.getBoundingClientRect().width,height:bar.getBoundingClientRect().height}))}))})`);
+  const page=await client.evaluate(`({scroll:document.documentElement.scrollWidth,head:Array.from(document.querySelectorAll('.repos .head span')).map(node=>node.textContent),rows:Array.from(document.querySelectorAll('.repos a.row')).map(row=>({key:row.dataset.key,height:row.getBoundingClientRect().height,latest:row.children[2].textContent,latestTitle:row.children[2].title,latestKind:row.children[2].querySelector('.state')?.classList[1],hidden:row.children[3].getAttribute('aria-hidden'),branch:row.children[1].textContent,cells:Array.from(row.children).map(cell=>cell.getBoundingClientRect().height),bars:Array.from(row.querySelectorAll('.bar')).map(bar=>({colour:bar.classList[1],href:bar.getAttribute('href'),title:bar.title,label:bar.getAttribute('aria-label'),tab:bar.tabIndex,left:bar.getBoundingClientRect().left,width:bar.getBoundingClientRect().width,height:bar.getBoundingClientRect().height}))}))})`);
   const reads=client.requests.slice(mark).filter(request=>request.path.startsWith('/api/repos')||request.path.startsWith('/api/runs'));
   check(reads.length===1&&new URL(reads[0].url).searchParams.get('recent_runs')==='true','the page did not read every strip with the repository list in one request '+JSON.stringify(reads));
   check(page.scroll<=width&&JSON.stringify(page.head)==='["REPOSITORY","DEFAULT BRANCH","LATEST RUN","LAST 20","BRANCHES"]','repositories page overflowed or lost its head '+JSON.stringify(page));
@@ -39,7 +40,7 @@ export async function repositories(client){
   // prints branch names as the run list does.
   check(api.latest==='failed  · w5/own-m3 · Nov 15 15:00'&&api.branch==='main','latest run or default branch not shown as a branch name '+JSON.stringify(api));
   const web=page.rows.find(row=>row.key==='origin/team/web');
-  check(web.latest.startsWith('assisted; not evidence  · search · ')&&web.bars[2].title.endsWith(' · assisted; not evidence')&&!web.bars[1].title.includes('evidence'),'not-evidence pass not named '+JSON.stringify(web));
+  check(web.latest.startsWith('passed  · feature/search · ')&&web.latestTitle==='assisted; not evidence'&&web.latestKind==='other'&&api.latestTitle===''&&web.bars[2].title.endsWith(' · assisted; not evidence')&&!web.bars[1].title.includes('evidence'),'not-evidence pass not named '+JSON.stringify(web));
   check(api.bars[0].title==='passed · topic-0 · Nov 15 19:00'&&api.bars[19].title==='passed · topic-19 · 14:00'&&api.bars[5].title.startsWith('cancelled · ')&&api.bars[17].title.startsWith('queued · '),'bar titles wrong '+JSON.stringify(api.bars.map(bar=>bar.title)));
   const capture=await client.cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{x:0,y:0,width,height:Math.max(900,await client.evaluate('document.documentElement.scrollHeight')),scale:1}});
   await writeFile(`${client.artifacts}/repositories-strip-${width}-light.png`,Buffer.from(capture.data,'base64'));
@@ -51,10 +52,16 @@ export async function repositories(client){
  // The mono theme draws running hollow, as its status mark, so it differs from white failed.
  const mono=await barLooks(client,'mono'),look=bar=>bar.fill+'|'+bar.edge,running=mono.find(bar=>bar.kind==='running');
  check(new Set(mono.map(look)).size===4&&running.fill==='rgba(0, 0, 0, 0)'&&running.edge.startsWith('solid ')&&mono.every(bar=>bar.fill!=='rgba(0, 0, 0, 0)'||bar.edge.startsWith('solid ')),'mono bars not four visible looks '+JSON.stringify(mono));
- // A pass that is not evidence is drawn amber, as running, never as a green pass.
- const amber=await client.evaluate(`(()=>{const fill=kind=>getComputedStyle(document.querySelector('.repos .bar.'+kind)).backgroundColor;return {noevidence:fill('noevidence'),running:fill('running'),passed:fill('passed')};})()`);
- check(amber.noevidence===amber.running&&amber.noevidence!==amber.passed,'not-evidence pass not amber '+JSON.stringify(amber));
- results.push({light,mono,amber});
+ // A pass that is not evidence is drawn as a cancelled run (other), never as a pass or a failure,
+ // in the light and the mono theme.
+ const noResult=[];
+ for(const theme of ['light','mono'])noResult.push({theme,...await client.evaluate(`(()=>{document.documentElement.dataset.theme=${JSON.stringify(theme)};
+  const look=node=>{const style=getComputedStyle(node);return style.backgroundColor+'|'+style.borderTopStyle+' '+style.borderTopColor;};
+  const bar=(repo,index)=>document.querySelectorAll('.repos a.row[data-key="'+repo+'"] .bar')[index];
+  const out={assisted:look(bar('origin/team/web',2)),cancelled:look(bar('origin/team/api',5)),passed:look(bar('origin/team/api',0)),failed:look(bar('origin/team/api',1))};
+  document.documentElement.dataset.theme='light';return out;})()`)});
+ check(noResult.every(look=>look.assisted===look.cancelled&&look.assisted!==look.passed&&look.assisted!==look.failed),'not-evidence pass not drawn as other '+JSON.stringify(noResult));
+ results.push({light,mono,noResult});
  // A row link's accessible name is its text cells, as on a page without bars: aria-hidden does not
  // take descendants out of a name, so the row names itself and no bar title may appear in it. An
  // unread default branch leaves no gap in the label (the tree collapses spaces, so the label is read too).

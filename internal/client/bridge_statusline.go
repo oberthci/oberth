@@ -109,7 +109,7 @@ func footerRows(page apicontract.RunPage, err error, now time.Time) json.RawMess
 		text, color := footerRun(run, page.Runs, now)
 		reason := notEvidence(run)
 		if reason != "" && run.Status == "passed" {
-			color = "yellow"
+			color = "status-metadata"
 		}
 		children = append(children, map[string]any{"type": "text", "props": map[string]any{"color": color}, "children": []any{text}})
 		if reason != "" {
@@ -149,7 +149,8 @@ func footerRun(run apicontract.RunRecord, runs []apicontract.RunRecord, now time
 	return clean(strings.Join(cells, " ")), color
 }
 
-// C2's reasons for a run that is never evidence; a pass with one is amber.
+// C2's reasons for a run that is never evidence; a pass with one is grey, as
+// other runs that are no result.
 const (
 	reasonResumed  = "resumed; not evidence"
 	reasonAssisted = "assisted; not evidence"

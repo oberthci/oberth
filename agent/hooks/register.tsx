@@ -178,8 +178,8 @@ export const register: Register = (on, options) => {
     const [header, ...lines] = boxRows(state, loop.count, e.props.bodyColumns - FRAME)
     const { Box, Text } = $.ui.resolve(e)
     if (compact && !rows.length) return <Text wrap="truncate-end" color="yellow">{PROFILE_REASON}</Text>
-    // A pass that is not evidence is amber, never green.
-    const color = (run: Run) => run.status === 'passed' ? (notEvidence(run) ? 'yellow' : 'green') : run.status === 'failed' ? 'red' : run.status === 'cancelled' ? 'gray' : 'yellow'
+    // A pass that is not evidence is grey, as other runs that are no result, never green.
+    const color = (run: Run) => run.status === 'passed' ? (notEvidence(run) ? 'gray' : 'green') : run.status === 'failed' ? 'red' : run.status === 'cancelled' ? 'gray' : 'yellow'
     return <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor="gray" paddingX={1} width={problems.length && !compact ? problemWidth : undefined}>
       {rows.length > 0 && <Text wrap="truncate-end" dimColor>{header}</Text>}
       {rows.map((run, index) => <Text wrap="truncate-end" color={color(run)}>{lines[index]}</Text>)}

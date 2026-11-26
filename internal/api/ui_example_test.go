@@ -121,7 +121,7 @@ func uiExample(t *testing.T) *fixture {
 func exampleRepositories(runs []apicontract.RunRecord, at time.Time) []apicontract.Repository {
 	api, web := runs[1].RunSummary, runs[2].RunSummary
 	api.Ref, api.CreatedAt = "refs/heads/w5/own-m3", at.Add(-24*time.Hour)
-	web.Ref, web.Status, web.DisplayReason = "refs/heads/search", stepmodel.RunPassed, "assisted; not evidence"
+	web.Ref, web.Status, web.DisplayReason = "refs/heads/feature/search", stepmodel.RunPassed, "assisted; not evidence"
 	return []apicontract.Repository{
 		{Repo: runs[0].Repo, DefaultBranch: "refs/heads/main", BranchCount: new(3), LatestRun: &api, RecentRuns: exampleMarks(at, "pfpppcfppppfrppppqfp")},
 		{Repo: runs[2].Repo, DefaultBranch: "refs/heads/main", LatestRun: &web, RecentRuns: exampleMarks(at, "ppapr")},

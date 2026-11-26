@@ -465,7 +465,7 @@ test('resumed and assisted runs say so on passed rows in the box and /oberth-run
   }
 })
 
-test('a not-evidence reason stays whole at 60 and 80 columns and its pass is amber', { options: { ...options, runs: 5 } }, async ($, on) => {
+test('a not-evidence reason stays whole beside the status word from 50 columns and its pass is grey', { options: { ...options, runs: 5 } }, async ($, on) => {
   bottom(on)
   mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
   const long = { repo: 'github/oberthci/repository-with-a-long-name', ref: 'refs/heads/w6/fix-resume-long-branch' }
@@ -477,20 +477,21 @@ test('a not-evidence reason stays whole at 60 and 80 columns and its pass is amb
     { ...run('dddddddd000000000000000000000000'), ...long, status: 'failed', display_reason: RESUMED_REASON, failure: lintFailure },
   ])
   await startSession($, on)
-  for (const columns of [60, 80]) {
+  for (const columns of [50, 60, 80]) {
     const ui = await $.ui.mount({ ...band, props: { ...band.props, bodyColumns: columns }, surface: 'terminal' })
     const drawn = await ui.findAll({ type: 'Text' })
     await ui.unmount()
     const row = (id: string) => drawn.find(line => line.text.startsWith(id))!
     for (const line of drawn) expect(line.text.length).toBeLessThanOrEqual(columns - 4)
-    expect(row('aaaaaaaa').text).toEndWith(RESUMED_REASON)
-    expect(row('cccccccc').text).toEndWith(ASSISTED_REASON)
+    expect(row('aaaaaaaa').text).toMatch(/ ✓ passed .*resumed; not evidence$/)
+    expect(row('cccccccc').text).toMatch(/ ✓ passed .*assisted; not evidence$/)
+    expect(row('dddddddd').text).toContain('✗ failed')
     expect(row('dddddddd').text).toContain(RESUMED_REASON)
     expect(row('bbbbbbbb').text).not.toContain('evidence')
-    expect([row('aaaaaaaa').props.color, row('cccccccc').props.color, row('bbbbbbbb').props.color, row('dddddddd').props.color]).toEqual(['yellow', 'yellow', 'green', 'red'])
+    expect([row('aaaaaaaa').props.color, row('cccccccc').props.color, row('bbbbbbbb').props.color, row('dddddddd').props.color]).toEqual(['gray', 'gray', 'green', 'red'])
     const listed = (await $.command.run({ ...commandInput, presentation: { isFullscreen: false, columns }, command: 'oberth-runs', args: '' })).text!.split('\n')
     for (const line of listed) expect(line.length).toBeLessThanOrEqual(columns)
-    expect(listed.find(line => line.startsWith('aaaaaaaa'))).toContain(RESUMED_REASON)
+    expect(listed.find(line => line.startsWith('aaaaaaaa'))).toMatch(/ ✓ passed .*resumed; not evidence$/)
     expect(listed.find(line => line.startsWith('cccccccc'))).toContain(ASSISTED_REASON)
     expect(listed.find(line => line.startsWith('dddddddd'))).toContain(RESUMED_REASON)
   }

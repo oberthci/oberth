@@ -94,7 +94,7 @@ func TestRepositoryRecentRunsReadAsOneLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := out.String()
-	if !strings.Contains(text, "repositories[0] / recent runs: PF-RRA (oldest first)\n") || !strings.Contains(text, "repositories[1] / recent runs: no runs\n") ||
+	if !strings.Contains(text, "repositories[0] / recent runs: PF-RR- (oldest first)\n") || !strings.Contains(text, "repositories[1] / recent runs: no runs\n") ||
 		strings.Contains(text, "repositories[2] / recent runs") || strings.Contains(text, "11111111") || strings.Contains(text, "refs/heads") {
 		t.Fatalf("recent runs not one line per repository: %q", text)
 	}

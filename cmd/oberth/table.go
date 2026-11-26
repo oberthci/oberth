@@ -59,7 +59,7 @@ func renderRepositoryRuns(out io.Writer, path, key string, value any) (bool, err
 
 // recentLetters spells runs as the web page colours them: P passed, F failed,
 // R queued or running, - cancelled or any other status; a pass that is not
-// evidence (its mark carries a reason) is A, never P.
+// evidence (its mark carries a reason) is -, never P.
 func recentLetters(runs []any) string {
 	letters := map[string]string{"passed": "P", "failed": "F", "queued": "R", "running": "R"}
 	var text strings.Builder
@@ -71,7 +71,7 @@ func recentLetters(runs []any) string {
 			letter = "-"
 		}
 		if reason, _ := object["display_reason"].(string); status == "passed" && reason != "" {
-			letter = "A"
+			letter = "-"
 		}
 		text.WriteString(letter)
 	}

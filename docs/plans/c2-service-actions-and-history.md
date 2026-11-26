@@ -259,7 +259,8 @@ Assisted run is never shown as plainly passed: a passed one says `assisted; not
 evidence` in every view (rows without a stored reason too) and in its finished
 event, and a failed one keeps its own reason. Recent-run marks carry the same
 reason. Both reasons fit any reason cell whole (at most 22 characters); every
-surface keeps them whole and draws such a pass amber, never green.
+surface keeps them whole beside the status word and draws such a pass as other
+runs that are no result (grey), never green; no new status, letter or colour.
 
 Run get/list expose an explicit workflow choice as `selected_file` from the persisted
 request, including refused admissions and reruns, without another admission read.

@@ -124,9 +124,9 @@ const FALLBACK_WIDTH = 80
 
 // Aligned single lines of at most width cells. The last column and the names give way in
 // the order Last says (the last column goes when it cannot keep NARROWEST), then lines are cut.
-// A kept reason is never cut: the last column keeps it whole while the names give way, and
-// when the row still cannot fit, the reason takes the place of its status word and the cells
-// after it, beside the status icon.
+// A kept reason is never cut and the status word always stays: the last column keeps the
+// reason whole while the names give way, then AGE, TIME and STEPS go, then the names. Below
+// about 42 cells (the RUN and STATUS columns, the reason and its spaces) a line is cut.
 function fit(table: string[][], requested: number, first: boolean, kept: string[]): string[] {
   const width = Number.isFinite(requested) && requested >= 2 ? Math.floor(requested) : FALLBACK_WIDTH
   const widths = table[0]!.map((_, index) => Math.max(...table.map(row => cells(row[index]!))))
@@ -145,15 +145,12 @@ function fit(table: string[][], requested: number, first: boolean, kept: string[
     }
   }
   for (const shrink of first ? [shrinkLast, shrinkNames] : [shrinkNames, shrinkLast]) shrink()
-  const replace = floor > 0 && over() > 0
-  if (replace) widths[last] = 0
+  if (floor > 0) for (const index of [6, 5, 4, 1, 2]) if (over() > 0) widths[index] = 0
   // A cut keeps all but the last cell, so a kept reason exactly as wide as its column shows alone.
   const fitted = (cell: string, size: number, keep: string) => cells(cell) > size && keep && size <= cells(keep) ? keep : cut(cell, size)
   const shown = (row: string[], upto: number, keep: string) => row.slice(0, upto).flatMap((cell, index) =>
     widths[index] ? [pad(fitted(cell, widths[index]!, index === last ? keep : ''), widths[index]!)] : [])
-  return table.map((row, index) => cut((replace && kept[index]
-    ? [...shown(row, 3, ''), `${Array.from(row[3]!)[0]} ${kept[index]}`]
-    : shown(row, row.length, kept[index]!)).join(' ').trimEnd(), width))
+  return table.map((row, index) => cut(shown(row, row.length, kept[index]!).join(' ').trimEnd(), width))
 }
 
 // The header and one line per run, shared by the box and /oberth-runs.
@@ -167,7 +164,7 @@ function rows(runs: Run[], now: number, width: number, last: Last): string[] {
 const selected = (run: Run) => run.selected_file ? `${run.selected_file} selected` : ''
 
 // A resumed or assisted run is never evidence: its row says so whole, passed rows included,
-// and such a pass is not drawn as an ordinary one.
+// and such a pass is drawn grey, as other runs that are no result.
 export const RESUMED_REASON = 'resumed; not evidence'
 export const ASSISTED_REASON = 'assisted; not evidence'
 export const notEvidence = (run: Run) => run.display_reason === RESUMED_REASON || run.display_reason === ASSISTED_REASON ? run.display_reason : ''

@@ -80,12 +80,12 @@ Without a selection it explains setup once and stays hidden.
 It registers no model tools: they would share the bridge's server name, and the bridge serves the model. It reads no credential paths, server state or cluster API.
 
 Resumed and assisted runs are never evidence, so their rows say so, passed included,
-and such a pass is amber, never green. The box keeps C2's `resumed; not evidence` or
-`assisted; not evidence` whole after the status: the names give way first, and when
-the row still cannot fit, the reason takes the place of the status word and the cells
-after it, beside the icon. `/oberth-runs` leads the reason column with it under the
-same rule, and the Codex footer gives it a cell of its own after the run. A contract
-test binds the words of all three, the web page and C2.
+and such a pass is grey, as cancelled rows, never green. The box keeps `✓ passed` and
+C2's `resumed; not evidence` or `assisted; not evidence` whole after it: the names
+give way first, then AGE, TIME and STEPS, then the names go; below about 42 body cells
+a line is cut. `/oberth-runs` leads the reason column with it under the same rule,
+and the Codex footer gives it a cell of its own after the run. A contract test binds
+the words of all three, the web page and C2.
 
 One timer discovers idle runs every 15 seconds. While a shown or pinned run is live,
 one public `run wait --until any --timeout-s 1` per round replaces the sleep between
