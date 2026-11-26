@@ -24,7 +24,7 @@ func (s *Store) RunByRef(ctx context.Context, repositories []string, ref string)
 	if !validRef(ref) {
 		return stateport.Run{}, refuse(invalid, nil)
 	}
-	return s.latestRun(ctx, stateport.RunFilter{Repositories: repositories, Ref: ref})
+	return s.latestRun(ctx, stateport.RunFilter{Repositories: repositories, Ref: ref, SkipResumed: true})
 }
 
 // ResolveRun applies canonical repository scope before testing prefix uniqueness.

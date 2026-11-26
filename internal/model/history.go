@@ -27,6 +27,9 @@ type RunOrigin struct {
 	Assisted      bool   `json:"assisted"`
 	WorkflowName  string `json:"workflow_name"`
 	WorkflowUID   string `json:"workflow_uid"`
+	// ResumedFrom names the failed run whose Workflow this run resumed on a
+	// fixed commit. It is write-once; a resumed run is never evidence.
+	ResumedFrom string `json:"resumed_from,omitempty"`
 }
 
 // ReleaseReceipt identifies a delivered release, never a merely passing run.
@@ -133,6 +136,10 @@ func copyPointer[T any](value *T) *T {
 	return &copy
 }
 
-// HasAssistance excludes audited inspection dispatches from evidence.
-// Requesting assist alone leaves a run ordinary.
-func (o RunOrigin) HasAssistance() bool { return o.Assisted }
+// HasAssistance excludes audited inspection dispatches and resumed runs from
+// evidence. Requesting assist alone leaves a run ordinary.
+func (o RunOrigin) HasAssistance() bool { return o.Assisted || o.Resumed() }
+
+// Resumed reports a run that resumed a failed run's Workflow. It is no build
+// of its commit in either direction: it neither gives nor blocks evidence.
+func (o RunOrigin) Resumed() bool { return o.ResumedFrom != "" }

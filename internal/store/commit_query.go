@@ -8,7 +8,8 @@ import (
 	"github.com/oberthci/oberth/internal/stateport"
 )
 
-// RunByCommit resolves only visible object/commit prefixes, newest run per commit.
+// RunByCommit resolves only visible object/commit prefixes, newest run per commit;
+// a resumed run is never selected by commit.
 func (s *Store) RunByCommit(ctx context.Context, repositories []string, prefix string) (stateport.Run, error) {
 	if !stateport.ValidCommitPrefix(prefix) {
 		return stateport.Run{}, refuse(invalidCommit, nil)
@@ -44,7 +45,7 @@ func commitQuery(repositories []string, prefix string) (string, []any) {
 		}
 		column := `json_extract(r.summary,'$.` + field + `')`
 		parts = append(parts, `SELECT r.sequence,coalesce(json_extract(r.summary,'$.commit_sha'),json_extract(r.summary,'$.object_sha')) AS identity
-FROM runs r INDEXED BY `+index+` CROSS JOIN repositories p ON p.id=r.repo_id WHERE `+predicate+` AND `+column+`>=? AND `+column+`<?`)
+FROM runs r INDEXED BY `+index+` CROSS JOIN repositories p ON p.id=r.repo_id WHERE `+predicate+` AND `+column+`>=? AND `+column+`<? AND `+unresumed("r"))
 		args = append(args, scopeArgs...)
 		args = append(args, prefix, prefixEnd(prefix))
 	}

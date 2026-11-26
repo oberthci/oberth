@@ -69,7 +69,7 @@ func (s *Service) runView(ctx context.Context, r stateport.Run, q runQuery) (api
 // record shows a resolved run with its recorded cause. Callers pass only runs
 // already resolved inside the caller's repository scope.
 func record(r stateport.Run) apicontract.RunRecord {
-	return apicontract.RunRecord{RunSummary: summary(r.RunSummary), RunCause: r.Origin.RunCause, SelectedFile: r.Origin.RequestedFile}
+	return apicontract.RunRecord{RunSummary: view(r), RunCause: r.Origin.RunCause, SelectedFile: r.Origin.RequestedFile}
 }
 
 func (s *Service) listFilter(ctx context.Context, a actor.Actor, q runQuery) (stateport.RunFilter, error) {
@@ -164,7 +164,7 @@ func (s *Service) prepareStatus(ctx context.Context, a actor.Actor, q runQuery) 
 	if err != nil {
 		return nil, err
 	}
-	return bounded(func(context.Context) (stepmodel.RunSummary, error) { return summary(r.RunSummary), nil }), nil
+	return bounded(func(context.Context) (stepmodel.RunSummary, error) { return view(r), nil }), nil
 }
 
 func (s *Service) repos(ctx context.Context, scope []string, options apicontract.RepoListArgs) ([]apicontract.Repository, error) {
@@ -245,7 +245,7 @@ func (s *Service) runFacts(ctx context.Context, repos []stateport.Repository, sc
 		}
 		for _, run := range latest {
 			if run.Repo == r.Canonical {
-				latest := summary(run.RunSummary)
+				latest := view(run)
 				v.LatestRun = &latest
 				break
 			}

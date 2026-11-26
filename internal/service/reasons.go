@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
@@ -33,6 +35,7 @@ const (
 	reasonPromoteAgain             = "default branch moved; promote again"
 	reasonRetestNotStarted         = "default branch moved; retest not started"
 	reasonAssisted                 = "run is assisted"
+	reasonResumed                  = "resumed run; not evidence"
 
 	reasonHoldAbandon = "hold release requested"
 
@@ -194,6 +197,19 @@ func terminal(status stepmodel.RunStatus) bool {
 func isMissing(err error) bool {
 	var p *publicerr.Error
 	return errors.As(err, &p) && p.Code() == publicerr.NotFound
+}
+
+// view is a run's public summary: a resumed run says so in every state.
+func view(r stateport.Run) stepmodel.RunSummary {
+	v := summary(r.RunSummary)
+	resumedReason(&v, r.Origin)
+	return v
+}
+
+func resumedReason(v *stepmodel.RunSummary, o model.RunOrigin) {
+	if o.Resumed() {
+		v.DisplayReason = reasonResumed
+	}
 }
 
 // summary keeps reasons that add information beyond the status; detail stays whole.

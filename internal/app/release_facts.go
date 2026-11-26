@@ -132,7 +132,8 @@ func retainedReleaseFacts(ctx context.Context, r Request, file string, runs Rele
 }
 
 func buildResult(ctx context.Context, row stateport.Run, runs ReleaseRuns) (bool, error) {
-	if row.Release || row.Origin.RequestedFile != "" && row.Origin.RequestedFile != workflowpolicy.BuildFile {
+	// A resumed run is no build of its commit: it neither passes nor blocks.
+	if row.Release || row.Origin.Resumed() || row.Origin.RequestedFile != "" && row.Origin.RequestedFile != workflowpolicy.BuildFile {
 		return false, nil
 	}
 	if !row.HasAdmission {

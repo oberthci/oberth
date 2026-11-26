@@ -89,6 +89,16 @@ func (s *Service) recordFinished(ctx context.Context, f finishedRecord) error {
 	if reason == "" {
 		reason = runReason(o.Status)
 	}
+	if r.Origin.Resumed() {
+		// A resumed run is never evidence and is never rerun for its verdict:
+		// the fix is resumed again or pushed for a full run.
+		reason = reasonResumed
+		if o.Failure != nil {
+			failure := *o.Failure
+			failure.Retry = stepmodel.RetryHint{Action: stepmodel.RetryNone}
+			o.Failure = &failure
+		}
+	}
 	projectCI, err := s.ciIssueEvidence(ctx, r, o)
 	if err != nil {
 		return err

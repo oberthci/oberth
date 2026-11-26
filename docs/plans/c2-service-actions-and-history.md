@@ -248,5 +248,13 @@ Promotion selects the newest build.yaml branch result for its commit; an optiona
 workflow result cannot replace that evidence. Scan at most two 200-run pages;
 after 400 optional rows, refuse with guidance to run a fresh build for the commit.
 
+A resumed run (fix and resume re-runs the failed part of a failed run; its
+write-once `resumed_from` is in the run origin) is no build of its commit either
+way: promotion and the release build check skip it, so it never shadows the full
+run, and it never counts as evidence. Selection by commit or ref (status, wait,
+run get) skips it; only its ID names it. Every view says `resumed run; not
+evidence` in every state, passed included; its verdict stores that reason with
+retry hint `none`, since an unassisted run of that commit may be active.
+
 Run get/list expose an explicit workflow choice as `selected_file` from the persisted
 request, including refused admissions and reruns, without another admission read.

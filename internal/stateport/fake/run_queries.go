@@ -83,7 +83,7 @@ func queryProjection(r stateport.Run, record bool) stateport.Run {
 }
 
 func (f *Runs) RunByRef(ctx context.Context, scope []string, ref string) (stateport.Run, error) {
-	rows, err := f.Runs(ctx, stateport.RunFilter{Repositories: scope, Ref: ref, Limit: 1})
+	rows, err := f.Runs(ctx, stateport.RunFilter{Repositories: scope, Ref: ref, Limit: 1, SkipResumed: true})
 	if err != nil {
 		return stateport.Run{}, err
 	}
@@ -106,18 +106,16 @@ func (f *Runs) RunByCommit(ctx context.Context, scope []string, prefix string) (
 	var newest stateport.Run
 	commits := map[string]bool{}
 	for _, r := range f.data.runs {
-		if !visibleRun(scope, r.Repo) {
+		if !commitCandidate(r, scope, prefix) {
 			continue
 		}
-		if strings.HasPrefix(r.ObjectSHA, prefix) || r.CommitSHA != nil && strings.HasPrefix(*r.CommitSHA, prefix) {
-			key := r.ObjectSHA
-			if r.CommitSHA != nil {
-				key = *r.CommitSHA
-			}
-			commits[key] = true
-			if r.Sequence > newest.Sequence {
-				newest = r
-			}
+		key := r.ObjectSHA
+		if r.CommitSHA != nil {
+			key = *r.CommitSHA
+		}
+		commits[key] = true
+		if r.Sequence > newest.Sequence {
+			newest = r
 		}
 	}
 	if len(commits) > 1 {
@@ -193,13 +191,26 @@ func selectedRun(r stateport.Run, q stateport.RunFilter) bool {
 	if !visibleRun(q.Repositories, r.Repo) || q.Status != "" && r.Status != q.Status || q.Ref != "" && r.Ref != q.Ref {
 		return false
 	}
-	if !runMetadata(r, q) {
+	if !runMetadata(r, q) || skippedResumed(r, q) {
 		return false
 	}
 	if q.CommitSHA != "" && (r.CommitSHA == nil || *r.CommitSHA != q.CommitSHA) {
 		return false
 	}
 	return q.RefGlob == "" || stateport.MatchRefGlob(q.RefGlob, r.Ref)
+}
+
+// commitCandidate matches a visible run by object or commit prefix; a resumed
+// run is never selected by commit.
+func commitCandidate(r stateport.Run, scope []string, prefix string) bool {
+	if !visibleRun(scope, r.Repo) || r.Origin.Resumed() {
+		return false
+	}
+	return strings.HasPrefix(r.ObjectSHA, prefix) || r.CommitSHA != nil && strings.HasPrefix(*r.CommitSHA, prefix)
+}
+
+func skippedResumed(r stateport.Run, q stateport.RunFilter) bool {
+	return q.SkipResumed && r.Origin.Resumed()
 }
 
 func pageRuns(rows []stateport.Run, q stateport.RunFilter, cursor int64) []stateport.Run {

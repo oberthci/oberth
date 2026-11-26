@@ -24,7 +24,7 @@ func (s *Service) prepareWait(ctx context.Context, a actor.Actor, q runQuery, ti
 		return nil, err
 	}
 	return func(ctx context.Context) (apicontract.WaitResult, error) {
-		return s.wait(ctx, stateport.RunState{RunSummary: summary(r.RunSummary), Revision: r.Revision}, waitOptions{until: q.Until, timeout: timeout, changed: changed, run: r})
+		return s.wait(ctx, stateport.RunState{RunSummary: view(r), Revision: r.Revision}, waitOptions{until: q.Until, timeout: timeout, changed: changed, run: r})
 	}, nil
 }
 
@@ -51,6 +51,7 @@ func (s *Service) wait(ctx context.Context, r stateport.RunState, o waitOptions)
 	first := true
 	for {
 		current := summary(r.RunSummary)
+		resumedReason(&current, o.run.Origin)
 		result := apicontract.WaitResult{Run: &current}
 		holds, err := s.waitHolds(wait, r, &o)
 		if err != nil {

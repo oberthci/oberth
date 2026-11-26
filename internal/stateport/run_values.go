@@ -32,6 +32,9 @@ type RunFilter struct {
 	Status                                 stepmodel.RunStatus
 	Trigger                                model.RunTrigger
 	Latest, LatestRepository               bool
+	// SkipResumed leaves out resumed runs: selection by commit or ref never
+	// picks one; only its own ID names it.
+	SkipResumed bool
 }
 
 // RunUpdate carries a verdict and its originating catalogue reason.

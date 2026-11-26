@@ -116,6 +116,9 @@ func runPredicate(f stateport.RunFilter) (string, []any) {
 			args = append(args, v.value)
 		}
 	}
+	if f.SkipResumed {
+		predicate += ` AND ` + unresumed("runs")
+	}
 	if f.RefGlob != "" {
 		predicate += ` AND runs.ref GLOB ?`
 		args = append(args, f.RefGlob)
@@ -153,4 +156,9 @@ func validateRunFilter(f stateport.RunFilter) error {
 		return refuse(invalid, nil)
 	}
 	return nil
+}
+
+// unresumed is the SQL form of a run that resumed no other run.
+func unresumed(table string) string {
+	return "coalesce(json_extract(" + table + ".origin,'$.resumed_from'),'')=''"
 }

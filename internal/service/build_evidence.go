@@ -20,7 +20,8 @@ func (s *Service) latestBuild(ctx context.Context, repo, commit string) ([]state
 		}
 		for _, row := range rows {
 			filter.Before = row.Sequence
-			if row.Origin.RequestedFile != "" && row.Origin.RequestedFile != workflowpolicy.BuildFile {
+			// A resumed run is no build of its commit: it never shadows one.
+			if row.Origin.Resumed() || row.Origin.RequestedFile != "" && row.Origin.RequestedFile != workflowpolicy.BuildFile {
 				continue
 			}
 			row, err = s.buildEvidenceRun(ctx, row)
