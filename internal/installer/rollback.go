@@ -233,6 +233,7 @@ func (m Maintenance) RollbackReview() ([]string, error) {
 		return nil, err
 	}
 	return []string{
+		fmt.Sprintf("Rollback: %s -> %s", r.TargetVersion, r.Source.Version),
 		"Rollback record: " + m.Engine.Credentials.pathFor("rollback.json"),
 		fmt.Sprintf("Source: %s; revision %d; schema %d", r.Source.Version, r.Source.Number, r.Options.Schema),
 		fmt.Sprintf("Target: %s; revision %d; schema %d", r.TargetVersion, r.TargetRevision, r.TargetSchema),
