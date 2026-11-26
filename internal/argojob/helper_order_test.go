@@ -56,7 +56,7 @@ func checkExecAdmissionBarriers(t *testing.T, release bool) {
 	}
 	childResult := make(chan *inspection, 1)
 	go func() {
-		child, _, _, _ := o.admit(holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "exec cat /dev/zero >/dev/null"}})
+		child, _, _, _ := o.admit(holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "exec cat /dev/zero >/dev/null"}})
 		childResult <- child
 	}()
 	<-validated
@@ -64,7 +64,7 @@ func checkExecAdmissionBarriers(t *testing.T, release bool) {
 	go func() {
 		close(closeBegan)
 		if release {
-			_, _, _, _ = o.admit(holdRequest{Version: 1, UID: "uid", Op: "release"})
+			_, _, _, _ = o.admit(holdRequest{Version: holdProtocol, UID: "uid", Op: "release"})
 		} else {
 			o.close()
 		}

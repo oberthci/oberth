@@ -24,7 +24,7 @@ func TestBRequestBudgetKillsSilentProcess(t *testing.T) {
 		}
 		return child, err
 	}
-	_, next := sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "exec", TimeoutMS: 1, Argv: []string{"sh", "-c", "exec cat /dev/zero >/dev/null"}})
+	_, next := sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", TimeoutMS: 1, Argv: []string{"sh", "-c", "exec cat /dev/zero >/dev/null"}})
 	child := <-started
 	timer := <-clock.timers
 	timer <- clock.Now()
@@ -60,7 +60,7 @@ func TestBBlockedReaderCannotDelayClose(t *testing.T) {
 	defer client.Close()
 	observed := &observedHoldConn{Conn: owner, writing: make(chan struct{})}
 	go o.request(observed)
-	if err := writeHoldFrame(client, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"printf", "output"}}); err != nil {
+	if err := writeHoldFrame(client, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"printf", "output"}}); err != nil {
 		t.Fatal(err)
 	}
 	<-observed.writing
@@ -188,7 +188,7 @@ func TestBOversizedRequestNeverReachesStart(t *testing.T) {
 	defer conn.Close()
 	wrote := make(chan struct{})
 	go func() {
-		_ = writeHoldFrame(conn, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"true", strings.Repeat("x", maxHoldFrame)}})
+		_ = writeHoldFrame(conn, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"true", strings.Repeat("x", maxHoldFrame)}})
 		close(wrote)
 	}()
 	var f holdFrame

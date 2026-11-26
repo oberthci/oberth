@@ -50,7 +50,7 @@ func wrapHold(t *wf.Template, p nativebinding.Preparation) error {
 		{Name: "OBERTH_HOLD_LIMIT", Value: limit},
 		{Name: "OBERTH_HOLD_TTL", Value: strconv.FormatInt(int64(p.HoldTTL/time.Second), 10)},
 		{Name: "OBERTH_HOLD_POD_UID", ValueFrom: &core.EnvVarSource{FieldRef: &core.ObjectFieldSelector{FieldPath: "metadata.uid"}}},
-		{Name: "OBERTH_HOLD_PROTOCOL", Value: "1"},
+		{Name: "OBERTH_HOLD_PROTOCOL", Value: "2"},
 	}
 	for _, v := range values {
 		main.Env = canonicalHoldEnv(main.Env, v)

@@ -38,7 +38,7 @@ func signalEntryProcess(t *testing.T, routine bool) (*exec.Cmd, io.WriteCloser, 
 	if routine {
 		mode = "1"
 	}
-	command.Env = append(os.Environ(), "OBERTH_REVIEW_CHILD=1", "OBERTH_REVIEW_ROUTINE="+mode, "OBERTH_REVIEW_ROOT="+root, "OBERTH_REVIEW_MARKER="+marker, "OBERTH_HOLD_ATTEMPT=0", "OBERTH_HOLD_LIMIT=0", "OBERTH_HOLD_TTL=1200", "OBERTH_HOLD_POD_UID=review-uid", "OBERTH_HOLD_PROTOCOL=1")
+	command.Env = append(os.Environ(), "OBERTH_REVIEW_CHILD=1", "OBERTH_REVIEW_ROUTINE="+mode, "OBERTH_REVIEW_ROOT="+root, "OBERTH_REVIEW_MARKER="+marker, "OBERTH_HOLD_ATTEMPT=0", "OBERTH_HOLD_LIMIT=0", "OBERTH_HOLD_TTL=1200", "OBERTH_HOLD_POD_UID=review-uid", "OBERTH_HOLD_PROTOCOL=2")
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -95,11 +95,11 @@ func checkRoutineSignal(t *testing.T, sig syscall.Signal) {
 	if err != nil || !strings.Contains(line, "command exited 7; held") {
 		t.Fatal("routine signal canceled original or suppressed hold", sig, line, err)
 	}
-	_, next := sendHold(t, filepath.Join(root, "hold.sock"), holdRequest{Version: 1, UID: "review-uid", Op: "status"})
+	_, next := sendHold(t, filepath.Join(root, "hold.sock"), holdRequest{Version: holdProtocol, UID: "review-uid", Op: "status"})
 	if f := finalHold(t, next); f.Type != "held" {
 		t.Fatal("routine signal closed hold", sig, f)
 	}
-	_, next = sendHold(t, filepath.Join(root, "hold.sock"), holdRequest{Version: 1, UID: "review-uid", Op: "release"})
+	_, next = sendHold(t, filepath.Join(root, "hold.sock"), holdRequest{Version: holdProtocol, UID: "review-uid", Op: "release"})
 	if f := finalHold(t, next); f.Type != "closed" {
 		t.Fatal(f)
 	}

@@ -49,7 +49,7 @@ func testHoldRuntime(t *testing.T) (holdRuntime, *holdTestClock) {
 	t.Helper()
 	clock := newHoldTestClock()
 	root := holdTempDir(t)
-	values := map[string]string{"OBERTH_HOLD_ATTEMPT": "0", "OBERTH_HOLD_LIMIT": "0", "OBERTH_HOLD_TTL": "1200", "OBERTH_HOLD_POD_UID": "uid", "OBERTH_HOLD_PROTOCOL": "1"}
+	values := map[string]string{"OBERTH_HOLD_ATTEMPT": "0", "OBERTH_HOLD_LIMIT": "0", "OBERTH_HOLD_TTL": "1200", "OBERTH_HOLD_POD_UID": "uid", "OBERTH_HOLD_PROTOCOL": "2"}
 	return holdRuntime{root: root, start: startInspection, env: func(key string) string { return values[key] }, now: clock.Now, after: clock.After, signals: make(chan os.Signal, 8)}, clock
 }
 func testHoldOwner(t *testing.T) (*holdOwner, string, *holdTestClock) {
@@ -111,7 +111,7 @@ func TestBExecStartCloseOrdering(t *testing.T) {
 		if closeFirst {
 			o.close()
 		}
-		child, frame, _, _ := o.admit(holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "echo started > \"$1\"; exec cat /dev/zero > /dev/null", "sh", sentinel}})
+		child, frame, _, _ := o.admit(holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "echo started > \"$1\"; exec cat /dev/zero > /dev/null", "sh", sentinel}})
 		cleanupInspection(t, child)
 		if closeFirst {
 			if child != nil || frame.Type != "closed" {
@@ -140,7 +140,7 @@ func TestBExecStartCloseOrdering(t *testing.T) {
 }
 func TestBRemoteDisconnectWithoutOutput(t *testing.T) {
 	o, path, clock := testHoldOwner(t)
-	conn, _ := sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "exec", TimeoutMS: 10, Argv: []string{"sh", "-c", "exec cat /dev/zero >/dev/null"}})
+	conn, _ := sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", TimeoutMS: 10, Argv: []string{"sh", "-c", "exec cat /dev/zero >/dev/null"}})
 	timer := <-clock.timers
 	_ = conn.Close()
 	timer <- clock.Now()
@@ -150,7 +150,7 @@ func TestBRemoteDisconnectWithoutOutput(t *testing.T) {
 	default:
 	}
 	// A remote loss can leave the local socket open; the owner's timer still ends it.
-	_, next := sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "exec", TimeoutMS: 10, Argv: []string{"sh", "-c", "exec cat /dev/zero >/dev/null"}})
+	_, next := sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", TimeoutMS: 10, Argv: []string{"sh", "-c", "exec cat /dev/zero >/dev/null"}})
 	timer = <-clock.timers
 	timer <- clock.Now()
 	if f := finalHold(t, next); f.Type != "timeout" {
@@ -159,14 +159,14 @@ func TestBRemoteDisconnectWithoutOutput(t *testing.T) {
 }
 func TestBExecProtocolBounds(t *testing.T) {
 	_, path, _ := testHoldOwner(t)
-	for _, r := range []holdRequest{{}, {Version: 2, Op: "status", UID: "uid"}, {Version: 1, Op: "unknown", UID: "uid"}, {Version: 1, Op: "status"}, {Version: 1, Op: "exec", UID: "uid", TimeoutMS: -1}, {Version: 1, Op: "exec", UID: "uid", TimeoutMS: 900001}, {Version: 1, Op: "exec", UID: "uid", Argv: make([]string, 257)}} {
+	for _, r := range []holdRequest{{}, {Version: 1, Op: "status", UID: "uid"}, {Version: holdProtocol, Op: "unknown", UID: "uid"}, {Version: holdProtocol, Op: "status"}, {Version: holdProtocol, Op: "exec", UID: "uid", TimeoutMS: -1}, {Version: holdProtocol, Op: "exec", UID: "uid", TimeoutMS: 900001}, {Version: holdProtocol, Op: "exec", UID: "uid", Argv: make([]string, 257)}} {
 		_, next := sendHold(t, path, r)
 		if f := finalHold(t, next); f.Type != "refused" {
 			t.Fatal(f)
 		}
 	}
 	checkMalformedHoldFrames(t, path)
-	conn, next := sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "printf stdout; printf stderr >&2; exit 7"}})
+	conn, next := sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "printf stdout; printf stderr >&2; exit 7"}})
 	_ = conn.(*net.UnixConn).CloseWrite()
 	var output string
 	for {
@@ -210,13 +210,13 @@ func TestBActionAdmissionAndClose(t *testing.T) {
 	o, path, clock := testHoldOwner(t)
 	marker := filepath.Join(t.TempDir(), "effect")
 	for _, uid := range []string{"", "another-run", "replaced-uid"} {
-		_, next := sendHold(t, path, holdRequest{Version: 1, UID: uid, Op: "exec", Argv: []string{"sh", "-c", "touch \"$1\"", "sh", marker}})
+		_, next := sendHold(t, path, holdRequest{Version: holdProtocol, UID: uid, Op: "exec", Argv: []string{"sh", "-c", "touch \"$1\"", "sh", marker}})
 		if f := finalHold(t, next); f.Type != "refused" {
 			t.Fatal(f)
 		}
 	}
 	clock.advance(21 * time.Minute)
-	_, next := sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"touch", marker}})
+	_, next := sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"touch", marker}})
 	if f := finalHold(t, next); f.Type != "closed" {
 		t.Fatal(f)
 	}
@@ -228,7 +228,7 @@ func TestBActionAdmissionAndClose(t *testing.T) {
 func TestBInspectionSurface(t *testing.T) {
 	_, path, _ := testHoldOwner(t)
 	output := filepath.Join(t.TempDir(), "output")
-	_, next := sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "printf changed > \"$1\"", "sh", output}})
+	_, next := sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "printf changed > \"$1\"", "sh", output}})
 	if f := finalHold(t, next); f.Type != "exit" || f.Code != 0 {
 		t.Fatal(f)
 	}
@@ -236,7 +236,7 @@ func TestBInspectionSurface(t *testing.T) {
 	if err != nil || string(data) != "changed" {
 		t.Fatal(string(data), err)
 	}
-	_, next = sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"printf", "arbitrary"}})
+	_, next = sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"printf", "arbitrary"}})
 	var text string
 	for {
 		f := next()
@@ -372,7 +372,7 @@ func TestBSerialHoldsAccumulate(t *testing.T) {
 		}()
 		timer := <-clock.timers
 		<-diagnostic.ready
-		_, next := sendHold(t, filepath.Join(r.root, "hold.sock"), holdRequest{Version: 1, UID: "uid", Op: "status"})
+		_, next := sendHold(t, filepath.Join(r.root, "hold.sock"), holdRequest{Version: holdProtocol, UID: "uid", Op: "status"})
 		if f := finalHold(t, next); f.Type != "held" || f.TTL != 1200 || !f.HeldSince.Equal(clock.Now()) {
 			t.Fatal(f)
 		}

@@ -13,7 +13,7 @@ func TestMalformedHelperConfigurationNeverStartsOriginal(t *testing.T) {
 		{"ATTEMPT", "wrong"}, {"ATTEMPT", "-1"},
 		{"LIMIT", "wrong"}, {"LIMIT", "-1"},
 		{"TTL", "wrong"}, {"TTL", "-1"}, {"TTL", "0"}, {"TTL", "14401"},
-		{"PROTOCOL", "2"},
+		{"PROTOCOL", "1"},
 	} {
 		t.Run(test.key+test.value, func(t *testing.T) {
 			r, _ := testHoldRuntime(t)

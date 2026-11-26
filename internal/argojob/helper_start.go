@@ -21,12 +21,16 @@ type HoldIO struct {
 	Out, Err io.Writer
 }
 type holdRuntime struct {
-	start   func([]string) (*inspection, error)
-	root    string
-	env     func(string) string
-	now     func() time.Time
-	after   func(time.Duration) <-chan time.Time
-	signals <-chan os.Signal
+	start         func([]string) (*inspection, error)
+	root          string
+	env           func(string) string
+	now           func() time.Time
+	after         func(time.Duration) <-chan time.Time
+	signals       <-chan os.Signal
+	sourceRoot    string
+	command       []string
+	streams       HoldIO
+	pendingSignal os.Signal
 }
 type holdConfig struct {
 	attempt, limit int64
@@ -74,7 +78,7 @@ func (r holdRuntime) configuration() (holdConfig, error) {
 	}
 	ttl, err := strconv.ParseInt(r.env("OBERTH_HOLD_TTL"), 10, 64)
 	c.uid = r.env("OBERTH_HOLD_POD_UID")
-	if err != nil || ttl <= 0 || ttl > 14400 || c.uid == "" || r.env("OBERTH_HOLD_PROTOCOL") != "1" {
+	if err != nil || ttl <= 0 || ttl > 14400 || c.uid == "" || r.env("OBERTH_HOLD_PROTOCOL") != "2" {
 		return c, fmt.Errorf("invalid configuration")
 	}
 	c.ttl = time.Duration(ttl) * time.Second
@@ -132,6 +136,7 @@ func (r holdRuntime) run(ctx context.Context, argv []string, streams HoldIO) int
 	if code == 0 || c.attempt != c.limit || canceled || r.canceled(ctx) {
 		return code
 	}
+	r.command, r.streams = argv, streams
 	return r.hold(ctx, c, code, streams.Err)
 }
 func routineHoldSignal(s os.Signal) bool {

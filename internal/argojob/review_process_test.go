@@ -71,7 +71,7 @@ func checkReviewReleaseRound(t *testing.T, round int) {
 		}(i)
 	}
 	reviewPause(time.Duration(round) * 5 * time.Millisecond)
-	_, next := sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "release"})
+	_, next := sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "release"})
 	if f := finalHold(t, next); f.Type != "closed" {
 		t.Fatal("release", f)
 	}
@@ -85,7 +85,7 @@ func checkReviewReleaseRound(t *testing.T, round int) {
 	// Anything that started must be dead; nothing may start afterwards.
 	reviewAllDead(t, reviewPids(t, marks))
 	before := len(reviewPids(t, marks))
-	_, next = sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "echo $$ > \"$1\"", "sh", filepath.Join(marks, "late")}})
+	_, next = sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "echo $$ > \"$1\"", "sh", filepath.Join(marks, "late")}})
 	if f := finalHold(t, next); f.Type != "closed" {
 		t.Fatal("late exec", f)
 	}
@@ -156,7 +156,7 @@ func TestReviewRaceSilentReaderVersusRelease(t *testing.T) {
 	for range 4 {
 		go func() { statuses <- reviewHoldStatus(path) }()
 	}
-	_, next := sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "release"})
+	_, next := sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "release"})
 	if f := finalHold(t, next); f.Type != "closed" {
 		t.Fatal(f)
 	}
@@ -205,7 +205,7 @@ func reviewSilentInspection(t *testing.T) (*holdOwner, string, *inspection) {
 	t.Cleanup(func() { _ = client.Close(); _ = server.Close(); <-handled })
 	observed := &observedHoldConn{Conn: reviewSilentConn{server}, writing: make(chan struct{})}
 	go func() { o.request(observed); close(handled) }()
-	if err := writeHoldFrame(client, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"cat", "/dev/zero"}}); err != nil {
+	if err := writeHoldFrame(client, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"cat", "/dev/zero"}}); err != nil {
 		t.Fatal(err)
 	}
 	child := <-started
@@ -222,7 +222,7 @@ func reviewHoldStatus(path string) string {
 		return err.Error()
 	}
 	defer c.Close()
-	if err := writeHoldFrame(c, holdRequest{Version: 1, UID: "uid", Op: "status"}); err != nil {
+	if err := writeHoldFrame(c, holdRequest{Version: holdProtocol, UID: "uid", Op: "status"}); err != nil {
 		return err.Error()
 	}
 	var f holdFrame
@@ -252,7 +252,7 @@ func reviewStartHelper(t *testing.T) (*exec.Cmd, string) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestReviewHelperProcessEntry$", "-test.count=1")
 	cmd.Env = append(os.Environ(), "GORACE=atexit_sleep_ms=0", "REVIEW_HOLD_HELPER=1", "REVIEW_ROOT="+root, "REVIEW_ARGS="+string(args),
 		"OBERTH_HOLD_ATTEMPT=0", "OBERTH_HOLD_LIMIT=0", "OBERTH_HOLD_TTL=60", "OBERTH_HOLD_POD_UID=uid",
-		"OBERTH_HOLD_PROTOCOL=1")
+		"OBERTH_HOLD_PROTOCOL=2")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestReviewReleaseReplyBeforeExit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := writeHoldFrame(conn, holdRequest{Version: 1, UID: "uid", Op: "release"}); err != nil {
+		if err := writeHoldFrame(conn, holdRequest{Version: holdProtocol, UID: "uid", Op: "release"}); err != nil {
 			t.Fatal(err)
 		}
 		var f holdFrame
@@ -310,7 +310,7 @@ func reviewExchange(path string, argv []string) string {
 		return "dial"
 	}
 	defer conn.Close()
-	_ = writeHoldFrame(conn, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: argv})
+	_ = writeHoldFrame(conn, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: argv})
 	for {
 		var f holdFrame
 		if readHoldFrame(conn, &f) != nil {

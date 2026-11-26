@@ -63,7 +63,7 @@ func TestReviewSocketLossKillsBeforeBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = writeHoldFrame(conn, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "kill -STOP $$"}}); err != nil {
+	if err = writeHoldFrame(conn, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "kill -STOP $$"}}); err != nil {
 		t.Fatal(err)
 	}
 	p := <-started

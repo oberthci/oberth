@@ -10,21 +10,21 @@ import (
 
 func TestOwnedAssistLifecycleContract(t *testing.T) {
 	_, path, _ := testHoldOwner(t)
-	_, next := sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "status"})
+	_, next := sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "status"})
 	if f := finalHold(t, next); f.Type != "held" || f.TTL != 1200 {
 		t.Fatal(f)
 	}
-	_, next = sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "exit 7"}})
+	_, next = sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "exit 7"}})
 	if f := finalHold(t, next); f.Type != "exit" || f.Code != 7 {
 		t.Fatal(f)
 	}
 	for range 2 {
-		_, next = sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "release"})
+		_, next = sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "release"})
 		if f := finalHold(t, next); f.Type != "closed" {
 			t.Fatal(f)
 		}
 	}
-	_, next = sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"true"}})
+	_, next = sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"true"}})
 	if f := finalHold(t, next); f.Type != "closed" {
 		t.Fatal("payload accepted after release", f)
 	}

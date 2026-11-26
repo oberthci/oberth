@@ -47,7 +47,7 @@ func armedEnvironment(main *core.Container) map[string]core.EnvVar {
 		values[v.Name] = v
 	}
 	uid := values["OBERTH_HOLD_POD_UID"].ValueFrom
-	if uid == nil || uid.FieldRef == nil || uid.FieldRef.FieldPath != "metadata.uid" || values["OBERTH_HOLD_PROTOCOL"].Value != "1" {
+	if uid == nil || uid.FieldRef == nil || uid.FieldRef.FieldPath != "metadata.uid" || values["OBERTH_HOLD_PROTOCOL"].Value != "2" {
 		return nil
 	}
 	return values
@@ -98,7 +98,7 @@ func (e *Executor) Holds(ctx context.Context, b nativebinding.RunBinding) ([]mod
 	}
 	return out, nil
 }
-func (e *Executor) queryHold(ctx context.Context, h *model.LiveHold) {
+func (e *Executor) queryHold(ctx context.Context, h *model.LiveHold) holdFrame {
 	ctx, cancel := context.WithTimeout(ctx, e.config.ObservationTimeout)
 	defer cancel()
 	out := &boundedOutput{limit: 4096}
@@ -106,9 +106,10 @@ func (e *Executor) queryHold(ctx context.Context, h *model.LiveHold) {
 	status, _, ok := holdReply(out.body.Bytes())
 	if err != nil || !ok || status.Type != "held" || status.HeldSince.IsZero() || status.TTL <= 0 || status.TTL > 14400 || status.RemainingMS < 0 {
 		h.AvailabilityUnknown = true
-		return
+		return holdFrame{}
 	}
 	h.HeldSince, h.TTLSeconds, h.RemainingMS = status.HeldSince, status.TTL, status.RemainingMS
+	return status
 }
 func (e *Executor) verifyHold(ctx context.Context, b nativebinding.RunBinding, h model.LiveHold) error {
 	if h.RunID != b.RunID {

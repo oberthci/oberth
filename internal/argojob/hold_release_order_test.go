@@ -16,7 +16,7 @@ func TestReleaseStopsExecBeforeReplyCompletes(t *testing.T) {
 		}
 		return p, err
 	}
-	_, next := sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "kill -STOP $$"}})
+	_, next := sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "kill -STOP $$"}})
 	child := <-started
 	cleanupInspection(t, child)
 	<-c.timers
@@ -24,7 +24,7 @@ func TestReleaseStopsExecBeforeReplyCompletes(t *testing.T) {
 	defer client.Close()
 	released := make(chan struct{})
 	go func() { o.request(server); close(released) }()
-	if err := writeHoldFrame(client, holdRequest{Version: 1, UID: "uid", Op: "release"}); err != nil {
+	if err := writeHoldFrame(client, holdRequest{Version: holdProtocol, UID: "uid", Op: "release"}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -54,7 +54,7 @@ func TestReleaseStopsExecBeforeReplyCompletes(t *testing.T) {
 
 func TestNaturalInspectionSignalRetainsExit(t *testing.T) {
 	_, path, _ := testHoldOwner(t)
-	_, next := sendHold(t, path, holdRequest{Version: 1, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "kill -KILL $$"}})
+	_, next := sendHold(t, path, holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", Argv: []string{"sh", "-c", "kill -KILL $$"}})
 	if f := finalHold(t, next); f.Type != "exit" || f.Code != 137 {
 		t.Fatal("natural child result reclassified as a hold stop", f)
 	}

@@ -34,7 +34,7 @@ func TestBRequestBudgetDurations(t *testing.T) {
 				clock.advance(test.spent)
 				return child, err
 			}
-			child, frame, timer, _ := o.admit(holdRequest{Version: 1, UID: "uid", Op: "exec", TimeoutMS: test.request, Argv: []string{"sh", "-c", "kill -STOP $$"}})
+			child, frame, timer, _ := o.admit(holdRequest{Version: holdProtocol, UID: "uid", Op: "exec", TimeoutMS: test.request, Argv: []string{"sh", "-c", "kill -STOP $$"}})
 			if child == nil {
 				t.Fatal("positive admission refused", frame)
 			}
