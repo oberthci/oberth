@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Run, Snapshot } from '../types'
-import { age, boxRows, decodeRun, duration, progress, PROFILE_REASON, PROFILE_REMEDY, REFRESH_MS, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, span, table, visible, WINDOW_MS } from './model'
+import { age, boxRows, decodeRun, duration, progress, PROFILE_REASON, PROFILE_REMEDY, REFRESH_MS, RESUMED_REASON, shortID, shown, SHOWN_REASON, SHOWN_REMEDY, span, table, visible, WINDOW_MS } from './model'
 import { SETUP } from './client'
 import { hostProps, hostValues } from './host-elements'
 
@@ -444,6 +444,19 @@ test('/oberth-runs says why a run was cancelled and leaves other reasons out', {
   expect(lines[1]!.indexOf('branch deleted')).toBe(lines[0]!.indexOf('REASON'))
   expect(lines[2]).toMatch(/ 1m$/)
   expect(lines[3]).toMatch(/ 1m$/)
+})
+
+test('a resumed run names itself on a passed row in the box and /oberth-runs', { options }, async ($, on) => {
+  bottom(on)
+  mock.clock(on, { now: Date.parse('2026-11-18T00:01:00Z') })
+  const resumed = { ...run('aaaaaaaa000000000000000000000000', 'passed'), finished_at: '2026-11-18T00:00:45Z', display_reason: RESUMED_REASON }
+  cli(on, () => [resumed, { ...run('bbbbbbbb000000000000000000000000', 'passed'), display_reason: 'passed' }])
+  await startSession($, on)
+  const box = await boxLines($, 'terminal', 120)
+  expect(box[1]).toMatch(/^aaaaaaaa .*✓ passed .* resumed run; not evidence$/)
+  const lines = (await $.command.run({ ...commandInput, command: 'oberth-runs', args: '' })).text!.split('\n')
+  expect(lines[1]).toMatch(/^aaaaaaaa .*✓ passed .* resumed run; not evidence$/)
+  expect(lines[2]).toMatch(/ 1m$/)
 })
 
 test('a failed row names its step and a watched row is marked, cut before the ref', { options }, async ($, on) => {

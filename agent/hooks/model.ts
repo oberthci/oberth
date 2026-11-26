@@ -154,17 +154,21 @@ function rows(runs: Run[], now: number, width: number, last: Last): string[] {
 
 const selected = (run: Run) => run.selected_file ? `${run.selected_file} selected` : ''
 
+// A resumed run is never evidence: every row says so, passed rows included.
+export const RESUMED_REASON = 'resumed run; not evidence'
+const resumed = (run: Run) => run.display_reason === RESUMED_REASON ? RESUMED_REASON : ''
+
 // The box's watched mark, selection and failed step give way before the names.
 export function boxRows(state: Snapshot, count: number, width: number): string[] {
   const runs = visible(state, count)
   const watched = (run: Run) => state.pins.some(pin => pin.run.id === run.id) ? '●' : ''
-  const text = (run: Run) => [watched(run), selected(run), failedStep(run)].filter(Boolean).join(' ')
+  const text = (run: Run) => [watched(run), selected(run), failedStep(run), resumed(run)].filter(Boolean).join(' ')
   return runs.length ? rows(runs, state.now, width, { label: '', text, first: true }) : []
 }
 
-// /oberth-runs ends a failed row with its failed step and reason and a cancelled row with
-// its reason, kept before the names; other reasons only repeat the status word.
-const explained = (run: Run) => run.status === 'failed' || run.status === 'cancelled'
+// /oberth-runs ends a failed row with its failed step and reason, and a cancelled or
+// resumed row with its reason, kept before the names; other reasons only repeat the status word.
+const explained = (run: Run) => run.status === 'failed' || run.status === 'cancelled' || resumed(run) !== ''
 const reason = (run: Run) => [selected(run), explained(run) ? [failedStep(run), run.display_reason].filter(Boolean).join(': ') : ''].filter(Boolean).join(' · ')
 
 export function table(runs: Run[], now: number, width: number): string {
