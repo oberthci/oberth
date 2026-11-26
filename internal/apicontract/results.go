@@ -241,7 +241,7 @@ type Uplink struct {
 	Fingerprint string     `json:"fingerprint"`
 	Admin       bool       `json:"admin"`
 	Scope       []string   `json:"scope"`
-	CreatedAt   time.Time  `json:"created_at"`
+	CreatedAt   time.Time  `json:"created_at,omitzero"`
 	LastSeen    *time.Time `json:"last_seen"`
 	RevokedAt   *time.Time `json:"revoked_at"`
 	ExpiresAt   *time.Time `json:"expires_at"`
