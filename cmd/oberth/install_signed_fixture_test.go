@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -61,7 +62,16 @@ func signedInstallRelease(t *testing.T, version string) (installer.Release, stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err := json.Marshal(releaseverify.Record{Version: version, Commit: strings.Repeat("a", 40), Base: "sha256:" + strings.Repeat("d", 64), Images: map[string]string{"oberth": "sha256:" + strings.Repeat("b", 64), "oberth-source-plugin": "sha256:" + strings.Repeat("c", 64)}})
+	return signedInstallArchive(t, version, body)
+}
+
+func signedInstallArchive(t *testing.T, version string, body []byte) (installer.Release, string) {
+	t.Helper()
+	chart, err := loader.LoadArchive(bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := json.Marshal(releaseverify.Record{Version: version, Commit: strings.Repeat("a", 40), Base: "sha256:" + strings.Repeat("d", 64), Images: map[string]string{"oberth": chart.Values["imageDigest"].(string), "oberth-source-plugin": chart.Values["sourcePluginImageDigest"].(string)}})
 	if err != nil {
 		t.Fatal(err)
 	}
