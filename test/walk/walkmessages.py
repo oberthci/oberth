@@ -2,16 +2,12 @@
 
 
 def messages(raw):
-    """Undo the CLI formatter's two-space, 80-column continuation lines."""
+    """Join the CLI formatter's indented whole-word and path continuations."""
     result, previous = [], ""
     for line in raw.decode("utf-8", errors="replace").split("\n"):
         continuation = line.startswith("  ") and result and previous.strip()
-        word = line[2:].split(" ", 1)[0]
-        if continuation and len(previous) + 1 + len(word) > 80:
-            content = previous.removeprefix("  ") if previous.startswith("  ") else previous
-            width = 78 if previous.startswith("  ") else 80
-            separator = "" if len(content) == width and " " not in content else " "
-            result[-1] += separator + line[2:]
+        if continuation:
+            result[-1] += " " + line[2:]
         elif line:
             result.append(line)
         previous = line

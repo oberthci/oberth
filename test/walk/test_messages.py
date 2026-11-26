@@ -10,9 +10,12 @@ from walkmessages import collect, messages
 
 
 class MessageTests(unittest.TestCase):
-    def test_wraps_preserve_words_and_long_unbroken_identifiers(self):
-        self.assertEqual(messages(("x" * 80 + "\n  " + "y" * 78 + "\n  z\n").encode()),
-                         ["x" * 80 + "y" * 78 + "z"])
+    def test_wraps_preserve_whole_words_paths_and_paragraph_boundaries(self):
+        self.assertEqual(messages(("x" * 80 + "\n  next\n").encode()), ["x" * 80 + " next"])
+        text = "Use /tmp/config.json to configure the installation and keep the complete message readable in the evidence table."
+        rendered = ("Use\n  /tmp/config.json\n  to configure the installation and keep the complete message readable in the\n"
+                    "  evidence table.\n")
+        self.assertEqual(messages(rendered.encode()), [text])
         text = "A " + "word " * 14 + "last"
         self.assertEqual(messages((text + "\n  continuation\n\n  indented\n").encode()),
                          [text + " continuation", "  indented"])

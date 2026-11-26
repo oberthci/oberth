@@ -1,4 +1,4 @@
-"""Exercise walk code for the Go CLI's installation contract."""
+"""Exercise walk code for the Go CLI's installation and formatter contracts."""
 import json
 from pathlib import Path
 import sys
@@ -7,6 +7,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "test/walk"))
 import walktwo
 from walkconfig import Environment
+from walkmessages import messages
 
 
 def installation_commands(root):
@@ -33,4 +34,7 @@ def installation_commands(root):
 
 
 if __name__ == "__main__":
-    print(json.dumps(installation_commands(Path(sys.argv[2]))))
+    if sys.argv[1] == "profiles":
+        print(json.dumps(installation_commands(Path(sys.argv[2]))))
+    else:
+        print(json.dumps([messages(text.encode()) for text in json.load(sys.stdin)]))
