@@ -284,7 +284,7 @@ func installationApproval(ctx context.Context, review installationReview, in io.
 	}
 	if review.request.enabled("dry-run") || review.request.enabled("yes") {
 		for _, line := range review.plan.Review() {
-			if err := writeWrapped(out, safeDisplay(line)); err != nil {
+			if _, err := fmt.Fprintln(out, safeDisplay(line)); err != nil {
 				return "", err
 			}
 		}
