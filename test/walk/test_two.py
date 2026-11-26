@@ -291,6 +291,96 @@ class TwoTests(unittest.TestCase):
                          ["two-objects", "two-objects", "two-controller-log"])
         self.assertEqual(self.s.results[2]["facts"]["native_occurrences"], {"first": 2, "second": 2})
 
+    def test_controller_stage_executes_exact_runs_and_isolation_observations(self):
+        self.s.args.two_installations = "controllers"
+        instances = self.config["instances"]
+
+        def user(name, values=None, **kwargs):
+            if name == "two-controller-log":
+                self.assertEqual(values, self.config["argo"])
+                return 0, b"unrelated-workflow", b""
+            if name == "two-objects":
+                instance = next(i for i in instances if i["pipeline_namespace"] == values["namespace"])
+                return 0, json.dumps({"items": self.native(instance)}).encode(), b""
+            self.assertEqual(name, "two-read")
+            instance = next(i for i in instances if two.profile_env(self.s, i) == kwargs["env"])
+            arguments = values["arguments"]
+            self.assertEqual([arguments[0], *arguments[2:]], ["tool", "-", "--json"])
+            return self.controller_tool(self.s, instance, arguments[1], json.loads(kwargs["input"]))
+
+        self.s.user.side_effect = user
+        with patch.object(two, "preflight", return_value={}), patch.object(two, "target", return_value={}), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.walk.execute(), 0, self.s.results)
+        calls = self.s.user.call_args_list
+        self.assertEqual([c.args[0] for c in calls],
+                         ["two-read"] * 4 + ["two-objects"] + ["two-read"] * 4
+                         + ["two-objects", "two-controller-log"])
+        for offset, own, foreign in ((0, instances[0], instances[1]), (5, instances[1], instances[0])):
+            reads = calls[offset:offset + 4]
+            self.assertEqual([c.args[1]["arguments"][1] for c in reads],
+                             ["run_get", "repo_list", "run_list", "run_get"])
+            self.assertEqual([json.loads(c.kwargs["input"]) for c in reads],
+                             [{"id": own["run_id"]}, {}, {"limit": 100}, {"id": foreign["run_id"]}])
+            self.assertTrue(all(c.kwargs["env"] == two.profile_env(self.s, own) for c in reads))
+            self.assertEqual(calls[offset + 4].args[1], {"namespace": own["pipeline_namespace"]})
+        self.assertEqual(self.s.results[2]["facts"], {
+            "exact_runs_passed": True, "lists_and_foreign_lookups_isolated": True,
+            "controller_labels_exact": True, "independent_controller_silent": True})
+
+    def test_install_stage_executes_both_collision_probes_and_identity_observations(self):
+        charts = self.s.private / "candidate-chart/oberth/charts"
+        charts.mkdir(parents=True)
+        with tarfile.open(charts / "argo-workflows-1.2.3.tgz", "w:gz") as archive:
+            body = b"version: 1.2.3\n"
+            header = tarfile.TarInfo("argo-workflows/Chart.yaml")
+            header.size = len(body)
+            archive.addfile(header, io.BytesIO(body))
+        items = [{"metadata": {"name": name, "uid": name,
+                  "labels": {"app.kubernetes.io/managed-by": "Helm"},
+                  "annotations": {"meta.helm.sh/release-name": "plain", "meta.helm.sh/release-namespace": "independent"}},
+                  "spec": {}} for name in sorted(two.CRDS)]
+
+        def user(name, values=None, **kwargs):
+            if name == "two-crds":
+                return 0, json.dumps({"items": items}).encode(), b""
+            if name == "two-helm-status":
+                self.assertEqual(values, {"namespace": "oberth"})
+                return 0, b'{"version":1}', b""
+            if name == "two-identity":
+                self.assertEqual(values["namespace"], "oberth")
+                return 0, json.dumps(values).encode(), b""
+            self.assertIn(name, ("two-argo-install", "two-install", "two-read"))
+            if name == "two-install" and "OBERTH_PROFILE" not in kwargs["env"]:
+                return 1, COLLISION, b""
+            return 0, b"{}", b""
+
+        self.s.user.side_effect = user
+        self.s.two_candidate = {"commit": "c" * 40}
+        with patch.object(two, "preflight", return_value={}), patch.object(two, "target", return_value={}), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.walk.execute(), 0, self.s.results)
+        calls = self.s.user.call_args_list
+        probes = [c for c in calls if c.args[0] == "two-install" and "OBERTH_PROFILE" not in c.kwargs["env"]]
+        self.assertEqual(len(probes), 2)
+        command = ["install", "--context", self.s.config.context,
+                   "--chart", str(self.s.private / "candidate-chart/oberth")]
+        self.assertEqual([c.args[1]["arguments"] for c in probes], [command, command + ["--yes"]])
+        self.assertEqual([c.kwargs["input"] for c in probes], [b"n\n", b"n\n"])
+        self.assertEqual([c.kwargs["env"]["HOME"] for c in probes], [
+            str(two.receipt(self.s).parent / ("no-answers-" + str(yes))) for yes in (False, True)])
+        start = next(i for i, c in enumerate(calls) if c is probes[0]) - 3
+        observations = calls[start:start + 11]
+        self.assertEqual([c.args[0] for c in observations],
+                         ["two-helm-status", "two-identity", "two-identity", "two-install"] * 2
+                         + ["two-helm-status", "two-identity", "two-identity"])
+        for offset in (0, 4, 8):
+            self.assertEqual([c.args[1]["object"] for c in observations[offset + 1:offset + 3]],
+                             ["oberth-admin", "oberth"])
+        self.assertEqual(self.s.results[4]["facts"], {
+            "interactive_and_yes_refused": True, "first_identity_unchanged": True})
+        self.assertEqual(json.loads(two.receipt(self.s).read_text()), self.s.two_candidate)
+
     def test_install_stage_installs_the_pinned_independent_controller(self):
         charts = self.s.private / "candidate-chart/oberth/charts"
         charts.mkdir(parents=True)
