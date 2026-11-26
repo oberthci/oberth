@@ -244,7 +244,7 @@ func resumeRemaining(ctx context.Context, retried *wf.Workflow, plan admissionco
 			continue
 		}
 		remaining = append(remaining, s.Path)
-		if why := unsafeEntry(e, ok, retried); why != "" {
+		if why := unsafeEntry(e, ok); why != "" {
 			return nil, nil, resumeRefusal(ReasonResumeUnsafe, stepLabel(s)+" "+why)
 		}
 	}
@@ -256,17 +256,12 @@ func resumeWorkflowHook(path string) bool {
 }
 
 // unsafeEntry refuses unresolved entries and remaining output-parameter producers.
-func unsafeEntry(e admissioncontract.PlanEntry, planned bool, w *wf.Workflow) string {
+func unsafeEntry(e admissioncontract.PlanEntry, planned bool) string {
 	if e.OutputParameters {
 		return "has output parameters"
 	}
 	if !planned || e.Dynamic {
 		return "eligibility unresolved"
-	}
-	for _, t := range w.Spec.Templates {
-		if t.Name == e.Template && len(t.Outputs.Parameters) > 0 {
-			return "has output parameters"
-		}
 	}
 	return ""
 }
