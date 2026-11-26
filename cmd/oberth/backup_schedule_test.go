@@ -104,7 +104,7 @@ func checkBackupSchedulePod(t *testing.T, object unstructured.Unstructured) {
 	t.Helper()
 	var job batchv1.CronJob
 	decodeBackupObject(t, object, &job)
-	if job.Kind != "CronJob" || job.Spec.Schedule != "0 2 * * *" || job.Spec.ConcurrencyPolicy != batchv1.ForbidConcurrent || job.Spec.JobTemplate.Spec.BackoffLimit == nil || *job.Spec.JobTemplate.Spec.BackoffLimit != 0 {
+	if job.Kind != "CronJob" || job.Spec.Schedule != "0 2 * * *" || job.Spec.ConcurrencyPolicy != batchv1.ForbidConcurrent || job.Spec.JobTemplate.Spec.BackoffLimit == nil || *job.Spec.JobTemplate.Spec.BackoffLimit != 2 {
 		t.Fatal("backup schedule lost its explicit native execution bounds")
 	}
 	pod := job.Spec.JobTemplate.Spec.Template.Spec

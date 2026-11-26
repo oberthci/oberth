@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/oberthci/oberth/internal/apicontract"
@@ -36,13 +35,7 @@ func (s accountDatabase) Snapshot(ctx context.Context, options stateport.Options
 		return stateport.BackupReport{}, backupAccountProblem()
 	}
 	defer clear(jwt)
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.config.SnapshotURL, strings.NewReader("{}"))
-	if err != nil {
-		return stateport.BackupReport{}, backupAccountProblem()
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+string(jwt))
-	response, err := s.http.Do(request)
+	response, err := s.databaseResponse(ctx, jwt)
 	if err != nil {
 		return stateport.BackupReport{}, backupAccountProblem()
 	}

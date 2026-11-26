@@ -143,7 +143,8 @@ success, never database-only copies, other names or links; `--database-only` ref
 `oberth backup --print-schedule` prints a [CronJob, Role and RoleBinding](backup-schedule.yaml).
 Edit image, PVC and schedule, then apply it in the Restricted server namespace; the Job holds no
 profile, kubeconfig or decryption key. Bundled backups fail without store access. Rollback keeps
-ConfigMap `oberth-backup`; across schemas the Job fails until upgrade. For the store role via a
+ConfigMap `oberth-backup`; across schemas the Job fails until upgrade. The Job retries 503s six times (1–16s backoff), with two Pod retries;
+`oberth system status` shows backup job (including a missed run) and backup last success from the native CronJob. For the store role via a
 saved share, set listener `disable_unauthed_generate_root_endpoints=false`, restart/unseal, run:
 `oberth secretstore setup --backup-only --config <config> --ca-file <ca> --unseal-file <share>`
 The CLI chooses its OTP before generation and saves only store/nonce metadata in `<config>.backup-setup.json`; revocation removes it.

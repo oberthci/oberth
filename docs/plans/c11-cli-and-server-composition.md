@@ -161,7 +161,7 @@ database, cluster_detail, upstream_info, secret_store, audit_chain and
 schema_version fields. Background readiness samples every 5 seconds, probes
 within 30 seconds and retains a last success for at most 90 seconds. Deadline
 or typed reader contention may retain green without renewing its age; a hard
-writer failure or incomplete recovery refuses readiness. Requests read snapshots; system status also probes live secret-store read readiness and includes the unseal remedy when sealed. Store and controller status probes run concurrently with five-second bounds, leaving time for other reads within the ten-second request budget.
+writer failure or incomplete recovery refuses readiness. Requests read snapshots; system status also probes live secret-store read readiness and includes the unseal remedy when sealed. Store, controller and backup-job status probes run concurrently with five-second bounds, leaving time for other reads within the ten-second request budget.
 Cluster, audit and login diagnostics do not gate readiness. Diagnostic intervals
 are fixed: one sampler every five seconds. Watch synchronization waits on the
 server context. C11 owns samplers and

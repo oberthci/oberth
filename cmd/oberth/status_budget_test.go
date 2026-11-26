@@ -15,7 +15,7 @@ import (
 
 func TestSystemStatusBlockedProbesShareRequestBudget(t *testing.T) {
 	c := testComposition(t)
-	started := make(chan string, 2)
+	started := make(chan string, 3)
 	transport := testTransport(func(r *http.Request) (*http.Response, error) {
 		started <- r.URL.Host
 		<-r.Context().Done()
@@ -53,8 +53,8 @@ func TestSystemStatusBlockedProbesShareRequestBudget(t *testing.T) {
 	if _, _, err = c.store.StateMetadata(ctx); err != nil {
 		t.Fatal("admin metadata lost its remaining budget", err)
 	}
-	if len(started) != 2 || status.Ready || len(status.Parts) != 1 || status.Parts[0].DisplayReason != "secret store unavailable" {
-		t.Fatal("blocked probes did not report both observations", status, len(started))
+	if len(started) != 3 || status.Ready || len(status.Parts) != 1 || status.Parts[0].DisplayReason != "secret store unavailable" {
+		t.Fatal("blocked probes did not report all three observations", status, len(started))
 	}
 	assertBlockedControllerSetting(t, status)
 }

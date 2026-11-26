@@ -16,12 +16,13 @@ func (a serverAdministration) statusSnapshot(ctx context.Context, action string)
 	if action != "system_status" {
 		return a.statusParts(ctx), nil
 	}
-	var cap settingsRows
+	var cap, backup settingsRows
 	var probes sync.WaitGroup
 	probes.Go(func() { cap.runCap(ctx, a.owner) })
+	probes.Go(func() { backup.backupJob(ctx, a.owner) })
 	parts := a.statusParts(ctx)
 	probes.Wait()
-	settings := a.effectiveSettings(ctx, parts, cap.values)
+	settings := a.effectiveSettings(ctx, parts, append(cap.values, backup.values...))
 	return parts, &settings
 }
 
