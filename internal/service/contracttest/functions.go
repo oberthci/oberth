@@ -89,7 +89,7 @@ func (p LogsFuncs) Purge(ctx context.Context, r stateport.Run) error { return p.
 type HoldExecFuncs struct {
 	ListFunc    func(context.Context, stateport.Run) ([]model.LiveHold, error)
 	AbandonFunc func(context.Context, stateport.Run, model.LiveHold) error
-	ExecFunc    func(context.Context, stateport.Run, model.LiveHold, apicontract.RunHoldExecArgs) (apicontract.ExecResult, error)
+	ExecFunc    func(context.Context, stateport.Run, model.LiveHold, service.HoldInspection) (apicontract.ExecResult, error)
 }
 
 func (p HoldExecFuncs) List(ctx context.Context, r stateport.Run) ([]model.LiveHold, error) {
@@ -98,6 +98,6 @@ func (p HoldExecFuncs) List(ctx context.Context, r stateport.Run) ([]model.LiveH
 func (p HoldExecFuncs) Abandon(ctx context.Context, r stateport.Run, h model.LiveHold) error {
 	return p.AbandonFunc(ctx, r, h)
 }
-func (p HoldExecFuncs) Exec(ctx context.Context, r stateport.Run, h model.LiveHold, q apicontract.RunHoldExecArgs) (apicontract.ExecResult, error) {
+func (p HoldExecFuncs) Exec(ctx context.Context, r stateport.Run, h model.LiveHold, q service.HoldInspection) (apicontract.ExecResult, error) {
 	return p.ExecFunc(ctx, r, h, q)
 }

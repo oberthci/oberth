@@ -61,6 +61,30 @@ func TestHoldAuditPrecedesNativeEffects(t *testing.T) {
 	}
 	checkInspectedPassedRun(t, f)
 }
+
+func TestRefusedInspectionDoesNotMarkRun(t *testing.T) {
+	t.Parallel()
+	f := heldFixture(t)
+	before, _ := f.store.Run(t.Context(), runID)
+	audits := len(f.store.native.Audits())
+	refusal := publicerr.New(publicerr.InvalidTransition, "secret step after inspection", "Push for a full run.", nil)
+	f.holds.Preflight = func() error { return refusal }
+	f.holds.Execute = func(context.Context, stateport.Run, model.LiveHold, apicontract.RunHoldExecArgs) (apicontract.ExecResult, error) {
+		t.Fatal("refused inspection dispatched")
+		return apicontract.ExecResult{}, nil
+	}
+	call, err := f.s.PrepareRunHoldExec(t.Context(), workerCaller(), apicontract.RunHoldExecArgs{ID: runID, Argv: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = call(t.Context()); !errors.Is(err, refusal) {
+		t.Fatal(err)
+	}
+	after, err := f.store.Run(t.Context(), runID)
+	if err != nil || after.Origin.Assisted || after.Revision != before.Revision || len(f.store.native.Audits()) != audits {
+		t.Fatal("refused inspection marked run", after, err)
+	}
+}
 func TestHoldAuditFailureHasNoNativeEffect(t *testing.T) {
 	t.Parallel()
 	f := heldFixture(t)

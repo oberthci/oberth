@@ -66,16 +66,21 @@ func (s *Service) holdAction(ctx context.Context, q holdRequest) (holdLease, err
 	if err != nil {
 		return holdLease{}, err
 	}
+	lease := holdLease{run: r, hold: h}
+	if q.kind == "exec" {
+		return lease, nil
+	}
+	return lease, s.auditHoldAction(ctx, q, lease)
+}
+func (s *Service) auditHoldAction(ctx context.Context, q holdRequest, lease holdLease) error {
+	r, h := lease.run, lease.hold
 	reason := reasonAssisted
 	if q.kind == "abandon" {
 		reason = reasonHoldAbandon
 	}
 	a := stateport.Action{Actor: q.actor.Identity, Reason: q.reason, Events: []stateport.EventWrite{s.event(r, model.EventRunUpdated, reason, "assist:"+q.kind+":"+strconv.FormatInt(r.Revision, 10))}}
 	intent := stateport.HoldAction{RunID: r.ID, Step: h.Step, NodeID: h.NodeID, PodUID: h.PodUID, Kind: q.kind, Revision: r.Revision, Argv: q.argv, TimeoutS: q.timeoutS}
-	if err = s.c.HoldStore.Assist(ctx, a, intent); err != nil {
-		return holdLease{}, err
-	}
-	return holdLease{run: r, hold: h}, nil
+	return s.c.HoldStore.Assist(ctx, a, intent)
 }
 func (s *Service) PrepareRunHoldList(ctx context.Context, c apicontract.Caller, q apicontract.RunHoldListArgs) (apicontract.Call[apicontract.HoldPage], error) {
 	a, err := s.allow(ctx, c.Actor, "run_hold_list")
@@ -133,6 +138,8 @@ func (s *Service) PrepareRunHoldExec(ctx context.Context, c apicontract.Caller, 
 			return apicontract.ExecResult{}, err
 		}
 		q.ID, q.Step = lease.run.ID, lease.hold.Step
-		return s.c.Holds.Exec(op, lease.run, lease.hold, q)
+		return s.c.Holds.Exec(op, lease.run, lease.hold, HoldInspection{Args: q, BeforeExec: func(ctx context.Context) error {
+			return s.auditHoldAction(ctx, r, lease)
+		}})
 	}, nil
 }

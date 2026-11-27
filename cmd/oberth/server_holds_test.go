@@ -11,6 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/nativebinding"
+	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
@@ -75,7 +76,7 @@ func TestHoldNativeAdapterPreservesSelectionAndResult(t *testing.T) {
 			t.Fatal("native list changed", rows, got)
 		}
 		q := apicontract.RunHoldExecArgs{ID: p.run.ID, Step: "different-selector", Argv: []string{"printf", "value with spaces"}, TimeoutS: 37}
-		result, got := h.Exec(t.Context(), p.run, p.hold, q)
+		result, got := h.Exec(t.Context(), p.run, p.hold, service.HoldInspection{Args: q, BeforeExec: func(context.Context) error { return fault }})
 		want := apicontract.ExecResult{Stdout: p.result.Stdout, Stderr: p.result.Stderr, ExitCode: 23, Truncated: true}
 		if !errors.Is(got, err) || result != want {
 			t.Fatal("native result changed", result, got)
@@ -83,9 +84,17 @@ func TestHoldNativeAdapterPreservesSelectionAndResult(t *testing.T) {
 		if !reflect.DeepEqual(p.request.Command, q.Argv) || p.request.Timeout != 37*time.Second {
 			t.Fatal("argv or timeout changed", p.request)
 		}
+		checkHoldAuditCallback(t, p.request, fault)
 		if got = h.Abandon(t.Context(), p.run, p.hold); !errors.Is(got, err) || p.effects != 3 {
 			t.Fatal("release did not use selected native hold", got, p.effects)
 		}
+	}
+}
+
+func checkHoldAuditCallback(t *testing.T, q argojob.HoldExecRequest, want error) {
+	t.Helper()
+	if q.BeforeExec == nil || !errors.Is(q.BeforeExec(t.Context()), want) {
+		t.Fatal("native adapter lost inspection audit")
 	}
 }
 func TestHoldNativeAdapterRefusesMissingBinding(t *testing.T) {
@@ -95,7 +104,7 @@ func TestHoldNativeAdapterRefusesMissingBinding(t *testing.T) {
 		p.findErr = fault
 		h := heldRuns{p}
 		_, listErr := h.List(t.Context(), p.run)
-		_, execErr := h.Exec(t.Context(), p.run, p.hold, apicontract.RunHoldExecArgs{Argv: []string{"true"}})
+		_, execErr := h.Exec(t.Context(), p.run, p.hold, service.HoldInspection{Args: apicontract.RunHoldExecArgs{Argv: []string{"true"}}})
 		releaseErr := h.Abandon(t.Context(), p.run, p.hold)
 		for _, err := range []error{listErr, execErr, releaseErr} {
 			if err == nil || fault != nil && !errors.Is(err, fault) {

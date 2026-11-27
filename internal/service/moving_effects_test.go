@@ -29,11 +29,12 @@ func (f *testMovingGit) Publish(ctx context.Context, p model.Publication) (gitpo
 }
 
 type testHolds struct {
-	mu      sync.Mutex
-	live    map[string][]model.LiveHold
-	Listing func(context.Context, stateport.Run) ([]model.LiveHold, error)
-	Stop    func(context.Context, stateport.Run, model.LiveHold) error
-	Execute func(context.Context, stateport.Run, model.LiveHold, apicontract.RunHoldExecArgs) (apicontract.ExecResult, error)
+	mu        sync.Mutex
+	live      map[string][]model.LiveHold
+	Listing   func(context.Context, stateport.Run) ([]model.LiveHold, error)
+	Stop      func(context.Context, stateport.Run, model.LiveHold) error
+	Execute   func(context.Context, stateport.Run, model.LiveHold, apicontract.RunHoldExecArgs) (apicontract.ExecResult, error)
+	Preflight func() error
 }
 
 func (f *testHolds) setLive(id string, rows []model.LiveHold) {
@@ -55,8 +56,16 @@ func (f *testHolds) List(ctx context.Context, r stateport.Run) ([]model.LiveHold
 func (f *testHolds) Abandon(ctx context.Context, r stateport.Run, h model.LiveHold) error {
 	return f.Stop(ctx, r, h)
 }
-func (f *testHolds) Exec(ctx context.Context, r stateport.Run, h model.LiveHold, q apicontract.RunHoldExecArgs) (apicontract.ExecResult, error) {
-	return f.Execute(ctx, r, h, q)
+func (f *testHolds) Exec(ctx context.Context, r stateport.Run, h model.LiveHold, q service.HoldInspection) (apicontract.ExecResult, error) {
+	if f.Preflight != nil {
+		if err := f.Preflight(); err != nil {
+			return apicontract.ExecResult{}, err
+		}
+	}
+	if err := q.BeforeExec(ctx); err != nil {
+		return apicontract.ExecResult{}, err
+	}
+	return f.Execute(ctx, r, h, q.Args)
 }
 
 type testTimers struct {

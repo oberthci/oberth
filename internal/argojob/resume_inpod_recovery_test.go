@@ -237,12 +237,35 @@ func TestInspectionCannotInvokeRerunBeforeSecretStep(t *testing.T) {
 	defer e.collector.queue.ShutDown()
 	b := runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: "ci", Name: "shared", UID: "uid"})
 	q := HoldExecRequest{Binding: b, Hold: resumeLiveHold(r, plan), Command: []string{holdBinary, "rerun"}}
+	q.BeforeExec = func(context.Context) error {
+		t.Fatal("inspection bypassed secret fence: refused inspection was audited")
+		return nil
+	}
 	if _, err := e.HoldExec(t.Context(), q); err == nil || pods.inspections != 0 {
 		t.Fatal("inspection bypassed secret fence", err, pods.inspections)
 	}
 	r.Admission.Plan.Entries[1].SecretRoute = false
 	owner.SeedRun(r)
 	t.Run("secret-free inspection cannot rerun", TestInspectionCannotInvokeRerunEvenWithoutSecrets)
+}
+
+func TestInspectionAuditFailurePreventsDispatch(t *testing.T) {
+	t.Parallel()
+	config, r, plan, native, pods := inPodRecovery(t)
+	native.w = plan.Workflow.DeepCopy()
+	e := New(config)
+	defer e.queue.ShutDown()
+	defer e.collector.queue.ShutDown()
+	b := runBinding(r.Admission, r.RepositoryID, nativebinding.Object{Namespace: "ci", Name: "shared", UID: "uid"})
+	failure := errors.New("audit unavailable")
+	checked := false
+	q := HoldExecRequest{Binding: b, Hold: resumeLiveHold(r, plan), Command: []string{"true"}, BeforeExec: func(context.Context) error {
+		checked = true
+		return failure
+	}}
+	if _, err := e.HoldExec(t.Context(), q); !errors.Is(err, failure) || !checked || pods.inspections != 0 {
+		t.Fatal("inspection escaped audit fence", err, checked, pods.inspections)
+	}
 }
 
 func TestInPodApplyDormantGate(t *testing.T) {

@@ -43,11 +43,16 @@ type HoldStore interface {
 	Assist(context.Context, stateport.Action, stateport.HoldAction) error
 }
 
+type HoldInspection struct {
+	Args       apicontract.RunHoldExecArgs
+	BeforeExec func(context.Context) error
+}
+
 // HoldExec is implemented by native execution and logs; service owns authority/audit.
 type HoldExec interface {
 	List(context.Context, stateport.Run) ([]model.LiveHold, error)
 	Abandon(context.Context, stateport.Run, model.LiveHold) error
-	Exec(context.Context, stateport.Run, model.LiveHold, apicontract.RunHoldExecArgs) (apicontract.ExecResult, error)
+	Exec(context.Context, stateport.Run, model.LiveHold, HoldInspection) (apicontract.ExecResult, error)
 }
 
 type Timer interface{ Stop() bool }

@@ -22,11 +22,12 @@ const (
 )
 
 type HoldExecRequest struct {
-	Binding   nativebinding.RunBinding
-	Hold      model.LiveHold
-	Command   []string
-	Timeout   time.Duration
-	MaxOutput int
+	Binding    nativebinding.RunBinding
+	Hold       model.LiveHold
+	Command    []string
+	Timeout    time.Duration
+	MaxOutput  int
+	BeforeExec func(context.Context) error
 }
 type ExecResult struct {
 	Stdout, Stderr string
@@ -89,13 +90,17 @@ func (e *Executor) HoldExec(ctx context.Context, r HoldExecRequest) (ExecResult,
 	if err := e.secretFreeInspection(ctx, r.Binding); err != nil {
 		return ExecResult{}, err
 	}
+	if r.BeforeExec != nil {
+		if err := r.BeforeExec(ctx); err != nil {
+			return ExecResult{}, err
+		}
+	}
 	command := []string{holdBinary, "exec", "--pod-uid", r.Hold.PodUID, "--timeout-ms", strconv.FormatInt(r.Timeout.Milliseconds(), 10), "--"}
 	return e.relayHold(ctx, r.Hold, append(command, r.Command...), r.MaxOutput)
 }
 
-// Inspection can invoke the paired helper as the step identity. Enforce S1
-// before arbitrary commands too, so a typed rerun cannot bypass the server's
-// resume checks and let inspected state reach a later secret route.
+// Inspect only a secret-free remaining graph. Check before recording the
+// inspection intent, so a refusal cannot taint the run or its retry chain.
 func (e *Executor) secretFreeInspection(ctx context.Context, b nativebinding.RunBinding) error {
 	if e.config.Runs == nil {
 		return resumeRefusal(ReasonResumeStart, "inspection plan unavailable")

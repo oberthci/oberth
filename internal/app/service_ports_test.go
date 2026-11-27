@@ -66,7 +66,7 @@ func unexpectedService(t *testing.T) service.Config {
 		}, PublishFunc: func(context.Context, model.Publication) (gitport.PublicationReceipt, error) {
 			return gitport.PublicationReceipt{}, problem()
 		}},
-		Holds: servicecontract.HoldExecFuncs{ListFunc: func(context.Context, stateport.Run) ([]model.LiveHold, error) { return nil, problem() }, AbandonFunc: func(context.Context, stateport.Run, model.LiveHold) error { return problem() }, ExecFunc: func(context.Context, stateport.Run, model.LiveHold, apicontract.RunHoldExecArgs) (apicontract.ExecResult, error) {
+		Holds: servicecontract.HoldExecFuncs{ListFunc: func(context.Context, stateport.Run) ([]model.LiveHold, error) { return nil, problem() }, AbandonFunc: func(context.Context, stateport.Run, model.LiveHold) error { return problem() }, ExecFunc: func(context.Context, stateport.Run, model.LiveHold, service.HoldInspection) (apicontract.ExecResult, error) {
 			return apicontract.ExecResult{}, problem()
 		}},
 		Exec: servicecontract.ExecFuncs{CancelFunc: func(context.Context, stateport.Run, bool) error { return problem() }, InspectFunc: func(context.Context, service.CheckRequest) (apicontract.RunCheckResult, error) {
