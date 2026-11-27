@@ -194,3 +194,20 @@ func TestInPodInspectedSecretRefusedAndTerminalInspectionClosed(t *testing.T) {
 		t.Fatal("cleanup release changed final R1")
 	}
 }
+
+func TestInPodEntryValidationOwnsPartition(t *testing.T) {
+	t.Parallel()
+	authored := admissioncontract.Plan{Entries: []admissioncontract.PlanEntry{
+		{Path: "held", HoldArmed: true, HoldEligible: true},
+		{Path: "later", SecretRoute: true},
+	}}
+	plan := nativebinding.ResumePlan{InPod: &nativebinding.ResumeHold{Step: "held"}, Remaining: []string{"held", "later"}}
+	// Native planning owns S1; acceptance still requires every frozen entry.
+	if err := validateInPodEntries(authored, plan); err != nil {
+		t.Fatal("partition validation duplicated native S1", err)
+	}
+	plan.Remaining = []string{"held"}
+	if err := validateInPodEntries(authored, plan); err == nil {
+		t.Fatal("acceptance omitted frozen entry")
+	}
+}

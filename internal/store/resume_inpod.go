@@ -12,7 +12,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/nativebinding"
-	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/sourcecontract"
 	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
@@ -49,9 +48,6 @@ func validateInPodEntries(authored admissioncontract.Plan, plan nativebinding.Re
 		}
 		if !slices.Contains(plan.Remaining, e.Path) {
 			continue
-		}
-		if e.SecretRoute {
-			return publicerr.New(publicerr.InvalidTransition, "secret step after rerun", "Use the fresh-Pod resume or push for a full run.", nil)
 		}
 		if e.Path == h.Step {
 			held = e.HoldArmed && e.HoldEligible && !e.ResultConsumed
