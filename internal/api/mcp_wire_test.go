@@ -156,6 +156,9 @@ func TestMCPVersionsAndEnrollmentBeforeEffects(t *testing.T) {
 			if !strings.Contains(w.Body.String(), `"supported":["2026-07-28"]`) {
 				t.Fatal("no version remedy")
 			}
+			if !strings.Contains(w.Body.String(), "MCP 2026-07-28 is required.") || !strings.Contains(w.Body.String(), "client matching the server release") {
+				t.Fatal("protocol refusal lacks floor or matching-client remedy")
+			}
 		}
 		f := setup(t, nil)
 		r := wireRequest("tools/call", map[string]any{"name": "uplink_redeem", "arguments": map[string]string{"secret": "private"}})

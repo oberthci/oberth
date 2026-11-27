@@ -21,7 +21,7 @@ func messages() map[string]message {
 		"origin":             {publicerr.Forbidden, "MCP browser origin is not allowed.", "Use the configured server URL or the pinned stdio bridge."},
 		"skill":              {publicerr.InvalidInput, "Skill or embedded file is unavailable.", "Rediscover skills/list, approve the current origin and manifest, then reload the skill."},
 		"headers":            {publicerr.InvalidInput, "MCP 2026-07-28 headers do not match.", "Use MCP 2026-07-28 with matching version, method and name headers."},
-		"version":            {publicerr.InvalidInput, "MCP protocol version is unsupported.", "Use MCP 2026-07-28 and rediscover the server."},
+		"version":            {publicerr.InvalidInput, "MCP 2026-07-28 is required.", "Install the client matching the server release, then reconnect with MCP 2026-07-28."},
 		"metadata":           {publicerr.InvalidInput, "MCP request metadata is invalid.", "Send protocolVersion and clientCapabilities in each request metadata object."},
 		"bodySize":           {publicerr.InvalidInput, "Request body exceeds this route's byte limit.", "Send fewer arguments or a smaller input body."},
 		"bodyRead":           {publicerr.InvalidInput, "Request body could not be read completely.", "Reconnect and resend the complete JSON body."},

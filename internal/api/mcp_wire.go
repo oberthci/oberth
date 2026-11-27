@@ -97,6 +97,12 @@ func (resp rpcResponse) MarshalJSON() ([]byte, error) {
 }
 
 func (s *Server) validateMCP(w http.ResponseWriter, r *http.Request, req rpcRequest) bool {
+	// Clients without per-request metadata decode HTTP refusals as public errors.
+	// Refuse before dispatch, in the envelope they can actually display.
+	if req.Version() == "" && r.Header.Get("Mcp-Method") == "" {
+		s.writeError(w, r, refusal("version"), http.StatusBadRequest)
+		return false
+	}
 	resp := rpcResponse{JSONRPC: "2.0", ID: req.ID}
 	if len(req.ID) == 0 {
 		resp.ID = json.RawMessage(`null`)
@@ -104,7 +110,11 @@ func (s *Server) validateMCP(w http.ResponseWriter, r *http.Request, req rpcRequ
 	if !req.MatchingHeaders(r.Header) {
 		resp.Error = &rpcError{-32020, refusal("headers").Reason(), refusal("headers")}
 	} else if version := req.Version(); version != apicontract.ProtocolVersion {
-		resp.Error = &rpcError{-32022, refusal("version").Reason(), map[string]any{"supported": []string{apicontract.ProtocolVersion}, "requested": version}}
+		problem := refusal("version")
+		resp.Error = &rpcError{-32022, problem.Reason(), map[string]any{
+			"supported": []string{apicontract.ProtocolVersion}, "requested": version,
+			"reason": problem.Reason(), "remedy": problem.Remedy(),
+		}}
 	} else if !req.ValidMetadata() {
 		resp.Error = &rpcError{-32602, refusal("metadata").Reason(), refusal("metadata")}
 	}
