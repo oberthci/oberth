@@ -7,6 +7,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/stateport"
 	"reflect"
+	"slices"
 	"time"
 )
 
@@ -55,14 +56,20 @@ func (s *Service) wait(ctx context.Context, r stateport.RunState, o waitOptions)
 	for {
 		observed, err := s.waitSnapshot(ctx, wait, &o)
 		if err != nil {
-			return waitReadFailure(ctx, wait, observed.result, err)
+			if ctx.Err() != nil {
+				return apicontract.WaitResult{}, ctx.Err()
+			}
+			if wait.Err() != nil {
+				return s.waitTimeout(ctx, &o)
+			}
+			return apicontract.WaitResult{}, err
 		}
 		if first {
 			initialHolds = observed.holds
 			first = false
 		}
 		if waitReady(observed.state, o.until, initial) || waitHoldsReady(o.until, observed.holds, initialHolds) {
-			if err := s.authorizeWait(ctx, &o); err != nil {
+			if err := s.authorizeWaitDelivery(ctx, &o); err != nil {
 				return apicontract.WaitResult{}, err
 			}
 			return observed.result, nil
@@ -116,6 +123,9 @@ func (s *Service) waitTimeout(ctx context.Context, o *waitOptions) (apicontract.
 	if err != nil {
 		return apicontract.WaitResult{}, err
 	}
+	if err := s.authorizeWaitDelivery(ctx, o); err != nil {
+		return apicontract.WaitResult{}, err
+	}
 	out.result.TimedOut = true
 	return out.result, nil
 }
@@ -129,6 +139,17 @@ func (s *Service) authorizeWait(ctx context.Context, o *waitOptions) error {
 	o.actor = a
 	return err
 }
+func (s *Service) authorizeWaitDelivery(ctx context.Context, o *waitOptions) error {
+	scope := o.actor.Scope
+	if err := s.authorizeWait(ctx, o); err != nil {
+		return err
+	}
+	if !slices.Equal(scope, o.actor.Scope) {
+		return refuse(forbidden)
+	}
+	return nil
+}
+
 func waitReady(r stateport.RunState, until string, initial stateport.RunState) bool {
 	return terminal(r.Status) || until == "any" && !reflect.DeepEqual(r, initial)
 }
@@ -155,16 +176,6 @@ func (s *Service) waitHolds(ctx context.Context, r stateport.RunState, o *waitOp
 		out = append(out, h.HeldNotice)
 	}
 	return out, nil
-}
-func waitReadFailure(ctx, wait context.Context, result apicontract.WaitResult, err error) (apicontract.WaitResult, error) {
-	if ctx.Err() != nil {
-		return result, ctx.Err()
-	}
-	if wait.Err() != nil {
-		result.TimedOut = true
-		return result, nil
-	}
-	return result, err
 }
 
 func waitHoldsReady(until string, current, initial []model.HeldNotice) bool {

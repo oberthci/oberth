@@ -130,7 +130,7 @@ atomically; no crash window can lose their events or publication intent.
 Native progress is observation, never an authority audit record.
 
 **Delta:** After commit, coalesce scoped repository/run/upstream wake hints; silent observations do not wake readers.
-Subscribe before every read; authority, removal and pruning invalidate affected readers. Reauthorize before delivery.
+Subscribe before every read; authority, removal and pruning invalidate affected readers. Reauthorize after the final read, including timeouts; discard the reply if scope changed.
 Event queries capture an upper cursor and filter scope/run/kind before their limit, at most 500 internally and 200 publicly.
 Ref matching belongs to the same query owner. Advance past examined filter misses; never skip unexamined
 matches. Pages carry events, next_after_id, latest_id, oldest_id, has_more and gap; hints never replace durable events.
