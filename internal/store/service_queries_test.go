@@ -91,8 +91,11 @@ func (c probeConn) PrepareContext(ctx context.Context, query string) (driver.Stm
 	return probeStmt{Stmt: stmt, query: query, probe: c.probe}, nil
 }
 func (s probeStmt) Query(args []driver.Value) (driver.Rows, error) {
-	s.probe.record(s.query)
-	return s.Stmt.Query(args)
+	values := make([]driver.NamedValue, len(args))
+	for i, value := range args {
+		values[i] = driver.NamedValue{Ordinal: i + 1, Value: value}
+	}
+	return s.QueryContext(context.Background(), values)
 }
 func (s probeStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
 	s.probe.record(s.query)
