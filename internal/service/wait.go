@@ -70,7 +70,7 @@ func (s *Service) wait(ctx context.Context, r stateport.RunState, o waitOptions)
 		}
 		select {
 		case <-s.ctx.Done():
-			return observed.result, refuse(unavailable)
+			return apicontract.WaitResult{}, refuse(unavailable)
 		case <-wait.Done():
 			return s.waitTimeout(ctx, &o)
 		case <-o.changed:
