@@ -461,21 +461,45 @@ class GateVerdicts(SignalGateTests, VendorGateTests, GoGateTests, GateFixture, u
 
 
 class HoldNamespaceGate(unittest.TestCase):
-    def test_test_gate_refuses_an_unavailable_namespace_host(self):
+    def run_namespace_gate(self, mode, required=None):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:
             binary = Path(tmp)
             for name, body in {
                 "python3": "exit 0\n",
-                "go": 'printf "hold-namespaces: SKIPPED: fixture user namespaces disabled\\n"\n'
-                      'test "${OBERTH_REQUIRE_HOLD_NAMESPACES:-}" != 1\n',
+                "lint": 'printf "fixture\\n"\n',
+                "go": 'if [ "$1" = test ]; then\n'
+                      '  case " $* " in *" -v "*) ;; *) exit 17 ;; esac\n'
+                      '  printf "hold-namespaces: SKIPPED: fixture user namespaces disabled\\n"\n'
+                      '  test "${OBERTH_REQUIRE_HOLD_NAMESPACES:-}" != 1\n'
+                      'fi\n',
             }.items():
                 script = binary / name
                 script.write_text("#!/bin/sh\n" + body)
                 script.chmod(0o700)
-            env = dict(os.environ, PATH=str(binary) + os.pathsep + os.environ["PATH"])
+            env = dict(os.environ, PATH=str(binary) + os.pathsep + os.environ["PATH"],
+                       GOLANGCI_LINT=str(binary / "lint"))
             env.pop("OBERTH_REQUIRE_HOLD_NAMESPACES", None)
-            result = subprocess.run(["bash", "hack/check.sh", "test"], cwd=root,
-                                    env=env, text=True, capture_output=True, timeout=30)
-            self.assertNotEqual(0, result.returncode, "test gate accepted skipped namespace tests")
-            self.assertIn("fixture user namespaces disabled", result.stdout)
+            if required is not None:
+                env["OBERTH_REQUIRE_HOLD_NAMESPACES"] = required
+            return subprocess.run(["bash", "hack/check.sh", mode], cwd=root,
+                                  env=env, text=True, capture_output=True, timeout=30)
+
+    def test_check_gate_refuses_an_unavailable_namespace_host(self):
+        result = self.run_namespace_gate("check", "0")
+        self.assertNotEqual(0, result.returncode, "test gate accepted skipped namespace tests")
+        self.assertIn("FAIL (1): env OBERTH_REQUIRE_HOLD_NAMESPACES=1 go test", result.stderr,
+                      "test gate accepted skipped namespace tests")
+        self.assertIn("fixture user namespaces disabled", result.stdout)
+
+    def test_ci_test_gate_reports_unavailable_namespaces(self):
+        result = self.run_namespace_gate("test")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("hold-namespaces: SKIPPED: fixture user namespaces disabled", result.stdout)
+
+    def test_local_test_gate_can_require_namespaces(self):
+        result = self.run_namespace_gate("test", "1")
+        self.assertNotEqual(0, result.returncode, "test gate accepted skipped namespace tests")
+        self.assertIn("FAIL (1): env OBERTH_REQUIRE_HOLD_NAMESPACES=1 go test", result.stderr,
+                      "test gate accepted skipped namespace tests")
+        self.assertIn("fixture user namespaces disabled", result.stdout)
