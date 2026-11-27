@@ -122,7 +122,7 @@ func resumeChanged(cause error) error {
 func resumeReplyDetail(old, commit string, plan nativebinding.ResumePlan) string {
 	detail := fmt.Sprintf("from %s at %s; %s; %d steps carried", old, commit[:8], plan.Mode(), len(plan.Carried))
 	if plan.InPod != nil {
-		detail += "; untracked files, inspection state and processes kept; secret-free remaining steps"
+		detail += "; untracked files named in held-step logs; inspection state and processes kept; secret-free remaining steps"
 	}
 	if len(plan.SecretSteps) > 0 {
 		detail += "; secret steps on F after carried steps: " + strings.Join(plan.SecretSteps, ", ")

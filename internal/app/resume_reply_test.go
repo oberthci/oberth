@@ -42,7 +42,7 @@ func TestInPodResumeReplyNamesKeptStateAndDeadline(t *testing.T) {
 		if err != nil || out.Run != "next" || out.Mode != "in-pod" || out.DeadlineRemainingMS == nil || *out.DeadlineRemainingMS != left || out.Advice != advice {
 			t.Fatal("in-Pod reply lost deadline advice", out, err)
 		}
-		for _, phrase := range []string{"untracked files", "inspection state", "processes kept", "secret-free remaining steps"} {
+		for _, phrase := range []string{"untracked files named in held-step logs", "inspection state", "processes kept", "secret-free remaining steps"} {
 			if !strings.Contains(out.Detail, phrase) {
 				t.Fatal("in-Pod reply hides kept workspace state", out.Detail, phrase)
 			}

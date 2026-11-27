@@ -28,6 +28,7 @@ type rerunManifest struct {
 	RunID   string
 	Commit  string
 	Removed []string
+	kept    string
 }
 
 func (r holdRuntime) checkoutRoot() string {
@@ -161,6 +162,7 @@ func (r holdRuntime) applyRerunSnapshot(ctx context.Context, stage, digest strin
 			return rerunManifest{}, err
 		}
 	}
+	manifest.kept = keptUntracked(dest, files)
 	return manifest, ctx.Err()
 }
 
@@ -321,6 +323,7 @@ func (r holdRuntime) rerunCommand(ctx context.Context, request holdRequest, code
 		return holdDiagnostic(diagnostic, code, fmt.Errorf("snapshot install failed: %w", err))
 	}
 	_, _ = fmt.Fprintln(diagnostic, nativebinding.RerunMarker(manifest.Commit, manifest.RunID))
+	_, _ = fmt.Fprintln(diagnostic, "oberth-hold: kept untracked files: "+manifest.kept)
 	if len(r.command) == 0 {
 		return holdDiagnostic(diagnostic, code, fmt.Errorf("authored command is missing"))
 	}
