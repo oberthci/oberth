@@ -2,19 +2,21 @@ package api
 
 import (
 	"context"
-	"github.com/oberthci/oberth/internal/apicontract"
-	"github.com/oberthci/oberth/internal/model"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // Config supplies transport dependencies. Source is returned only from the
 // separate SourceHandler; it is never mounted in the user listener.
 type Config struct {
+	Version       string
+	BrowserOrigin string
 	Auth          Authenticator
 	Views         apicontract.Views
 	Registry      *Registry
@@ -30,8 +32,6 @@ type Config struct {
 	Metrics       func(context.Context, apicontract.Caller) (string, error)
 	Source        http.Handler
 	MaximumWait   time.Duration
-	EventStreams  int
-	ReplayBacklog int
 }
 
 type Server struct {
@@ -43,7 +43,6 @@ type Server struct {
 	draining        atomic.Bool
 	drain           chan struct{}
 	drainOnce       sync.Once
-	sessions        sessions
 	reservations    reservations
 }
 
@@ -51,14 +50,16 @@ func New(c Config) (*Server, error) {
 	if err := validateConfig(c); err != nil {
 		return nil, err
 	}
+	if c.Version == "" {
+		c.Version = "(devel)"
+	}
+	var err error
+	c.BrowserOrigin, err = browserOrigin(c.BrowserOrigin)
+	if err != nil {
+		return nil, err
+	}
 	if c.MaximumWait == 0 {
 		c.MaximumWait = 600 * time.Second
-	}
-	if c.EventStreams == 0 {
-		c.EventStreams = eventsPerIdentity
-	}
-	if c.ReplayBacklog == 0 {
-		c.ReplayBacklog = 500
 	}
 
 	registry := *c.Registry
@@ -67,13 +68,11 @@ func New(c Config) (*Server, error) {
 	shutdown, cancelShutdown := context.WithCancel(context.Background())
 	s := &Server{config: c, mux: http.NewServeMux(), drain: make(chan struct{}), observers: shutdown, cancelObservers: cancelShutdown}
 
-	var err error
 	s.ui, err = loadUI()
 	if err != nil {
 		cancelShutdown()
 		return nil, err
 	}
-	s.sessions.items = map[string]*session{}
 	s.reservations.counts = map[string]int{}
 	s.routes()
 	return s, nil
@@ -89,7 +88,7 @@ func (s *Server) SourceHandler() http.Handler {
 // BeginDrain withdraws readiness before refusing work and waking observers.
 func (s *Server) BeginDrain() {
 	s.draining.Store(true)
-	s.drainOnce.Do(func() { close(s.drain); s.cancelObservers(); s.sessions.close() })
+	s.drainOnce.Do(func() { close(s.drain); s.cancelObservers() })
 }
 
 type endpoint func(http.ResponseWriter, *http.Request, apicontract.Caller)
@@ -111,10 +110,6 @@ func (s *Server) private(fn endpoint) http.HandlerFunc {
 			s.writeError(w, r, err, status)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/mcp") && !validProtocolHeader(r.Header) {
-			s.writeError(w, r, refusal("method"), 400)
-			return
-		}
 		fn(w, r, c)
 	}
 }
@@ -124,10 +119,12 @@ func (s *Server) routes() {
 	})
 	s.mux.HandleFunc("GET /livez", s.probe(s.config.Live, false))
 	s.mux.HandleFunc("GET /readyz", s.probe(s.config.Ready, true))
-	s.mux.HandleFunc("POST /mcp", s.private(s.mcp))
-	s.mux.HandleFunc("GET /mcp", s.private(s.eventStream))
-	s.mux.HandleFunc("DELETE /mcp", s.private(s.deleteSession))
-	s.mux.HandleFunc("POST /mcp/enroll", s.enrollment)
+	s.mux.HandleFunc("POST /mcp", s.mcpOrigin(s.private(s.mcp)))
+	s.mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Allow", "POST")
+		s.writeError(w, r, refusal("mcpMethod"), http.StatusMethodNotAllowed)
+	})
+	s.mux.HandleFunc("POST /mcp/enroll", s.mcpOrigin(s.enrollment))
 	s.mux.HandleFunc("POST /api/admin/{action}", s.private(s.admin))
 	s.mux.HandleFunc("POST /api/backup/database", s.accountBackup)
 	s.mux.HandleFunc("GET /metrics", s.private(s.metrics))
@@ -177,9 +174,6 @@ func validateConfig(c Config) error {
 		return err
 	}
 	if c.MaximumWait < 0 || c.MaximumWait > 600*time.Second {
-		return refusal("input")
-	}
-	if c.EventStreams < 0 || c.EventStreams > 64 || c.ReplayBacklog < 0 || c.ReplayBacklog > 10000 {
 		return refusal("input")
 	}
 	return nil

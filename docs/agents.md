@@ -61,20 +61,23 @@ the checkout. Keep using CLI commands until the tools are connected.
 The bridge uses the selected CLI profile and its pinned HTTPS trust. Without a profile it gives
 setup instructions and no tools; it does not try another installation.
 
-The optional [agent plugins](install.md#agent-plugins) add a run box and run/watch commands.
+Only MCP 2026-07-28 is supported, including enrollment and standalone CLI calls.
+The complete host floor is Claude Code 2.1.331+ in the interactive terminal main conversation,
+v2 runtime, direct Anthropic connection, feature flags and MCP skills enabled; Fable, Opus 4.8,
+Sonnet 5, Haiku 5.5 or later. Pro/Max/Ultra qualify; Team/Enterprise need organization enablement.
+One-shot, SDK and cloud sessions are outside this floor. Other hosts need equivalent skill loading,
+Tasks and form interaction. Tasks support alone (2.1.304) is insufficient.
+Clear CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0 and CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND=1,
+then start a new session and rediscover/attach. Keep the same server name, transport, command/URL,
+args, env, headers and timeout for same-session recovery. Otherwise read durable state and attach
+afresh. Recovery never restarts CI. Unsupported hosts must upgrade or use the standalone CLI.
 
 ## Push, observe and respond
-Review the commit and obtain consent before pushing a new branch:
-
-```sh
-git push oberth HEAD:refs/heads/change -o oberth.run=1
-```
-
-An agent push without `-o oberth.run=1` is parked: no run starts. Never wait for a run that was not
-created. The server's initialization instructions are the run loop; follow them exactly.
-
-Without tools, follow `oberth log <run>` in a background shell, then use `oberth run wait <run>` and
-read the state. Exit zero means the wait completed, not that CI passed.
+After reviewing the commit and obtaining consent, request CI with
+`git push oberth HEAD:refs/heads/change -o oberth.run=1`. Without that option a push is parked:
+no run starts. Follow the server's discovery instructions for the CI loop.
+Without tools, follow `oberth log <run>` in a background shell, then `oberth run wait <run>`.
+Exit zero means the wait completed; read the verdict.
 
 ## Show the evidence
 When builds come up, paste the bridge's rendered display block verbatim in a code block. Without
@@ -84,19 +87,16 @@ commit when they differ. An assisted run is never promotion evidence; obtain an 
 before promoting.
 
 ## Promote and release
-After consent, run `oberth promote <tested-commit-sha>`. Show the tested run, resulting
-default-branch commit and that commit's CI result. If promotion is refused, follow its remedy; do
-not push the default branch as a workaround. Follow [agent promotion](releasing.md#agent-promotion)
-for the administrator's policy change and [project release steps](releasing.md#release-your-project)
-for secret grants, saving local work, checkout synchronization and passing CI on the resulting
-default commit. After release consent, run `oberth release <tag>` and show its commit, run result
-and publication. A lost mutation reply means read the object's state before repeating the action.
+After consent, use `oberth promote <tested-commit-sha>` and show the resulting default commit's CI.
+On refusal, follow its remedy; do not push the default branch as a workaround.
+Follow [agent promotion](releasing.md#agent-promotion) for policy and
+[project releases](releasing.md#release-your-project) for grants and checkout synchronization.
+After release consent, use `oberth release <tag>`; show its commit, run and publication.
+Resolve lost mutation replies from durable state before repeating an action.
 
 ## Resume a failed run
-After consent, commit and push a late fix without `oberth.run`, then call
-`run_resume {id,commit}` (CLI: `oberth run resume <id> <commit>`). Argo retries the
-failed part on F, retaining passed artifacts, outputs and workspace volumes.
-The resumed run is Assisted and never evidence. Watch `run.finished`; if it fails,
-fix and resume again. After a pass and consent, call `run_rerun` once, then promote
-only its unassisted pass. Changed pipelines or grants require a full pushed run.
-Carried state may include old caches and external effects; fix-in-held-Pod is unavailable.
+After consent, commit and push F parked, then `oberth run resume <id> <commit>`
+(`run_resume {id,commit}`). Argo retries failed work, retaining passed outputs and volumes.
+R2 is Assisted, never evidence. On failure fix/resume again; after a pass and consent, rerun once
+for a fresh unassisted pass to promote. Changed pipelines or grants require a full pushed run.
+Carried caches and effects are not fresh evidence; same-Pod resume is unavailable.

@@ -36,6 +36,7 @@ func TestUIExampleServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("OBERTH_UI_ORIGIN", "http://"+listener.Addr().String())
 	f := uiExample(t)
 	handler := f.server.Handler()
 	if os.Getenv("OBERTH_UI_PROGRESS") != "" {

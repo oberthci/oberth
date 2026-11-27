@@ -36,7 +36,7 @@ func TestAccountSnapshotHasOneNativeRouteAndNoAdministratorAccess(t *testing.T) 
 	r := httptest.NewRequest("POST", "/api/backup/database", strings.NewReader("{}"))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer projection-fixture")
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	if w.Code != 200 || w.Body.String() != "canonical-backup-fixture" || calls != 1 {
 		t.Fatal("native backup account route refused its stream", w.Code, calls)
 	}
@@ -94,7 +94,7 @@ func TestAccountSnapshotRefusesClientCertificate(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer projection-fixture")
 	r.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{{}}}
 	w := newStreamWriter()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	if w.Code != 401 || calls != 0 || strings.Contains(w.Body.String(), "canonical-backup-fixture") {
 		t.Fatal("account snapshot accepted a request carrying a client certificate", w.Code, calls)
 	}
@@ -113,7 +113,7 @@ func TestAccountSnapshotRefusesOversizedTokenBeforeReview(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer "+strings.Repeat("a", size))
 		w := newStreamWriter()
-		f.server.Handler().ServeHTTP(w, r)
+		f.server.Handler().ServeHTTP(w, modernRequest(r))
 		if size > 64<<10 && (w.Code != 401 || calls != 1) {
 			t.Fatal("oversized backup token reached authentication", w.Code, calls)
 		}

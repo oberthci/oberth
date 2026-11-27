@@ -13,7 +13,7 @@ import (
 
 func TestSecondEveryToolSchema(t *testing.T) {
 	f := setup(t, nil)
-	assertSuccess(t, initialize(f))
+	assertSuccess(t, discover(f))
 	reg, _ := api.Builtin(f.bindings)
 	for _, m := range listTools(t, reg, admin()) {
 		w := rpc(f, m.Name, toolArgs(m))
@@ -50,7 +50,7 @@ func TestSecondPopulateSchemas(t *testing.T) {
 		}
 		out.Set(ptr.Elem())
 	}
-	assertSuccess(t, initialize(f))
+	assertSuccess(t, discover(f))
 	for _, m := range listTools(t, reg, admin()) {
 		w := rpc(f, m.Name, toolArgs(m))
 		var wire map[string]any

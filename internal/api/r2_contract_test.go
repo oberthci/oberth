@@ -13,7 +13,7 @@ import (
 
 func TestInitializeTeachesPushWaitLogsFixPromoteRelease(t *testing.T) {
 	f := setup(t, nil)
-	w := initialize(f)
+	w := discover(f)
 	assertSuccess(t, w)
 	var wire struct {
 		Result struct {

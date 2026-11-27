@@ -32,7 +32,7 @@ func TestSecondEventFiltersHaveOneShapeBound(t *testing.T) {
 	for _, tool := range []string{"events_wait"} {
 		for _, key := range []string{"repos", "kinds", "refs_glob"} {
 			f := setup(t, nil)
-			initialize(f)
+			discover(f)
 			values := make([]string, 32)
 			for i := range values {
 				values[i] = "widget"

@@ -8,20 +8,8 @@ import (
 	"strings"
 )
 
-// ProtocolVersion is the server's preferred MCP protocol revision.
-const ProtocolVersion = "2025-06-18"
-
-// NegotiateProtocol preserves the supported older revision when requested.
-func NegotiateProtocol(requested string) string {
-	if requested == "2025-03-26" {
-		return requested
-	}
-	return ProtocolVersion
-}
-
-// SSEFrame preserves message data and its resume cursor; comments carry no data.
+// SSEFrame carries request-scoped message data; comments carry no data.
 type SSEFrame struct {
-	ID        string
 	Data      []byte
 	Keepalive bool
 }
@@ -69,10 +57,6 @@ func (f *SSEFrame) line(line string) {
 	case "data":
 		f.Data = append(f.Data, value...)
 		f.Data = append(f.Data, '\n')
-	case "id":
-		if !strings.ContainsRune(value, 0) {
-			f.ID = value
-		}
 	case "":
 		f.Keepalive = f.Keepalive || value == "keepalive"
 	}

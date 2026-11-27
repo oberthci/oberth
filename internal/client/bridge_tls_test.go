@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/api/fake"
+	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/model"
 )
 
@@ -56,7 +57,7 @@ func TestBridgeRenewAndStdout(t *testing.T) {
 	cfg, peers, pair, _, rt := tlsBridgeConfig(t)
 	dir := filepath.Join(cfg.Base, cfg.Profile)
 	p := newBridgePeer(t, cfg)
-	p.initialize()
+	p.discover()
 	if <-peers != 100 {
 		t.Fatal("initial client identity missing")
 	}
@@ -67,6 +68,7 @@ func TestBridgeRenewAndStdout(t *testing.T) {
 		t.Fatal("unchanged identity discarded connection")
 	default:
 	}
+	checkPinnedBridgeTools(t, p)
 	renewBridgeIdentity(t, cfg, pair)
 	p.send(2, "ping", nil)
 	p.frame()
@@ -88,6 +90,17 @@ func TestBridgeRenewAndStdout(t *testing.T) {
 	p.send(3, "ping", nil)
 	if data := p.frame(); !bytesContainRPCError(data) {
 		t.Fatal("mismatched replacement identity accepted")
+	}
+}
+
+func checkPinnedBridgeTools(t *testing.T, p *bridgePeer) {
+	t.Helper()
+	for _, name := range []string{"run_get", "run_rerun"} {
+		p.tool(name, name, map[string]string{"id": "11111111"}, nil)
+		id, _ := json.Marshal(name)
+		if _, refused, _, err := apicontract.ToolPayloadForID(p.frame(), id); err != nil || refused {
+			t.Fatal("pinned joined tool failed", name, err)
+		}
 	}
 }
 

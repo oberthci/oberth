@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/oberthci/oberth/internal/api/fake"
-	"github.com/oberthci/oberth/internal/apicontract"
 	"io"
 	"net/http"
 	"os"
@@ -13,6 +11,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/api/fake"
+	"github.com/oberthci/oberth/internal/apicontract"
 )
 
 func TestBridgeCompactsMultilineReply(t *testing.T) {
@@ -35,7 +36,7 @@ func TestBridgeRejectsMismatchedRelayID(t *testing.T) {
 		return handlerTransport(h).RoundTrip(r)
 	}))
 	p := newBridgePeer(t, cfg)
-	p.initialize()
+	p.discover()
 	p.send("expected", "ping", nil)
 	var reply struct {
 		ID    string
@@ -48,7 +49,7 @@ func TestBridgeRejectsMismatchedRelayID(t *testing.T) {
 func TestBridgeCleansRefusedCredentialReservations(t *testing.T) {
 	cfg := bridgeProfile(t, handlerTransport(server(t, fake.Bindings())))
 	p := newBridgePeer(t, cfg)
-	p.initialize()
+	p.discover()
 	p.tool(1, "uplink_add", map[string]any{}, nil)
 	p.frame()
 	_ = p.input.Close()
@@ -70,23 +71,13 @@ func TestBridgeEOFDrainsAcceptedMutation(t *testing.T) {
 			return apicontract.Receipt{}, ctx.Err()
 		}
 	}}
-	stream := make(chan context.Context, 1)
 	h := server(t, b)
-	cfg := bridgeProfile(t, roundTrip(func(r *http.Request) (*http.Response, error) {
-		if r.Method != http.MethodGet {
-			return handlerTransport(h).RoundTrip(r)
-		}
-		stream <- r.Context()
-		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(untilCancelled{r.Context()})}, nil
-	}))
+	cfg := bridgeProfile(t, handlerTransport(h))
 	p := newBridgePeer(t, cfg)
-	p.initialize()
-	p.send(nil, "notifications/initialized", nil)
-	streaming := awaitEventContext(t, stream)
+	p.discover()
 	p.tool("mutation", "run_rerun", map[string]any{"id": "run1"}, nil)
 	<-entered
 	_ = p.input.Close()
-	awaitEventSignal(t, streaming.Done())
 	timer := time.NewTimer(30 * time.Millisecond)
 	defer timer.Stop()
 	select {
@@ -124,7 +115,7 @@ func TestBridgeCancelledMutationReportsLostReply(t *testing.T) {
 		return handlerTransport(h).RoundTrip(r)
 	}))
 	p := newBridgePeer(t, cfg)
-	p.initialize()
+	p.discover()
 	p.tool("mut", "run_rerun", map[string]any{"id": "run1"}, nil)
 	<-entered
 	p.send(nil, "notifications/cancelled", map[string]any{"requestId": "mut"})

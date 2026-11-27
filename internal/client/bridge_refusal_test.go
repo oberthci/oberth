@@ -18,7 +18,7 @@ func TestBridgeRefusalKeepsRequiredContext(t *testing.T) {
 	b := fake.Bindings()
 	b.RunRerun.Handler = &fake.Handler[apicontract.RunRerunArgs, apicontract.Receipt]{Error: refusal}
 	p := newBridgePeer(t, bridgeProfile(t, handlerTransport(server(t, b))))
-	p.initialize()
+	p.discover()
 	p.tool(7, "run_rerun", map[string]any{"id": "0123456789abcdef"}, nil)
 	frame := p.frame()
 	var reply struct {

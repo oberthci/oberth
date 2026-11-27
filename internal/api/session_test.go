@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"github.com/oberthci/oberth/internal/apicontract"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,73 +14,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/apicontract"
+
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/api/fake"
 	"github.com/oberthci/oberth/internal/publicerr"
 )
 
-func initialize(f *fixture) *httptest.ResponseRecorder {
-	return request(f, "POST", "/mcp", []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`))
-}
-func TestSession64Accepts65RefusesAndIdleExpiry(t *testing.T) {
-	f := setup(t, nil)
-	for i := 0; i < 64; i++ {
-		assertSuccess(t, initialize(f))
-	}
-	if w := initialize(f); !strings.Contains(w.Body.String(), `"error":`) {
-		t.Fatal("sixty-fifth session accepted")
-	}
-	f.clock.Advance(time.Hour - time.Nanosecond)
-	if w := request(f, "DELETE", "/mcp", nil); w.Code != 204 {
-		t.Fatal("session expired before its idle bound")
-	}
-	assertSuccess(t, initialize(f))
-	f.clock.Advance(time.Hour)
-	if w := request(f, "DELETE", "/mcp", nil); w.Code != 404 {
-		t.Fatal("idle session retained")
-	}
-	assertSuccess(t, initialize(f))
-}
-func TestSessionCredentialBinding(t *testing.T) {
-	f := setup(t, nil)
-	assertSuccess(t, initialize(f))
-	c := admin()
-	c.CredentialID = "different-private-id"
-	f.auth.Set(c, nil)
-	if w := request(f, "DELETE", "/mcp", nil); w.Code != 404 {
-		t.Fatal("session transferred authority")
-	}
-	c.CredentialID = "private-id"
-	f.auth.Set(c, nil)
-	if w := request(f, "DELETE", "/mcp", nil); w.Code != 204 {
-		t.Fatal(w.Body.String())
-	}
-}
-func TestRunResource64Accepts65Refuses(t *testing.T) {
-	f := setup(t, nil)
-	assertSuccess(t, initialize(f))
-	for i := 0; i < 65; i++ {
-		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": i, "method": "resources/subscribe", "params": map[string]string{"uri": fmt.Sprintf("run://run-%08d", i)}})
-		w := request(f, "POST", "/mcp", body)
-		if strings.Contains(w.Body.String(), `"error":`) != (i == 64) {
-			t.Fatalf("subscription %d: %s", i, w.Body.String())
-		}
-	}
-}
-func TestProtocolDatesAndRequestID(t *testing.T) {
-	for _, tc := range []struct {
-		version, want string
-		refused       bool
-	}{
-		{"2025-03-26", "2025-03-26", false}, {"2025-06-18", "2025-06-18", false}, {"2030-01-01", "2025-06-18", false}, {"invalid", "", true},
-	} {
-		f := setup(t, nil)
-		body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"identity","method":"initialize","params":{"protocolVersion":%q}}`, tc.version)
-		w := request(f, "POST", "/mcp", []byte(body))
-		if !strings.Contains(w.Body.String(), `"id":"identity"`) || strings.Contains(w.Body.String(), `"error":`) != tc.refused || !strings.Contains(w.Body.String(), tc.want) {
-			t.Fatal(w.Body.String())
-		}
-	}
+func discover(f *fixture) *httptest.ResponseRecorder {
+	return request(f, "POST", "/mcp", []byte(`{"jsonrpc":"2.0","id":1,"method":"server/discover"}`))
 }
 func TestCertificateTrustExpiryAndDualAuthority(t *testing.T) {
 	f := setup(t, nil)
@@ -105,7 +46,7 @@ func TestCertificateTrustExpiryAndDualAuthority(t *testing.T) {
 				r.Header.Set("Authorization", "Bearer "+tc.bearer)
 			}
 			w := httptest.NewRecorder()
-			f.server.Handler().ServeHTTP(w, r)
+			f.server.Handler().ServeHTTP(w, modernRequest(r))
 			if w.Code != tc.want {
 				t.Fatal(w.Code, w.Body.String())
 			}
@@ -115,7 +56,7 @@ func TestCertificateTrustExpiryAndDualAuthority(t *testing.T) {
 	r := httptest.NewRequest("GET", "/api/status", nil)
 	r.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
 	w := httptest.NewRecorder()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	if w.Code != 401 {
 		t.Fatal("expired certificate accepted")
 	}
@@ -127,7 +68,7 @@ func TestUnknownCertificateNeverFallsBackToBearer(t *testing.T) {
 	leaf := &x509.Certificate{Raw: []byte("leaf"), NotBefore: f.clock.Now().Add(-time.Hour), NotAfter: f.clock.Now().Add(time.Hour)}
 	r.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
 	w := httptest.NewRecorder()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	if w.Code != 401 {
 		t.Fatal("certificate fell back")
 	}
@@ -171,7 +112,7 @@ func TestAllConfigBounds(t *testing.T) {
 	for _, tc := range []struct {
 		key   string
 		limit int
-	}{{"streams", 64}, {"backlog", 10000}, {"wait", 600}} {
+	}{{"wait", 600}} {
 		for _, delta := range []int{0, 1} {
 			b := fake.Bindings()
 			r, err := api.Builtin(b)
@@ -180,10 +121,6 @@ func TestAllConfigBounds(t *testing.T) {
 			}
 			c := api.Config{FailureLog: slog.New(slog.NewTextHandler(io.Discard, nil)), Registry: r, Auth: fake.NewAuth(admin()), Runtime: fake.NewClock().Runtime(), Classify: publicerr.Classify}
 			switch tc.key {
-			case "streams":
-				c.EventStreams = tc.limit + delta
-			case "backlog":
-				c.ReplayBacklog = tc.limit + delta
 			case "wait":
 				c.MaximumWait = time.Duration(tc.limit+delta) * time.Second
 			}
@@ -215,7 +152,7 @@ func TestDualCredentialsRejectEveryAuthorityMismatch(t *testing.T) {
 			r.Header.Set("Authorization", "Bearer valid")
 			r.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
 			w := httptest.NewRecorder()
-			f.server.Handler().ServeHTTP(w, r)
+			f.server.Handler().ServeHTTP(w, modernRequest(r))
 			if w.Code != 401 {
 				t.Fatal("conflicting authority accepted")
 			}
@@ -247,28 +184,6 @@ func TestSourceListenerHasNoHistoryAuthority(t *testing.T) {
 	}
 }
 
-func TestSessionExactIdleBoundaryAndFullTableExpiry(t *testing.T) {
-	for _, elapsed := range []time.Duration{time.Hour - time.Nanosecond, time.Hour} {
-		f := setup(t, nil)
-		assertSuccess(t, initialize(f))
-		f.clock.Advance(elapsed)
-		w := request(f, "DELETE", "/mcp", nil)
-		want := 204
-		if elapsed == time.Hour {
-			want = 404
-		}
-		if w.Code != want {
-			t.Fatalf("idle %s: %d", elapsed, w.Code)
-		}
-	}
-	f := setup(t, nil)
-	for i := 0; i < 64; i++ {
-		assertSuccess(t, initialize(f))
-	}
-	f.clock.Advance(time.Hour)
-	assertSuccess(t, initialize(f))
-}
-
 func TestToolDeadlineIncludesPreparationAndListenerUsesTheLongestTool(t *testing.T) {
 	var preparedDeadline time.Time
 	h := apicontract.HandlerFunc[apicontract.RunWaitArgs, apicontract.WaitResult](func(ctx context.Context, _ apicontract.Caller, _ apicontract.RunWaitArgs) (apicontract.Call[apicontract.WaitResult], error) {
@@ -285,45 +200,6 @@ func TestToolDeadlineIncludesPreparationAndListenerUsesTheLongestTool(t *testing
 	assertSuccess(t, rpc(f, "run_wait", map[string]any{"id": "12345678", "timeout_s": 1}))
 	if preparedDeadline.IsZero() || f.server.WriteTimeout() != 16*time.Minute {
 		t.Fatal("deadline metadata did not reach the listener contract")
-	}
-}
-
-func TestProtocolHeadersAreValidatedOnEveryMCPBoundary(t *testing.T) {
-	f := setup(t, nil)
-	for _, path := range []string{"/mcp", "/mcp/enroll"} {
-		for _, version := range []string{"2025-03-26", "2025-06-18", "invalid", "2030-01-01"} {
-			r := httptest.NewRequest("POST", path, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
-			r.Header.Set("Content-Type", "application/json")
-			if path == "/mcp" {
-				r.Header.Set("Authorization", "Bearer valid")
-			}
-			r.Header.Set("MCP-Protocol-Version", version)
-			w := httptest.NewRecorder()
-			f.server.Handler().ServeHTTP(w, r)
-			want := 200
-			if version == "invalid" || version == "2030-01-01" {
-				want = 400
-			}
-			if w.Code != want {
-				t.Fatalf("%s version %s: %d", path, version, w.Code)
-			}
-		}
-	}
-	r := httptest.NewRequest("POST", "/mcp/enroll", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
-	r.Header.Add("MCP-Protocol-Version", apicontract.ProtocolVersion)
-	r.Header.Add("MCP-Protocol-Version", apicontract.ProtocolVersion)
-	w := httptest.NewRecorder()
-	f.server.Handler().ServeHTTP(w, r)
-	if w.Code != 400 {
-		t.Fatal("duplicate protocol header accepted")
-	}
-	r = httptest.NewRequest("POST", "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("MCP-Protocol-Version", "invalid")
-	w = httptest.NewRecorder()
-	f.server.Handler().ServeHTTP(w, r)
-	if w.Code != 401 {
-		t.Fatal("protocol negotiation replaced caller authentication")
 	}
 }
 

@@ -20,8 +20,8 @@ func TestRemovedSelectorsAreRejected(t *testing.T) {
 			t.Fatal(tc.name, w.Body.String())
 		}
 	}
-	initialize(f)
-	if w := request(f, "DELETE", "/mcp", nil); w.Code != 204 {
+	discover(f)
+	if w := request(f, "DELETE", "/mcp", nil); w.Code != 405 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }

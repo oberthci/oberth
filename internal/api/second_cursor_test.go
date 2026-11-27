@@ -2,14 +2,15 @@ package api_test
 
 import (
 	"context"
-	"github.com/oberthci/oberth/internal/api"
-	"github.com/oberthci/oberth/internal/api/fake"
-	"github.com/oberthci/oberth/internal/apicontract"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/api/fake"
+	"github.com/oberthci/oberth/internal/apicontract"
 )
 
 func TestWaitCeilingPreservesRequestedEventCursor(t *testing.T) {
@@ -29,7 +30,7 @@ func TestWaitCeilingPreservesRequestedEventCursor(t *testing.T) {
 				r.Header.Set("Accept", "text/event-stream")
 			}
 			w := newStreamWriter()
-			f.server.Handler().ServeHTTP(w, r)
+			f.server.Handler().ServeHTTP(w, modernRequest(r))
 			if !strings.Contains(w.Body.String(), `"timed_out":true`) || !strings.Contains(w.Body.String(), `"next_after_id":12345`) {
 				t.Fatal("timeout rewound the durable event cursor", w.Body.String())
 			}

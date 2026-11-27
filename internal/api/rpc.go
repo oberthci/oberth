@@ -3,27 +3,23 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/oberthci/oberth/internal/apicontract"
 	"mime"
 	"net/http"
-	"time"
+
+	"github.com/oberthci/oberth/internal/apicontract"
 )
 
 const rpcResponseBytes = 3*apicontract.ResponseBytes + apicontract.RPCEnvelopeBytes
 
 const RestartingRPCCode = -32001
 
-type rpcRequest struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
-}
+type rpcRequest = apicontract.MCPRequest
 type rpcResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Result  any             `json:"result,omitempty"`
-	Error   *rpcError       `json:"error,omitempty"`
+	JSONRPC       string          `json:"jsonrpc"`
+	ID            json.RawMessage `json:"id"`
+	Result        any             `json:"result,omitempty"`
+	Error         *rpcError       `json:"error,omitempty"`
+	serverVersion string
 }
 type rpcError struct {
 	Code    int    `json:"code"`
@@ -31,15 +27,9 @@ type rpcError struct {
 	Data    any    `json:"data,omitempty"`
 }
 type callParams struct {
-	Name      string                     `json:"name"`
-	Arguments json.RawMessage            `json:"arguments,omitempty"`
-	Meta      map[string]json.RawMessage `json:"_meta,omitempty"`
-}
-type initializeParams struct {
-	ProtocolVersion string                     `json:"protocolVersion"`
-	Capabilities    map[string]json.RawMessage `json:"capabilities,omitempty"`
-	ClientInfo      map[string]json.RawMessage `json:"clientInfo,omitempty"`
-	Meta            map[string]json.RawMessage `json:"_meta,omitempty"`
+	apicontract.MCPParams
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 type content struct {
 	Type string `json:"type"`
@@ -51,10 +41,8 @@ type toolResult struct {
 	IsError           bool      `json:"isError"`
 }
 
-func validVersion(v string) bool { _, err := time.Parse("2006-01-02", v); return err == nil }
 func (s *Server) mcp(w http.ResponseWriter, r *http.Request, c apicontract.Caller) {
-	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || media != "application/json" || r.URL.RawQuery != "" {
+	if !jsonMedia(r.Header) || r.URL.RawQuery != "" {
 		s.writeError(w, r, refusal("media"), 400)
 		return
 	}
@@ -65,21 +53,20 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request, c apicontract.Calle
 	}
 	var req rpcRequest
 	if err = decode(raw, &req, apicontract.RequestBytes); err != nil {
-		s.writeRPC(w, r, rpcResponse{"2.0", json.RawMessage("null"), nil, &rpcError{-32700, refusal("input").Reason(), s.publicError(r.Context(), err)}})
+		s.writeRPC(w, r, rpcResponse{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{-32700, refusal("input").Reason(), s.publicError(r.Context(), err)}})
 		return
 	}
 	if string(req.Params) == "null" {
 		req.Params = nil
 	}
-	resp := rpcResponse{JSONRPC: "2.0", ID: req.ID}
+	resp := rpcResponse{JSONRPC: "2.0", ID: req.ID, serverVersion: s.config.Version}
 	if req.JSONRPC != "2.0" || !validRPCID(req.ID) {
 		resp.ID = json.RawMessage("null")
 		resp.Error = &rpcError{-32600, refusal("input").Reason(), nil}
 		s.writeRPC(w, r, resp)
 		return
 	}
-	if req.Method == "notifications/initialized" && len(req.ID) == 0 {
-		w.WriteHeader(202)
+	if !s.validateMCP(w, r, req) {
 		return
 	}
 	if len(req.ID) == 0 {
@@ -89,8 +76,11 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request, c apicontract.Calle
 	s.dispatchRPC(w, r, c, rpcExchange{req, resp})
 }
 func validRPCID(id json.RawMessage) bool {
-	if len(id) == 0 || bytes.Equal(id, []byte("null")) {
+	if len(id) == 0 {
 		return true
+	}
+	if bytes.Equal(bytes.TrimSpace(id), []byte("null")) {
+		return false
 	}
 	var str string
 	if json.Unmarshal(id, &str) == nil {
@@ -102,13 +92,13 @@ func validRPCID(id json.RawMessage) bool {
 func (s *Server) dispatchRPC(w http.ResponseWriter, r *http.Request, c apicontract.Caller, x rpcExchange) {
 	req, resp := x.req, x.resp
 	switch req.Method {
-	case "initialize", "ping", "tools/list":
-		s.handshake(w, r, handshakeRequest{req: req, caller: c})
+	case "server/discover", "ping", "tools/list":
+		s.discovery(w, r, discoveryRequest{req: req, caller: c})
 		return
 	case "tools/call":
 		s.callTool(w, r, c, rpcExchange{req, resp})
 		return
-	case "resources/list", "resources/read", "resources/subscribe", "resources/unsubscribe":
+	case "resources/list", "resources/read":
 		s.resource(w, r, c, rpcExchange{req, resp})
 		return
 	default:
@@ -117,20 +107,22 @@ func (s *Server) dispatchRPC(w http.ResponseWriter, r *http.Request, c apicontra
 	s.writeRPC(w, r, resp)
 }
 func (s *Server) writeRPC(w http.ResponseWriter, r *http.Request, resp rpcResponse) {
-	s.writeJSON(w, r, jsonReply{200, resp, rpcResponseBytes})
+	resp.serverVersion = s.config.Version
+	status := 200
+	if resp.Error != nil {
+		switch resp.Error.Code {
+		case -32601:
+			status = 404
+		case -32700, -32600, -32602, -32020, -32021, -32022:
+			status = 400
+		}
+	}
+	s.writeJSON(w, r, jsonReply{status, resp, rpcResponseBytes})
 }
 
 type rpcExchange struct {
 	req  rpcRequest
 	resp rpcResponse
-}
-
-func validProtocolHeader(header http.Header) bool {
-	values := header.Values("MCP-Protocol-Version")
-	if len(values) == 0 {
-		return true
-	}
-	return len(values) == 1 && (values[0] == "" || values[0] == apicontract.NegotiateProtocol(values[0]))
 }
 
 const agentInstructions = `An agent push requests CI with -o oberth.run=1; otherwise it is parked and creates no run.
@@ -148,16 +140,20 @@ While promoting, cancel and restart the one wait with promotion.finished added; 
 Whenever builds come up, paste the display block that oberth mcp adds after each run result verbatim in a code block, without clipping reasons.
 For issue changes, observe issue.updated and refresh issue_list or issue_get.
 object_sha is the accepted object; commit_sha is the tested commit. Confirm delivery with publication_list.
-Pushed notifications are an extra. After a lost mutation reply or restart, read durable state before repeating an action.`
+Request-scoped progress is an extra. After a lost mutation reply or restart, read durable state before repeating an action.`
 
-func initializeResult(p initializeParams, enrollment bool) any {
-	version := apicontract.NegotiateProtocol(p.ProtocolVersion)
-	capabilities := map[string]any{"tools": map[string]bool{"listChanged": false}}
+func (s *Server) discoveryResult(enrollment bool) any {
+	capabilities := map[string]any{"tools": map[string]any{}}
 	instructions := agentInstructions
 	if enrollment {
 		instructions = "Generate and retain private keys locally. Redeem the invitation with uplink_redeem, install the returned certificate, then reconnect to the ordinary tool endpoint."
 	} else {
-		capabilities["resources"] = map[string]bool{"subscribe": true}
+		capabilities["resources"] = map[string]any{}
 	}
-	return map[string]any{"protocolVersion": version, "capabilities": capabilities, "serverInfo": map[string]string{"name": "Oberth", "version": "1"}, "instructions": instructions}
+	return map[string]any{"supportedVersions": []string{apicontract.ProtocolVersion}, "capabilities": capabilities, "instructions": instructions, "_meta": map[string]any{"io.modelcontextprotocol/serverInfo": map[string]string{"name": "Oberth", "version": s.config.Version}}}
+}
+
+func jsonMedia(header http.Header) bool {
+	media, _, err := mime.ParseMediaType(header.Get("Content-Type"))
+	return err == nil && media == "application/json"
 }

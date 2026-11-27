@@ -40,7 +40,7 @@ func TestBridgeConcurrentRequests(t *testing.T) {
 	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run1", Status: stepmodel.RunFailed}}}
 	h := server(t, b)
 	p := newBridgePeer(t, bridgeProfile(t, streamingTransport(h)))
-	init := p.initialize()
+	init := p.discover()
 	if !bytes.Contains(init, []byte("once per code change")) {
 		t.Fatal("server instructions changed")
 	}
@@ -80,7 +80,7 @@ func TestBridgeCancelAndLostReply(t *testing.T) {
 		return handlerTransport(h).RoundTrip(r)
 	}))
 	p := newBridgePeer(t, cfg)
-	p.initialize()
+	p.discover()
 	p.tool("lost", "repo_archive", map[string]any{"repo": "upstream/org/app"}, nil)
 	data := p.frame()
 	if calls.Load() != 1 || !bytes.Contains(data, []byte("Reply lost; nothing was retried.")) || !bytes.Contains(data, []byte("Read the object's state")) {
@@ -102,7 +102,7 @@ func TestBridgeProgressFromKeepalive(t *testing.T) {
 				}
 			}}
 			p := newBridgePeer(t, bridgeProfile(t, streamingTransport(server(t, b))))
-			p.initialize()
+			p.discover()
 			p.tool("wait", "run_wait", map[string]any{"id": "run1", "timeout_s": 600}, token)
 			if token != nil {
 				data := p.frame()

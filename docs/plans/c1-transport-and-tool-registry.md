@@ -24,11 +24,15 @@ Authentication returns an actor or a typed invalid-credential/temporary-failure 
 Only verified client certificates are accepted. Dual credentials must agree on identity,
 fingerprint, admin and scope; an unknown certificate cannot fall back to a bearer.
 
-C1 owns only ephemeral session IDs, subscription filters, resource subscriptions,
-delivery cursors, stream reservations and browser
-preferences. A session binds delivery to a credential; it grants no authority and is
-unnecessary for tool calls. Durable events, run records and authorization remain behind
-C2 interfaces.
+C1 owns request-scoped delivery reservations and browser preferences. MCP uses only
+2026-07-28, per-request version, client identity and capabilities, and server/discover.
+Validate matching version/method/name headers (including Base64 sentinel encoding) before
+effects. Header errors are HTTP 400/-32020; unsupported revisions are 400/-32022 with
+supported versions; unknown methods are 404/-32601. Required missing capabilities are
+400/-32021. There are no initialization sessions, GET streams or reconnect cursors.
+MCP accepts only the configured public browser origin; other origins refuse.
+The web client sends modern metadata and headers. Enrollment requires JSON.
+Durable events, run records and authorization remain behind C2 interfaces.
 
 ### One tool declaration and one decode
 
@@ -91,7 +95,7 @@ C4 is the sole validator.
 | Boundary | Contract |
 | --- | --- |
 | Public | `GET /healthz`, `/livez`, `/readyz`; `/`, `/runs`, `/runs/{run}`, `/repos`, `/issues`, `/issues/{id}`, `/status` and `/assets/{name}` serve redirects or a data-free static shell. |
-| Authenticated MCP | `POST /mcp` requires `Content-Type: application/json`: JSON-RPC 2.0 `initialize`, `ping`, `tools/list`, `tools/call`, initialized notification and run resource methods. `GET /mcp` streams session events; `DELETE /mcp` closes a session. |
+| Authenticated MCP | `POST /mcp` requires `Content-Type: application/json`: JSON-RPC 2.0 `server/discover`, `ping`, `tools/list`, `tools/call` and read-only run resource methods. GET and DELETE return 405. Each request declares metadata; complete replies carry resultType and cacheable replies carry ttlMs/cacheScope. |
 | Authenticated views | `GET /api/runs`, `/api/runs/counts`, `/api/runs/{run}` and its `/logs`, `/containers`, `/containerlog`, `/containerlog/stream`; `/api/repos`, `/api/issues`, `/api/issues/{id}`, `/api/grants`, `/api/audit`, `/api/schedules`, `/api/status`, `/api/uplinks`. `/metrics` requires metrics authority or an unscoped admin. |
 | Actions | `POST /api/promotions` calls the same typed promotion operation. `POST /api/admin/{action}` uses the fixed admin action inventory, JSON bodies only, no query arguments, and unscoped admin authority. Database backup is a stream, not an MCP tool. `POST /api/backup/database` streams the same snapshot only for the TokenReviewed `oberth-backup` ServiceAccount token with its fixed audience; that review spends its own 1/s, burst-2 budget, at most two in flight and one per address, with the broker's invalid-token cooldown, after refusing tokens over 64 KiB; overflow returns retryable 503. |
 | Enrollment | `POST /mcp/enroll` offers only `uplink_redeem`. Invitation inputs are body-only. Its typed result includes the server's SSH endpoint, delivered inside the verified TLS session for the joined profile. It creates no ordinary MCP session and cannot call other tools. |
@@ -174,15 +178,13 @@ revision dedupe key, fact-and-event transaction without coalescing, and
 separate 24-hour/newest-10,000 progress retention. C1 preserves those semantics and
 cursor gaps; it emits no independent update events. Delivery is at least once. Clients
 deduplicate IDs and continue with `next_after_id`, including on empty filtered pages and
-timeout. Push and `run://<id>` resource notifications are observations. Reconnects
-resume with `Last-Event-ID`; gaps/backlog limits are explicit, never completion
-evidence. `GET /mcp` must not silently reset a supplied old/future Last-Event-ID cursor
-to the current head; use C2's cursor contract.
+timeout. Run resource reads and finite events_wait calls are observations; web UI
+events remain separate. Request-scoped SSE keeps heartbeats and one final result.
 
 **Delta:** Retire `secretstore_plan`, `secretstore_sync_receipt` and
 `secretstore_verify` and their agent arguments; C9 installation commands keep
 that work. Retire `events_since`, `events_subscribe` and their arguments. Agents
-use `events_wait`; interactive sessions receive pushed notifications.
+use `events_wait`; no independent MCP stream is opened.
 Authentication has no failed-login table, failure buckets or failure-limit
 replies; invalid credentials still refuse.
 
@@ -231,11 +233,9 @@ C2/C3/C4/C5/C7/C9/C10 import.
   Explicit acceptable SSE gets an immediate comment, 20-second heartbeats and exactly
   one final RPC message. Each frame has a five-second write/flush budget. Validate and
   authorize before streaming; disconnect cancels observation only and joins the writer. Only request-owned client cancellation is quiet. Server-side cancellation and deadlines retain their classified refusals and logged reasons; expected interruptions log below ERROR.
-- Session bounds: 16 sessions per credential, one-hour idle lifetime, 64 run
-  subscriptions per session; event streams default 4/max 64 per credential; replay
-  backlog default 500/max 10,000, fetched in batches of 100. Reauthenticate at 30
-  seconds with a five-second budget; changed authority closes delivery. Event summaries
-  follow the public message contract and data stays within 8 KiB.
+- Request streams reauthenticate at 30 seconds with a five-second budget;
+  changed authority closes delivery. Event summaries follow the public message
+  contract and data stays within 8 KiB.
 - Native log streams: 32 per server, access checks roughly each second, credential
   rechecks at 30 seconds, five-second checks and 30-second writes; close the source and
   join the watcher on cancellation. Keep C8's bounded scans. MCP `run_logs` defaults to

@@ -9390,10 +9390,10 @@
     }
   },
   "spec_sha256": {
-    "docs/plans/c1-transport-and-tool-registry.md": "6520cc0a0985ceaeeec37a73ee080f687bc0bae9c8b9a74624b4da0db1ab193c",
+    "docs/plans/c1-transport-and-tool-registry.md": "bee3c94562de05001c34650b20eecbe8c7a5318e2c37f07a8ade131be669509f",
     "docs/plans/c10-schedules.md": "78bd7b77d6511426d16b5c7ddf543b8124c47e82d40fb16542cfa8efbac7ca67",
-    "docs/plans/c11-cli-and-server-composition.md": "1a5c66ef67a5bc66712957a208efef4d602a4f7d6c1c24ec61a94f434c6a5af6",
-    "docs/plans/c12-agent-client.md": "4ae9d796277502ec23eef27dc7632c8a732e162fd3107837715256af9e7f97ac",
+    "docs/plans/c11-cli-and-server-composition.md": "2ebbc2b71b8428fca3759ca5f90641b6ccf3bd08d9cb20bfc9738e38b4374530",
+    "docs/plans/c12-agent-client.md": "f54b8b037bfe3ac60826bf895d540b543fbcd6400f61efd362886c5cd7059fbd",
     "docs/plans/c13-own-pipelines.md": "2f1eaa0667e6dcdca40fdfb1b36588265a9a30c0eeeeb60ac772200b2c7eae80",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
     "docs/plans/c2-service-actions-and-history.md": "77a8e3aaae2ecf4b426fb64bd4310ed87bbefc47fbf9bc7a74504dab1f47ab9d",
@@ -9407,7 +9407,7 @@
   },
   "deltas": [
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:35",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:39",
       "markers": [
         "**Delta:**"
       ],
@@ -9422,7 +9422,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:52",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:56",
       "markers": [
         "**Delta:**"
       ],
@@ -9437,7 +9437,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:77",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:81",
       "markers": [
         "**Delta:**"
       ],
@@ -9507,7 +9507,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:100",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:104",
       "markers": [
         "**Delta:**"
       ],
@@ -9522,7 +9522,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:115",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:119",
       "markers": [
         "**Delta:**"
       ],
@@ -9537,7 +9537,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:135",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:139",
       "markers": [
         "**Delta:**"
       ],
@@ -9596,7 +9596,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:151",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:155",
       "markers": [
         "**Delta:**"
       ],
@@ -9634,7 +9634,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:159",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:163",
       "markers": [
         "**Delta:**"
       ],
@@ -9815,12 +9815,12 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:168",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:172",
       "markers": [
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "The `events_wait` arguments carry `repos`, `refs_glob`, `kinds`, `own`, and `snapshot` (return immediately without waiting). C2 applies actor scope first. `EventPage` carries `events`, `next_after_id`, `latest_id`, `oldest_id`, `has_more`, optional `gap`; waits add timeout information. Events carry `id`, `kind`, `at`, public run/promotion/repository/ref/SHA identity, summary and bounded data; internal deduplication keys stay hidden. **Delta:** use the eight kinds in [Shared contracts](README.md#shared-contracts), including observation-only `run.updated`, owned by the component recording each fact. The filter is `events_wait.kinds`. C2's [Events and observation](c2-service-actions-and-history.md#events-and-observation) defines its payload `{run_id,repo,ref,object_sha,commit_sha,data?}`, internal count pair in `Data`, revision dedupe key, fact-and-event transaction without coalescing, and separate 24-hour/newest-10,000 progress retention. C1 preserves those semantics and cursor gaps; it emits no independent update events. Delivery is at least once. Clients deduplicate IDs and continue with `next_after_id`, including on empty filtered pages and timeout. Push and `run://<id>` resource notifications are observations. Reconnects resume with `Last-Event-ID`; gaps/backlog limits are explicit, never completion evidence. `GET /mcp` must not silently reset a supplied old/future Last-Event-ID cursor to the current head; use C2's cursor contract.",
+      "basis": "The `events_wait` arguments carry `repos`, `refs_glob`, `kinds`, `own`, and `snapshot` (return immediately without waiting). C2 applies actor scope first. `EventPage` carries `events`, `next_after_id`, `latest_id`, `oldest_id`, `has_more`, optional `gap`; waits add timeout information. Events carry `id`, `kind`, `at`, public run/promotion/repository/ref/SHA identity, summary and bounded data; internal deduplication keys stay hidden. **Delta:** use the eight kinds in [Shared contracts](README.md#shared-contracts), including observation-only `run.updated`, owned by the component recording each fact. The filter is `events_wait.kinds`. C2's [Events and observation](c2-service-actions-and-history.md#events-and-observation) defines its payload `{run_id,repo,ref,object_sha,commit_sha,data?}`, internal count pair in `Data`, revision dedupe key, fact-and-event transaction without coalescing, and separate 24-hour/newest-10,000 progress retention. C1 preserves those semantics and cursor gaps; it emits no independent update events. Delivery is at least once. Clients deduplicate IDs and continue with `next_after_id`, including on empty filtered pages and timeout. Run resource reads and finite events_wait calls are observations; web UI events remain separate. Request-scoped SSE keeps heartbeats and one final result.",
       "rows": [
         {
           "category": "MCP arguments",
@@ -9839,12 +9839,12 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:182",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:184",
       "markers": [
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** Retire `secretstore_plan`, `secretstore_sync_receipt` and `secretstore_verify` and their agent arguments; C9 installation commands keep that work. Retire `events_since`, `events_subscribe` and their arguments. Agents use `events_wait`; interactive sessions receive pushed notifications. Authentication has no failed-login table, failure buckets or failure-limit replies; invalid credentials still refuse.",
+      "basis": "**Delta:** Retire `secretstore_plan`, `secretstore_sync_receipt` and `secretstore_verify` and their agent arguments; C9 installation commands keep that work. Retire `events_since`, `events_subscribe` and their arguments. Agents use `events_wait`; no independent MCP stream is opened. Authentication has no failed-login table, failure buckets or failure-limit replies; invalid credentials still refuse.",
       "rows": [
         {
           "category": "MCP tools",
@@ -10087,7 +10087,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:189",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:191",
       "markers": [
         "**Delta:**"
       ],
@@ -10096,7 +10096,7 @@
       "rows": []
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:194",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:196",
       "markers": [
         "**Delta:**"
       ],
@@ -10427,7 +10427,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c11-cli-and-server-composition.md:131",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:132",
       "markers": [
         "**Delta:**"
       ],
@@ -10445,7 +10445,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c11-cli-and-server-composition.md:141",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:142",
       "markers": [
         "**Delta:**"
       ],
@@ -10468,7 +10468,7 @@
       "markers": [
         "**Delta:**"
       ],
-      "spec": "docs/plans/c11-cli-and-server-composition.md:209",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:210",
       "basis": "**Delta:** The server starts each part's background work once and stops parts in reverse order after HTTP drain. Missing parts or settings refuse startup. Composition calls store retention once a day using [C2's event-retention rule](c2-service-actions-and-history.md#events-and-observation)."
     },
     {
@@ -10574,7 +10574,7 @@
       "markers": [
         "**Delta:**"
       ],
-      "spec": "docs/plans/c11-cli-and-server-composition.md:221",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:222",
       "basis": "**Delta:** Version/status outputs retain their declared formats. Bind version, commit, date and schema to the selected build and database, so identity values vary by installation. Health, readiness and metrics belong to C11; retain readiness verdicts and scenario counters, with typed DTO and metric names as declared here."
     },
     {
@@ -10601,7 +10601,7 @@
       "markers": [
         "**Delta:**"
       ],
-      "spec": "docs/plans/c11-cli-and-server-composition.md:227",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:228",
       "basis": "**Delta:** The happy path allows `oberth promote <sha>` without a file, pipeline scaffolding, secret storage without cluster access and enrollment without hand-run openssl. Each command uses the same service authority and admission checks as other clients."
     },
     {
@@ -10610,7 +10610,7 @@
       "markers": [
         "**Delta:**"
       ],
-      "spec": "docs/plans/c11-cli-and-server-composition.md:302",
+      "spec": "docs/plans/c11-cli-and-server-composition.md:303",
       "basis": "**Delta:** `connect` checks generated keys, matching invitation certificates, occupied-path refusal before redemption, a consumed-invitation remedy, selected identity/scope/profile and repository binding, `.local` discovery with TLS still bound to the original name, repo registration/forge acceptance and the smoke push after a fresh join using the returned SSH endpoint. It also checks the bridge's display block, complete reasons and separate detail, all accepted repository-address forms, credential-bearing and prefixed-path refusals, exact preservation of other remotes and browser-only enrollment without an SSH key. `TestBridgeDisplayBlock` tests this over the protocol. `TestServedLeafRenews` checks renewal at two thirds and the served CA chain. `promote` invokes `oberth promote <sha>` without a file and checks the tested run, resulting main commit and new CI run. `TestRemoteTransportFlags` exercises every wrapper with explicit client certificate/key and trust flags. `TestServerShutdownContract` blocks each dependency and proves cancellation, reverse-order join and no duplicate native work. `TestRefuseIncompleteComposition` checks every missing part and required setting. The health inspection separates local liveness from external waits and checks the 90-second database readiness bound."
     },
     {

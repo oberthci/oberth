@@ -123,8 +123,9 @@ hook. Examples and the migration guide show the same setting explicitly.
 
 `oberth renew` renews the selected profile's client certificate through C2's
 enrollment contract; C11 verifies and saves the matching credential before use.
-The bridge forwards the session's pushed event stream and resumes it from its
-last event ID; durable `events_wait` and per-request progress remain available.
+The bridge and standalone CLI use MCP 2026-07-28 with per-request metadata and matching
+version/method/name headers. The bridge preserves host metadata, requestState and
+inputResponses. Request-scoped progress remains available; session/GET recovery is removed.
 
 ### Repository and identity choices
 

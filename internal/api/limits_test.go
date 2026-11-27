@@ -4,64 +4,15 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"testing/synctest"
-	"time"
 
 	"github.com/oberthci/oberth/internal/apicontract"
 )
-
-func TestSessionLimitsBelongToIdentityAndInstallation(t *testing.T) {
-	ss := sessions{items: map[string]*session{}}
-	defer ss.close()
-	nonce := 0
-	rt := Runtime{Now: func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }, Nonce: func() string { nonce++; return fmt.Sprint(nonce) }}
-	c := apicontract.Caller{}
-	for identity := 0; identity < 8; identity++ {
-		c.Actor.Identity = fmt.Sprint(identity)
-		for n := 0; n < 64; n++ {
-			c.CredentialID = fmt.Sprint(n)
-			if _, err := ss.create(c, rt); err != nil {
-				t.Fatal(identity, n, err)
-			}
-		}
-		if _, err := ss.create(c, rt); err == nil || !strings.Contains(err.Error(), "identity") {
-			t.Fatal("identity session bound", err)
-		}
-	}
-	c.Actor.Identity = "another"
-	if _, err := ss.create(c, rt); err == nil || !strings.Contains(err.Error(), "installation") {
-		t.Fatal("installation session bound", err)
-	}
-	ss.remove("1")
-	if _, err := ss.create(c, rt); err != nil {
-		t.Fatal("closed session did not release capacity", err)
-	}
-}
-
-func TestIdleSessionDeletesItselfWithoutAnotherRequest(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		ss := sessions{items: map[string]*session{}}
-		defer ss.close()
-		rt := Runtime{Now: func() time.Time { timer := time.NewTimer(0); defer timer.Stop(); return <-timer.C }, Nonce: func() string { return "session" }}
-		if _, err := ss.create(apicontract.Caller{}, rt); err != nil {
-			t.Fatal(err)
-		}
-		timer := time.NewTimer(time.Hour)
-		<-timer.C
-		synctest.Wait()
-		ss.mu.Lock()
-		defer ss.mu.Unlock()
-		if len(ss.items) != 0 {
-			t.Fatal("idle session retained without traffic")
-		}
-	})
-}
 
 func TestStreamLimitsReserveRoomForOtherIdentities(t *testing.T) {
 	for _, tc := range []struct {
 		kind string
 		per  int
-	}{{"events", 32}, {"native", 64}} {
+	}{{"native", 64}} {
 		t.Run(tc.kind, func(t *testing.T) {
 			checkStreamLimits(t, tc.kind, tc.per)
 		})

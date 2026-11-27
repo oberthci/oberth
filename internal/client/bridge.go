@@ -19,26 +19,21 @@ type BridgeConfig struct {
 	Base, Profile string
 	Display       func(string, json.RawMessage) (string, bool)
 	Diagnostic    io.Writer
-	Jitter        func() float64
 }
 
 type bridge struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	client      *Client
-	config      BridgeConfig
-	out         io.Writer
-	output      sync.Mutex
-	outputErr   error
-	mu          sync.Mutex
-	active      map[string]context.CancelFunc
-	session     string
-	version     string
-	initialized sync.Once
-	workers     sync.WaitGroup
-	eventCtx    context.Context
-	events      sync.WaitGroup
-	footer      footer
+	ctx           context.Context
+	cancel        context.CancelFunc
+	client        *Client
+	config        BridgeConfig
+	out           io.Writer
+	output        sync.Mutex
+	outputErr     error
+	mu            sync.Mutex
+	active        map[string]context.CancelFunc
+	workers       sync.WaitGroup
+	backgroundCtx context.Context
+	footer        footer
 }
 
 // Bridge speaks newline JSON-RPC until EOF or cancellation, then joins requests.
@@ -55,8 +50,8 @@ func Bridge(ctx context.Context, in io.Reader, out io.Writer, config BridgeConfi
 		defer remote.Close()
 	}
 	life, cancel := context.WithCancel(ctx)
-	events, stopEvents := context.WithCancel(life)
-	b := &bridge{eventCtx: events, ctx: life, cancel: cancel, client: remote, config: config, out: out, active: map[string]context.CancelFunc{}}
+	background, stopBackground := context.WithCancel(life)
+	b := &bridge{backgroundCtx: background, ctx: life, cancel: cancel, client: remote, config: config, out: out, active: map[string]context.CancelFunc{}}
 	stop := context.AfterFunc(life, func() {
 		for _, stream := range []any{in, out} {
 			if c, ok := stream.(io.Closer); ok {
@@ -65,13 +60,11 @@ func Bridge(ctx context.Context, in io.Reader, out io.Writer, config BridgeConfi
 		}
 	})
 	err = b.read(life, in)
-	stopEvents()
+	stopBackground()
 	if err != nil {
 		cancel()
 	}
 	b.workers.Wait()
-	b.events.Wait()
-	b.closeSession(ctx)
 	cancel()
 	stop()
 	if b.outputErr != nil {
@@ -192,19 +185,10 @@ func (b *bridge) accept(parent context.Context, req rpcRequest) {
 		}
 		return
 	}
-	if req.Method == "notifications/initialized" && len(req.ID) == 0 {
-		if b.client != nil {
-			b.initialized.Do(func() { b.workers.Go(func() { b.handle(parent, req) }) })
-		}
-		return
-	}
 	if len(req.ID) == 0 {
 		return
 	}
-	if req.Method == "initialize" {
-		b.handle(parent, req)
-		return
-	}
+
 	ctx, cancel := context.WithCancel(parent)
 	b.mu.Lock()
 	_, duplicate := b.active[string(req.ID)]

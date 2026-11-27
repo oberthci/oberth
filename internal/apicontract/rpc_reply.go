@@ -5,6 +5,37 @@ import (
 	"encoding/json"
 )
 
+// ResultTypeForID checks correlation before interpreting an extensible modern
+// result. Core complete results may omit the discriminator under the wire spec.
+func ResultTypeForID(data, id json.RawMessage) (string, error) {
+	var wire struct {
+		JSONRPC string
+		ID      json.RawMessage
+		Result  map[string]json.RawMessage
+		Error   json.RawMessage
+	}
+	if json.Unmarshal(data, &wire) != nil || wire.JSONRPC != "2.0" || !bytes.Equal(wire.ID, id) {
+		return "", ErrReply
+	}
+	if len(wire.Error) > 0 && !bytes.Equal(wire.Error, []byte("null")) {
+		if wire.Result != nil {
+			return "", ErrReply
+		}
+		return "complete", nil
+	}
+	if wire.Result == nil {
+		return "", ErrReply
+	}
+	if raw, ok := wire.Result["resultType"]; ok {
+		var kind string
+		if json.Unmarshal(raw, &kind) != nil || kind == "" {
+			return "", ErrReply
+		}
+		return kind, nil
+	}
+	return "complete", nil
+}
+
 // ToolPayload decodes the canonical tools/call reply for request ID 1.
 func ToolPayload(data []byte) (json.RawMessage, bool, bool, error) {
 	return ToolPayloadForID(data, json.RawMessage("1"))

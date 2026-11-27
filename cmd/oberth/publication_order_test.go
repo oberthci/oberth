@@ -26,10 +26,10 @@ func TestPublicationOrderSurvivesCLIJSONAndMCP(t *testing.T) {
 	encoder, decoder := mcpPeer(t, a, []string{"mcp", "--profile", "pinned"})
 	var reply json.RawMessage
 	for _, request := range []map[string]any{
-		{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"protocolVersion": "2025-06-18"}},
+		{"jsonrpc": "2.0", "id": 1, "method": "server/discover"},
 		{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": "publication_list", "arguments": map[string]any{}}},
 	} {
-		if err := encoder.Encode(request); err != nil {
+		if err := encoder.Encode(modernMCPFrame(request)); err != nil {
 			t.Fatal(err)
 		}
 		if err := decoder.Decode(&reply); err != nil {

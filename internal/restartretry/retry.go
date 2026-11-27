@@ -33,9 +33,6 @@ func New(start, deadline time.Time) Budget {
 	return Budget{until: until, delay: 100 * time.Millisecond, ceiling: 2 * time.Second}
 }
 
-// Stream reconnects pushed event delivery until the session ends.
-func Stream() Budget { return Budget{delay: 2 * time.Second, ceiling: 30 * time.Second} }
-
 // Next advances backoff to the constructor's ceiling. It never schedules a
 // retry at or beyond an expiry and never renews the original deadline.
 func (b *Budget) Next(now time.Time) (time.Duration, bool) {

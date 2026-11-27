@@ -2,11 +2,12 @@ package api
 
 import (
 	"context"
+	"net/http"
+	"time"
+
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
-	"net/http"
-	"time"
 )
 
 func (s *Server) enrollment(w http.ResponseWriter, r *http.Request) {
@@ -14,12 +15,12 @@ func (s *Server) enrollment(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, refusal("restarting"), 503)
 		return
 	}
-	if !validProtocolHeader(r.Header) {
-		s.writeError(w, r, refusal("method"), 400)
-		return
-	}
 	if !s.enrollmentAllowed(r) {
 		s.writeError(w, r, refusal("unknown"), 404)
+		return
+	}
+	if !jsonMedia(r.Header) {
+		s.writeError(w, r, refusal("media"), 400)
 		return
 	}
 	raw, err := readBody(w, r, apicontract.EnrollmentBytes)
@@ -36,9 +37,20 @@ func (s *Server) enrollment(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, refusal("input"), 400)
 		return
 	}
-	if s.handshake(w, r, handshakeRequest{req: req, enrollment: true}) {
+	if !s.validateMCP(w, r, req) {
 		return
 	}
+	if len(req.ID) == 0 {
+		w.WriteHeader(202)
+		return
+	}
+	if s.discovery(w, r, discoveryRequest{req: req, enrollment: true}) {
+		return
+	}
+	s.enrollmentTool(w, r, req)
+}
+
+func (s *Server) enrollmentTool(w http.ResponseWriter, r *http.Request, req rpcRequest) {
 	resp := rpcResponse{JSONRPC: "2.0", ID: req.ID}
 	var params callParams
 	if !enrollmentRequest(req, &params) {
@@ -97,7 +109,7 @@ func enrollmentRequest(req rpcRequest, params *callParams) bool {
 }
 
 func (s *Server) enrollmentAllowed(r *http.Request) bool {
-	return s.config.Enroll != nil && r.URL.RawQuery == "" && len(r.Header.Values("Authorization")) == 0 && r.Header.Get("Mcp-Session-Id") == ""
+	return s.config.Enroll != nil && r.URL.RawQuery == "" && len(r.Header.Values("Authorization")) == 0
 }
 func validRedemption(a model.InviteRedemption) bool {
 	return a.Secret != "" && a.CSR != "" && a.CAPin != "" && a.ServerURL != "" && a.SSHPublicKey != ""

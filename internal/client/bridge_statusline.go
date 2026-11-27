@@ -41,7 +41,7 @@ func isFooterRead(req rpcRequest) bool {
 
 func (b *bridge) footerRead(ctx context.Context, req rpcRequest) {
 	content := map[string]string{"uri": footerURI, "mimeType": "application/json", "text": string(b.footerTree())}
-	data, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"contents": []any{content}}})
+	data, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"resultType": "complete", "ttlMs": 0, "cacheScope": "private", "contents": []any{content}}})
 	_ = b.emit(ctx, data)
 }
 
@@ -53,7 +53,7 @@ func (b *bridge) footerTree() json.RawMessage {
 	tree := f.tree
 	if !f.pending && (tree == nil || b.client.now().Sub(f.at) >= footerRefresh) {
 		f.pending = true
-		b.workers.Go(func() { b.refreshFooter(b.eventCtx) })
+		b.workers.Go(func() { b.refreshFooter(b.backgroundCtx) })
 	}
 	f.mu.Unlock()
 	if tree != nil {

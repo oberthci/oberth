@@ -6,13 +6,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/oberthci/oberth/internal/apicontract"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/apicontract"
 
 	"github.com/oberthci/oberth/internal/actor"
 	"github.com/oberthci/oberth/internal/api"
@@ -40,7 +43,7 @@ func setup(t *testing.T, change func(*api.Config, *apicontract.Bindings)) *fixtu
 	clock := fake.NewClock()
 	auth := fake.NewAuth(admin())
 	diagnostics := &fake.Diagnostics{}
-	c := api.Config{FailureLog: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: func(context.Context, apicontract.Caller) (string, error) { return "oberth_ready 1\n", nil }, Auth: auth, Runtime: clock.Runtime(), Classify: publicerr.Classify, Diagnostics: diagnostics, Streams: &fake.Streams{}, Enroll: &fake.Handler[model.InviteRedemption, model.InviteCertificate]{}, Views: apicontract.Views{Counts: apicontract.Binding[apicontract.Empty, apicontract.RunCounts]{Handler: &fake.Handler[apicontract.Empty, apicontract.RunCounts]{}}, Containers: apicontract.Binding[apicontract.IDArgs, apicontract.ContainerPage]{Handler: &fake.Handler[apicontract.IDArgs, apicontract.ContainerPage]{Value: apicontract.ContainerPage{Containers: []apicontract.Container{}}}}, ContainerLog: apicontract.Binding[apicontract.ContainerArgs, apicontract.LogResult]{Handler: &fake.Handler[apicontract.ContainerArgs, apicontract.LogResult]{}}}}
+	c := api.Config{BrowserOrigin: os.Getenv("OBERTH_UI_ORIGIN"), FailureLog: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: func(context.Context, apicontract.Caller) (string, error) { return "oberth_ready 1\n", nil }, Auth: auth, Runtime: clock.Runtime(), Classify: publicerr.Classify, Diagnostics: diagnostics, Streams: &fake.Streams{}, Enroll: &fake.Handler[model.InviteRedemption, model.InviteCertificate]{}, Views: apicontract.Views{Counts: apicontract.Binding[apicontract.Empty, apicontract.RunCounts]{Handler: &fake.Handler[apicontract.Empty, apicontract.RunCounts]{}}, Containers: apicontract.Binding[apicontract.IDArgs, apicontract.ContainerPage]{Handler: &fake.Handler[apicontract.IDArgs, apicontract.ContainerPage]{Value: apicontract.ContainerPage{Containers: []apicontract.Container{}}}}, ContainerLog: apicontract.Binding[apicontract.ContainerArgs, apicontract.LogResult]{Handler: &fake.Handler[apicontract.ContainerArgs, apicontract.LogResult]{}}}}
 	if change != nil {
 		change(&c, &b)
 	}
@@ -68,7 +71,7 @@ func request(f *fixture, method, target string, body []byte) *httptest.ResponseR
 		r.Header.Del("Mcp-Session-Id")
 	}
 	w := httptest.NewRecorder()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	return w
 }
 func rpc(f *fixture, name string, args any) *httptest.ResponseRecorder {
@@ -88,7 +91,7 @@ func TestToolRegistryAndDecodeContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request(f, "POST", "/mcp", []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`))
+	request(f, "POST", "/mcp", []byte(`{"jsonrpc":"2.0","id":1,"method":"server/discover"}`))
 	tools := listTools(t, r, admin())
 	if len(tools) != 75 {
 		t.Fatalf("incomplete inventory: %d", len(tools))
@@ -220,7 +223,7 @@ func TestConditionalAndGzipReadsAuthenticateFirst(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer valid")
 	r.Header.Set("Accept-Encoding", "gzip")
 	w := httptest.NewRecorder()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	z, err := gzip.NewReader(w.Body)
 	if err != nil {
 		t.Fatal(err)
@@ -237,13 +240,13 @@ func TestConditionalAndGzipReadsAuthenticateFirst(t *testing.T) {
 	}
 	r.Header.Set("If-None-Match", first.Header().Get("ETag"))
 	w = httptest.NewRecorder()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	if w.Code != 304 {
 		t.Fatal(w.Code)
 	}
 	r.Header.Del("Authorization")
 	w = httptest.NewRecorder()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	if w.Code != 401 {
 		t.Fatal("conditional read bypassed auth")
 	}
@@ -271,7 +274,7 @@ func TestPublicReadRouteInventory(t *testing.T) {
 			assertSuccess(t, request(f, "GET", route, nil))
 			r := httptest.NewRequest("GET", route, nil)
 			w := httptest.NewRecorder()
-			f.server.Handler().ServeHTTP(w, r)
+			f.server.Handler().ServeHTTP(w, modernRequest(r))
 			if w.Code != 401 {
 				t.Fatalf("unauthenticated route: %d", w.Code)
 			}
@@ -417,4 +420,31 @@ func TestUnknownFailureReferenceMatchesItsFixedDiagnostic(t *testing.T) {
 			t.Fatal("caller reference cannot be found in diagnostics")
 		}
 	}
+}
+
+func modernRequest(r *http.Request) *http.Request {
+	if r.Method != "POST" || (r.URL.Path != "/mcp" && r.URL.Path != "/mcp/enroll") {
+		return r
+	}
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return r
+	}
+	originalSize := len(raw)
+	var wire apicontract.MCPRequest
+	if json.Unmarshal(raw, &wire) == nil {
+		params, err := apicontract.WithClientMetadata(wire.Params)
+		if err == nil {
+			wire.Params = params
+			raw, _ = json.Marshal(wire)
+			if len(raw) < originalSize {
+				raw = append(raw, bytes.Repeat([]byte(" "), originalSize-len(raw))...)
+			}
+			for name, values := range wire.Headers() {
+				r.Header[name] = values
+			}
+		}
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	return r
 }

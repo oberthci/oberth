@@ -78,6 +78,6 @@ func cancellationExchange(t *testing.T, transport string, client bool, cause err
 	}
 	r.Header.Set("Authorization", "Bearer valid")
 	w := newStreamWriter()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	return logs.String(), w.Body.String()
 }

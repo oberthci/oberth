@@ -3,14 +3,15 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"github.com/oberthci/oberth/internal/apicontract"
-	"github.com/oberthci/oberth/internal/publicerr"
 	"io"
 	"log/slog"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/publicerr"
 )
 
 type countedOutput struct {
@@ -43,7 +44,7 @@ func TestSecondReplyEncodesPayloadOnce(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer test")
 		w := httptest.NewRecorder()
-		s.Handler().ServeHTTP(w, r)
+		s.Handler().ServeHTTP(w, modernRequest(r))
 		if calls != 1 {
 			t.Fatal("payload encoded more than once", calls)
 		}

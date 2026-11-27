@@ -2,9 +2,9 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/client"
 )
 
-func TestAgentSignalClosesServerSession(t *testing.T) {
+func TestAgentSignalStopsBridge(t *testing.T) {
 	if os.Getenv("OBERTH_TEST_AGENT_SIGNAL") == "1" {
 		agentSignalChild(t)
 		return
@@ -32,7 +32,7 @@ func TestAgentSignalClosesServerSession(t *testing.T) {
 
 func checkAgentSignal(t *testing.T, binary string, signal os.Signal) {
 	t.Helper()
-	command := exec.CommandContext(t.Context(), binary, "-test.run=^TestAgentSignalClosesServerSession$", "-test.timeout=15s")
+	command := exec.CommandContext(t.Context(), binary, "-test.run=^TestAgentSignalStopsBridge$", "-test.timeout=15s")
 	command.Env = append(os.Environ(), "OBERTH_TEST_AGENT_SIGNAL=1")
 	input, err := command.StdinPipe()
 	if err != nil {
@@ -45,16 +45,19 @@ func checkAgentSignal(t *testing.T, binary string, signal os.Signal) {
 	if err = command.Start(); err != nil {
 		t.Fatal(err)
 	}
-	_, _ = io.WriteString(input, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\"}}\n")
+	if err := json.NewEncoder(input).Encode(modernMCPFrame(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "server/discover"})); err != nil {
+		t.Fatal(err)
+	}
+
 	scanner := bufio.NewScanner(output)
 	if !scanner.Scan() || !strings.Contains(scanner.Text(), `"result"`) {
-		t.Fatal("agent did not initialize", scanner.Text())
+		t.Fatal("agent did not discover", scanner.Text())
 	}
 	if err = command.Process.Signal(signal); err != nil {
 		t.Fatal(err)
 	}
 	if !scanner.Scan() || scanner.Text() != "closed" {
-		t.Fatal("signal did not close server session", scanner.Text())
+		t.Fatal("signal did not stop bridge", scanner.Text())
 	}
 	_ = input.Close()
 	if err = command.Wait(); err != nil {
@@ -77,17 +80,10 @@ func agentSignalChild(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	transport := app.config.Transport
-	app.config.Transport = testTransport(func(r *http.Request) (*http.Response, error) {
-		resp, err := transport.RoundTrip(r)
-		if r.Method == http.MethodDelete && err == nil && resp.StatusCode == http.StatusNoContent {
-			_, _ = fmt.Fprintln(os.Stdout, "closed")
-		}
-		return resp, err
-	})
 	ctx, stop := interruptContext(t.Context())
 	defer stop()
-	// The protocol writer stays open so this test can report the session close.
+	// Keep stdout open to report that cancellation joined the bridge.
 	app.in, app.out = os.Stdin, struct{ io.Writer }{os.Stdout}
 	app.runMCP(ctx, "agent")
+	_, _ = fmt.Fprintln(os.Stdout, "closed")
 }

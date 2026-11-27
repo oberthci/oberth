@@ -1,16 +1,9 @@
 package api
 
-import "time"
-
 const (
-	pollsPerIdentity        = 64
-	sessionsPerIdentity     = 64
-	sessionsPerInstallation = 512
-	eventsPerIdentity       = 32
-	nativePerIdentity       = 64
-	streamsPerInstallation  = 256
-	sessionIdleTimeout      = time.Hour
-	resourcesPerSession     = 64
+	pollsPerIdentity       = 64
+	nativePerIdentity      = 64
+	streamsPerInstallation = 256
 )
 
 func (r *reservations) stream(kind, identity string, perIdentity int) (func(), error) {

@@ -21,7 +21,7 @@ const shellCSP = "default-src 'none'; script-src 'self'; style-src 'self'; conne
 func uiRequest(f *fixture, path string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest("GET", path, nil)
 	w := httptest.NewRecorder()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	return w
 }
 
@@ -238,7 +238,9 @@ func TestUIRoutesDoNotShadowAPI(t *testing.T) {
 			t.Fatal("shell masks route", path, w.Code)
 		}
 	}
-	if w := uiRequest(f, "/mcp"); w.Code != 401 {
+	w := httptest.NewRecorder()
+	f.server.Handler().ServeHTTP(w, httptest.NewRequest("POST", "/mcp", nil))
+	if w.Code != 401 {
 		t.Fatal("MCP authentication bypassed", w.Code)
 	}
 }

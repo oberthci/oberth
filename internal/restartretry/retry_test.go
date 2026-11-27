@@ -105,15 +105,3 @@ func TestWaitTimerCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-func TestStreamBackoffUntilSessionCancellation(t *testing.T) {
-	b := Stream()
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, want := range []time.Duration{2, 4, 8, 16, 30, 30} {
-		delay, ok := b.Next(now)
-		if !ok || delay != want*time.Second {
-			t.Fatal("stream backoff changed", delay)
-		}
-		now = now.Add(time.Hour)
-	}
-}

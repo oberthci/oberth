@@ -87,12 +87,15 @@ func (f *composedFixture) checkReservationRetry(t *testing.T) {
 	t.Helper()
 	invitation := f.invitation(t, "retry-agent")
 	request := model.InviteRedemption{Secret: invitation.Secret, ServerURL: invitation.ServerURL, CAPin: invitation.CAPin, CSR: "malformed", SSHPublicKey: "malformed"}
-	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "uplink_redeem", "arguments": request}})
+	body, _ := json.Marshal(modernMCPFrame(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "uplink_redeem", "arguments": request}}))
+	var wire apicontract.MCPRequest
+	_ = json.Unmarshal(body, &wire)
 	for attempt := range 2 {
 		req, err := http.NewRequestWithContext(t.Context(), "POST", f.config.Public.URL+"/mcp/enroll", bytes.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
+		req.Header = wire.Headers()
 		req.Header.Set("Content-Type", "application/json")
 		response, err := f.client(f.config.Listen.HTTPS).Do(req)
 		if err != nil {

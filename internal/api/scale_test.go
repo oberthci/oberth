@@ -5,7 +5,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/oberthci/oberth/internal/apicontract"
 )
@@ -18,34 +17,20 @@ func TestActorScaleBudgets(t *testing.T) {
 }
 func checkActorScaleBudgets(t *testing.T, size int) {
 	t.Helper()
-	ss := sessions{items: map[string]*session{}}
-	defer ss.close()
 	s := &Server{reservations: reservations{counts: map[string]int{}}}
-	rt := Runtime{Now: func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }}
-	var ids []string
 	var releases []func()
 	for i := range size {
 		c := apicontract.Caller{CredentialID: fmt.Sprintf("credential-%d", i)}
 		c.Actor.Identity = fmt.Sprintf("actor-%d", i)
-		rt.Nonce = func() string { return c.CredentialID }
-		id, err := ss.create(c, rt)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ids = append(ids, id)
 		releases = append(releases, reserveScaleActor(t, s, c)...)
+		if s.reservations.counts["wait:"+c.Actor.Identity] != 2 {
+			t.Fatal("actor wait budgets merged")
+		}
 	}
-	if s.reservations.counts["events"] != size || s.reservations.counts["native"] != size {
-		t.Fatal("stream kind budgets merged")
+	if s.reservations.counts["native"] != size {
+		t.Fatal("native stream budget merged")
 	}
 	drainScaleActors(t, releases, &s.reservations)
-	for _, id := range ids {
-		ss.remove(id)
-		ss.remove(id)
-	}
-	if len(ss.items) != 0 {
-		t.Fatal("sessions retained after drain")
-	}
 }
 func reserveScaleActor(t *testing.T, s *Server, c apicontract.Caller) []func() {
 	t.Helper()
@@ -57,17 +42,11 @@ func reserveScaleActor(t *testing.T, s *Server, c apicontract.Caller) []func() {
 		}
 		releases = append(releases, release)
 	}
-	for _, kind := range []string{"events", "native"} {
-		per := eventsPerIdentity
-		if kind == "native" {
-			per = nativePerIdentity
-		}
-		release, err := s.reservations.stream(kind, c.Actor.Identity, per)
-		if err != nil {
-			t.Fatal(err)
-		}
-		releases = append(releases, release)
+	release, err := s.reservations.stream("native", c.Actor.Identity, nativePerIdentity)
+	if err != nil {
+		t.Fatal(err)
 	}
+	releases = append(releases, release)
 	return releases
 }
 func drainScaleActors(t *testing.T, releases []func(), r *reservations) {
@@ -85,7 +64,7 @@ func drainScaleActors(t *testing.T, releases []func(), r *reservations) {
 }
 
 func TestActorScaleAdmissionRace(t *testing.T) {
-	for _, kind := range []string{"events", "native"} {
+	for _, kind := range []string{"native"} {
 		t.Run(kind, func(t *testing.T) {
 			r := reservations{counts: map[string]int{}}
 			var admitted atomic.Int64

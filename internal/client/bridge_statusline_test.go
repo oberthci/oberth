@@ -24,7 +24,7 @@ func TestBridgeFooterEOFStopsRefresh(t *testing.T) {
 		return apicontract.RunPage{}, ctx.Err()
 	}}
 	p := newBridgePeer(t, bridgeProfile(t, streamingTransport(server(t, bindings))))
-	p.initialize()
+	p.discover()
 	footerReply(t, p, "footer")
 	deadline := time.NewTimer(time.Second)
 	defer deadline.Stop()
@@ -101,7 +101,7 @@ func TestBridgeFooterSlowListReadBudget(t *testing.T) {
 	}}
 	bindings.RunList.Handler = list
 	p := newBridgePeer(t, bridgeProfile(t, streamingTransport(server(t, bindings))))
-	p.initialize()
+	p.discover()
 	if text := footerReply(t, p, "first"); !strings.Contains(text, "Oberth: reading runs") {
 		t.Fatalf("blocked list did not show a placeholder: %s", text)
 	}
@@ -134,7 +134,7 @@ func TestBridgeCodexFooterEntrypoint(t *testing.T) {
 	cfg := bridgeProfile(t, streamingTransport(server(t, b)))
 	cfg.Config.Now = clock.Now
 	p := newBridgePeer(t, cfg)
-	p.initialize()
+	p.discover()
 	p.send("tools", "tools/list", nil)
 	var tools struct {
 		Result struct {
@@ -252,7 +252,7 @@ func TestBridgeCodexFooterCacheBound(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(remote.Close)
-			b := &bridge{ctx: t.Context(), eventCtx: t.Context(), client: remote}
+			b := &bridge{ctx: t.Context(), backgroundCtx: t.Context(), client: remote}
 			b.footerTree()
 			b.workers.Wait()
 			assertFooterCalls(t, list, 1)
@@ -320,7 +320,7 @@ func TestBridgeFooterLeavesRunResources(t *testing.T) {
 	b := fake.Bindings()
 	b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Value: apicontract.RunRecord{RunSummary: stepmodel.RunSummary{ID: "run1", Status: stepmodel.RunPassed}}}
 	p := newBridgePeer(t, bridgeProfile(t, streamingTransport(server(t, b))))
-	p.initialize()
+	p.discover()
 	p.send("run", "resources/read", map[string]any{"uri": "run://run1"})
 	if data := p.frame(); !strings.Contains(string(data), `run://run1`) || strings.Contains(string(data), "Oberth:") {
 		t.Fatalf("run resource: %s", data)

@@ -3,9 +3,6 @@ package api
 import (
 	"context"
 	"crypto/x509"
-	"github.com/oberthci/oberth/internal/actor"
-	"github.com/oberthci/oberth/internal/apicontract"
-	"github.com/oberthci/oberth/internal/publicerr"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -14,6 +11,10 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/oberthci/oberth/internal/actor"
+	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/publicerr"
 )
 
 type secondAuth struct{}
@@ -48,7 +49,7 @@ func TestSecondOrdinaryDeadline(t *testing.T) {
 			r.Header.Set("Authorization", "Bearer test")
 			w := &secondDeadlineWriter{ResponseRecorder: httptest.NewRecorder(), flushed: make(chan struct{})}
 			done := make(chan struct{})
-			go func() { defer close(done); s.Handler().ServeHTTP(w, r) }()
+			go func() { defer close(done); s.Handler().ServeHTTP(w, modernRequest(r)) }()
 			<-expired
 			synctest.Wait()
 			select {

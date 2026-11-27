@@ -231,7 +231,7 @@ class Session:
         require(body is None, "HTTP probes must be read-only")
         context = ssl.create_default_context(cafile=str(self.home / ".config/oberth/installer-ca.crt"))
         context.load_cert_chain(str(self.private / "admin.csr.crt"), str(self.private / "admin.key"))
-        headers = {"Content-Type": "application/json", "MCP-Protocol-Version": "2025-06-18"}
+        headers = {"Content-Type": "application/json"}
         try:
             return request(self.config.base + path, body, headers, context=context,
                            timeout=self.args.run_timeout + 30 if body is not None else 30)

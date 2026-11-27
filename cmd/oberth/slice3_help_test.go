@@ -4,15 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/oberthci/oberth/internal/api/fake"
-	"github.com/oberthci/oberth/internal/apicontract"
-	"github.com/oberthci/oberth/internal/stepmodel"
 	"io"
 	"net/http"
 	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/oberthci/oberth/internal/api/fake"
+	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/stepmodel"
 )
 
 func TestEveryCatalogueCommandHasMatchingHumanHelp(t *testing.T) {
@@ -77,12 +79,17 @@ func TestMCPDiagnosticsNeverEnterProtocolOutput(t *testing.T) {
 	app, diagnostic := pinnedMCPApplication(t)
 	var out bytes.Buffer
 	app.out = &out
-	app.in = strings.NewReader("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
+	frame, _ := json.Marshal(modernMCPFrame(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "run_get", "arguments": map[string]string{"id": "12345678"}}}))
+	app.in = strings.NewReader(string(frame) + "\n")
+	now := app.config.Time()
+	app.config.Now = func() time.Time { return now }
+	app.config.Wait = func(_ context.Context, delay time.Duration) error { now = now.Add(delay); return nil }
 	app.config.Transport = testTransport(func(*http.Request) (*http.Response, error) { return nil, io.EOF })
 	if code := app.run(t.Context(), []string{"mcp", "--profile", "pinned"}); code != 0 {
 		t.Fatalf("bridge failed: %s", diagnostic.String())
 	}
-	if !strings.Contains(diagnostic.String(), "Cannot reach") || out.Len() != 0 {
+	message := "No reply yet, trying again."
+	if !strings.Contains(diagnostic.String(), message) || bytes.Contains(out.Bytes(), []byte(message)) || !json.Valid(bytes.TrimSpace(out.Bytes())) {
 		t.Fatalf("diagnostic reached protocol output: %q / %q", out.String(), diagnostic.String())
 	}
 }

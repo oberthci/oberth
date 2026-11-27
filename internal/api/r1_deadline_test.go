@@ -2,13 +2,14 @@ package api_test
 
 import (
 	"context"
-	"github.com/oberthci/oberth/internal/api"
-	"github.com/oberthci/oberth/internal/apicontract"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/apicontract"
 )
 
 func TestRequestedWaitControlsPreparationDeadline(t *testing.T) {
@@ -29,7 +30,7 @@ func TestRequestedWaitControlsPreparationDeadline(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer valid")
 		w := httptest.NewRecorder()
-		f.server.Handler().ServeHTTP(w, r)
+		f.server.Handler().ServeHTTP(w, modernRequest(r))
 		assertSuccess(t, w)
 		if outer.Sub(deadline) != 4*time.Second {
 			t.Fatal("request timeout ignored", outer.Sub(deadline))

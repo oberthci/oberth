@@ -64,8 +64,17 @@ func (c *Client) Close() { c.http.CloseIdleConnections() }
 // A safe read can reconnect only within this call's original deadline and outage window.
 func (c *Client) Call(ctx context.Context, d apicontract.Definition, input json.RawMessage) (json.RawMessage, bool, error) {
 	data, refused, err := c.call(ctx, d, input, rpcExchange{request: rpcRequest{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "tools/call"}})
+	if refused {
+		var wire struct{ Error *struct{ Code int } }
+		if json.Unmarshal(data, &wire) == nil && wire.Error != nil && wire.Error.Code >= -32022 && wire.Error.Code <= -32020 {
+			return nil, false, failure("protocol", nil)
+		}
+	}
 	if err != nil || refused {
 		return data, refused, err
+	}
+	if kind, err := apicontract.ResultTypeForID(data, json.RawMessage("1")); err != nil || kind != "complete" {
+		return nil, false, failure("interaction", err)
 	}
 	value, refused, _, err := apicontract.ToolPayload(data)
 	return value, refused, err
@@ -142,7 +151,7 @@ func (c *Client) attempt(ctx context.Context, d apicontract.Definition, input js
 	if len(body) > apicontract.RequestBytes {
 		return nil, false, false, failure("request_size", nil)
 	}
-	resp, err := c.send(ctx, http.MethodPost, body, wire.headers)
+	resp, err := c.send(ctx, http.MethodPost, body, nil)
 	if err != nil {
 		retry, classified := exchangeFailure(d, resp, err)
 		return nil, false, retry, classified
@@ -154,6 +163,13 @@ func (c *Client) attempt(ctx context.Context, d apicontract.Definition, input js
 	}
 	if resp.StatusCode != http.StatusOK {
 		return data, true, restartretry.RetryableStatus(resp.StatusCode), nil
+	}
+	kind, err := apicontract.ResultTypeForID(data, wire.request.ID)
+	if err != nil {
+		return nil, false, false, replyFailure(d, err)
+	}
+	if kind != "complete" {
+		return data, false, false, nil
 	}
 
 	_, _, retry, err := apicontract.ToolPayloadForID(data, wire.request.ID)

@@ -156,14 +156,14 @@ func assertPinnedMCPEntry(t *testing.T, explicit bool) {
 		return "pinned", nil
 	}
 	encoder, decoder := mcpPeer(t, a, args)
-	if err := encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": map[string]any{"protocolVersion": "2025-06-18"}}); err != nil {
+	if err := encoder.Encode(modernMCPFrame(map[string]any{"jsonrpc": "2.0", "id": "init", "method": "server/discover"})); err != nil {
 		t.Fatal(err)
 	}
 	var reply map[string]json.RawMessage
 	if err := decoder.Decode(&reply); err != nil || reply["error"] != nil {
 		t.Fatalf("pinned profile overridden: %v %s", err, diag.String())
 	}
-	if err := encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list"}); err != nil {
+	if err := encoder.Encode(modernMCPFrame(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list"})); err != nil {
 		t.Fatal(err)
 	}
 	if err := decoder.Decode(&reply); err != nil || !bytes.Contains(reply["result"], []byte(`"run_get"`)) {
@@ -209,11 +209,11 @@ func TestMCPRunReadEndsWithDisplayBlock(t *testing.T) {
 		Error json.RawMessage
 	}
 	for _, request := range []map[string]any{
-		{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"protocolVersion": "2025-06-18"}},
+		{"jsonrpc": "2.0", "id": 1, "method": "server/discover"},
 		{"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
 		{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": map[string]any{"name": "run_get", "arguments": map[string]any{"id": "run1"}}},
 	} {
-		if encoder.Encode(request) != nil || decoder.Decode(&reply) != nil || reply.Error != nil {
+		if encoder.Encode(modernMCPFrame(request)) != nil || decoder.Decode(&reply) != nil || reply.Error != nil {
 			t.Fatalf("bridge refused %v: %s", request["method"], diag.String())
 		}
 		for _, tool := range reply.Result.Tools {
@@ -298,4 +298,13 @@ func assertDefaultRegistration(t *testing.T, a application, out *bytes.Buffer) {
 	if err = a.agentTools("uplink"); err != nil || !strings.Contains(out.String(), actual+" mcp") {
 		t.Fatal("default registration used PATH or checkout")
 	}
+}
+
+func modernMCPFrame(frame map[string]any) map[string]any {
+	params, _ := json.Marshal(frame["params"])
+	if frame["params"] == nil {
+		params = nil
+	}
+	frame["params"], _ = apicontract.WithClientMetadata(params)
+	return frame
 }

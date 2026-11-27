@@ -16,7 +16,7 @@ func (b *bridge) handle(ctx context.Context, req rpcRequest) {
 		b.tool(ctx, req)
 		return
 	}
-	if isFooterRead(req) {
+	if isFooterRead(req) && req.Version() == apicontract.ProtocolVersion && req.ValidMetadata() {
 		b.footerRead(ctx, req)
 		return
 	}
@@ -39,9 +39,6 @@ func (b *bridge) relay(ctx context.Context, req rpcRequest) {
 	}
 	if len(data) > 0 {
 		_ = b.emit(ctx, data)
-	}
-	if req.Method == "notifications/initialized" && len(req.ID) == 0 {
-		b.events.Go(func() { b.followEvents(b.eventCtx) })
 	}
 }
 
@@ -79,7 +76,7 @@ func (b *bridge) forwardTool(ctx context.Context, req rpcRequest, tool bridgeToo
 		return
 	}
 	defer CleanupCredentials(paths)
-	wire := rpcExchange{request: req, headers: b.headers(), progress: b.progress(ctx, tool.token)}
+	wire := rpcExchange{request: req, progress: b.progress(ctx, tool.token)}
 	data, refused, err := b.client.call(ctx, tool.definition, tool.arguments, wire)
 	if ctx.Err() != nil {
 		if tool.definition.Mutation {
@@ -87,22 +84,40 @@ func (b *bridge) forwardTool(ctx context.Context, req rpcRequest, tool bridgeToo
 		}
 		return
 	}
-	if err != nil || refused {
-		if refused {
-			err = resultError(data)
+	if refused {
+		var reply struct {
+			JSONRPC string
+			ID      json.RawMessage
 		}
+		if json.Unmarshal(data, &reply) == nil && reply.JSONRPC == "2.0" && string(reply.ID) == string(req.ID) {
+			_ = b.emit(ctx, data)
+		} else {
+			b.rpcError(req.ID, -32000, resultError(data))
+		}
+		return
+	}
+	if err != nil {
 		if tool.definition.Mutation && lostReply(err) {
 			err = failure("bridge_lost", err)
 		}
 		b.rpcError(req.ID, -32000, err)
 		return
 	}
-	data, err = privateToolReply(req.ID, data, paths)
+	b.sendToolReply(ctx, req, data, paths)
+}
+
+func (b *bridge) sendToolReply(ctx context.Context, req rpcRequest, data []byte, paths map[string]string) {
+	name, _ := req.RoutingName()
+	if kind, _ := apicontract.ResultTypeForID(data, req.ID); kind != "complete" {
+		_ = b.emit(ctx, data)
+		return
+	}
+	data, err := privateToolReply(req.ID, data, paths)
 	if err != nil {
 		b.rpcError(req.ID, -32000, err)
 		return
 	}
-	_ = b.emit(ctx, b.display(req, tool.definition.Name, data))
+	_ = b.emit(ctx, b.display(req, name, data))
 }
 
 func privateToolReply(id json.RawMessage, data []byte, paths map[string]string) ([]byte, error) {
@@ -131,7 +146,7 @@ func (b *bridge) direct(ctx context.Context, req rpcRequest) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := b.client.send(ctx, http.MethodPost, body, b.headers())
+	resp, err := b.client.send(ctx, http.MethodPost, body, nil)
 	if err != nil {
 		return nil, requestFailure(apicontract.Definition{}, err)
 	}
@@ -143,24 +158,14 @@ func (b *bridge) direct(ctx context.Context, req rpcRequest) ([]byte, error) {
 	if err != nil {
 		return nil, failure("reply", err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, resultError(data)
-	}
+
 	var reply struct {
 		ID      json.RawMessage `json:"id"`
 		JSONRPC string          `json:"jsonrpc"`
-		Result  struct {
-			ProtocolVersion string `json:"protocolVersion"`
-		} `json:"result"`
-		Error json.RawMessage `json:"error"`
+		Error   json.RawMessage `json:"error"`
 	}
 	if json.Unmarshal(data, &reply) != nil || string(reply.ID) != string(req.ID) || reply.JSONRPC != "2.0" {
 		return nil, failure("reply", nil)
-	}
-	if req.Method == "initialize" && len(reply.Error) == 0 {
-		b.mu.Lock()
-		b.session, b.version = resp.Header.Get("Mcp-Session-Id"), reply.Result.ProtocolVersion
-		b.mu.Unlock()
 	}
 	return data, nil
 }

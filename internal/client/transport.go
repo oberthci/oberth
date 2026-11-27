@@ -6,10 +6,13 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"github.com/oberthci/oberth/internal/clientcert"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/clientcert"
 )
 
 func transport(o Options) (*http.Transport, error) {
@@ -48,6 +51,19 @@ func transport(o Options) (*http.Transport, error) {
 }
 
 func (c *Client) request(ctx context.Context, body []byte) (*http.Response, error) {
+	var request apicontract.MCPRequest
+	if json.Unmarshal(body, &request) != nil {
+		return nil, failure("reply", nil)
+	}
+	var err error
+	request.Params, err = apicontract.WithClientMetadata(request.Params)
+	if err != nil {
+		return nil, failure("reply", err)
+	}
+	body, err = json.Marshal(request)
+	if err != nil {
+		return nil, failure("reply", err)
+	}
 	return c.send(ctx, http.MethodPost, body, nil)
 }
 
@@ -58,6 +74,15 @@ func (c *Client) send(ctx context.Context, method string, body []byte, headers h
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
+	if method == http.MethodPost {
+		var wire apicontract.MCPRequest
+		if json.Unmarshal(body, &wire) != nil {
+			return nil, failure("reply", nil)
+		}
+		for name, values := range wire.Headers() {
+			req.Header[name] = values
+		}
+	}
 	for name, values := range headers {
 		req.Header[name] = append([]string(nil), values...)
 	}

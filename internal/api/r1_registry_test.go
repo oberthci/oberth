@@ -3,13 +3,14 @@ package api_test
 import (
 	"context"
 	"encoding/json"
-	"github.com/oberthci/oberth/internal/apicontract"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/oberthci/oberth/internal/apicontract"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/api/fake"
@@ -41,7 +42,7 @@ func TestEachToolHasItsOwnDescribedInput(t *testing.T) {
 		describedFields(t, m.InputSchema)
 	}
 	f := setup(t, nil)
-	w := initialize(f)
+	w := discover(f)
 	if !strings.Contains(w.Body.String(), `"instructions":`) || !strings.Contains(w.Body.String(), "publication_list") {
 		t.Fatal("agent instructions absent")
 	}
@@ -144,7 +145,7 @@ func TestWaitBoundaryHasMarginAndClampsServiceTimeout(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Authorization", "Bearer valid")
 		w := httptest.NewRecorder()
-		f.server.Handler().ServeHTTP(w, r)
+		f.server.Handler().ServeHTTP(w, modernRequest(r))
 		assertSuccess(t, w)
 		if input.TimeoutS != 1 || outer.Sub(deadline) != 4*time.Second || !strings.Contains(w.Body.String(), `"timed_out":true`) {
 			t.Fatal("wait boundary lost its timeout or deadline margin", w.Body.String(), input, outer.Sub(deadline))

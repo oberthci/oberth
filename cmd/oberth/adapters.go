@@ -139,7 +139,7 @@ func newTransport(ctx context.Context, c *composition, diagnostic io.Writer) err
 		return err
 	}
 	//nolint:contextcheck // The transport owns its observer context; BeginDrain cancels it before components stop.
-	c.api, err = api.New(api.Config{Registry: registry, Auth: c.auth, Enroll: c.enroll, Streams: c.streams, AccountBackup: c.accountBackup, Source: c.source, Views: c.views, Runtime: c.runtime, Classify: publicerr.Classify,
+	c.api, err = api.New(api.Config{Version: binaryVersion(), BrowserOrigin: c.config.Public.URL, Registry: registry, Auth: c.auth, Enroll: c.enroll, Streams: c.streams, AccountBackup: c.accountBackup, Source: c.source, Views: c.views, Runtime: c.runtime, Classify: publicerr.Classify,
 		Ready: c.health.ready, Live: c.health.live, Metrics: func(ctx context.Context, _ apicontract.Caller) (string, error) {
 			value := c.health.metrics(ctx)
 			if c.store != nil {

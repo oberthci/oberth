@@ -8,6 +8,7 @@ const copy = {
  accepted: ["Request accepted."], cancel: ["Cancel this run?"], abandon: ["Release this held step?"],
  emptySteps: ["This run has no planned steps."], emptyLog: ["This step wrote no output."],
  clearRepo: ["Select it again to show all repositories."],
+ protocol: ["Server protocol request was refused.", "Reload this page and try again."],
  network: ["Oberth is not reachable.", "Check that the server is running, then reload this page."],
  reconnecting: ["Reconnecting to Oberth.", "Live updates retry by themselves."],
  ready: ["Server ready."], notReady: ["Server unavailable."], unknown: ["Server status."],
@@ -17,7 +18,7 @@ const copy = {
 const main = document.querySelector("#main"), notice = document.querySelector("#notice");
 const signin = document.querySelector("#signin"), topbar = document.querySelector("header");
 let screen, serial = 0;
-const readSpacing = 1000;
+const readSpacing = 1000, mcpProtocol = "2026-07-28";
 function h(tag, attrs = {}, ...children) {
  const node = document.createElement(tag);
  for (const [key, value] of Object.entries(attrs)) {
@@ -46,7 +47,8 @@ async function exchange(path, options = {}) {
    }});
   const revision = response.headers.get("X-Oberth-UI");
   if (revision && revision !== document.querySelector('meta[name="oberth-ui"]').content) document.querySelector("#upgrade").hidden = false;
-  if (!response.ok) value = await response.json();
+  if (!response.ok) { value = await response.json();
+   if (value.error) value = value.error.data?.reason ? value.error.data : {reason: copy.protocol[0], remedy: copy.protocol[1]}; }
  } catch (error) { if (error.name !== "AbortError") observe(false); throw error; }
  observe(!unavailable(response.status));
  if (!response.ok) {
@@ -65,8 +67,11 @@ const trouble = error => !error.reason || unavailable(error.status);
 function retryAfter(value) { return /^\d+$/.test(value || "") ? Number(value) * 1000 : 5000; }
 async function get(path, signal) { return (await exchange(path, {signal})).json(); }
 async function call(name, args, signal) {
- const value = await (await exchange("/mcp", {method: "POST", signal, headers: {"Content-Type": "application/json"}, body: JSON.stringify({jsonrpc: "2.0", id: ++serial, method: "tools/call", params: {name, arguments: args}})})).json();
+ const meta = {"io.modelcontextprotocol/protocolVersion": mcpProtocol, "io.modelcontextprotocol/clientInfo": {name: "oberth-web", version: document.querySelector('meta[name="oberth-ui"]').content}, "io.modelcontextprotocol/clientCapabilities": {}};
+ const headers = {"Content-Type": "application/json", "MCP-Protocol-Version": mcpProtocol, "Mcp-Method": "tools/call", "Mcp-Name": name};
+ const value = await (await exchange("/mcp", {method: "POST", signal, headers, body: JSON.stringify({jsonrpc: "2.0", id: ++serial, method: "tools/call", params: {name, arguments: args, _meta: meta}})})).json();
  if (value.error) throw Object.assign(new Error(), value.error.data || {reason: value.error.message}, {refused: true});
+ if (value.result.resultType !== undefined && value.result.resultType !== "complete") throw Object.assign(new Error(), {reason: copy.protocol[0], remedy: copy.protocol[1], refused: true});
  if (value.result.isError) throw Object.assign(new Error(), JSON.parse(value.result.content[0].text), {refused: true});
  return value.result.structuredContent;
 }

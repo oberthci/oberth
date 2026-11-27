@@ -7,7 +7,7 @@ Recorded before implementation from the transport reference and slice-01.
 - Verified certificates and bearer credentials bind live authority; conflicting
   credentials refuse. Hidden records and missing records share service refusals.
 - Tool listing, typed calls, omitted arguments, invalid arguments and protocol
-  negotiation work without a delivery session. Unknown operations refuse.
+  discovery use MCP 2026-07-28 metadata on each request. Unknown operations refuse.
 - Run reads preserve queued/running/passed/failed/cancelled states, plan order,
   complete counts, paged steps, native attempts and separate diagnostics.
 - Log reads preserve waiting/running/copying/cut/purged/missing facts supplied by
@@ -17,8 +17,8 @@ Recorded before implementation from the transport reference and slice-01.
   Backup is an independently bounded stream; enrollment has an isolated inventory.
 - Waits reserve per credential, authorize before streaming, emit heartbeats and
   one final reply, cancel observation on disconnect and join their writer.
-- Interactive session events follow credential scope, are bounded and reauthorized. Reconnect cursors
-  and filtered empty-page advancement are preserved, including explicit gaps.
+- Finite events_wait preserves filtered empty-page advancement and explicit gaps.
+  MCP has no initialization session, GET stream or Last-Event-ID recovery.
 - JSON reads support conditional responses and gzip; streams bypass compression.
 - Retained artifact readers, wire aliases, grouped execution views and message
   parsing are deliberately absent. Browser code is outside this task.

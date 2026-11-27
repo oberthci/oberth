@@ -18,7 +18,7 @@ func TestMCPPostRequiresJSON(t *testing.T) {
 			r.Header.Set("Authorization", "Bearer valid")
 			r.Header.Set("Content-Type", media)
 			w := httptest.NewRecorder()
-			f.server.Handler().ServeHTTP(w, r)
+			f.server.Handler().ServeHTTP(w, modernRequest(r))
 			_, _, calls := h.Observed()
 			valid := media == "application/json" || media == "application/json; charset=utf-8"
 			if valid {

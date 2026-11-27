@@ -2,9 +2,6 @@ package api_test
 
 import (
 	"context"
-	"github.com/oberthci/oberth/internal/api"
-	"github.com/oberthci/oberth/internal/api/fake"
-	"github.com/oberthci/oberth/internal/apicontract"
 	"io"
 	"net"
 	"net/http"
@@ -14,6 +11,10 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/api/fake"
+	"github.com/oberthci/oberth/internal/apicontract"
 )
 
 // The listener runs net/http over in-memory pipes, without opening any socket.
@@ -68,6 +69,8 @@ func secondDo(cl *http.Client, path, body string) (*http.Response, error) {
 	r, _ := http.NewRequest("POST", "http://memory"+path, strings.NewReader(body))
 	r.Header.Set("Authorization", "Bearer valid")
 	r.Header.Set("Content-Type", "application/json")
+	r = modernRequest(r)
+	r.ContentLength = -1
 	return cl.Do(r)
 }
 
@@ -136,7 +139,7 @@ func TestSecondTimeoutDeliveryModes(t *testing.T) {
 				r.Header.Set("Accept", "text/event-stream")
 			}
 			w := newStreamWriter()
-			f.server.Handler().ServeHTTP(w, r)
+			f.server.Handler().ServeHTTP(w, modernRequest(r))
 			if !strings.Contains(w.Body.String(), `"timed_out":true`) || sse && strings.Count(w.Body.String(), "event: message") != 1 {
 				t.Fatal("timeout delivery lost its one final result", w.Body.String())
 			}

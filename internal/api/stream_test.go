@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/oberthci/oberth/internal/apicontract"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -14,9 +13,10 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/oberthci/oberth/internal/apicontract"
+
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/api/fake"
-	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/publicerr"
 )
 
@@ -51,7 +51,7 @@ func startSSE(f *fixture, path, method, body string) *pendingRequest {
 	r.Header.Set("Mcp-Session-Id", "00000000000000000000000000000001")
 	w := newStreamWriter()
 	joined := make(chan struct{})
-	go func() { defer close(joined); f.server.Handler().ServeHTTP(w, r) }()
+	go func() { defer close(joined); f.server.Handler().ServeHTTP(w, modernRequest(r)) }()
 	return &pendingRequest{cancel, joined, w}
 }
 func waitBody() string {
@@ -114,7 +114,7 @@ func TestSSEPreparesBeforeStreamingAndHasOneFinalReply(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer valid")
 	r.Header.Set("Accept", "text/event-stream")
 	w := newStreamWriter()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	if !strings.HasPrefix(w.Body.String(), ": keepalive\n\n") || strings.Count(w.Body.String(), "event: message") != 1 || len(w.deadlines) != 6 {
 		t.Fatal(w.Body.String())
 	}
@@ -130,7 +130,7 @@ func TestSSEPreparesBeforeStreamingAndHasOneFinalReply(t *testing.T) {
 		b.RunWait.Handler = &fake.Handler[apicontract.RunWaitArgs, apicontract.WaitResult]{PrepareError: publicerr.New(publicerr.Forbidden, "Run is unavailable.", "Use a visible run.", nil)}
 	})
 	w = newStreamWriter()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	if strings.HasPrefix(w.Body.String(), ":") || w.Header().Get("Content-Type") == "text/event-stream" {
 		t.Fatal("started streaming before authorization")
 	}
@@ -172,7 +172,7 @@ func TestSSEAcceptRequiresExplicitNonzeroQuality(t *testing.T) {
 		r.Header.Set("Authorization", "Bearer valid")
 		r.Header.Set("Accept", accept)
 		w := newStreamWriter()
-		f.server.Handler().ServeHTTP(w, r)
+		f.server.Handler().ServeHTTP(w, modernRequest(r))
 		if strings.Contains(w.Header().Get("Content-Type"), "event-stream") {
 			t.Fatal("implicit SSE accepted")
 		}
@@ -189,7 +189,7 @@ func TestPrivateBoundedDiagnosticsContract(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer valid")
 	r.Header.Set("Accept", "text/event-stream")
 	w := newStreamWriter()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	data, err := json.Marshal(f.diagnostics.Items())
 	if err != nil {
 		t.Fatal(err)
@@ -278,104 +278,13 @@ func TestNativeAndBackupStreamsPreservePlainBytes(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Accept-Encoding", "gzip")
 		w := newStreamWriter()
-		f.server.Handler().ServeHTTP(w, r)
+		f.server.Handler().ServeHTTP(w, modernRequest(r))
 		if w.Body.String() != tc.want || w.Header().Get("Content-Encoding") != "" {
 			t.Fatal(w.Body.String())
 		}
 	}
 }
-func TestEventCursorNeverResetsAndEmptyPagesAdvance(t *testing.T) {
-	for _, cursor := range []string{"1", "999999"} {
-		t.Run(cursor, func(t *testing.T) {
-			seen := make(chan *int64, 2)
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			h := &eventHandler{seen: seen, cancel: cancel}
-			f := setup(t, func(_ *api.Config, b *apicontract.Bindings) { b.EventsWait.Handler = h })
-			assertSuccess(t, request(f, "POST", "/mcp", []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`)))
-			r := httptest.NewRequest("GET", "/mcp", nil).WithContext(ctx)
-			r.Header.Set("Authorization", "Bearer valid")
-			r.Header.Set("Accept", "text/event-stream")
-			r.Header.Set("Mcp-Session-Id", "00000000000000000000000000000001")
-			r.Header.Set("Last-Event-ID", cursor)
-			w := newStreamWriter()
-			f.server.Handler().ServeHTTP(w, r)
-			first, second := <-seen, <-seen
-			if first == nil || fmt.Sprint(*first) != cursor || second == nil || *second != 42 {
-				t.Fatal("cursor was reset or filtered progress lost")
-			}
-			if !strings.Contains(w.Body.String(), "id: 42\n") || !strings.Contains(w.Body.String(), `"gap":true`) {
-				t.Fatal(w.Body.String())
-			}
-		})
-	}
-}
 
-type eventHandler struct {
-	seen   chan *int64
-	cancel context.CancelFunc
-	calls  int
-}
-
-func (h *eventHandler) Prepare(ctx context.Context, _ apicontract.Caller, a apicontract.EventsWaitArgs) (apicontract.Call[apicontract.EventResult], error) {
-	h.seen <- a.AfterID
-	h.calls++
-	if h.calls > 1 {
-		h.cancel()
-		return nil, context.Canceled
-	}
-	return func(context.Context) (apicontract.EventResult, error) {
-		return apicontract.EventResult{EventPage: model.EventPage{Events: []model.AgentEvent{}, NextAfterID: 42, Gap: true}}, nil
-	}, nil
-}
-
-func TestEventStreams32Accepts33Refuses(t *testing.T) {
-	started := make(chan struct{}, 32)
-	f := setup(t, func(_ *api.Config, b *apicontract.Bindings) {
-		b.EventsWait.Handler = &fake.Handler[apicontract.EventsWaitArgs, apicontract.EventResult]{Run: func(ctx context.Context) (apicontract.EventResult, error) {
-			started <- struct{}{}
-			<-ctx.Done()
-			return apicontract.EventResult{}, ctx.Err()
-		}}
-	})
-	assertSuccess(t, initialize(f))
-	pending := []*pendingRequest{}
-	for i := 0; i < 32; i++ {
-		pending = append(pending, startSSE(f, "/mcp", "GET", ""))
-	}
-	for i := 0; i < 32; i++ {
-		<-started
-	}
-	over := startSSE(f, "/mcp", "GET", "")
-	accepted := false
-	select {
-	case <-over.joined:
-		accepted = over.writer.Code != 429
-	case <-started:
-		accepted = true
-	}
-	over.cancel()
-	<-over.joined
-	if accepted {
-		for _, p := range pending {
-			p.cancel()
-		}
-		for _, p := range pending {
-			<-p.joined
-		}
-		t.Fatal("thirty-third event stream reached its handler")
-	}
-
-	for _, p := range pending {
-		p.cancel()
-	}
-	for _, p := range pending {
-		<-p.joined
-	}
-	if f.clock.ActiveTickers() != 0 {
-		t.Fatal("event observer outlived request")
-	}
-}
 func TestStreamReauthenticationAt30SecondsClosesChangedAuthority(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		started := make(chan struct{})

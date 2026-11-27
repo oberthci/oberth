@@ -12,7 +12,7 @@ import (
 )
 
 func TestCompleteRequestAllowsExactByteBudget(t *testing.T) {
-	envelope := map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "issue_import", "arguments": apicontract.IssueImportArgs{JSONL: ""}}}
+	envelope := map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"_meta": apicontract.ClientMetadata(), "name": "issue_import", "arguments": apicontract.IssueImportArgs{JSONL: ""}}}
 	empty, err := json.Marshal(envelope)
 	if err != nil {
 		t.Fatal(err)

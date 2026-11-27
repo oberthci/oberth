@@ -88,9 +88,23 @@ func (p *bridgePeer) send(id any, method string, params any) {
 	if id != nil {
 		frame["id"] = id
 	}
-	if params != nil {
-		frame["params"] = params
+	raw, _ := json.Marshal(params)
+	if params == nil {
+		raw = nil
 	}
+	raw, _ = apicontract.WithClientMetadata(raw)
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &fields)
+	if original, ok := params.(map[string]any); ok {
+		if meta, ok := original["_meta"].(map[string]any); ok {
+			merged := apicontract.ClientMetadata()
+			for name, value := range meta {
+				merged[name], _ = json.Marshal(value)
+			}
+			fields["_meta"], _ = json.Marshal(merged)
+		}
+	}
+	frame["params"] = fields
 	data, err := json.Marshal(frame)
 	if err == nil {
 		written := make(chan error, 1)
@@ -129,16 +143,16 @@ func (p *bridgePeer) frame() json.RawMessage {
 	}
 	return nil
 }
-func (p *bridgePeer) initialize() json.RawMessage {
+func (p *bridgePeer) discover() json.RawMessage {
 	p.t.Helper()
-	p.send("init", "initialize", map[string]any{"protocolVersion": apicontract.ProtocolVersion, "capabilities": map[string]any{}, "clientInfo": map[string]string{"name": "test", "version": "1"}})
+	p.send("init", "server/discover", nil)
 	data := p.frame()
 	var reply struct {
 		ID    string
 		Error any
 	}
 	if json.Unmarshal(data, &reply) != nil || reply.ID != "init" || reply.Error != nil {
-		p.t.Fatalf("initialize refused: %s", data)
+		p.t.Fatalf("discovery refused: %s", data)
 	}
 	return data
 }

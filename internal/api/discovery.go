@@ -1,29 +1,30 @@
 package api
 
 import (
-	"github.com/oberthci/oberth/internal/apicontract"
-	"github.com/oberthci/oberth/internal/model"
 	"net/http"
 	"time"
+
+	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/model"
 )
 
-type handshakeRequest struct {
+type discoveryRequest struct {
 	req        rpcRequest
 	caller     apicontract.Caller
 	enrollment bool
 }
 
-func (s *Server) handshake(w http.ResponseWriter, r *http.Request, x handshakeRequest) bool {
+func (s *Server) discovery(w http.ResponseWriter, r *http.Request, x discoveryRequest) bool {
 	resp := rpcResponse{JSONRPC: "2.0", ID: x.req.ID}
 	limit := apicontract.RequestBytes
 	if x.enrollment {
 		limit = apicontract.EnrollmentBytes
 	}
 	switch x.req.Method {
-	case "initialize":
-		resp = s.initializeReply(w, r, x, limit)
+	case "server/discover":
+		resp.Result = s.discoveryResult(x.enrollment)
 	case "ping":
-		var p apicontract.Empty
+		var p apicontract.MCPParams
 		if err := decode(x.req.Params, &p, limit); err != nil {
 			resp.Error = &rpcError{-32602, refusal("input").Reason(), s.publicError(r.Context(), err)}
 		} else {
@@ -31,6 +32,7 @@ func (s *Server) handshake(w http.ResponseWriter, r *http.Request, x handshakeRe
 		}
 	case "tools/list":
 		var p struct {
+			apicontract.MCPParams
 			Cursor string `json:"cursor,omitempty"`
 		}
 		if err := decode(x.req.Params, &p, limit); err != nil {
@@ -40,33 +42,11 @@ func (s *Server) handshake(w http.ResponseWriter, r *http.Request, x handshakeRe
 		} else {
 			resp.Result = s.config.Registry.listWire(x.caller)
 		}
-	case "notifications/initialized":
-		w.WriteHeader(202)
-		return true
 	default:
 		return false
 	}
 	s.writeRPC(w, r, resp)
 	return true
-}
-func (s *Server) initializeReply(w http.ResponseWriter, r *http.Request, x handshakeRequest, limit int) rpcResponse {
-	resp := rpcResponse{JSONRPC: "2.0", ID: x.req.ID}
-	var p initializeParams
-	if decode(x.req.Params, &p, limit) != nil || !validVersion(p.ProtocolVersion) {
-		resp.Error = &rpcError{-32602, refusal("method").Reason(), nil}
-		return resp
-	}
-	if !x.enrollment {
-		id, err := s.sessions.create(x.caller, s.config.Runtime)
-		if err != nil {
-			problem := s.publicError(r.Context(), err)
-			resp.Error = &rpcError{-32000, problem.Reason(), problem}
-			return resp
-		}
-		w.Header().Set("Mcp-Session-Id", id)
-	}
-	resp.Result = initializeResult(p, x.enrollment)
-	return resp
 }
 func enrollmentCatalogue() any {
 	schema := schemaForType[model.InviteRedemption]()

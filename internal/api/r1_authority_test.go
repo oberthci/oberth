@@ -5,11 +5,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"github.com/oberthci/oberth/internal/apicontract"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/apicontract"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/api/fake"
@@ -39,7 +40,7 @@ func TestMalformedCredentialsNeverReachLookup(t *testing.T) {
 		r := httptest.NewRequest("GET", "/api/status", nil)
 		r.Header["Authorization"] = headers
 		w := httptest.NewRecorder()
-		f.server.Handler().ServeHTTP(w, r)
+		f.server.Handler().ServeHTTP(w, modernRequest(r))
 		if w.Code != 401 || probe.calls != 0 {
 			t.Fatal("transport credential syntax bypassed", w.Code, probe.calls)
 		}
@@ -52,7 +53,7 @@ func TestMalformedCredentialsNeverReachLookup(t *testing.T) {
 	r := httptest.NewRequest("GET", "/api/status", nil).WithContext(parent)
 	r.Header.Set("Authorization", "Bearer valid")
 	w := httptest.NewRecorder()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	assertSuccess(t, w)
 	if d := outer.Sub(probe.deadline); d < 4*time.Second || d > 6*time.Second {
 		t.Fatal("lookup deadline changed", d)
@@ -75,7 +76,7 @@ func TestCertificateNotBeforeIncludesExactBoundary(t *testing.T) {
 		r := httptest.NewRequest("GET", "/api/status", nil)
 		r.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
 		w := httptest.NewRecorder()
-		f.server.Handler().ServeHTTP(w, r)
+		f.server.Handler().ServeHTTP(w, modernRequest(r))
 		want := 200
 		if offset > 0 {
 			want = 401
@@ -172,7 +173,7 @@ func TestEnrollmentIsolation(t *testing.T) {
 	r := httptest.NewRequest("POST", "/mcp/enroll", strings.NewReader(redemptionBody()))
 	r.Header.Set("Authorization", "Bearer valid")
 	w := httptest.NewRecorder()
-	f.server.Handler().ServeHTTP(w, r)
+	f.server.Handler().ServeHTTP(w, modernRequest(r))
 	if w.Code != 404 {
 		t.Fatal("ordinary credentials accepted by enrollment")
 	}

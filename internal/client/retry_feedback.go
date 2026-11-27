@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/oberthci/oberth/internal/restartretry"
 	"io"
 	"sync"
 	"time"
+
+	"github.com/oberthci/oberth/internal/restartretry"
 
 	"github.com/oberthci/oberth/internal/apicontract"
 )
@@ -39,7 +40,7 @@ func (c *Client) retryWait(ctx context.Context, delay time.Duration, f *readFeed
 	return nil
 }
 
-// Diagnostics can be emitted by concurrent MCP calls and the session stream.
+// Diagnostics can be emitted by concurrent MCP calls and request progress.
 type diagnosticWriter struct {
 	mu  sync.Mutex
 	out io.Writer

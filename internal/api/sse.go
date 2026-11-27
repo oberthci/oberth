@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
-	"github.com/oberthci/oberth/internal/apicontract"
 	"io"
 	"mime"
 	"net/http"
@@ -11,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/oberthci/oberth/internal/apicontract"
 )
 
 func acceptsSSE(h http.Header) bool { return acceptsMedia(h.Values("Accept"), "text/event-stream") }
@@ -151,15 +151,6 @@ func (s *Server) heartbeat(ctx context.Context, w http.ResponseWriter, state hea
 			}
 		}
 	}
-}
-
-func notification(method string, params any) string {
-	data, _ := json.Marshal(struct {
-		JSONRPC string `json:"jsonrpc"`
-		Method  string `json:"method"`
-		Params  any    `json:"params"`
-	}{"2.0", method, params})
-	return "event: message\ndata: " + string(data) + "\n\n"
 }
 
 type observation struct {

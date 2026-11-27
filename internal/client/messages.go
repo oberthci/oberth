@@ -13,11 +13,11 @@ func failure(key string, cause error) *publicerr.Error {
 
 func catalogue() map[string][2]string {
 	return map[string][2]string{
+		"interaction":      {"Server requested further interaction.", "Use an interactive host; read durable state before another action."},
 		"request_size":     {"The encoded request exceeds 1048576 bytes.", "Use a smaller request and retry."},
 		"client_cert":      {"Server refused this client certificate.", "Run oberth renew if it is still permitted; otherwise ask an administrator for a new invitation."},
 		"renewal":          {"Renewal certificate is invalid.", "Keep the current profile and check the server before retrying oberth renew."},
-		"bridge_stream":    {"Pushed event stream is unavailable.", "Check server access; use events_wait to read current events."},
-		"bridge_close":     {"Could not close the agent session.", "Retry after the idle session expires or ask the administrator to check the server."},
+		"protocol":         {"MCP protocol request was refused.", "Use an Oberth client and host supporting MCP 2026-07-28, then rediscover the server."},
 		"bridge_profile":   {"No uplink profile selected for the agent bridge.", "Run oberth join <file>, then use its mcp --profile line or the bound checkout."},
 		"bridge_admin":     {"Administrator profiles cannot run the agent bridge.", "Run oberth join <file>, then use its uplink mcp --profile line."},
 		"bridge_input":     {"MCP input is invalid or exceeds the request limit.", "Send one bounded JSON-RPC message per line."},

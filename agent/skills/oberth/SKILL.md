@@ -40,7 +40,7 @@ Right after join, tell the person how Claude Code's run box finds the CLI: it us
 If join printed another path, or Claude Code starts outside this checkout, ask them to run `/plugin configure oberth@oberthci` and set executable to the path in the join line, profile to the uplink profile that line names, and leave runs blank for three.
 The plugin gives the person `/oberth-runs` and `/oberth-watch <run>`; you use the bridge's tools, the plugin adds none.
 In Codex the bridge itself offers the run footer: tell the person to turn on Custom status line in `/experimental`, restart, and pick Oberth runs in `/statusline`.
-With tools connected, follow the server's initialization instructions; they are the authority for the run loop.
+With tools connected, follow the server's discovery instructions; they are the authority for the run loop.
 Each run result from those tools ends with its display block; paste that block verbatim.
 Without those tools, use steps 7-8 and paste `oberth run get <run>` whole.
 During held-step assistance never print the environment or credential files.

@@ -45,7 +45,7 @@ func (shortBridgeOutput) Write([]byte) (int, error) { return 0, nil }
 
 func TestBridgeIDsAndConcurrentWrites(t *testing.T) {
 	p := wrappedBridgePeer(t, bridgeProfile(t, handlerTransport(server(t, fake.Bindings()))), func(out io.WriteCloser) io.WriteCloser { return fragmentedOutput{out} })
-	p.initialize()
+	p.discover()
 	for i := 0; i < 20; i++ {
 		p.send(i, "ping", nil)
 	}
@@ -83,7 +83,7 @@ func TestBridgeForwardsOnlyBearerDigest(t *testing.T) {
 	b.UplinkAdd.Handler = h
 	cfg := bridgeProfile(t, handlerTransport(server(t, b)))
 	p := newBridgePeer(t, cfg)
-	p.initialize()
+	p.discover()
 	digest := apicontract.SecretDigest("caller-retained-bearer")
 	p.tool("private", "uplink_add", map[string]any{"identity": "agent", "ssh_public_key": "public-key", "bearer_digest": digest}, nil)
 	data := p.frame()
@@ -109,7 +109,7 @@ func TestBridgeDuplicateIDDoesNotCancelOriginal(t *testing.T) {
 		return nil, r.Context().Err()
 	}))
 	p := newBridgePeer(t, cfg)
-	p.initialize()
+	p.discover()
 	p.tool(4, "run_get", map[string]any{"id": "run1"}, nil)
 	select {
 	case <-entered:
@@ -134,7 +134,7 @@ func TestBridgeBoundsActiveRequests(t *testing.T) {
 		return nil, r.Context().Err()
 	}))
 	p := newBridgePeer(t, cfg)
-	p.initialize()
+	p.discover()
 	for id := 0; id < 65; id++ {
 		p.tool(id, "run_get", map[string]any{"id": "run1"}, nil)
 	}

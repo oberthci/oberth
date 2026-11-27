@@ -106,8 +106,7 @@ The server's MCP instructions carry the loop once. With work in flight, keep
 one background `events_wait` open for its held/finished events and add promotion completion
 while promoting. Before pushing, call `events_wait` with `snapshot:true` and no `after_id`;
 it returns a cursor immediately. Push, then wait from that cursor, even if background calls are unavailable. Handle every event, deduplicate IDs and advance
-`next_after_id`, including after timeout; a gap requires a new snapshot. Pushed
-notifications are an extra. A parked push has no run; request CI with a real ref
+`next_after_id`, including after timeout; a gap requires a new snapshot. Request-scoped progress is an extra. A parked push has no run; request CI with a real ref
 update and `oberth.run=1`.
 
 Read a finished run; if cancelled, show who cancelled and stop without fixing code or rerunning. Otherwise use its typed retry hint. A rerun hint permits unchanged
@@ -159,7 +158,7 @@ credential files or Pod environment.
    lists no output schemas. Status and event pages carry their JSON alone. Paste the
    block verbatim with whole reasons and separate native detail. Strip terminal
    controls and format marks; do not infer an error class from prose or clip text.
-5. The bridge forwards pushed session events with cursor resumption and maps
+5. The bridge maps request-scoped
    keepalives to protocol progress for requests with a progress
    token. Hosts with smaller tool timeouts pass a smaller `timeout_s`. A long
    event wait cannot block run reads; cancellation ends observation only.

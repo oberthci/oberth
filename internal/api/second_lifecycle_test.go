@@ -2,57 +2,20 @@ package api_test
 
 import (
 	"context"
-	"fmt"
-	"github.com/oberthci/oberth/internal/api"
-	"github.com/oberthci/oberth/internal/api/fake"
-	"github.com/oberthci/oberth/internal/apicontract"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"testing/synctest"
+
+	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/api/fake"
+	"github.com/oberthci/oberth/internal/apicontract"
 )
 
-func TestSecondConcurrentResourceBound(t *testing.T) {
-	const n = 96
-	entered := make(chan struct{}, n)
-	release := make(chan struct{})
-	f := setup(t, func(_ *api.Config, b *apicontract.Bindings) {
-		b.RunGet.Handler = &fake.Handler[apicontract.RunGetArgs, apicontract.RunRecord]{Run: func(context.Context) (apicontract.RunRecord, error) {
-			entered <- struct{}{}
-			<-release
-			return apicontract.RunRecord{}, nil
-		}}
-	})
-	assertSuccess(t, initialize(f))
-	var successes atomic.Int32
-	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			w := request(f, "POST", "/mcp", []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"resources/subscribe","params":{"uri":"run://run-%d"}}`, i)))
-			if !strings.Contains(w.Body.String(), `"error":`) {
-				successes.Add(1)
-			}
-		}(i)
-	}
-	for i := 0; i < n; i++ {
-		<-entered
-	}
-	close(release)
-	wg.Wait()
-	t.Logf("parallel subscriptions accepted=%d limit=64", successes.Load())
-	if successes.Load() != 64 {
-		t.Errorf("resource cap exceeded: %d", successes.Load())
-	}
-}
-
 func TestSecondDrainDuringPreparation(t *testing.T) {
-	for _, kind := range []string{"JSON wait", "SSE wait", "event stream", "native log"} {
+	for _, kind := range []string{"JSON wait", "SSE wait", "native log"} {
 		t.Run(kind, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				entered := make(chan struct{})
@@ -60,13 +23,13 @@ func TestSecondDrainDuringPreparation(t *testing.T) {
 				f := setup(t, func(c *api.Config, b *apicontract.Bindings) {
 					secondPreparationBlock(c, b, kind, func(ctx context.Context) { child = ctx; close(entered); <-ctx.Done() })
 				})
-				assertSuccess(t, initialize(f))
+				assertSuccess(t, discover(f))
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
 				r := secondObservationRequest(ctx, kind)
 				w := newStreamWriter()
 				done := make(chan struct{})
-				go func() { defer close(done); f.server.Handler().ServeHTTP(w, r) }()
+				go func() { defer close(done); f.server.Handler().ServeHTTP(w, modernRequest(r)) }()
 				<-entered
 				f.server.BeginDrain()
 				synctest.Wait()
