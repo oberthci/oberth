@@ -41,31 +41,22 @@ func afterMarker(ctx context.Context, source io.ReaderAt, spans []span, marker s
 
 func markerOffset(ctx context.Context, input io.Reader, start int64, marker string) (span, bool, error) {
 	reader := bufio.NewReaderSize(input, 64<<10)
-	offset, foundAt := start, start
-	var previous []byte
-	matched := false
+	offset, lineStart := start, start
+	whole := true
 	for {
 		if err := ctx.Err(); err != nil {
 			return span{}, false, err
 		}
 		chunk, err := reader.ReadSlice('\n')
-		data := append(previous, chunk...)
-		if !matched {
-			if at := bytes.Index(data, []byte(marker)); at >= 0 {
-				foundAt = offset - int64(len(previous)) + int64(at)
-				matched = true
-			}
-		}
 		offset += int64(len(chunk))
+		if whole && err == nil && bytes.Equal(chunk, []byte(marker+"\n")) {
+			return span{lineStart, offset}, true, nil
+		}
 		if errors.Is(err, bufio.ErrBufferFull) {
-			keep := min(len(data), len(marker))
-			previous = append([]byte(nil), data[len(data)-keep:]...)
+			whole = false
 			continue
 		}
-		if matched {
-			return span{foundAt, offset}, true, nil
-		}
-		previous = nil
+		whole, lineStart = true, offset
 		if errors.Is(err, io.EOF) {
 			break
 		}

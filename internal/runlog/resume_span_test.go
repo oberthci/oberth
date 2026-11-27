@@ -50,12 +50,41 @@ func checkAfterMarker(t *testing.T, s *Store, marker string) {
 func TestFailedLogSpanKeepsPartialLineAndExactEmptyAttempt(t *testing.T) {
 	t.Parallel()
 	marker := "oberth-hold: rerunning on ffffffff as next"
-	for _, failed := range []string{"partial P0", ""} {
+	for _, failed := range []string{"partial P0\n", ""} {
 		s := newStore(t, 4096)
 		capture(t, s, native("held"), failed+marker+"\nF output\n")
 		body, meta, err := s.Read(t.Context(), "run", ReadRequest{Selector: Selector{NodeID: "held", Container: "main"}, BeforeMarker: marker})
 		if err != nil || string(body) != failed || meta.Reason == "failed-attempt log pending" {
 			t.Fatal("failed log boundary lost bytes", failed, string(body), meta, err)
+		}
+	}
+}
+
+func TestRerunMarkersMatchExactCompleteLines(t *testing.T) {
+	t.Parallel()
+	marker := "oberth-hold: rerunning on ffffffff as next"
+	for _, forged := range []string{"prefix " + marker + "\n", marker + " suffix\n", strings.Repeat("x", 64<<10) + marker + "\n", marker} {
+		s := newStore(t, 256<<10)
+		prefix := forged + "P0 failure tail\n"
+		capture(t, s, native("held"), prefix+marker+"\nF output\n")
+		selector := Selector{NodeID: "held", Container: "main"}
+		request := ReadRequest{Selector: selector, BeforeMarker: marker}
+		before, meta, err := s.Read(t.Context(), "run", request)
+		if err != nil || !strings.HasSuffix(string(before), "P0 failure tail\n") || meta.Bytes != int64(len(prefix)) {
+			t.Fatal("inline marker hid failure tail", string(before), err)
+		}
+		stream, err := s.OpenStream(t.Context(), "run", request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		full, err := io.ReadAll(stream)
+		_ = stream.Close()
+		if err != nil || string(full) != prefix {
+			t.Fatal("inline marker changed stored span", len(full), err)
+		}
+		after, _, err := s.Read(t.Context(), "run", ReadRequest{Selector: selector, AfterMarker: marker})
+		if err != nil || string(after) != "F output\n" {
+			t.Fatal("inline marker shifted failure tail", string(after), err)
 		}
 	}
 }

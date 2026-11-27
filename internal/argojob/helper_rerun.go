@@ -322,7 +322,8 @@ func (r holdRuntime) rerunCommand(ctx context.Context, request holdRequest, code
 	if err != nil {
 		return holdDiagnostic(diagnostic, code, fmt.Errorf("snapshot install failed: %w", err))
 	}
-	_, _ = fmt.Fprintln(diagnostic, nativebinding.RerunMarker(manifest.Commit, manifest.RunID))
+	// End any partial command output before emitting the exact boundary line.
+	_, _ = fmt.Fprintln(diagnostic, "\n"+nativebinding.RerunMarker(manifest.Commit, manifest.RunID))
 	_, _ = fmt.Fprintln(diagnostic, "oberth-hold: kept untracked files: "+manifest.kept)
 	if len(r.command) == 0 {
 		return holdDiagnostic(diagnostic, code, fmt.Errorf("authored command is missing"))

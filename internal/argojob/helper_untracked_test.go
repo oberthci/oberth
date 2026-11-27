@@ -25,11 +25,15 @@ func TestRerunNamesRetainedUntrackedFiles(t *testing.T) {
 	defer os.Remove(stage)
 	r.command, r.streams = []string{"true"}, HoldIO{}
 	var diagnostic bytes.Buffer
+	_, _ = diagnostic.WriteString("partial P0")
 	if code := r.rerunCommand(t.Context(), holdRequest{Stage: stage, Digest: digest}, 7, &diagnostic); code != 0 {
 		t.Fatal(code, diagnostic.String())
 	}
 	if !strings.Contains(diagnostic.String(), `kept untracked files: "line\nbreak", "notes.txt"`) {
 		t.Fatal("retained filenames missing", diagnostic.String())
+	}
+	if !strings.Contains(diagnostic.String(), "partial P0\noberth-hold: rerunning on") {
+		t.Fatal("marker did not end partial command output", diagnostic.String())
 	}
 	if strings.Index(diagnostic.String(), "kept untracked") < strings.Index(diagnostic.String(), "rerunning on") {
 		t.Fatal("retained list belongs to predecessor logs")
