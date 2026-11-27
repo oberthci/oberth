@@ -15,8 +15,15 @@ func TestOrdinaryPreparationSkipsDormantResultScan(t *testing.T) {
 		t.Fatal("ordinary preparation requires the dormant assist gate")
 	}
 	w := simpleWorkflow()
-	w.Spec.Arguments.Parameters = []wf.Parameter{{Name: "message", Value: wf.AnyStringPtr("{{tasks.producer.outputs.result}}")}}
+	w.Spec.Templates[0].Inputs.Parameters = []wf.Parameter{{Name: "message", Default: wf.AnyStringPtr("")}}
 	w.Spec.Templates[0].Outputs.Parameters = []wf.Parameter{{Name: "value", ValueFrom: &wf.ValueFrom{Path: "/tmp/value"}}}
+	w.Spec.Templates = append(w.Spec.Templates, wf.Template{Name: "flow", DAG: &wf.DAGTemplate{Tasks: []wf.DAGTask{
+		{Name: "producer", Template: "main"},
+		{Name: "consumer", Template: "main", Depends: "producer", Arguments: wf.Arguments{Parameters: []wf.Parameter{
+			{Name: "message", Value: wf.AnyStringPtr("{{tasks.producer.outputs.result}}")},
+		}}},
+	}}})
+	w.Spec.Entrypoint = "flow"
 	selector := &core.SecretKeySelector{LocalObjectReference: core.LocalObjectReference{Name: "private"}, Key: "dummy"}
 	kind := holdSecretRoute(w, selector, "env")
 	r := requestFor(t, w)
@@ -40,11 +47,12 @@ func TestOrdinaryPreparationSkipsDormantResultScan(t *testing.T) {
 
 func assertOrdinaryResumeFacts(t *testing.T, plan admissioncontract.Plan) {
 	t.Helper()
-	if len(plan.Entries) != 1 {
+	if len(plan.Entries) != 2 {
 		t.Fatal("ordinary preparation lost its plan", plan)
 	}
-	e := plan.Entries[0]
-	if e.ResultConsumed || !e.SecretRoute || !e.OutputParameters {
-		t.Fatal("ordinary preparation scanned dormant results or lost retry safety facts", e)
+	for _, e := range plan.Entries {
+		if e.ResultConsumed || !e.SecretRoute || !e.OutputParameters {
+			t.Fatal("ordinary preparation scanned dormant results or lost retry safety facts", e)
+		}
 	}
 }
