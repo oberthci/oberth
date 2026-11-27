@@ -88,13 +88,13 @@ oberth upgrade --dry-run
 oberth upgrade --yes
 ```
 Upgrades require signed releases; local charts use `oberth install --chart <directory>`. After
-upgrading, replace the administrator CLI with that release's verified client and repoint wrappers to
-it. `--service-port 443` selects in-cluster HTTPS port 443 (default 8443). Add `--version <version>`
-to both commands to select a version. Offline `--release-dir <directory>` reads signed files or a
-parent of version directories (`v0.1.0`, `v0.2.0`). Version directories override flat files; invalid
-directories refuse. Same-schema repair needs both releases; select their parent. Review preserves
-settings and shows changed defaults, schema and revision; JSON has images. Review names direct Helm
-edits; install and upgrade replace them. Rollback/repair refuse them and name install or upgrade.
+upgrading, replace the CLI with that release's verified client and repoint wrappers. Add
+`--version <version>` to both commands to select it; `--service-port 443` selects HTTPS port 443
+(default 8443). Offline `--release-dir <directory>` reads signed files or a parent of version
+directories; version directories override flat files and invalid directories refuse. Same-schema
+repair needs both releases; select their parent. Review preserves settings and shows changed
+defaults, schema, revision and images (JSON). Install/upgrade replace direct Helm edits;
+rollback/repair refuse them and name install or upgrade.
 Review failed revisions. Finish unlabelled Workflows before upgrading (not adopted). Runs survive
 restarts; submission during a controller restart may fail at step start: `oberth run rerun <id>`.
 Database backups stay in the profile by version/UTC time; copy off-machine. If the store restarts
@@ -112,7 +112,10 @@ An orphaned resumed Workflow needs its `oberth.ci/record` finalizer removed by h
 Review the saved record with `oberth rollback --dry-run`, then run `oberth rollback --yes` with its
 original profile. A different schema, cluster UID or unexpected revision refuses before writes.
 Repeating resumes rollback; without the record, inspect the deployed revision. Offline, use
-`--release-dir <directory>` with signed source-version files; another version refuses.
+`--release-dir <directory>` with signed source-version files; another version refuses. Before
+rolling v0.30.19 back to v0.30.18, pause affected schedules, remove their YAML declarations and
+verify their CronWorkflows are gone. Finish or cancel every child and verify collection before
+downgrading. Recreate schedules with the restored release before resuming; startup sync can fail.
 ## Back up
 `oberth backup --out <new-archive-file>` encrypts the database, bundled store data and five
 installation Secrets: CA key, forge deploy key, SSH host key, store TLS and administrator public
@@ -127,9 +130,9 @@ offline; `oberth backup verify` uses the same inputs. Both need `--backup-profil
 v0.30.17 cannot read archives with forge host pins. Keep age, administrator and unseal files apart:
 the archive has neither age identity nor unseal material. A database-only backup cannot restore
 store values; keep secure originals to put again. Separate `recovery` can unseal data.
-`oberth access list --repo <repo> --kind store_path --json` lists paths/steps, never values.
-`--output json` warnings exit 0: optional `warning` has `code`, `reason`, `remedy`, optional `id`,
-`context`, `detail`; also on standard error; clean and dry-run results omit `warning`.
+`oberth access list --repo <repo> --kind store_path --json` lists paths/steps, never values. JSON
+warnings exit 0: optional `warning` has `code`, `reason`, `remedy`, optional `id`, `context`, `detail`;
+also on standard error; clean and dry-run results omit `warning`.
 `oberth backup --directory <dir> --keep 7` prunes verified signed full copies after success
 (1–1000), never unsigned copies, other names or links; `--database-only` refuses `--keep`. Signed
 `installation_id` is the backup signing public key. Foreign archives refuse without

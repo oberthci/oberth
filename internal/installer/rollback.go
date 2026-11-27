@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 // Rollback verifies the earlier release before applying its complete chart.
@@ -232,7 +234,7 @@ func (m Maintenance) RollbackReview() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []string{
+	lines := []string{
 		fmt.Sprintf("Rollback: %s -> %s", r.TargetVersion, r.Source.Version),
 		"Rollback record: " + m.Engine.Credentials.pathFor("rollback.json"),
 		fmt.Sprintf("Source: %s; revision %d; schema %d", r.Source.Version, r.Source.Number, r.Options.Schema),
@@ -241,5 +243,13 @@ func (m Maintenance) RollbackReview() ([]string, error) {
 		"An orphaned resumed Workflow needs its oberth.ci/record finalizer removed by hand.",
 		"State: " + r.State,
 		"Backup: " + r.BackupPath,
-	}, nil
+	}
+	if semver.Compare(r.TargetVersion, "v0.30.19") >= 0 && semver.Compare(r.Source.Version, "v0.30.19") < 0 {
+		lines = append(lines,
+			"Sealed schedule admissions from v0.30.19 may refuse after this downgrade.",
+			"Remove affected schedules; finish or cancel their children and verify collection before downgrading.",
+			"Recreate schedules with the restored release before resuming them.",
+		)
+	}
+	return lines, nil
 }
