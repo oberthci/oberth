@@ -60,7 +60,7 @@ Copy `~/.config/oberth/<profile>/`, archives, `backup.agekey` and `recovery` off
 `installation.json` records paths. Complete backups encrypt the five installation Secrets and
 bundled store data; keep the age identity, administrator private file and recovery material apart.
 Missing administrator keys refuse install. `OBERTH_PROFILE` or `~/.config/oberth/current` selects;
-agent joining preserves selection.
+agent joining preserves selection. Logs reload once on rotation; on failure, re-run the command.
 ## Agent plugins
 Once public, add the Claude Code skill and run box with `/plugin marketplace add oberthci/oberth`
 and `/plugin install oberth@oberthci`. Default: fetcher's `~/.local/bin/oberth`, `OBERTH_PROFILE` or
@@ -88,8 +88,7 @@ oberth upgrade --dry-run
 oberth upgrade --yes
 ```
 Upgrades require signed releases; local charts use `oberth install --chart <directory>`. For 18→19,
-select v0.30.19's verified CLI first. After
-upgrading, replace the administrator CLI with that release's verified client and repoint wrappers to
+use v0.30.19's verified CLI first. Afterward, select that release's CLI and repoint wrappers to
 it. Add `--version <version>` to pick it; `--service-port 443` sets in-cluster HTTPS (default 8443).
 Offline `--release-dir <directory>` reads signed files or version directories, which override flat
 files; invalid directories refuse. Same-schema repair needs both releases under that parent.

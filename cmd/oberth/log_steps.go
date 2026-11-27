@@ -12,7 +12,7 @@ func (s *flowSession) logRunInfo(id string) (stepmodel.RunSummary, error) {
 	request := apicontract.RunGetArgs{ID: id}
 	for {
 		var page stepmodel.RunSummary
-		if err := s.invoke("run_get", request, &page); err != nil {
+		if err := s.invokeLog("run_get", request, &page); err != nil {
 			return result, err
 		}
 		steps := append(result.Steps, page.Steps...)
@@ -37,7 +37,7 @@ func (s *flowSession) logPlannedSteps(request apicontract.RunLogsArgs) error {
 	if request.Step != "" {
 		if _, found := nextLogStep(run.Steps, request.Step, shown); !found {
 			var logs apicontract.LogResult
-			if err := s.invoke("run_logs", request, &logs); err != nil {
+			if err := s.invokeLog("run_logs", request, &logs); err != nil {
 				return err
 			}
 			return flowError("contract", nil)

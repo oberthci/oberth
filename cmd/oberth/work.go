@@ -339,7 +339,7 @@ type logCursor struct {
 func (s *flowSession) currentLogPage(request apicontract.RunLogsArgs, cursor *logCursor) (*apicontract.LogResult, error) {
 	request.ByteOffset = cursor.offset
 	var logs apicontract.LogResult
-	if err := s.invoke("run_logs", request, &logs); err != nil {
+	if err := s.invokeLog("run_logs", request, &logs); err != nil {
 		return nil, err
 	}
 	chosen := logContainerKey(logs)

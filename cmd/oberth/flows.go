@@ -14,12 +14,13 @@ import (
 )
 
 type flowSession struct {
-	app      application
-	ctx      context.Context
-	options  commonOptions
-	remote   *client.Client
-	resolved client.Options
-	last     json.RawMessage
+	app         application
+	ctx         context.Context
+	options     commonOptions
+	remote      *client.Client
+	resolved    client.Options
+	last        json.RawMessage
+	logIdentity *logIdentity
 }
 type flowCommand struct {
 	name, usage, summary string

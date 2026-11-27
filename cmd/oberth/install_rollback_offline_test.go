@@ -28,7 +28,11 @@ type signedMaintenance struct {
 
 func signedMaintenanceFixture(t *testing.T) signedMaintenance {
 	t.Helper()
-	base := t.TempDir()
+	return signedMaintenanceFixtureAt(t, t.TempDir())
+}
+
+func signedMaintenanceFixtureAt(t *testing.T, base string) signedMaintenance {
+	t.Helper()
 	engine, charts := offlineInstallEngine(t, base)
 	earlier, previous := signedInstallRelease(t, "v0.1.0")
 	choices := installer.Choices{Context: "chosen"}

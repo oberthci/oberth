@@ -93,8 +93,8 @@ func TestUpgradeAndRollbackAuditWithTheProfileFilesTheyLeave(t *testing.T) {
 	if code := app.run(t.Context(), []string{"upgrade", "--version", "v0.2.0", "--release-dir", f.install.target, "--yes"}); code != 0 {
 		t.Fatal("upgrade failed", code, diagnostic)
 	}
-	if _, err := os.Stat(before); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("upgrade kept the earlier certificate file", err)
+	if _, err := os.Stat(before); !os.IsNotExist(err) {
+		t.Fatal("upgrade retained the earlier certificate", err)
 	}
 	if strings.Contains(diagnostic.String(), "unconfirmed") {
 		t.Fatal("recorded upgrade audit reported unconfirmed", diagnostic)
