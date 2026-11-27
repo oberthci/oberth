@@ -194,9 +194,9 @@ object and kubelet `stats/summary` as `stats`. `summarize` reads projected JSONL
 Oversize frames emit small omission records. Output ≤samples × 32 MiB (8640 max: 270 GiB).
 Raw commands/env/messages stay private; UID joins retain final Pod/helper requests/limits;
 unknown children stay in the coverage denominator. Resources have a stable digest.
-Missing reads, templates, requests, usage, memory peaks and throttling remain
-explicit. Summary memory is sampled working set, never a peak or hard-limit proof.
-Volume stats can expose PVC usage; absent volume samples cannot establish PVC size.
+Missing reads/requests, numeric CPU/working-set/rootfs/log usage, peaks and throttling
+stay explicit; so do absent Pod ephemeral bytes and each claim's volume bytes.
+Zero is measured. Filesystem counters overlap; keep external directory/PVC bytes separate.
 Record external five-minute PVC samples and control readiness/API latency beside
 these observations. Keep cache state, largest-input coverage and config/repo
 versions with the evidence; no collector infers cache state from resource usage.

@@ -136,6 +136,41 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(row["claims"][0]["pvc"]["uid"], "pvc-1")
         self.assertEqual(row["volume_usage"][0]["usedBytes"], 42)
 
+    def test_numeric_and_claim_coverage_survives_identity_resolution(self):
+        for value in (None, 0, 42, False, "0", -1):
+            for volume in (None, {"name": "cache", "time": "volume-time"}):
+                with self.subTest(value=value, volume=volume):
+                    frame = fixture()
+                    pod = frame["pods"]["items"][0]
+                    pod["spec"].pop("initContainers")
+                    pod["spec"]["volumes"] = [{"name": "cache", "persistentVolumeClaim": {"claimName": "cache"}}]
+                    frame["pvcs"] = {"items": [{"metadata": {"namespace": "runs", "name": "cache", "uid": "pvc-1"}}]}
+                    stats = frame["stats"]["pods"][0]
+                    metrics = {metric: {"time": metric + "-time"} for metric in ("cpu", "memory", "rootfs", "logs")}
+                    stats["ephemeral-storage"] = {"time": "pod-time"}
+                    if volume is not None:
+                        stats["volume"] = [dict(volume)]
+                    if value is not None:
+                        for metric, field in (("cpu", "usageNanoCores"), ("memory", "workingSetBytes"), ("rootfs", "usedBytes"), ("logs", "usedBytes")):
+                            metrics[metric][field] = value
+                        stats["ephemeral-storage"]["usedBytes"] = value
+                        if volume is not None:
+                            stats["volume"][0]["usedBytes"] = value
+                    stats["containers"] = [{"name": "main", **metrics}]
+                    projected = observe.observation(frame)
+                    row = projected["pods"][0]
+                    summary = observe.summarize([projected, projected])["missing"]
+                    valid = type(value) is int and value >= 0
+                    for metric in metrics:
+                        self.assertEqual(summary.get("container:" + metric, 0), 0 if valid else 2)
+                        self.assertEqual(row["containers"][0]["usage"][metric]["time"], metric + "-time")
+                    self.assertEqual(summary.get("ephemeral_storage", 0), 0 if valid else 2)
+                    self.assertEqual(summary.get("pvc_usage:cache", 0), 0 if valid and volume is not None else 2)
+                    self.assertNotIn("pvc_uid:cache", summary)
+                    self.assertEqual(row["ephemeral_storage"]["time"], "pod-time")
+                    if volume is not None:
+                        self.assertEqual(row["volume_usage"][0]["time"], "volume-time")
+
     def test_child_owner_chain_and_unknowns_remain_in_denominator(self):
         frame = fixture()
         frame["pods"]["items"][0]["metadata"]["ownerReferences"][0]["uid"] = "job-1"

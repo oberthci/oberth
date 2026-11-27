@@ -4,6 +4,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import selectors
@@ -30,6 +31,21 @@ def pick(value, names):
 
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def numeric(value):
+    return type(value) in (int, float) and value >= 0 and (type(value) is int or math.isfinite(value))
+
+
+def container_usage(measured):
+    fields = ("time", "usageNanoCores", "usageCoreNanoSeconds", "workingSetBytes", "usageBytes",
+              "rssBytes", "availableBytes", "capacityBytes", "usedBytes")
+    required = (("cpu", "usageNanoCores"), ("memory", "workingSetBytes"),
+                ("rootfs", "usedBytes"), ("logs", "usedBytes"))
+    usage = {metric: pick(measured.get(metric, {}), fields) for metric, _ in required}
+    missing = [metric for metric, field in required if not numeric(usage[metric].get(field))]
+    # Kubelet summary has neither cgroup memory peak nor throttle counters.
+    return usage, [*missing, "memory_peak", "cpu_throttling"]
 
 
 def observation(frame):
@@ -70,6 +86,7 @@ def observation(frame):
         if not w:
             missing.append("workflow_uid_join")
         claims = []
+        volume_usage = {v.get("name"): v for v in usage.get("volume", [])}
         for volume in spec.get("volumes", []):
             claim = volume.get("persistentVolumeClaim", {}).get("claimName")
             if claim:
@@ -77,6 +94,13 @@ def observation(frame):
                 claims.append({"volume": volume.get("name"), "claim_name": claim, "pvc": identity(pvc)})
                 if not pvc:
                     missing.append("pvc_uid:" + volume.get("name", ""))
+                measured = volume_usage.get(volume.get("name"), {})
+                ref = measured.get("pvcRef")
+                if not numeric(measured.get("usedBytes")) or (ref is not None and
+                        (ref.get("namespace"), ref.get("name")) != (meta.get("namespace"), claim)):
+                    missing.append("pvc_usage:" + volume.get("name", ""))
+        if not numeric(usage.get("ephemeral-storage", {}).get("usedBytes")):
+            missing.append("ephemeral_storage")
         for field, val in (("repo", labels.get("oberth.ci/repo")), ("commit", labels.get("oberth.ci/sha")),
                            ("template", node.get("templateName")), ("pod_uid", meta.get("uid")),
                            ("pod_spec", spec.get("containers")),
@@ -90,20 +114,14 @@ def observation(frame):
             for c in spec.get(carrier, []):
                 name = c.get("name")
                 measured = by_name.get(name, {})
-                absent = []
+                sampled, absent = container_usage(measured)
                 resources = c.get("resources", {})
                 for resource in ("cpu", "memory", "ephemeral-storage"):
                     if resource not in resources.get("requests", {}):
                         absent.append("request:" + resource)
-                for metric in ("cpu", "memory", "rootfs", "logs"):
-                    if metric not in measured:
-                        absent.append(metric)
-                # Kubelet summary has neither cgroup memory peak nor throttle counters.
-                absent.extend(("memory_peak", "cpu_throttling"))
                 cs = state.get(name, {})
                 containers.append({"name": name, "carrier": carrier, "restart_policy": c.get("restartPolicy"),
-                                   "resources": resources, "usage": {k: pick(measured.get(k, {}),
-                                   ("time", "usageNanoCores", "usageCoreNanoSeconds", "workingSetBytes", "usageBytes", "rssBytes", "availableBytes", "capacityBytes", "usedBytes")) for k in ("cpu", "memory", "rootfs", "logs")},
+                                   "resources": resources, "usage": sampled,
                                    "restart_count": cs.get("restartCount"),
                                    "terminated_reason": cs.get("state", {}).get("terminated", {}).get("reason"),
                                    "missing": absent})
