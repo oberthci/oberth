@@ -16,7 +16,7 @@ func (g *graph) runPriority(class string, priority *int32, path string, override
 		name     string
 		priority int32
 	}{{"release", 30}, {"promotion", 20}, {"qualification", 10}, {"lint", 0}} {
-		if g.policy.ServerNamespace == "" || class != "oberth-run-"+tier.name+"-"+g.policy.ServerNamespace {
+		if g.policy.ServerNamespace == "" || class != "oberth-run-"+g.policy.ServerNamespace+"-"+tier.name {
 			continue
 		}
 		value := ptr.Deref(priority, 0)

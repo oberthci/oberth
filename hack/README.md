@@ -208,11 +208,13 @@ cannot justify resizing. Missing/idle traffic leaves qualification unmeasured.
 
 # Native ordering
 
-For installation namespace `oberth`, choose native Workflow `priority` and
-`podPriorityClassName` together: release `30` / `oberth-run-release-oberth`,
-promotion-critical `20` / `oberth-run-promotion-oberth`, qualification `10` /
-`oberth-run-qualification-oberth`, lint `0` / `oberth-run-lint-oberth`.
-Replace the namespace suffix for another installation. These classes are
+For namespace `oberth`, explicitly install the classes with
+`--run-priorities '{"release":30000,"promotion":20000,"qualification":10000,"lint":0}'`.
+Choose native Workflow `priority` and
+`podPriorityClassName` together: release `30` / `oberth-run-oberth-release`,
+promotion-critical `20` / `oberth-run-oberth-promotion`, qualification `10` /
+`oberth-run-oberth-qualification`, lint `0` / `oberth-run-oberth-lint`.
+Replace `oberth` with the installation namespace. These classes are
 non-default and nonpreempting, below the protected control class. Argo orders
 workflows waiting for its cap; Kubernetes orders feasible pending Pods.
 Choose the tier explicitly per entrypoint. Credentials and caller urgency do

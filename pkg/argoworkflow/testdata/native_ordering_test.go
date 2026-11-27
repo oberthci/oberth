@@ -11,12 +11,12 @@ import (
 
 func TestOberthNativePriorityAndSerialPods(t *testing.T) {
 	t.Setenv("INFORMER_WRITE_BACK", "true")
-	for _, override := range []string{"", "oberth-run-lint-oberth"} {
+	for _, override := range []string{"", "oberth-run-oberth-lint"} {
 		for _, parallelism := range []int64{1, 2} {
 			ctx := logging.TestContext(t.Context())
 			priority := int32(30)
 			w := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "ordering", Namespace: "default"}, Spec: wfv1.WorkflowSpec{
-				Entrypoint: "main", Priority: &priority, PodPriorityClassName: "oberth-run-release-oberth", Parallelism: &parallelism,
+				Entrypoint: "main", Priority: &priority, PodPriorityClassName: "oberth-run-oberth-release", Parallelism: &parallelism,
 				Templates: []wfv1.Template{
 					{Name: "main", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "a", Template: "leaf"}, {Name: "b", Template: "leaf"}, {Name: "c", Template: "leaf"}}}},
 					{Name: "leaf", PriorityClassName: override, Container: &corev1.Container{Image: "image", Command: []string{"true"}}},

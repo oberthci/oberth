@@ -19,9 +19,9 @@ type priorityCase struct {
 func TestNativePrioritiesAreAdvisoryAndNeverRewriteSerialWork(t *testing.T) {
 	for _, mode := range []admissioncontract.Mode{admissioncontract.ModeInspect, admissioncontract.ModeSubmit} {
 		for _, tc := range []priorityCase{
-			{"oberth-run-release-oberth", 30, 0}, {"oberth-run-promotion-oberth", 20, 0},
-			{"oberth-run-qualification-oberth", 10, 0}, {"oberth-run-lint-oberth", 0, 0},
-			{"oberth-run-release-oberth", 0, 1}, {"custom", 17, 1}, {"", 30, 1},
+			{"oberth-run-oberth-release", 30, 0}, {"oberth-run-oberth-promotion", 20, 0},
+			{"oberth-run-oberth-qualification", 10, 0}, {"oberth-run-oberth-lint", 0, 0},
+			{"oberth-run-oberth-release", 0, 1}, {"custom", 17, 1}, {"", 30, 1},
 			{"oberth-control-oberth", 0, 0}, {"oberth-control-elsewhere", 0, 1},
 			{"oberth-control-custom", 17, 1},
 		} {
@@ -41,7 +41,7 @@ func checkNativePriority(t *testing.T, mode admissioncontract.Mode, tc priorityC
 	w := simpleWorkflow()
 	serial := int64(1)
 	w.Spec.Priority, w.Spec.PodPriorityClassName, w.Spec.Parallelism = &tc.priority, tc.class, &serial
-	w.Spec.Templates[0].PriorityClassName = "oberth-run-lint-oberth"
+	w.Spec.Templates[0].PriorityClassName = "oberth-run-oberth-lint"
 	r := requestFor(t, w)
 	r.Mode, r.IdentityRequest.Mode = mode, mode
 	prepared, err := Prepare(t.Context(), r, Policy{ServerNamespace: "oberth"}, identityHooks())
@@ -49,7 +49,7 @@ func checkNativePriority(t *testing.T, mode admissioncontract.Mode, tc priorityC
 		t.Fatal("native priority refused admission", mode, tc, err)
 	}
 	view := prepared.View()
-	if !reflect.DeepEqual(w.Spec.Priority, view.Workflow.Spec.Priority) || view.Workflow.Spec.PodPriorityClassName != tc.class || *view.Workflow.Spec.Parallelism != 1 || view.Workflow.Spec.Templates[0].PriorityClassName != "oberth-run-lint-oberth" {
+	if !reflect.DeepEqual(w.Spec.Priority, view.Workflow.Spec.Priority) || view.Workflow.Spec.PodPriorityClassName != tc.class || *view.Workflow.Spec.Parallelism != 1 || view.Workflow.Spec.Templates[0].PriorityClassName != "oberth-run-oberth-lint" {
 		t.Fatal("native ordering rewrote authored priority or serialization")
 	}
 	assertPriorityFindings(t, view.Findings, tc.want)
@@ -70,7 +70,7 @@ func assertPriorityFindings(t *testing.T, findings []admissioncontract.Finding, 
 func TestPriorityAdvisoriesUseMergedNativeDefaults(t *testing.T) {
 	w := simpleWorkflow()
 	r := requestFor(t, w)
-	raw := json.RawMessage(`{"spec":{"priority":30,"podPriorityClassName":"oberth-run-release-oberth"}}`)
+	raw := json.RawMessage(`{"spec":{"priority":30,"podPriorityClassName":"oberth-run-oberth-release"}}`)
 	canonical, err := sourcecontract.CanonicalJSON(raw)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestPriorityAdvisoriesUseMergedNativeDefaults(t *testing.T) {
 	if err != nil || p == nil {
 		t.Fatal(err)
 	}
-	if len(p.View().Findings) != 0 || *p.View().Workflow.Spec.Priority != 30 || p.View().Workflow.Spec.PodPriorityClassName != "oberth-run-release-oberth" {
+	if len(p.View().Findings) != 0 || *p.View().Workflow.Spec.Priority != 30 || p.View().Workflow.Spec.PodPriorityClassName != "oberth-run-oberth-release" {
 		t.Fatal("native priority defaults lost or inspected before merging", p.View())
 	}
 }

@@ -8,6 +8,7 @@ import (
 )
 
 func TestRunPrioritiesAreExplicitNonpreemptingAndRetained(t *testing.T) {
+	assertRunClassCount(t, rendered(t, nil), 0)
 	values, err := installer.RunPriorityChoices(`{"release":10000,"ordinary":0}`)
 	if err != nil {
 		t.Fatal(err)
@@ -15,6 +16,9 @@ func TestRunPrioritiesAreExplicitNonpreemptingAndRetained(t *testing.T) {
 	objects := rendered(t, values)
 	for _, name := range []string{"release", "ordinary"} {
 		class := object(t, objects, "PriorityClass", "oberth-run-oberth-"+name)
+		if class["value"] != map[string]float64{"release": 10000, "ordinary": 0}[name] {
+			t.Fatal("run class lost its explicitly selected priority", class)
+		}
 		if class["globalDefault"] != false || class["preemptionPolicy"] != "Never" || class["metadata"].(map[string]any)["annotations"].(map[string]any)["helm.sh/resource-policy"] != "keep" {
 			t.Fatal("run class changes preemption or disappears on rollback", class)
 		}
