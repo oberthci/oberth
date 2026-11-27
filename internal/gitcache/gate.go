@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/sourcedelivery"
 	"net"
 	"sync"
 )
@@ -193,6 +194,7 @@ func (
 	event ReceiveEvent,
 	source *ReceiveSource,
 ) error {
+	defer sourcedelivery.Measure(ctx, sourcedelivery.ReceiveGate, false)()
 	if c.config.PreReceive == nil {
 		return &gateError{code: "unavailable"}
 	}

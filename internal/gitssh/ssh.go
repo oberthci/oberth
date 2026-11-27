@@ -23,7 +23,8 @@ type IO struct {
 
 // Run connects with one selected private key and endpoint pins. Owned input
 // copying is closed and joined before return, including on cancellation.
-func Run(ctx context.Context, c Config, streams IO) error {
+func Run(ctx context.Context, c Config, streams IO) (result error) {
+	defer func() { result = pushBoundary(c.Command, false, result) }()
 	input := streams.Input
 	if c.Now == nil || input == nil {
 		return failure(reasonConfig)
@@ -75,7 +76,9 @@ func Run(ctx context.Context, c Config, streams IO) error {
 	}
 	return stream(ctx, client, c.Command, streams)
 }
-func stream(ctx context.Context, client *ssh.Client, command string, streams IO) error {
+func stream(ctx context.Context, client *ssh.Client, command string, streams IO) (result error) {
+	submitted := false
+	defer func() { result = pushBoundary(command, submitted, result) }()
 	session, err := client.NewSession()
 	var opening *ssh.OpenChannelError
 	if errors.As(err, &opening) {
@@ -92,6 +95,7 @@ func stream(ctx context.Context, client *ssh.Client, command string, streams IO)
 	if err != nil {
 		return transportError(ctx)
 	}
+	submitted = true
 	if err = session.Start(command); errors.Is(err, io.EOF) {
 		return interrupted(ctx, command, lost)
 	} else if err != nil {
@@ -102,14 +106,14 @@ func stream(ctx context.Context, client *ssh.Client, command string, streams IO)
 	err = session.Wait()
 	_ = input.Close()
 	<-done
+	var remote *ssh.ExitError
+	if err == nil || errors.As(err, &remote) {
+		return err
+	}
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
-	var remote *ssh.ExitError
-	if err != nil && !errors.As(err, &remote) {
-		return interrupted(ctx, command, lost)
-	}
-	return err
+	return interrupted(ctx, command, lost)
 }
 func transportError(ctx context.Context) error {
 	if ctx.Err() != nil {

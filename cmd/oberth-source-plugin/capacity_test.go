@@ -79,7 +79,7 @@ func TestPostStreamFailureWithholdsReceiptAndCountsFixedMetric(t *testing.T) {
 	b := f.Binding()
 	p := prepared(t, b)
 	var metrics []string
-	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, SourceClientBurst: 30, Metric: func(code, reason string) { metrics = append(metrics, code+"/"+reason) },
+	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, SourceClientBurst: 30, Metric: func(summary sourcedelivery.Summary) { metrics = append(metrics, summary.Code+"/"+summary.Reason) },
 		Authenticate: func(context.Context, string) (sourcedelivery.Caller, error) {
 			return sourcedelivery.Caller{Namespace: "ns", Workflow: "wf", UID: "uid"}, nil
 		},

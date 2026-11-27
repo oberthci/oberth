@@ -31,7 +31,7 @@ func (o *serverOwners) sourcePart(ctx context.Context) (Part, error) {
 	}, Pod: func(ctx context.Context, ns, name string) (*core.Pod, error) {
 		return o.cluster.Kube.CoreV1().Pods(ns).Get(ctx, name, meta.GetOptions{})
 	}}
-	source := sourcedelivery.New(sourcedelivery.Config{Authenticate: authentication.Authenticate, Run: o.sourceRun, Stage: o.cache.Stage, Now: o.c.clock.Now, SourceClientBurst: o.settings.SourceClientBurst, RecordFailure: func(ctx context.Context, caller sourcedelivery.Caller, started time.Time) error {
+	source := sourcedelivery.New(sourcedelivery.Config{Authenticate: authentication.Authenticate, Run: o.sourceRun, Stage: o.cache.Stage, Now: o.c.clock.Now, SourceClientBurst: o.settings.SourceClientBurst, Metric: o.sourceObservation, Permits: &o.c.health.source.permits, RecordFailure: func(ctx context.Context, caller sourcedelivery.Caller, started time.Time) error {
 		return o.recordDelivery(ctx, caller, runlog.InfrastructureReceipt{Kind: "source", StartedAt: started})
 	}, RecordSuccess: func(ctx context.Context, caller sourcedelivery.Caller, started time.Time) error {
 		return o.recordDelivery(ctx, caller, runlog.InfrastructureReceipt{Kind: "source", StartedAt: started, Delivered: true})

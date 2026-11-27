@@ -54,7 +54,8 @@ func Parse(args []string) (Config, error) {
 
 // Configure reads a bounded explicit directive set. No include, substitution,
 // ambient identity, wildcard host selection or executable directive is accepted.
-func Configure(path string, c Config) (Config, error) {
+func Configure(path string, c Config) (configured Config, result error) {
+	defer func() { result = pushBoundary(c.Command, false, result) }()
 	data, err := c.readFile(path, false)
 	if err != nil {
 		return c, err

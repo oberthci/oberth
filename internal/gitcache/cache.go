@@ -14,6 +14,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitport"
 	"github.com/oberthci/oberth/internal/reponame"
+	"github.com/oberthci/oberth/internal/sourcedelivery"
 	"k8s.io/utils/clock"
 )
 
@@ -41,8 +42,10 @@ type Config struct {
 	AdmissionMetric func(reason string)
 	// Log carries cache observations and native operation failure details.
 	// It must be nonblocking; detail belongs in the server log, not feedback.
-	Log func(reason, detail string)
-	Now func() time.Time
+	Log     func(reason, detail string)
+	Observe func(sourcedelivery.Summary)
+	Permits *sourcedelivery.Permits
+	Now     func() time.Time
 	// AbortReceive forgets a started admission that never reaches Deliver.
 	// It is nonblocking and performs no I/O; refusing/cancelled attempts may
 	// have no saved preparation, so forgetting an unknown ID must be harmless.

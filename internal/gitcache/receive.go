@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/oberthci/oberth/internal/sourcecontract"
+	"github.com/oberthci/oberth/internal/sourcedelivery"
 	"io"
 	"os"
 	"path/filepath"
@@ -68,7 +69,9 @@ type ReceiveRequest struct {
 
 // Receive stores original attribution before Git can change any ref. A failed
 // durable delivery remains ready for replay with its stable event ID.
-func (c *Cache) Receive(ctx context.Context, r ReceiveRequest) error {
+func (c *Cache) Receive(ctx context.Context, r ReceiveRequest) (result error) {
+	ctx, observation := sourcedelivery.Observe(ctx, "receive")
+	defer func() { c.observe(observation, result) }()
 	p, err := c.path(r.Repository)
 	if err != nil {
 		return err
@@ -104,6 +107,7 @@ func acquireReceive(ctx context.Context, slot chan struct{}, diagnostics io.Writ
 	if err := writeFeedback(diagnostics, []string{reasonPushWaiting + ". " + remedyPushWaiting}); err != nil {
 		return err
 	}
+	defer sourcedelivery.Measure(ctx, sourcedelivery.ReceiveSlot, true)()
 	return acquireContext(ctx, slot)
 }
 

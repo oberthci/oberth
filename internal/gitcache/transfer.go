@@ -2,6 +2,8 @@ package gitcache
 
 import (
 	"context"
+	"github.com/oberthci/oberth/internal/sourcedelivery"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,6 +34,7 @@ type transfer struct {
 	// waiting counts the callers still waiting for the result; left records
 	// that a caller stopped waiting before the transfer ended.
 	waiting int
+	joiners uint64
 	left    bool
 	// unanswered records that a caller waited its whole head wait for this
 	// read in vain, with its own context still live.
@@ -74,6 +77,7 @@ func (c *Cache) joinTransfer(key string, run func(context.Context, *atomic.Bool)
 	defer c.transfers.mu.Unlock()
 	if t := c.transfers.running[key]; t != nil {
 		t.waiting++
+		t.joiners++
 		return t
 	}
 	t := &transfer{done: make(chan struct{}), waiting: 1}
@@ -86,12 +90,24 @@ func (c *Cache) joinTransfer(key string, run func(context.Context, *atomic.Bool)
 	c.transfers.wait.Go(func() {
 		ctx, cancel := context.WithTimeout(c.ctx, c.budgets.background)
 		defer cancel()
+		ctx, observation := sourcedelivery.Observe(ctx, "job")
+		endService := sourcedelivery.Measure(ctx, transferPhase(key), false)
 		result := run(ctx, &t.sending)
+		endService()
+		summary := finishObservation(observation, result.err)
+		summary.Leaders = 1
+		if !summary.Blocked {
+			summary.Phase = transferPhase(key)
+		}
 		c.transfers.mu.Lock()
 		delete(c.transfers.running, key)
+		summary.Joiners = t.joiners
 		end := ending{left: t.left, unattended: t.waiting == 0}
 		t.result = result
 		c.transfers.mu.Unlock()
+		if c.config.Observe != nil {
+			c.config.Observe(summary)
+		}
 		close(t.done)
 		ended(ctx, result, end)
 	})
@@ -104,11 +120,16 @@ func (c *Cache) joinTransfer(key string, run func(context.Context, *atomic.Bool)
 func (c *Cache) awaitTransfer(ctx context.Context, key string, t *transfer) (outcome, bool) {
 	select {
 	case <-t.done:
-	case <-ctx.Done():
-		if c.leave(key, t) {
-			return outcome{}, false
+	default:
+		defer sourcedelivery.Measure(ctx, transferPhase(key), true)()
+		select {
+		case <-t.done:
+		case <-ctx.Done():
+			if c.leave(key, t) {
+				return outcome{}, false
+			}
+			<-t.done
 		}
-		<-t.done
 	}
 	c.transfers.mu.Lock()
 	defer c.transfers.mu.Unlock()
@@ -145,4 +166,16 @@ func (c *Cache) leave(key string, t *transfer) bool {
 	t.left = true
 	t.waiting--
 	return true
+}
+
+func transferPhase(key string) sourcedelivery.Phase {
+	op, _, _ := strings.Cut(key, "\x00")
+	switch {
+	case strings.HasSuffix(op, "/object"):
+		return sourcedelivery.Object
+	case strings.HasSuffix(op, "/fetch"), strings.HasSuffix(op, ".git"):
+		return sourcedelivery.Refresh
+	default:
+		return sourcedelivery.Head
+	}
 }

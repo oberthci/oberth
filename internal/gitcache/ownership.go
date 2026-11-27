@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/oberthci/oberth/internal/sourcedelivery"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -66,7 +67,20 @@ func (c *Cache) lockReceive(ctx context.Context, p string, readOnly bool) (Reser
 
 // Mirror recovery precedes both ordinary operations and authorized receive repair.
 func (c *Cache) lockMirror(ctx context.Context, p string) error {
-	if err := acquireContext(ctx, c.repositoryGate(p)); err != nil {
+	slot := c.repositoryGate(p)
+	select {
+	case slot <- struct{}{}:
+	default:
+		end := sourcedelivery.Measure(ctx, sourcedelivery.Repository, true)
+		err := acquireContext(ctx, slot)
+		end()
+		if err != nil {
+			return err
+		}
+	}
+	defer sourcedelivery.Measure(ctx, sourcedelivery.Recovery, false)()
+	if err := ctx.Err(); err != nil {
+		c.unlock(p)
 		return err
 	}
 	err := c.reconcileMirror(ctx, p)

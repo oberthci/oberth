@@ -3,6 +3,7 @@ package sourcedelivery
 import (
 	"context"
 	"errors"
+	"github.com/oberthci/oberth/internal/sourcecontract"
 	"io"
 	"k8s.io/utils/clock"
 	"net/http"
@@ -77,8 +78,8 @@ func TestCancelledStreamHasNoReceiptAndForbiddenCountsMetric(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	counted := false
-	server := New(Config{Now: (clock.RealClock{}).Now, Metric: func(code, reason string) {
-		if code == "forbidden" && reason == "" {
+	server := New(Config{Now: (clock.RealClock{}).Now, Metric: func(summary Summary) {
+		if summary.Code == "forbidden" {
 			counted = true
 		}
 	}})
@@ -87,7 +88,15 @@ func TestCancelledStreamHasNoReceiptAndForbiddenCountsMetric(t *testing.T) {
 	if w.Header().Get(ReceiptTrailer) != "" {
 		t.Fatal("cancelled stream got a receipt")
 	}
-	server.failure(httptest.NewRecorder(), &Failure{Code: "forbidden"})
+	server.config.Authenticate = func(context.Context, string) (Caller, error) { return Caller{}, &Failure{Code: "forbidden"} }
+	server.config.Run = func(context.Context, string) (Run, error) { return Run{}, nil }
+	server.config.Stage = func(context.Context, sourcecontract.Binding) (Staged, error) {
+		t.Fatal("forbidden request staged source")
+		return Staged{}, nil
+	}
+	req := httptest.NewRequest(http.MethodPost, LoadPath, strings.NewReader(`{"locator":"run","descriptor":{"version":1,"kind":"main"}}`))
+	req.Header.Set("Authorization", "Bearer bound")
+	server.ServeHTTP(httptest.NewRecorder(), req)
 	if !counted {
 		t.Fatal("forbidden response not counted")
 	}

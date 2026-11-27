@@ -42,10 +42,12 @@ type Staged struct {
 	Waited bool
 }
 type Config struct {
-	Authenticate      func(context.Context, string) (Caller, error)
-	Run               func(context.Context, string) (Run, error)
-	Stage             func(context.Context, sourcecontract.Binding) (Staged, error)
-	Metric            func(code, reason string)
+	Authenticate func(context.Context, string) (Caller, error)
+	Run          func(context.Context, string) (Run, error)
+	Stage        func(context.Context, sourcecontract.Binding) (Staged, error)
+	// Metric receives exactly one final summary per handled request. It must not block or do I/O.
+	Metric            func(Summary)
+	Permits           *Permits
 	SourceClientBurst int
 	Now               func() time.Time
 	RecordFailure     func(context.Context, Caller, time.Time) error
@@ -102,11 +104,24 @@ func New(config Config) *Server {
 	return &Server{config: config, auth: make(chan struct{}, max(0, config.SourceClientBurst/3)), transfers: make(chan struct{}, 2), workflows: make(map[Caller]int), waiters: make(map[Caller]int)}
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	observation := newObservation("load")
+	ctx := context.WithValue(r.Context(), observationContext{}, observation)
+	result := &outcomeWriter{ResponseWriter: w, code: "ok", observation: observation}
+	w = result
+	defer func() {
+		if s.config.Metric != nil {
+			summary := observation.Finish(result.code, result.err)
+			summary.Bytes, summary.Reason = result.bytes, result.reason
+			s.config.Metric(summary)
+		}
+	}()
 	if r.URL.Path != LoadPath {
+		outcome(w, "invalid_request")
 		http.NotFound(w, r)
 		return
 	}
 	if r.Method != http.MethodPost {
+		outcome(w, "invalid_request")
 		w.Header().Set("Allow", http.MethodPost)
 		w.WriteHeader(405)
 		return
@@ -115,14 +130,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 501, "not_configured", "")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	request, err := s.request(ctx, w, r)
 	if err != nil {
+		outcomeError(w, err)
 		s.fail(w, 400, "invalid_request", "")
 		return
 	}
 	s.load(ctx, w, r, request)
+	if result.err == nil {
+		result.err = ctx.Err()
+	}
 }
 
 func (s *Server) load(ctx context.Context, w http.ResponseWriter, r *http.Request, request LoadRequest) {
@@ -138,6 +157,7 @@ func (s *Server) load(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer func() { <-s.transfers }()
+	defer s.config.Permits.Enter(Transfer)()
 	if waited {
 		// A request waiting for capacity cannot use its old Pod/run decision.
 		run, binding, index, err = s.authorize(ctx, r.Header.Get("Authorization"), request)
@@ -174,6 +194,7 @@ func (s *Server) transferSlot(ctx context.Context, caller Caller) (bool, error) 
 	if acquire(s.transfers) {
 		return false, nil
 	}
+	defer Measure(ctx, Transfer, true)()
 	if !s.waiter(caller, 1) {
 		return false, &Failure{Code: "unavailable", Reason: "transfer-slot"}
 	}
@@ -213,6 +234,7 @@ func (s *Server) waiter(c Caller, delta int) bool {
 	return true
 }
 func (s *Server) authorize(ctx context.Context, header string, request LoadRequest) (Run, sourcecontract.Binding, int, error) {
+	defer Measure(ctx, Auth, false)()
 	empty := sourcecontract.Binding{}
 	if !strings.HasPrefix(header, "Bearer ") || len(header) > 8192 || len(header) <= 7 {
 		return Run{}, empty, 0, &Failure{Code: "unauthenticated"}
@@ -221,6 +243,7 @@ func (s *Server) authorize(ctx context.Context, header string, request LoadReque
 		return Run{}, empty, 0, &Failure{Code: "unavailable", Reason: "auth-cap"}
 	}
 	defer func() { <-s.auth }()
+	defer s.config.Permits.Enter(Auth)()
 	phase, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	caller, err := s.config.Authenticate(phase, strings.TrimPrefix(header, "Bearer "))
@@ -335,6 +358,7 @@ type transfer struct {
 
 func (s *Server) send(ctx context.Context, w http.ResponseWriter, t transfer) {
 	r, admission, index, stage := t.request, t.admission, t.index, t.stage
+	defer Measure(ctx, Transfer, false)()
 	closed := false
 	defer func() {
 		if !closed {
@@ -346,26 +370,29 @@ func (s *Server) send(ctx context.Context, w http.ResponseWriter, t transfer) {
 	digest := sha256.New()
 	writer := &deadlineWriter{ctx: ctx, w: w, now: s.config.Now}
 	if _, err := io.Copy(io.MultiWriter(writer, digest), stage.Body); err != nil {
-		s.metric("unavailable", "other")
+		outcomeError(w, err)
+		outcome(w, "unavailable")
 		return
 	}
 	if ctx.Err() != nil {
-		s.metric("unavailable", "other")
+		outcomeError(w, ctx.Err())
+		outcome(w, "unavailable")
 		return
 	}
 	closed = true
 	if err := stage.Body.Close(); err != nil {
-		s.metric("unavailable", "other")
+		outcomeError(w, err)
+		outcome(w, "unavailable")
 		return
 	}
 	receipt := LoadReceipt{Version: 1, Locator: r.Locator, Descriptor: r.Descriptor, Stream: StreamReceipt{AdmissionDigest: admission, Payload: Payload{Kind: r.Descriptor.Kind, Index: &index}, Digest: hex.EncodeToString(digest.Sum(nil)), Bytes: &stage.Bytes}}
 	value, err := EncodeReceipt(receipt)
 	if err != nil {
-		s.metric("unavailable", "other")
+		outcome(w, "unavailable")
 		return
 	}
 	if t.success != nil && t.success() != nil {
-		s.metric("unavailable", "other")
+		outcome(w, "unavailable")
 	}
 	w.Header().Set(ReceiptTrailer, value)
 }
@@ -387,9 +414,11 @@ func (d *deadlineWriter) Write(b []byte) (int, error) {
 	return d.w.Write(b)
 }
 func (s *Server) failure(w http.ResponseWriter, err error) {
+	outcomeError(w, err)
+	outcome(w, "unavailable")
 	var terminal *terminalFailure
 	if errors.As(err, &terminal) {
-		s.metric("unavailable", "other")
+		outcome(w, "unavailable")
 		s.fail(w, 502, "delivery_failed", "")
 		return
 	}
@@ -400,6 +429,7 @@ func (s *Server) failure(w http.ResponseWriter, err error) {
 	}
 	switch f.Code {
 	case "too_large", "gone":
+		outcome(w, f.Code)
 		status := 413
 		if f.Code == "gone" {
 			status = 410
@@ -425,19 +455,24 @@ func (s *Server) fail(w http.ResponseWriter, status int, code, reason string) {
 			w.Header().Set("Retry-After", "10")
 		}
 	}
-	if status == 401 || status == 403 || status == 503 {
-		s.metric(code, reason)
+	outcome(w, code)
+	if result, ok := w.(*outcomeWriter); ok {
+		result.reason = reason
+	}
+	if result, ok := w.(*outcomeWriter); ok && code == "unavailable" {
+		switch reason {
+		case "auth-cap":
+			result.block(Auth)
+		case "export-slot":
+			result.block(Export)
+		case "transfer-slot":
+			result.block(Transfer)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(ErrorResponse{Version: 1, Code: code})
 }
-func (s *Server) metric(code, reason string) {
-	if s.config.Metric != nil {
-		s.config.Metric(code, reason)
-	}
-}
-
 func (s *Server) request(ctx context.Context, w http.ResponseWriter, r *http.Request) (LoadRequest, error) {
 	err := http.NewResponseController(w).SetReadDeadline(boundedDeadline(ctx, s.config.Now().Add(10*time.Second)))
 	if err != nil && !errors.Is(err, http.ErrNotSupported) {

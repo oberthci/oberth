@@ -324,3 +324,8 @@ checked-binding proof → run Workflow name/UID; fragments → native templates.
 ### Fix and resume
 
 Load keeps the original locator embedded in the shared Workflow and follows accepted successors to serve the current owners F binding. Native namespace, name and NativeUID still match the authenticated Pod owner. Pending/Running Pods alone can load; carried terminal Pods cannot obtain F. An ordinary rerun stamps its own locator and has no resume origin. Main bindings move to F; pinned bindings remain equal.
+
+Source and receive owners emit one final fixed-size summary per request or physical
+job. Phase waits and service are separate; health counters precede a nonblocking
+summary enqueue to the 128-entry maintenance notice channel. Detail is UTF-8 safe,
+at most 2 KiB with an explicit truncation flag; drops are exposed and logs are lossy.

@@ -54,7 +54,7 @@ func (a application) gitSSH(ctx context.Context, args []string) int {
 		cfg, err = gitssh.Configure(path, cfg)
 	}
 	if err != nil {
-		return a.failed(err)
+		return a.failed(a.gitSSHProblem(err))
 	}
 	cfg.Now, cfg.Scratch = a.config.Time, filepath.Dir(path)
 	err = a.streamGitSSH(ctx, cfg)
@@ -100,7 +100,14 @@ func (a application) streamGitSSH(ctx context.Context, cfg gitssh.Config) error 
 	if !ok {
 		input = io.NopCloser(a.in)
 	}
-	return gitssh.Run(ctx, cfg, gitssh.IO{Input: input, Output: a.out, Diagnostics: a.diagnostic})
+	return a.gitSSHProblem(gitssh.Run(ctx, cfg, gitssh.IO{Input: input, Output: a.out, Diagnostics: a.diagnostic}))
+}
+
+func (a application) gitSSHProblem(err error) error {
+	if a.env(gitssh.ConfigEnvironment) == "" {
+		return gitssh.PushDiagnostic(err)
+	}
+	return err
 }
 
 func (a application) helperEntry(ctx context.Context, argv []string) (int, bool) {

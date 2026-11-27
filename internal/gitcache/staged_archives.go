@@ -69,12 +69,15 @@ func (s *stagedArchives) room(ctx context.Context) (bool, error) {
 		}
 		changed := s.changed
 		waited = true
+		end := sourcedelivery.Measure(ctx, sourcedelivery.Archive, true)
 		s.mu.Unlock()
 		select {
 		case <-ctx.Done():
+			end()
 			s.mu.Lock()
 			return waited, context.Cause(ctx)
 		case <-changed:
+			end()
 			s.mu.Lock()
 		}
 	}

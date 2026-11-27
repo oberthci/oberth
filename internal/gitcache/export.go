@@ -41,14 +41,19 @@ func (c *Cache) Stage(ctx context.Context, b sourcecontract.Binding) (sourcedeli
 	case c.export <- struct{}{}:
 	default:
 		waited = true
+		end := sourcedelivery.Measure(ctx, sourcedelivery.Export, true)
 		select {
 		case c.export <- struct{}{}:
+			end()
 		case <-ctx.Done():
+			end()
 			return sourcedelivery.Staged{}, context.Cause(ctx)
 		}
 	}
 	defer func() { <-c.export }()
+	defer c.config.Permits.Enter(sourcedelivery.Export)()
 	if stage, found, err := c.staged.open(key); found {
+		sourcedelivery.Joined(ctx)
 		stage.Waited = waited
 		return c.checkedStage(ctx, b, stage, err)
 	}
@@ -69,6 +74,7 @@ func (c *Cache) Stage(ctx context.Context, b sourcecontract.Binding) (sourcedeli
 	return c.staged.put(key, dir, stage), nil
 }
 func (c *Cache) build(ctx context.Context, dir string, b sourcecontract.Binding) (sourcedelivery.Staged, error) {
+	defer sourcedelivery.Measure(ctx, sourcedelivery.Export, false)()
 	p, err := c.path(b.Revision.Repository)
 	if err != nil {
 		return sourcedelivery.Staged{}, err

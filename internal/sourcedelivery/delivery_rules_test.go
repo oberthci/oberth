@@ -68,9 +68,9 @@ func TestSourceCloseFailureWithholdsCompletionReceipt(t *testing.T) {
 	config.Stage = func(context.Context, sourcecontract.Binding) (sourcedelivery.Staged, error) {
 		return sourcedelivery.Staged{Body: &failedSourceClose{Reader: strings.NewReader("source"), closed: &closed}, Bytes: 6}, nil
 	}
-	config.Metric = func(code, reason string) {
-		if code != "unavailable" || reason != "other" {
-			t.Errorf("unexpected metric %q/%q", code, reason)
+	config.Metric = func(summary sourcedelivery.Summary) {
+		if summary.Code != "unavailable" {
+			t.Errorf("unexpected metric %q", summary.Code)
 		}
 		failed++
 	}
