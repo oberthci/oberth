@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/client"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/stateport"
@@ -175,8 +174,8 @@ func (s installationSession) rollback(ctx context.Context, out io.Writer) error 
 }
 
 func liveInstallationState(ctx context.Context, remote *client.Client) (stateport.Options, error) {
-	var status apicontract.SystemStatus
-	if err := remote.Invoke(ctx, "admin_version", apicontract.AdminVersionArgs{}, &status); err != nil {
+	status, err := remote.InstallationState(ctx)
+	if err != nil {
 		return stateport.Options{}, err
 	}
 	options := stateport.Options{Protocol: status.Protocol, Schema: status.SchemaVersion}
