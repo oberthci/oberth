@@ -12,54 +12,52 @@ import (
 
 const nativeDetailRestricted = "native detail restricted"
 
-type nativeDescription struct{ reason, detail string }
-
-func schedulingDescription(cause string) nativeDescription {
+func schedulingDescription(cause string) string {
 	switch cause {
 	case "slot":
-		return nativeDescription{"waiting for a run slot", "The native controller postponed this Workflow at its run cap."}
+		return "The native controller postponed this Workflow at its run cap."
 	case "lock":
-		return nativeDescription{"waiting for a lock", "Native synchronization is waiting. Run oberth lock status for scoped holders."}
+		return "Native synchronization is waiting. Run oberth lock status for scoped holders."
 	case "node":
-		return nativeDescription{"waiting for a node", "The scheduler reports that this Pod cannot currently be placed."}
+		return "The scheduler reports that this Pod cannot currently be placed."
 	case "quota_wait":
-		return nativeDescription{"waiting for quota", "Native admission refused the requested quota."}
+		return "Native admission refused the requested quota."
 	case "quota":
-		return nativeDescription{"quota exceeded", "Native admission refused the requested quota."}
+		return "Native admission refused the requested quota."
 	}
 	return startupDescription(cause)
 }
 
-func startupDescription(cause string) nativeDescription {
+func startupDescription(cause string) string {
 	switch cause {
 	case "image":
-		return nativeDescription{"image pull failed", "A required container image could not be started."}
+		return "A required container image could not be started."
 	case "startup":
-		return nativeDescription{"starting containers", "The Pod is waiting for its containers to start."}
+		return "The Pod is waiting for its containers to start."
 	case "disk_pressure":
-		return nativeDescription{"node disk pressure", "The assigned Pod has relevant native disk-pressure evidence."}
+		return "The assigned Pod has relevant native disk-pressure evidence."
 	case "memory_pressure":
-		return nativeDescription{"node memory pressure", "The assigned Pod has relevant native memory-pressure evidence."}
+		return "The assigned Pod has relevant native memory-pressure evidence."
 	case "pid_pressure":
-		return nativeDescription{"node process pressure", "The assigned Pod has relevant native process-pressure evidence."}
+		return "The assigned Pod has relevant native process-pressure evidence."
 	}
 	return infrastructureDescription(cause)
 }
 
-func infrastructureDescription(cause string) nativeDescription {
+func infrastructureDescription(cause string) string {
 	switch cause {
 	case "source":
-		return nativeDescription{"source delivery failed", "Source delivery did not complete for this admitted step."}
+		return "Source delivery did not complete for this admitted step."
 	case "secret":
-		return nativeDescription{"secret delivery failed", "A required secret could not be delivered to this admitted step."}
+		return "A required secret could not be delivered to this admitted step."
 	case "deadline":
-		return nativeDescription{"step timed out", "The native step exceeded its deadline."}
+		return "The native step exceeded its deadline."
 	case "init":
-		return nativeDescription{"init container failed", "An init container failed before the authored containers could start."}
+		return "An init container failed before the authored containers could start."
 	case "oom":
-		return nativeDescription{"out of memory", "The container was terminated for exceeding available memory."}
+		return "The container was terminated for exceeding available memory."
 	}
-	return nativeDescription{}
+	return ""
 }
 
 // Public detail is rebuilt from typed, allowlisted facts for every caller.
@@ -110,15 +108,15 @@ func projectNativeDetail(opaque string, diagnostic *stepmodel.NativeDiagnostic) 
 		return detail, &stepmodel.NativeDiagnostic{Source: diagnostic.Source}
 	}
 	description := schedulingDescription(diagnostic.Cause)
-	if description.detail == "" {
+	if description == "" {
 		return restrictedNativeDetail(opaque, diagnostic)
 	}
 	copy := &stepmodel.NativeDiagnostic{Cause: diagnostic.Cause, Source: diagnostic.Source}
 	if diagnostic.TransitionAt != nil {
 		copy.TransitionAt = new(*diagnostic.TransitionAt)
-		description.detail += "\nReported at " + diagnostic.TransitionAt.UTC().Format(time.RFC3339) + "."
+		description += "\nReported at " + diagnostic.TransitionAt.UTC().Format(time.RFC3339) + "."
 	}
-	return nativeConstraintDetail(description.detail, copy, diagnostic.Constraints)
+	return nativeConstraintDetail(description, copy, diagnostic.Constraints)
 }
 
 func restrictedNativeDetail(opaque string, diagnostic *stepmodel.NativeDiagnostic) (string, *stepmodel.NativeDiagnostic) {
