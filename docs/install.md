@@ -87,9 +87,9 @@ When the review shows a schema change, take a storage-level copy of the data vol
 oberth upgrade --dry-run
 oberth upgrade --yes
 ```
-Upgrades require signed releases; local charts use `oberth install --chart <directory>`.
-After upgrade, replace the CLI with that release's verified client and repoint wrappers.
-`--version <version>` selects a release; `--service-port 443` sets in-cluster HTTPS (default 8443).
+Upgrades require signed releases; local charts use `oberth install --chart <directory>`. After
+upgrading, replace the administrator CLI with that release's verified client and repoint wrappers to
+it. Add `--version <version>` to pick it; `--service-port 443` sets in-cluster HTTPS (default 8443).
 Offline `--release-dir <directory>` reads signed files or version directories, which override flat
 files; invalid directories refuse. Same-schema repair needs both releases under that parent.
 Review preserves settings and names changed defaults, schema, revision, images (JSON) and direct
@@ -126,11 +126,11 @@ off-machine unrenamed; save SHA256 separately. Use local hard links; never overw
 `oberth backup verify` uses these inputs: `--backup-profile <name>` or `--sha256 <saved-digest>`.
 Restore with the same or a newer release. v0.30.17 cannot read archives with forge host pins;
 v0.30.18 cannot verify v0.30.19 signed manifests. Keep a verified v0.30.19+ CLI or saved SHA256.
-Keep age, administrator and unseal files apart: archives lack age identity and unseal material.
-Database-only backups lack store values; keep originals to put again. `recovery` can unseal data.
-`oberth access list --repo <repo> --kind store_path --json` lists paths/steps, never values. JSON
-warnings exit 0: optional `warning` has code/reason/remedy, optional id/context/detail; also stderr.
-Clean and dry-run results omit `warning`.
+Keep age, administrator and unseal files apart: the archive has neither age identity nor unseal
+material. Database-only backups cannot restore store values; keep originals to put again.
+`oberth access list --repo <repo> --kind store_path --json` lists paths/steps, never values.
+`--output json` warnings exit 0: optional `warning` has `code`, `reason`, `remedy`, optional `id`,
+`context`, `detail`; also on standard error; clean and dry-run results omit `warning`.
 `oberth backup --directory <dir> --keep 7` prunes verified signed full copies after success
 (1–1000), never unsigned copies, other names or links; `--database-only` refuses `--keep`. Signed
 `installation_id` is the backup signing public key. Foreign archives refuse without
