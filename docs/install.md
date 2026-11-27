@@ -111,8 +111,8 @@ An orphaned resumed Workflow needs its `oberth.ci/run-record` finalizer removed 
 Review with `oberth rollback --dry-run`, then `oberth rollback --yes` using the original profile.
 Schema, cluster UID or unexpected revision changes refuse before writes. Reruns resume rollback.
 Without the record, inspect the deployed revision. Offline `--release-dir <directory>` needs signed
-source-version files. Before rolling v0.30.19 back to v0.30.18, pause schedules and remove their
-YAML declarations; verify CronWorkflows are gone; finish/cancel every child and check collection.
+source-version files. Before rolling v0.30.19 back to v0.30.18, pause schedules and finish/cancel
+every child; verify collection before removing YAML declarations; verify CronWorkflows are gone.
 Recreate schedules with the restored release before resuming; startup sync can fail.
 ## Back up
 `oberth backup --out <new-archive-file>` encrypts the database, bundled store data and five

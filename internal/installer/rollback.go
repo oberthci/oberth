@@ -247,7 +247,7 @@ func (m Maintenance) RollbackReview() ([]string, error) {
 	if semver.Compare(r.TargetVersion, "v0.30.19") >= 0 && semver.Compare(r.Source.Version, "v0.30.19") < 0 {
 		lines = append(lines,
 			"Sealed schedule admissions from v0.30.19 may refuse after this downgrade.",
-			"Remove affected schedules; finish or cancel their children and verify collection before downgrading.",
+			"Pause schedules; finish or cancel every child and verify collection, then remove CronWorkflows before downgrading.",
 			"Recreate schedules with the restored release before resuming them.",
 			"Backups taken by v0.30.19 need v0.30.19+ to verify their signed manifests.",
 			"Keep a verified v0.30.19+ recovery CLI and the pre-upgrade backup.",

@@ -1,6 +1,7 @@
 package installer_test
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -17,7 +18,7 @@ func TestRollbackReviewNamesScheduleAdmissionCutover(t *testing.T) {
 			text := strings.Join(lines, "\n")
 			for _, required := range []string{
 				"Sealed schedule admissions from v0.30.19 may refuse after this downgrade.",
-				"Remove affected schedules; finish or cancel their children and verify collection before downgrading.",
+				"Pause schedules; finish or cancel every child and verify collection, then remove CronWorkflows before downgrading.",
 				"Recreate schedules with the restored release before resuming them.",
 			} {
 				if strings.Contains(text, required) != (version == "v0.30.18") || len(required) > 120 {
@@ -25,5 +26,9 @@ func TestRollbackReviewNamesScheduleAdmissionCutover(t *testing.T) {
 				}
 			}
 		})
+	}
+	guide, err := os.ReadFile("../../docs/install.md")
+	if err != nil || !strings.Contains(string(guide), "verify collection before removing YAML declarations") {
+		t.Fatal("rollback guide removes parents before child collection", err)
 	}
 }
