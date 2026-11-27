@@ -22,10 +22,18 @@ func TestNativePrioritiesAreAdvisoryAndNeverRewriteSerialWork(t *testing.T) {
 			{"oberth-run-release-oberth", 30, 0}, {"oberth-run-promotion-oberth", 20, 0},
 			{"oberth-run-qualification-oberth", 10, 0}, {"oberth-run-lint-oberth", 0, 0},
 			{"oberth-run-release-oberth", 0, 1}, {"custom", 17, 1}, {"", 30, 1},
+			{"oberth-control-oberth", 0, 0}, {"oberth-control-elsewhere", 0, 1},
+			{"oberth-control-custom", 17, 1},
 		} {
 			t.Run(string(mode)+"/"+tc.class, func(t *testing.T) { checkNativePriority(t, mode, tc) })
 		}
 	}
+}
+
+func TestControlPriorityWithoutInstallationIsUnmanaged(t *testing.T) {
+	g := graph{}
+	g.runPriority("oberth-control-", nil, "spec.podPriorityClassName", false)
+	assertPriorityFindings(t, g.findings, 1)
 }
 
 func checkNativePriority(t *testing.T, mode admissioncontract.Mode, tc priorityCase) {
