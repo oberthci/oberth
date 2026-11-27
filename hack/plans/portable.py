@@ -79,24 +79,29 @@ def retired_contracts(root):
     return {"rules": len(data["rules"]), "selectors": sum(len(r["tokens"]) for r in data["rules"])}
 
 
-def disposition_contracts(api):
-    root = api["ROOT"]
-    data = json.loads((root / "docs/plans/dispositions.json").read_text())
-    expected = api["spec_deltas"]()
+def reviewed_dispositions(data, expected, file_digest, compact):
+    """Verify review witnesses before accepting or merging their decisions."""
     assert data["version"] == 2
     assert set(data["spec_sha256"]) == {p.rsplit(":", 1)[0] for p in expected}
     for file, sha in data["spec_sha256"].items():
-        assert digest(root / file) == sha, ("stale spec digest", file)
+        assert file_digest(file) == sha, ("stale spec digest", file)
     assert len(data["deltas"]) == len(expected)
     assert {d["spec"] for d in data["deltas"]} == set(expected)
     for delta in data["deltas"]:
         spec = expected[delta["spec"]]
         assert delta["markers"] == spec["markers"]
-        assert api["compact"](delta["basis"]) in spec["text"], ("stale Delta basis", delta["spec"])
+        assert compact(delta["basis"]) in spec["text"], ("stale Delta basis", delta["spec"])
         assert delta["scope"] in {"implementation", "behaviour"}
         assert delta["scope"] != "implementation" or not delta["rows"] and not delta.get("predicates")
         for row in delta["rows"]:
             assert row["disposition"] in {"KEEP", "CHANGE", "RETIRED", "NEW"}
+
+
+def disposition_contracts(api):
+    root = api["ROOT"]
+    data = json.loads((root / "docs/plans/dispositions.json").read_text())
+    expected = api["spec_deltas"]()
+    reviewed_dispositions(data, expected, lambda file: digest(root / file), api["compact"])
     sweeps = json.loads((root / "docs/plans/sweeps.json").read_text())
     assert sweeps["version"] == 1
     identities = [(s["source"], s["id"]) for s in sweeps["findings"]]

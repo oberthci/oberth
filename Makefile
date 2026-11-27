@@ -1,7 +1,12 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := check
 .NOTPARALLEL:
-.PHONY: test lint lint-selftest guards check dev deadcode release-bytes build-bytes static ui-check
+.PHONY: test lint lint-selftest guards check dev deadcode release-bytes build-bytes static ui-check setup
+
+setup:
+	@git config merge.plan-witness.name 'Merge reviewed plan witnesses'
+	@git config merge.plan-witness.driver 'python3 -I hack/plans/merge.py %O %A %B %P %S %X %Y'
+	@git config merge.plan-witness.recursive binary
 
 test lint lint-selftest guards check:
 	@bash hack/check.sh $@

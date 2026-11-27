@@ -830,16 +830,18 @@ def client_and_push_surfaces():
         add("UI views", name, "C1", behavior, f"internal/api/static/app.js:{line}")
 
 
-def spec_deltas():
+def spec_deltas(sources=None):
     """Capture the actual enclosing Delta clause, not just its bold marker."""
     result = {}
-    for path in sorted((ROOT / "docs/plans").glob("c[0-9]*-*.md")):
-        source = path.read_text()
+    if sources is None:
+        sources = {str(path.relative_to(ROOT)): path.read_text()
+                   for path in sorted((ROOT / "docs/plans").glob("c[0-9]*-*.md"))}
+    for path, source in sorted(sources.items()):
         for match in re.finditer(r"\*\*([^*]*\bdelta\b[^*]*)\*\*", source, re.I):
             if re.match(r"\s+(?:marks|means|identifies|describes)\b", source[match.end():]):
                 continue
             line = source[:match.start()].count("\n") + 1
-            key = f"{path.relative_to(ROOT)}:{line}"
+            key = f"{path}:{line}"
             prior_blank = source.rfind("\n\n", 0, match.start())
             start = prior_blank + 2 if prior_blank >= 0 else 0
             boundaries = list(re.finditer(r"(?m)^(?:- |\d+\. |\| )", source[start:match.start()]))

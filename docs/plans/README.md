@@ -48,6 +48,9 @@ The portable check uses Python 3 alone:
 The comparison baseline in `dispositions.json` is the `main` commit immediately
 before the fold. When a fold lands, advance the baseline to the resulting
 `main` commit and its inventory.
+Run `make setup` once per clone to enable the plan merge driver. It merges
+reviewed decisions and derives hashes and Delta locations from merged plans.
+Unreviewed inputs and conflicting prose require review; portable checks stay strict.
 The parity tool's pinned-source regression runs with
 `OBERTH_PARITY_REFERENCE=<old checkout> OBERTH_PARITY_REWRITE=<REWRITE.md>
 python3 -m unittest discover -s hack/plans -p test_regeneration.py`.
