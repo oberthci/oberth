@@ -14,14 +14,17 @@ const receiveRefusalBurst = 8
 const receiveRefusalWindow = time.Minute
 const maxReceiveRefusalScopes = 1024
 const maxReceiveRefusalBytes = 384 << 10
+const maxReceiveRefusalUpdates = 16
 const receiveRefusalFlushTimeout = 5 * time.Second
 
 // ReceiveRefusal contains public selectors only; no error text or workflow bytes.
 type ReceiveRefusal struct {
-	Code    string              `json:"code"`
-	File    string              `json:"file,omitempty"`
-	Step    string              `json:"step,omitempty"`
-	Updates []ReceiveRefusalRef `json:"updates,omitempty"`
+	Code             string              `json:"code"`
+	File             string              `json:"file,omitempty"`
+	Step             string              `json:"step,omitempty"`
+	Updates          []ReceiveRefusalRef `json:"updates,omitempty"`
+	OmittedUpdates   int                 `json:"omitted_updates,omitempty"`
+	SelectorsOmitted bool                `json:"selectors_omitted,omitempty"`
 }
 
 type ReceiveRefusalRef struct {
@@ -46,10 +49,10 @@ type receiveRefusals struct {
 // per authenticated actor/repository. Pending counts stay in bounded memory;
 // audit reads and subsequent refusals flush them without a background worker.
 func (s *Store) RecordReceiveRefusal(ctx context.Context, actor, repository string, v ReceiveRefusal) error {
-	raw, _ := json.Marshal(v)
-	if actor == "" || repository == "" || len(raw) > maxReceiveRefusalBytes || len(v.Code) > 40 || v.Code == "" {
+	if actor == "" || repository == "" || len(v.Code) > 40 || v.Code == "" {
 		return refuse(invalid, nil)
 	}
+	raw := receiveRefusalDetails(v)
 	s.refusals.Lock()
 	defer s.refusals.Unlock()
 	key := refusalScope{actor, repository}
@@ -66,6 +69,21 @@ func (s *Store) RecordReceiveRefusal(ctx context.Context, actor, repository stri
 		w.recorded++
 	}
 	return err
+}
+
+func receiveRefusalDetails(v ReceiveRefusal) []byte {
+	v.OmittedUpdates, v.SelectorsOmitted = 0, false
+	if len(v.Updates) > maxReceiveRefusalUpdates {
+		v.OmittedUpdates = len(v.Updates) - maxReceiveRefusalUpdates
+		v.Updates = v.Updates[:maxReceiveRefusalUpdates]
+	}
+	raw, _ := json.Marshal(v)
+	if len(raw) > maxReceiveRefusalBytes {
+		// Keep the denial even if selectors exceed their admitted domain.
+		v = ReceiveRefusal{Code: v.Code, OmittedUpdates: v.OmittedUpdates + len(v.Updates), SelectorsOmitted: true}
+		raw, _ = json.Marshal(v)
+	}
+	return raw
 }
 
 func (s *Store) receiveRefusalWindow(ctx context.Context, key refusalScope) (*refusalWindow, error) {

@@ -155,7 +155,7 @@ func TestReceiveRefusalScopeAndPayloadBounds(t *testing.T) {
 		s.refusals.windows[refusalScope{string(raw), "origin/team/widget"}] = &refusalWindow{start: now}
 	}
 	requireCode(t, s.RecordReceiveRefusal(t.Context(), "overflow", "origin/team/widget", ReceiveRefusal{Code: "grant"}), publicerr.Unavailable)
-	for _, v := range []ReceiveRefusal{{}, {Code: string(make([]byte, 41))}, {Code: "grant", File: string(make([]byte, 384<<10))}} {
+	for _, v := range []ReceiveRefusal{{}, {Code: string(make([]byte, 41))}} {
 		requireCode(t, s.RecordReceiveRefusal(t.Context(), "agent", "origin/team/widget", v), publicerr.InvalidInput)
 	}
 }
