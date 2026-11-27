@@ -16,6 +16,9 @@ func TestTimeoutReauthorizesAfterFinalSnapshot(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				f := setup(t)
 				f.seed("running")
+				a := f.store.Actors[caller().Fingerprint]
+				a.Scope = []string{"origin", "private"}
+				f.store.Actors[a.Fingerprint] = a
 				reads := 0
 				f.c.Runs = stateReadHook{RunStore: f.store, read: func(ctx context.Context, id string) (stateport.RunState, error) {
 					value, err := f.store.RunState(ctx, id)
