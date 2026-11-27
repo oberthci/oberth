@@ -87,14 +87,13 @@ When the review shows a schema change, take a storage-level copy of the data vol
 oberth upgrade --dry-run
 oberth upgrade --yes
 ```
-Upgrades require signed releases; local charts use `oberth install --chart <directory>`. After
-upgrading, replace the CLI with that release's verified client and repoint wrappers. Add
-`--version <version>` to both commands to select it; `--service-port 443` selects HTTPS port 443
-(default 8443). Offline `--release-dir <directory>` reads signed files or a parent of version
-directories; version directories override flat files and invalid directories refuse. Same-schema
-repair needs both releases; select their parent. Review preserves settings and shows changed
-defaults, schema, revision and images (JSON). Install/upgrade replace direct Helm edits;
-rollback/repair refuse them and name install or upgrade.
+Upgrades require signed releases; local charts use `oberth install --chart <directory>`.
+After upgrade, replace the CLI with that release's verified client and repoint wrappers.
+`--version <version>` selects a release; `--service-port 443` sets in-cluster HTTPS (default 8443).
+Offline `--release-dir <directory>` reads signed files or version directories, which override flat
+files; invalid directories refuse. Same-schema repair needs both releases under that parent.
+Review preserves settings and names changed defaults, schema, revision, images (JSON) and direct
+Helm edits. Install/upgrade replace those edits; rollback/repair refuse and name install/upgrade.
 Review failed revisions. Finish unlabelled Workflows before upgrading (not adopted). Runs survive
 restarts; submission during a controller restart may fail at step start: `oberth run rerun <id>`.
 Database backups stay in the profile by version/UTC time; copy off-machine. If the store restarts
@@ -109,14 +108,12 @@ recovery is manual: keep the encrypted pre-upgrade archive, `backup.agekey` and 
 Before downgrading, cancel non-terminal resumed runs or wait for them to finish.
 An orphaned resumed Workflow needs its `oberth.ci/run-record` finalizer removed by hand.
 ## Roll back
-Review the saved record with `oberth rollback --dry-run`, then run `oberth rollback --yes` with its
-original profile. A different schema, cluster UID or unexpected revision refuses before writes.
-Repeating resumes rollback; without the record, inspect the deployed revision. Offline, use
-`--release-dir <directory>` with signed source-version files; another version refuses. Before
-rolling v0.30.19 back to v0.30.18, pause affected schedules, remove their YAML declarations and
-verify their CronWorkflows are gone. Finish or cancel every child and verify collection before
-downgrading. Recreate schedules with the restored release before resuming; startup sync can fail.
-Keep a verified v0.30.19+ recovery CLI for v0.30.19 backups and preserve the pre-upgrade backup.
+Review with `oberth rollback --dry-run`, then `oberth rollback --yes` using the original profile.
+Schema, cluster UID or unexpected revision changes refuse before writes. Reruns resume rollback.
+Without the record, inspect the deployed revision. Offline `--release-dir <directory>` needs signed
+source-version files. Before rolling v0.30.19 back to v0.30.18, pause schedules and remove their
+YAML declarations; verify CronWorkflows are gone; finish/cancel every child and check collection.
+Recreate schedules with the restored release before resuming; startup sync can fail.
 ## Back up
 `oberth backup --out <new-archive-file>` encrypts the database, bundled store data and five
 installation Secrets: CA key, forge deploy key, SSH host key, store TLS and administrator public
@@ -124,17 +121,16 @@ login keys. The writer checks members while encrypting with the public age recip
 `oberth-backup-signing` holds that recipient (ConfigMap mismatches refuse) and signs
 `<archive>.manifest.json` (name, hashes, digest); the profile keeps `backup_public_key`. Copy both
 off-machine unrenamed; save SHA256 separately. Use local hard links; never overwrite. Limit: 1 GiB;
-`--dry-run` previews. `--database-only` and pre-upgrade copies exclude store data and installation
-Secrets. `oberth restore --from <archive> --identity-file <private-age-file> --dry-run` reviews
-offline; `oberth backup verify` uses the same inputs. Both need `--backup-profile <name>` or saved
-`--sha256 <saved-digest>`. Restore with the same or a newer release:
-v0.30.17 cannot read archives with forge host pins; v0.30.18 cannot verify v0.30.19 signed manifests.
-Keep a verified v0.30.19+ recovery CLI or an independently saved SHA256 digest. Keep age,
-administrator and unseal files apart: archives lack age identity and unseal material. Database-only
-backups lack store values; keep originals to put again. Separate `recovery` can unseal data.
+`--dry-run` previews; `--database-only` and pre-upgrade copies omit store data/installation Secrets.
+`oberth restore --from <archive> --identity-file <private-age-file> --dry-run` reviews offline.
+`oberth backup verify` uses these inputs: `--backup-profile <name>` or `--sha256 <saved-digest>`.
+Restore with the same or a newer release. v0.30.17 cannot read archives with forge host pins;
+v0.30.18 cannot verify v0.30.19 signed manifests. Keep a verified v0.30.19+ CLI or saved SHA256.
+Keep age, administrator and unseal files apart: archives lack age identity and unseal material.
+Database-only backups lack store values; keep originals to put again. `recovery` can unseal data.
 `oberth access list --repo <repo> --kind store_path --json` lists paths/steps, never values. JSON
-warnings exit 0: optional `warning` has `code`, `reason`, `remedy`, optional `id`, `context`, `detail`;
-also on standard error; clean and dry-run results omit `warning`.
+warnings exit 0: optional `warning` has code/reason/remedy, optional id/context/detail; also stderr.
+Clean and dry-run results omit `warning`.
 `oberth backup --directory <dir> --keep 7` prunes verified signed full copies after success
 (1–1000), never unsigned copies, other names or links; `--database-only` refuses `--keep`. Signed
 `installation_id` is the backup signing public key. Foreign archives refuse without
