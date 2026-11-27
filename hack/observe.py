@@ -4,13 +4,15 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import os
 import re
+import selectors
 import subprocess
 import sys
-import tempfile
 import time
 
 MAX_FRAME = 32 * 1024 * 1024
+READ_TIMEOUT = 15
 
 
 def items(value):
@@ -167,32 +169,82 @@ def frames(source):
 
 def read_native(args):
     # Fixed GET operations only. Never echo command errors or unfiltered objects.
-    with tempfile.TemporaryFile() as output:
-        result = subprocess.run(["kubectl", "--request-timeout=10s", *args], stdout=output,
-                                stderr=subprocess.DEVNULL, check=False, timeout=15)
-        if result.returncode or output.tell() > MAX_FRAME:
-            raise ValueError("native read unavailable")
-        output.seek(0)
-        return json.load(output)
+    with subprocess.Popen(["kubectl", "--request-timeout=10s", *args], stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL) as child, selectors.DefaultSelector() as ready:
+        deadline, output = time.monotonic() + READ_TIMEOUT, bytearray()
+        ready.register(child.stdout, selectors.EVENT_READ)
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not ready.select(remaining):
+                    raise ValueError("native read timed out")
+                chunk = os.read(child.stdout.fileno(), min(65536, MAX_FRAME + 1 - len(output)))
+                output.extend(chunk)
+                if len(output) > MAX_FRAME:
+                    raise ValueError("native read exceeds byte limit")
+                if not chunk:
+                    break
+            if child.wait(timeout=max(0, deadline - time.monotonic())):
+                raise ValueError("native read unavailable")
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait()
+        return json.loads(output)
+
+
+def encoded_frame(frame):
+    """Bound UTF-8 bytes including the newline consumed by frames()."""
+    output = bytearray()
+    for part in json.JSONEncoder(separators=(",", ":")).iterencode(frame):
+        chunk = part.encode()
+        if len(output) + len(chunk) + 1 > MAX_FRAME:
+            raise ValueError("observation exceeds byte limit")
+        output.extend(chunk)
+    return output.decode()
+
+
+def emit(frame):
+    try:
+        line = encoded_frame(observation(frame))
+    except ValueError:
+        line = encoded_frame({"observed_at": frame.get("observed_at"), "pods": [], "workflows": [],
+                              "missing": ["projected_frame_oversize"], "sizing_eligible": False})
+    print(line, flush=True)
+
+
+def collect_frame(args):
+    frame = {"observed_at": dt.datetime.now(dt.timezone.utc).isoformat(), "missing": []}
+    budget = MAX_FRAME
+    queries = [(name, resource + ":" + ns, ["get", resource, "--namespace", ns, "-o", "json"])
+               for name, resource in (("pods", "pods"), ("workflows", "workflows.argoproj.io"),
+                   ("events", "events"), ("pvcs", "persistentvolumeclaims"),
+                   ("owners", "jobs.batch"), ("owners", "virtualmachineinstances.kubevirt.io"))
+               for ns in args.namespace]
+    queries.extend((("node", "node", ["get", "node", args.node, "-o", "json"]),
+                    ("stats", "stats", ["get", "--raw", "/api/v1/nodes/" + args.node + "/proxy/stats/summary"])))
+    for name, missing, query in queries:
+        try:
+            value = read_native(query)
+        except (ValueError, subprocess.SubprocessError):
+            frame["missing"].append(missing)
+            continue
+        try:
+            budget -= len(encoded_frame(value).encode()) + 1
+            if budget < 0:
+                raise ValueError("combined native frame too large")
+        except ValueError:
+            return {"observed_at": frame["observed_at"], "missing": ["native_frame_oversize"]}
+        if name in ("node", "stats"):
+            frame[name] = value
+        else:
+            frame.setdefault(name, {"items": []})["items"].extend(items(value))
+    return frame
 
 
 def collect(args):
     for index in range(args.samples):
-        frame = {"observed_at": dt.datetime.now(dt.timezone.utc).isoformat(), "missing": []}
-        for name, resource in (("pods", "pods"), ("workflows", "workflows.argoproj.io"), ("events", "events"), ("pvcs", "persistentvolumeclaims"), ("owners", "jobs.batch"), ("owners", "virtualmachineinstances.kubevirt.io")):
-            frame.setdefault(name, {"items": []})
-            for namespace in args.namespace:
-                try:
-                    frame[name]["items"].extend(items(read_native(["get", resource, "--namespace", namespace, "-o", "json"])))
-                except (ValueError, subprocess.SubprocessError):
-                    frame["missing"].append(resource + ":" + namespace)
-        for name, query in (("node", ["get", "node", args.node, "-o", "json"]),
-                            ("stats", ["get", "--raw", "/api/v1/nodes/" + args.node + "/proxy/stats/summary"])):
-            try:
-                frame[name] = read_native(query)
-            except (ValueError, subprocess.SubprocessError):
-                frame["missing"].append(name)
-        print(json.dumps(observation(frame), separators=(",", ":")), flush=True)
+        emit(collect_frame(args))
         if index + 1 < args.samples:
             time.sleep(args.interval)
 
@@ -212,7 +264,7 @@ def main():
         collect(args)
     elif args.mode == "project":
         for frame in frames(sys.stdin.buffer):
-            print(json.dumps(observation(frame), separators=(",", ":")), flush=True)
+            emit(frame)
     else:
         print(json.dumps(summarize(frames(sys.stdin.buffer)), sort_keys=True))
 

@@ -1,9 +1,12 @@
 import copy
 import importlib.util
+import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -26,6 +29,73 @@ def fixture():
 
 
 class ObservationTests(unittest.TestCase):
+    def native_child(self, program, timeout=2):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        executable = Path(directory.name) / "kubectl"
+        executable.write_text("#!" + sys.executable + "\n" + program)
+        executable.chmod(0o700)
+        children = []
+        popen = subprocess.Popen
+        def spawn(*args, **kwargs):
+            child = popen(*args, **kwargs)
+            children.append(child)
+            return child
+        self.enterContext(patch.dict(os.environ, {"PATH": directory.name}))
+        self.enterContext(patch.object(observe.subprocess, "Popen", spawn))
+        self.enterContext(patch.object(observe, "READ_TIMEOUT", timeout))
+        return Path(directory.name), children
+
+    def test_native_read_stops_oversize_producer_and_reaps_it(self):
+        directory, children = self.native_child(
+            "import os, pathlib, time\n"
+            "progress = pathlib.Path(__file__).with_name('progress').open('ab', buffering=0)\n"
+            "for n in range(512):\n"
+            "    os.write(1, b'x' * 4096)\n"
+            "    progress.write(b'x')\n"
+            "time.sleep(1)\n")
+        with patch.object(observe, "MAX_FRAME", 65536):
+            with self.assertRaises(ValueError):
+                observe.read_native(["get", "pods"])
+        self.assertLessEqual((directory / "progress").stat().st_size * 4096, 65536 + 65536)
+        self.assertIsNotNone(children[0].returncode)
+        with self.assertRaises(ChildProcessError):
+            os.waitpid(children[0].pid, os.WNOHANG)
+
+    def test_native_timeout_kills_and_reaps_silent_or_closed_producer(self):
+        for close in (False, True):
+            with self.subTest(close=close):
+                _, children = self.native_child("import os, time\n" +
+                    ("os.close(1)\n" if close else "") + "time.sleep(60)\n", timeout=0.1)
+                with self.assertRaises((ValueError, subprocess.TimeoutExpired)):
+                    observe.read_native(["get", "pods"])
+                self.assertIsNotNone(children[0].returncode)
+                with self.assertRaises(ChildProcessError):
+                    os.waitpid(children[0].pid, os.WNOHANG)
+
+    def test_combined_native_budget_retains_readable_omission(self):
+        value = {"items": [{"metadata": {"name": "x" * 500}}]}
+        args = type("Args", (), {"samples": 1, "namespace": ["runs"], "node": "node"})()
+        with patch.object(observe, "MAX_FRAME", 1024), patch.object(observe, "read_native", return_value=value), \
+                patch("sys.stdout", new_callable=io.StringIO) as output:
+            self.assertLess(len(observe.encoded_frame(value).encode()) + 1, observe.MAX_FRAME)
+            observe.collect(args)
+            result = list(observe.frames(io.BytesIO(output.getvalue().encode())))
+        self.assertEqual(len(result), 1)
+        self.assertIn("native_frame_oversize", observe.summarize(result)["missing"])
+        self.assertEqual(result[0]["pods"], [])
+
+    def test_projection_expansion_retains_readable_omission(self):
+        frame = fixture()
+        size = len(json.dumps(frame, separators=(",", ":")).encode()) + 1
+        self.assertGreater(len(json.dumps(observe.observation(frame)).encode()), size)
+        with patch.object(observe, "MAX_FRAME", size), patch("sys.stdout", new_callable=io.StringIO) as output:
+            observe.emit(frame)
+            result = list(observe.frames(io.BytesIO(output.getvalue().encode())))
+        self.assertEqual(result[0]["missing"], ["projected_frame_oversize"])
+        self.assertEqual(observe.summarize(result)["missing"]["projected_frame_oversize"], 1)
+        self.assertEqual(result[0]["pods"], [])
+
     def test_exact_uid_join_retains_defaulted_resources_and_helpers(self):
         frame = fixture()
         before = copy.deepcopy(frame)

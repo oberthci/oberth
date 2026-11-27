@@ -187,12 +187,12 @@ emits sanitized JSONL from ordinary traffic using GET only. Run with `umask 077`
 and redirect into a private local file. Include the control namespace and each
 child Job/VM namespace with another `--namespace`; use the read-only operator context.
 It never reads credential files itself or creates runs. It invokes kubectl with
-fixed arguments and bounded requests. No observation runs on the server/push path.
+fixed GETs: 10s request, 15s read, 32 MiB/read and combined frame; children are reaped.
 `project` consumes raw JSONL frames on stdin with `observed_at`, Kubernetes List
 objects `pods`, `workflows`, optional `owners` (Jobs/VMIs), `events`, a `node`
-object and kubelet `stats/summary` as `stats`. `summarize` consumes projected JSONL.
-Raw specs, commands, environment and event messages are never emitted. UID joins
-retain final Pod requests/limits for main/init/restartable helpers and overhead;
+object and kubelet `stats/summary` as `stats`. `summarize` reads projected JSONL, ≤32 MiB/line.
+Oversize frames emit small omission records. Output ≤samples × 32 MiB (8640 max: 270 GiB).
+Raw commands/env/messages stay private; UID joins retain final Pod/helper requests/limits;
 unknown children stay in the coverage denominator. Resources have a stable digest.
 Missing reads, templates, requests, usage, memory peaks and throttling remain
 explicit. Summary memory is sampled working set, never a peak or hard-limit proof.
