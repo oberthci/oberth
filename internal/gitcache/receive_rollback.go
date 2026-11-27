@@ -14,6 +14,7 @@ func (c *Cache) completeReceive(ctx context.Context, store string, files *receiv
 	if err != nil {
 		return err
 	}
+	result.event = record.Event
 	accepted := result.accepts(record)
 	if accepted && !result.failed() {
 		result.accepted = true

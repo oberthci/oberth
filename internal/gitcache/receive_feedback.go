@@ -7,6 +7,7 @@ import (
 )
 
 type receiveCompletion struct {
+	event    ReceiveEvent
 	gate     *receiveGate
 	owner    string
 	err      error

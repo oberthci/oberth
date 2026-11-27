@@ -80,20 +80,20 @@ func (c *Cache) Receive(ctx context.Context, r ReceiveRequest) (result error) {
 		return refuse("receive identity")
 	}
 	if err = c.checkHook(); err != nil {
-		return err
+		return c.refuseReceive(ctx, r, err)
 	}
 	if err = validateAdmission(r.Admission); err != nil {
-		return err
+		return c.refuseReceive(ctx, r, err)
 	}
 	if err = acquireReceive(ctx, c.repositoryGate(p+"/receive"), r.Diagnostics); err != nil {
-		return err
+		return c.refuseReceive(ctx, r, err)
 	}
 	defer func() { <-c.repositoryGate(p + "/receive") }()
 	if err = c.beforeReceive(ctx, p, r); err != nil {
-		return c.reportReceiveFailure(r.Diagnostics, err)
+		return c.refuseReceive(ctx, r, c.reportReceiveFailure(r.Diagnostics, err))
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return c.refuseReceive(ctx, r, err)
 	}
 	return c.receiveTransport(ctx, p, r)
 }
@@ -160,7 +160,7 @@ func (c *Cache) deliverPush(ctx context.Context, p string, r ReceiveRequest, del
 func (c *Cache) receiveTransport(ctx context.Context, p string, r ReceiveRequest) (err error) {
 	owner, err := c.reserveReceive(ctx, p, r)
 	if err != nil {
-		return err
+		return c.refuseReceive(ctx, r, err)
 	}
 	defer c.setActive(owner, false)
 	ctx, cancelNative := context.WithCancelCause(ctx)
@@ -200,6 +200,12 @@ func (c *Cache) receiveTransport(ctx context.Context, p string, r ReceiveRequest
 // while an original transport panic is unwinding.
 func (c *Cache) finishTransport(ctx context.Context, p string, r ReceiveRequest, result receiveCompletion) error {
 	passed, err := c.receiveFeedback(result, r)
+	if !result.accepted && err != nil {
+		if result.event.Actor == "" {
+			result.event = ReceiveEvent{Actor: r.Actor, Repository: r.Repository}
+		}
+		err = errors.Join(err, c.auditRefusal(ctx, result.event, err))
+	}
 	delivery := receiveDelivery{passed: passed}
 	defer c.abortUndelivered(&delivery)
 	var cleanup *receiveCleanupPendingError

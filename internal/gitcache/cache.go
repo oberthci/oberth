@@ -34,6 +34,9 @@ type Config struct {
 	// PreReceive admits run-requesting pushes before refs move. It must honor
 	// its request context. C3 supplies the admission duration and public errors.
 	PreReceive func(context.Context, ReceiveEvent, *ReceiveSource) error
+	// Refused records one completed refusal, after joining the receive gate.
+	// It receives authenticated attribution and any updates decoded by the hook.
+	Refused func(context.Context, ReceiveEvent, error) error
 	// AdmissionTimeout bounds admission and accepted receive delivery.
 	// Composition supplies its admission duration; zero uses thirty seconds.
 	AdmissionTimeout time.Duration

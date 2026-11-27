@@ -54,6 +54,9 @@ func (s *Store) AdministrativeAudit(ctx context.Context, scope []string, f state
 	if err != nil {
 		return nil, err
 	}
+	if err := s.flushReceiveRefusals(ctx, scope, false); err != nil {
+		return nil, err
+	}
 	tx, err := s.auditReaders.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, databaseError(err)

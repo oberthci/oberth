@@ -68,6 +68,10 @@ func receiveHook(ctx context.Context, input io.Reader, p string, record *Reserva
 	if err = validateRecordUpdates(updates); err != nil {
 		return err
 	}
+	if len(updates) > MaxUpdates {
+		return refuse("receive update count")
+	}
+	record.Event.Updates = updates
 	for _, u := range updates {
 		if u.Ref == record.Event.Admission.DefaultBranch && u.NewSHA != "" && !record.AllowDefault {
 			return &RefusalError{reason: reasonDefault, remedy: remedyDefault, Field: record.Event.Admission.DefaultBranch}
@@ -75,10 +79,6 @@ func receiveHook(ctx context.Context, input io.Reader, p string, record *Reserva
 		if err = validateUpdate(ctx, p, record, u); err != nil {
 			return err
 		}
-		if len(record.Event.Updates) >= MaxUpdates {
-			return refuse("receive update count")
-		}
-		record.Event.Updates = append(record.Event.Updates, u)
 	}
 	return finishReceiveHook(ctx, p, record)
 }

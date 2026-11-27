@@ -90,7 +90,9 @@ func openStorage(ctx context.Context, c *composition) ([]Part, error) {
 		return nil, err
 	}
 	c.store = db
-	parts := []Part{{Name: "store", Shutdown: stopResources, Close: func(context.Context) error { return db.Close() }}}
+	parts := []Part{{Name: "store", Shutdown: stopResources, Close: func(ctx context.Context) error {
+		return errors.Join(db.FlushReceiveRefusals(ctx), db.Close())
+	}}}
 	c.backup, err = store.NewBackup(c.config.DatabaseFile)
 	if err != nil {
 		return parts, err
