@@ -14,6 +14,7 @@ import (
 // RunRecord is one run as run_get and run_list return it: the run projection
 // and the recorded cause of the run, both visible only inside the caller's scope.
 type RunRecord struct {
+	LogUsage *logcontract.Usage `json:"log_usage,omitempty"`
 	stepmodel.RunSummary
 	model.RunCause
 	// SelectedFile is the explicit workflow choice, including refused admissions.
@@ -39,14 +40,15 @@ type WaitResult struct {
 	TimedOut bool                  `json:"timed_out"`
 }
 type LogResult struct {
-	Containers    []Container      `json:"containers,omitzero"`
-	ID            string           `json:"id,omitempty"`
-	NodeID        string           `json:"node_id,omitempty"`
-	Container     string           `json:"container,omitempty"`
-	Content       string           `json:"content"`
-	Meta          logcontract.Meta `json:"meta"`
-	DisplayReason string           `json:"display_reason,omitempty"`
-	Detail        string           `json:"detail,omitempty"`
+	Usage         *logcontract.Usage `json:"usage,omitempty"`
+	Containers    []Container        `json:"containers,omitzero"`
+	ID            string             `json:"id,omitempty"`
+	NodeID        string             `json:"node_id,omitempty"`
+	Container     string             `json:"container,omitempty"`
+	Content       string             `json:"content"`
+	Meta          logcontract.Meta   `json:"meta"`
+	DisplayReason string             `json:"display_reason,omitempty"`
+	Detail        string             `json:"detail,omitempty"`
 }
 type Container struct {
 	NodeID    string `json:"node_id"`
@@ -223,14 +225,15 @@ type EffectiveSetting struct {
 }
 
 type SystemStatus struct {
-	Settings      *[]EffectiveSetting `json:"settings,omitempty"`
-	SchemaVersion int                 `json:"schema_version,omitempty"`
-	Protocol      stateport.Protocol  `json:"protocol,omitzero"`
-	Parts         []PartStatus        `json:"parts"`
-	Ready         bool                `json:"ready"`
-	Version       string              `json:"version"`
-	DisplayReason string              `json:"display_reason"`
-	Detail        string              `json:"detail,omitempty"`
+	LogStorage    *logcontract.StoragePreview `json:"log_storage,omitempty"`
+	Settings      *[]EffectiveSetting         `json:"settings,omitempty"`
+	SchemaVersion int                         `json:"schema_version,omitempty"`
+	Protocol      stateport.Protocol          `json:"protocol,omitzero"`
+	Parts         []PartStatus                `json:"parts"`
+	Ready         bool                        `json:"ready"`
+	Version       string                      `json:"version"`
+	DisplayReason string                      `json:"display_reason"`
+	Detail        string                      `json:"detail,omitempty"`
 }
 type EventResult struct {
 	model.EventPage

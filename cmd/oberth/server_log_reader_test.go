@@ -54,7 +54,7 @@ func realServerLogReaderFor(t *testing.T, document string, ids ...string) (serve
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = logs.Close() })
-	return serverLogs{owner: &serverOwners{c: &composition{store: db, logs: logs}}}, accepted.Runs[0]
+	return serverLogs{owner: &serverOwners{c: &composition{store: db, logs: logs, clock: serverClock{Now: fake.NewClock().Now}}}}, accepted.Runs[0]
 }
 
 func saveReaderStep(t *testing.T, reader serverLogs, run stateport.Run, step stepmodel.RunStep) {

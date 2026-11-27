@@ -63,7 +63,13 @@ func (s *Service) runView(ctx context.Context, r stateport.Run, q runQuery) (api
 	if end < len(steps) {
 		r.NextStepOffset = &end
 	}
-	return record(r), nil
+	out := record(r)
+	usage, err := s.c.Logs.Usage(ctx, r)
+	if err != nil {
+		return out, err
+	}
+	out.LogUsage = &usage
+	return out, nil
 }
 
 // record shows a resolved run with its recorded cause. Callers pass only runs

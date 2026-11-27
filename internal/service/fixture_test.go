@@ -78,7 +78,9 @@ func setup(t *testing.T) *fixture {
 	f.c.Authority = ports.AuthorityFuncs{CurrentFunc: f.store.Current, KeyPolicyFunc: f.store.KeyPolicy}
 	f.c.Git = ports.GitFuncs{ResolveRefFunc: f.git.ResolveRef, ListRefsFunc: f.git.ListRefs, ReleaseTagFunc: f.git.ReleaseTag}
 	f.c.Exec = ports.ExecFuncs{CancelFunc: f.exec.Cancel, InspectFunc: f.exec.Inspect, LocksFunc: f.exec.Locks}
-	f.c.Logs = ports.LogsFuncs{ReadFunc: f.logs.Read, PurgeFunc: f.logs.Purge}
+	f.c.Logs = ports.LogsFuncs{ReadFunc: f.logs.Read, PurgeFunc: f.logs.Purge, UsageFunc: func(_ context.Context, r stateport.Run) (logcontract.Usage, error) {
+		return logcontract.Usage{PhysicalRunID: r.ID}, nil
+	}}
 	f.setupMoving(t)
 	f.restart(t)
 	return f

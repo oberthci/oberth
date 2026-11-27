@@ -5,6 +5,7 @@ import (
 	"github.com/oberthci/oberth/internal/actor"
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/gitport"
+	"github.com/oberthci/oberth/internal/logcontract"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/stateport"
@@ -71,8 +72,13 @@ func (p ExecFuncs) Inspect(ctx context.Context, q service.CheckRequest) (apicont
 func (p ExecFuncs) Locks(ctx context.Context) ([]service.Lock, error) { return p.LocksFunc(ctx) }
 
 type LogsFuncs struct {
+	UsageFunc func(context.Context, stateport.Run) (logcontract.Usage, error)
 	ReadFunc  func(context.Context, stateport.Run, apicontract.RunLogsArgs) (apicontract.LogResult, error)
 	PurgeFunc func(context.Context, stateport.Run) error
+}
+
+func (p LogsFuncs) Usage(ctx context.Context, r stateport.Run) (logcontract.Usage, error) {
+	return p.UsageFunc(ctx, r)
 }
 
 func (p LogsFuncs) Read(ctx context.Context, r stateport.Run, q apicontract.RunLogsArgs) (apicontract.LogResult, error) {

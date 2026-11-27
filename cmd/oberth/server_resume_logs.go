@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/nativebinding"
+	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/stateport"
 	"slices"
 )
@@ -24,6 +25,9 @@ func (l serverLogs) carriedLogs(ctx context.Context, r stateport.Run, q apicontr
 	old, err := l.owner.c.store.Run(ctx, r.Origin.ResumedFrom)
 	if err != nil {
 		return r, false, err
+	}
+	if old.Repo != r.Repo {
+		return r, false, publicerr.New(publicerr.NotFound, "Carried logs are unavailable.", "Inspect the run's recorded resume lineage.", nil)
 	}
 	return old, true, nil
 }

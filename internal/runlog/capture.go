@@ -44,7 +44,7 @@ func (r *Reservation) Capture(ctx context.Context, input CaptureRequest) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = spool.Close() }()
+	defer r.store.closeSpool(spool)
 	result := captureResult{detail: gap.Detail}
 	if gap.Detail != "" || gap.Reason != "" {
 		result.reason = incompleteReason
@@ -183,10 +183,13 @@ func (r *Reservation) stage(ctx context.Context, retry func(context.Context) err
 	if err != nil {
 		return nil, storage(cannotStageContainerOutputReason, err)
 	}
+	state := &spoolState{}
+	r.store.spools.Store(spool, state)
 	if err = retryCapture(ctx, retry, func() error { return r.store.root.Remove(name) }); err != nil {
-		_ = spool.Close()
+		r.store.closeSpool(spool)
 		return nil, storage(cannotUnlinkCaptureSpoolReason, err)
 	}
+	state.unlinked.Store(true)
 	return spool, nil
 }
 func retryCapture(ctx context.Context, retry func(context.Context) error, operation func() error) error {

@@ -32,10 +32,25 @@ func TestAdminStatusRegistryDeclaresExactlySchemaAndProtocolMetadata(t *testing.
 			continue
 		}
 		properties := tool.OutputSchema["properties"].(apicontract.Schema)
-		if len(properties) != 8 || properties["schema_version"].(apicontract.Schema)["type"] != "integer" || properties["protocol"].(apicontract.Schema)["type"] != "object" || properties["parts"].(apicontract.Schema)["type"] != "array" {
+		if len(properties) != 9 || properties["schema_version"].(apicontract.Schema)["type"] != "integer" || properties["protocol"].(apicontract.Schema)["type"] != "object" || properties["parts"].(apicontract.Schema)["type"] != "array" {
 			t.Fatal("status metadata contract differs")
 		}
 		assertOptionalSettingsSchema(t, properties["settings"].(apicontract.Schema))
+		assertLogStorageSchema(t, properties["log_storage"].(apicontract.Schema))
+	}
+}
+
+func assertLogStorageSchema(t *testing.T, schema apicontract.Schema) {
+	t.Helper()
+	variants := schema["anyOf"].([]apicontract.Schema)
+	if len(variants) != 2 || variants[0]["type"] != "object" || variants[1]["type"] != "null" {
+		t.Fatal("optional log storage contract differs", variants)
+	}
+	properties := variants[0]["properties"].(apicontract.Schema)
+	for _, name := range []string{"body", "index", "staging", "unknown", "open_spools"} {
+		if properties[name].(apicontract.Schema)["type"] != "object" {
+			t.Fatal("storage byte category missing", name)
+		}
 	}
 }
 

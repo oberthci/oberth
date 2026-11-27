@@ -24,6 +24,18 @@ func (l serverLogs) Read(ctx context.Context, r stateport.Run, q apicontract.Run
 		out.ID = r.ID
 		return out, err
 	}
+	out, err := l.read(ctx, r, q)
+	usage, usageErr := l.Usage(ctx, r)
+	if usageErr == nil {
+		out.Usage = &usage
+	}
+	if err == nil {
+		err = usageErr
+	}
+	return out, err
+}
+
+func (l serverLogs) read(ctx context.Context, r stateport.Run, q apicontract.RunLogsArgs) (apicontract.LogResult, error) {
 	request := logRequest(q)
 	if q.Containers {
 		return l.listContainers(ctx, r.ID)

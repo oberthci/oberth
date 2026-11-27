@@ -43,7 +43,8 @@ func (s *Service) prepareLogs(ctx context.Context, c apicontract.Caller, input l
 			return apicontract.LogResult{}, err
 		}
 		if purge.Completed {
-			return apicontract.LogResult{ID: r.ID, DisplayReason: reasonPurged}, nil
+			usage, err := s.c.Logs.Usage(ctx, r)
+			return apicontract.LogResult{ID: r.ID, DisplayReason: reasonPurged, Usage: &usage}, err
 		}
 		out, err := s.c.Logs.Read(ctx, r, q)
 		out.ID = r.ID

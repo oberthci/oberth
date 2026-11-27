@@ -164,6 +164,13 @@ func (a serverAdministration) Status(ctx context.Context, action string) (apicon
 			result.DisplayReason = "runs are active"
 		}
 	}
+	if action == "admin_version" {
+		preview, err := a.owner.c.logs.Inventory(ctx, a.owner.c.clock.Now)
+		if err != nil {
+			return result, err
+		}
+		result.LogStorage = &preview
+	}
 	return result, nil
 }
 func (a serverAdministration) ReceiveOutbox(ctx context.Context, action stateport.Action, scope []string, q apicontract.ReceiveOutboxArgs) (apicontract.OutboxResult, error) {

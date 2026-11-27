@@ -5,6 +5,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/gitport"
+	"github.com/oberthci/oberth/internal/logcontract"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/stateport"
 )
@@ -59,6 +60,10 @@ func (f *testLogs) Read(ctx context.Context, r stateport.Run, q apicontract.RunL
 	return f.ReadFunc(ctx, r, q)
 }
 func (f *testLogs) Purge(ctx context.Context, r stateport.Run) error { return f.PurgeFunc(ctx, r) }
+
+func (*testLogs) Usage(_ context.Context, r stateport.Run) (logcontract.Usage, error) {
+	return logcontract.Usage{PhysicalRunID: r.ID}, nil
+}
 
 type testSource struct {
 	File    func(context.Context, string, string) (gitport.Ref, gitport.File, error)

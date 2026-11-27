@@ -174,3 +174,5 @@ of live `Follow` and the run or step execution status.
 Default own-output reads trust the native projector's authored-container role.
 Container-set membership comes from the native template, including a member named
 `main`; sidecars and executor containers do not acquire that role from their names.
+
+Read-only usage separates body/index logical and allocated bytes, capture loss from window truncation, physical resume sources, current protection and pending/completed purge receipts. Legacy purge time and archive eligibility remain unknown; preview grants no purge permission. Run get/log views carry only the authorized run's usage. Admin version adds a paged, non-atomic installation inventory with staging, unknown/nonregular entries, root allocation, owner-tracked unlinked spools/reservations and actual filesystem free bytes/inodes. Inventory takes no append gate; unknown accounting withholds budget headroom. The operator policy is 6 GiB logs, review at 4 GiB toward 3 GiB; projected drain reserve and reclaimable bytes stay unknown until their owners supply them. No expiry or deletion follows a read.

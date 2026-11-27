@@ -17,7 +17,7 @@ async function loadLog(view, path, args, regions, restart) {
     if (signal.aborted) return;
     if (regions.output.textContent !== (result.content || "")) resetLog(regions, result.content || "");
     const open = regions.status.querySelector("details")?.open;
-    regions.status.replaceChildren(...[...(result.containers || []).map(item => h("p", {}, "Container: " + item.container)), h("p", {}, result.display_reason || result.meta.reason || (result.content ? "" : copy.emptyLog[0])), detail(result.detail || result.meta.detail, open)].filter(Boolean));
+    regions.status.replaceChildren(...[...(result.containers || []).map(item => h("p", {}, "Container: " + item.container)), h("p", {}, result.display_reason || result.meta.reason || (result.content ? "" : copy.emptyLog[0])), logUsage(result.usage), detail(result.detail || result.meta.detail, open)].filter(Boolean));
     regions.controls.querySelector("button")?.remove();
     if (result.meta.has_more) regions.controls.append(button("Earlier output", () => loadLog(view, path, {...args, byte_offset: result.meta.next_byte_offset}, regions, true)));
     const target = native ? args : result.containers?.at(-1);
@@ -41,6 +41,10 @@ async function loadLog(view, path, args, regions, restart) {
    if (view.logDirty && !signal.aborted) view.logReload();
   }
  }
+}
+function logUsage(usage) {
+ if (!usage) return null;
+ return h("p", {class: "muted"}, "Retained logs: " + usage.body.logical + " body bytes, " + usage.index.logical + " index bytes · " + (usage.body.allocated + usage.index.allocated) + " allocated bytes · physical run " + usage.physical_run_id + (usage.capture_limited ? " · " + usage.capture_reason : "") + (usage.incomplete ? " · capture incomplete" : "") + (usage.accounting_complete ? "" : " · accounting incomplete") + (usage.purge_completed ? " · purged" : usage.purge_pending ? " · purge pending" : "") + " · " + usage.protection_reason);
 }
 async function visibleLog(signal) {
  if (!document.hidden || signal.aborted) return;

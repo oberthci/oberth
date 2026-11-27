@@ -7,6 +7,7 @@ import (
 	"github.com/oberthci/oberth/internal/actor"
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/gitport"
+	"github.com/oberthci/oberth/internal/logcontract"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
@@ -109,6 +110,7 @@ type Exec interface {
 }
 
 type Logs interface {
+	Usage(context.Context, stateport.Run) (logcontract.Usage, error)
 	Read(context.Context, stateport.Run, apicontract.RunLogsArgs) (apicontract.LogResult, error)
 	Purge(context.Context, stateport.Run) error
 }

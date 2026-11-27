@@ -3,6 +3,7 @@ package runlog
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"strings"
 )
@@ -10,36 +11,36 @@ import (
 // UsageByRun counts only regular bodies and current native indexes;
 // symlink/nonregular evidence is skipped without following it.
 func (s *Store) UsageByRun(ctx context.Context) (map[string]int64, error) {
-	if err := s.lock(ctx); err != nil {
-		return nil, err
-	}
-	defer s.unlock()
 	directory, err := s.root.Open(".")
 	if err != nil {
 		return nil, storage(cannotListLogRootReason, err)
 	}
 	defer func() { _ = directory.Close() }()
-	entries, err := directory.ReadDir(-1)
-	if err != nil {
-		return nil, storage(cannotListLogEvidenceReason, err)
-	}
 	usage := map[string]int64{}
-	for _, entry := range entries {
-		if err = ctx.Err(); err != nil {
+	for {
+		if err := ctx.Err(); err != nil {
 			return nil, storage(logOperationCanceledReason, err)
 		}
-		id := ownedRun(entry.Name())
-		if id == "" {
-			continue
+		entries, readErr := directory.ReadDir(128)
+		for _, entry := range entries {
+			id := ownedRun(entry.Name())
+			if id == "" {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return nil, storage(cannotInspectLogEvidenceReason, err)
+			}
+			if info.Mode().IsRegular() {
+				usage[id] += info.Size()
+			}
 		}
-		info, err := entry.Info()
-		if err != nil {
-			return nil, storage(cannotInspectLogEvidenceReason, err)
+		if errors.Is(readErr, io.EOF) {
+			break
 		}
-		if !info.Mode().IsRegular() {
-			continue
+		if readErr != nil {
+			return nil, storage(cannotListLogEvidenceReason, readErr)
 		}
-		usage[id] += info.Size()
 	}
 	return usage, nil
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/actor"
 	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/logcontract"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/service/contracttest"
@@ -38,9 +39,12 @@ func exampleSummaryRuns(t *testing.T, base apicontract.RunRecord) apicontract.Ha
 
 func exampleRunService(t *testing.T, store *statefake.MovingRuns) *service.Service {
 	t.Helper()
+	logs := contracttest.LogsFuncs{UsageFunc: func(_ context.Context, r stateport.Run) (logcontract.Usage, error) {
+		return logcontract.Usage{PhysicalRunID: r.ID, SampledAt: testNow(), CaptureLimitBytes: 64 << 20, ProtectionReason: "archive eligibility unknown"}, nil
+	}}
 	c := service.Config{Runs: store, Catalog: store, Events: store, Publications: store, Promotions: store, HoldStore: store,
 		Authority: contracttest.AuthorityFuncs{CurrentFunc: func(_ context.Context, a actor.Actor) (actor.Actor, error) { return a, nil }},
-		Git:       contracttest.GitFuncs{}, MovingGit: contracttest.MovingGitFuncs{}, Exec: contracttest.ExecFuncs{}, Logs: contracttest.LogsFuncs{}, Holds: contracttest.HoldExecFuncs{},
+		Git:       contracttest.GitFuncs{}, MovingGit: contracttest.MovingGitFuncs{}, Exec: contracttest.ExecFuncs{}, Logs: logs, Holds: contracttest.HoldExecFuncs{},
 		Source: struct{ service.Source }{}, Starter: struct{ service.Starter }{}, Now: testNow,
 		AfterFunc: func(d time.Duration, f func()) service.Timer { return time.AfterFunc(d, f) }, NewID: func() string { return strings.Repeat("f", 32) }, OnError: func(err error) { t.Error(err) }}
 	s, err := service.New(t.Context(), c)

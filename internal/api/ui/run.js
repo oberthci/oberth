@@ -9,7 +9,7 @@ function runOrigin(run) {
 }
 function runDetail(run, open, origin) {
  return h("details", {open: open ? "" : null}, h("summary", {}, "Detail"), run.detail ? h("pre", {}, run.detail) : null,
-  h("pre", {class: "mono"}, ["Run ID: " + run.id, "Object ID: " + run.object_sha, "Commit ID: " + (run.commit_sha || "unknown"), run.repo + " · " + run.ref, origin, fullTimes(run)].filter(Boolean).join("\n")), otherRuns(run));
+  h("pre", {class: "mono"}, ["Run ID: " + run.id, "Object ID: " + run.object_sha, "Commit ID: " + (run.commit_sha || "unknown"), run.repo + " · " + run.ref, origin, fullTimes(run)].filter(Boolean).join("\n")), logUsage(run.log_usage), otherRuns(run));
 }
 function otherRuns(run) { return h("a", {href: "/runs?" + params({repo: run.repo, ref: run.ref})}, "Other runs of this ref"); }
 function runHeader(run, actions, open) {

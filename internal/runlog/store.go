@@ -19,6 +19,7 @@ type Store struct {
 	limit                int64
 	gate                 chan struct{}
 	active               sync.Map
+	spools               sync.Map // *os.File -> *spoolState; includes unlinked captures.
 	following            sync.Map
 	infrastructureHealth deliveryEvidenceHealth
 }
