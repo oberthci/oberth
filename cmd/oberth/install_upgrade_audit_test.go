@@ -35,7 +35,7 @@ type auditedUpgrade struct {
 
 func TestComposedUpgradeRecordsCompletionWithoutReplayingOnAuditFailure(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{"recorded", "refused", "lost reply", "upgrade failed", "dry run"} {
+	for _, mode := range []string{"recorded", "protocol boundary", "refused", "lost reply", "upgrade failed", "dry run"} {
 		t.Run(mode, func(t *testing.T) { composedUpgradeAuditCase(t, mode) })
 	}
 }
@@ -145,6 +145,9 @@ func newAuditedUpgrade(t *testing.T, mode string) auditedUpgrade {
 func auditFailureTransport(t *testing.T, transport http.RoundTripper, mode string, attempts *int) http.RoundTripper {
 	t.Helper()
 	return testTransport(func(request *http.Request) (*http.Response, error) {
+		if mode == "protocol boundary" && request.URL.Path == "/mcp" {
+			return nil, errors.New("client and server MCP versions differ")
+		}
 		if request.Body == nil {
 			return transport.RoundTrip(request)
 		}
@@ -153,11 +156,7 @@ func auditFailureTransport(t *testing.T, transport http.RoundTripper, mode strin
 			return nil, err
 		}
 		request.Body = io.NopCloser(bytes.NewReader(raw))
-		var call struct{ Params struct{ Name string } }
-		if err = json.Unmarshal(raw, &call); err != nil {
-			return nil, err
-		}
-		if call.Params.Name != "admin_audit_record" {
+		if request.URL.Path != "/api/admin/audit-record" {
 			return transport.RoundTrip(request)
 		}
 		*attempts++
@@ -194,7 +193,7 @@ func (f auditedUpgrade) assertCompleted(t *testing.T) {
 func (f auditedUpgrade) assertWarning(t *testing.T, mode string) {
 	t.Helper()
 	warning := "Upgrade succeeded; audit unconfirmed. Check: OBERTH_PROFILE='installed' oberth audit\n"
-	if mode == "recorded" {
+	if mode == "recorded" || mode == "protocol boundary" {
 		warning = ""
 	}
 	if f.diagnostic.String() != warning {

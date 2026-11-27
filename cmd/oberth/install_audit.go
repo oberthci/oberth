@@ -22,10 +22,9 @@ func (s installationSession) recordLifecycle(ctx context.Context, remote *client
 	if rollback {
 		operation, action = "Rollback", "rollback.completed"
 	}
-	var receipt apicontract.Receipt
 	if remote != nil {
 		args := apicontract.AdminAuditRecordArgs{Action: action, Details: details}
-		if err := remote.Invoke(ctx, "admin_audit_record", args, &receipt); err == nil && receipt.State == "recorded" {
+		if receipt, err := remote.RecordInstallation(ctx, args); err == nil && receipt.State == "recorded" {
 			return
 		}
 	}

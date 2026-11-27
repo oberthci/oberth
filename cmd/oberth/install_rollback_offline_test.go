@@ -122,9 +122,8 @@ func (f signedMaintenance) rollbackApplication(t *testing.T) (application, *byte
 	if app.config.Transport == nil {
 		// Only the best-effort audit receipt may reach a server; it is refused here.
 		app.config = client.Config{Now: f.session.engine.Now, Transport: testTransport(func(r *http.Request) (*http.Response, error) {
-			raw, err := io.ReadAll(r.Body)
-			if err != nil || !bytes.Contains(raw, []byte(`"admin_audit_record"`)) {
-				t.Fatal("offline rollback contacted a server", err)
+			if r.URL.Path != "/api/admin/audit-record" {
+				t.Fatal("offline rollback contacted a server")
 			}
 			return nil, io.EOF
 		})}

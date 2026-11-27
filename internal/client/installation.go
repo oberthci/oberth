@@ -19,6 +19,14 @@ func (c *Client) InstallationState(ctx context.Context) (apicontract.SystemStatu
 	return status, err
 }
 
+// RecordInstallation sends one completion receipt to the server left ready by
+// maintenance. A lost reply is uncertain and is never replayed.
+func (c *Client) RecordInstallation(ctx context.Context, args apicontract.AdminAuditRecordArgs) (apicontract.Receipt, error) {
+	var receipt apicontract.Receipt
+	err := c.installationCall(ctx, "admin_audit_record", args, &receipt)
+	return receipt, err
+}
+
 func (c *Client) installationCall(ctx context.Context, name string, input, out any) error {
 	d, ok := toolDefinition(name)
 	if !ok || d.AdminAction == "" {
