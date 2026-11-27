@@ -233,11 +233,21 @@ class GuidanceContract(unittest.TestCase):
     def test_skill_names_the_shipped_resume_mode(self):
         text = server_instructions()
         implementation = (ROOT / "internal/app/resume.go").read_text()
-        modes = set(re.findall(r'Mode:\s*"([^"]+)"', implementation))
+        binding = (ROOT / "internal/nativebinding/resume.go").read_text()
+        mode = re.search(r'func \(p ResumePlan\) Mode\(\) string \{\n(.*?)\n\}', binding, re.S)
+        self.assertIsNotNone(mode)
+        self.assertIn("Mode: plan.Mode()", implementation)
+        self.assertEqual(set(re.findall(r'return\s*"([^"]+)"', mode[1])), {"retry", "in-pod"})
+        modes = set(re.findall(r'^\treturn\s*"([^"]+)"', mode[1], re.M))
+        self.assertRegex(mode[1], r'if p\.InPod != nil \{\s+return "in-pod"')
+        self.assertIn("const AssistEnabled = false", (ROOT / "internal/admissioncontract/plan.go").read_text())
+        self.assertIn("const assistEnabled = admissioncontract.AssistEnabled", (ROOT / "internal/app/messages.go").read_text())
+        self.assertRegex(implementation, r'if plan\.InPod == nil \{\s+return plan, nil\s+\}\s+if !assistEnabled \{\s+return plan, refusal\("assist", nil\)')
         declared = set(re.findall(r'mode:"([^"]+)"', text))
         self.assertEqual(modes, {"retry"})
         self.assertEqual(declared, modes)
         self.assertIn("no same-Pod resume mode", text)
+        self.assertIn("Held-Pod reruns stay dormant with assist off", text)
 
     def test_release_origin_snapshot_matches_canonical_constant(self):
         result = subprocess.run(["python3", str(ROOT / "hack/release-origin.py"), "--check"], cwd=ROOT, text=True, capture_output=True, timeout=10)

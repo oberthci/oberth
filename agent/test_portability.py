@@ -17,7 +17,7 @@ class PortabilityContract(unittest.TestCase):
             home.mkdir()
             scratch.mkdir()
             shutil.copytree(source / "agent", checkout / "agent", ignore=shutil.ignore_patterns("__pycache__"))
-            for name in ("internal/api/rpc.go", "internal/app/resume.go", "internal/stepmodel/enums.go", "internal/releaseverify/release-cosign.pub", "internal/releaseverify/origin.go", "hack/release-origin.py", "internal/workflowpolicy/release-version.pattern"):
+            for name in ("internal/api/rpc.go", "internal/app/resume.go", "internal/nativebinding/resume.go", "internal/admissioncontract/plan.go", "internal/app/messages.go", "internal/stepmodel/enums.go", "internal/releaseverify/release-cosign.pub", "internal/releaseverify/origin.go", "hack/release-origin.py", "internal/workflowpolicy/release-version.pattern"):
                 if not (source / name).exists():
                     continue
                 destination = checkout / name
