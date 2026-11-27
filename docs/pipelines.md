@@ -86,7 +86,7 @@ Namespaces must be omitted, including in defaults and shared/inline templates; n
 Oberth adds no ordering or capacity queue. Retries are step attempts; reruns are new runs.
 Memory limits are bounds; check OOM/eviction. `oberth lock status`: holders, waiters, `stale` runs.
 The single run cap is Argo `parallelism`, set by `runs.parallel` (default 4; 0 unlimited).
-
+[Native ordering and observation](../hack/README.md#native-ordering) use existing Argo/Pod fields.
 ## Cache and outputs
 
 A cache is an existing administrator-granted claim. The example's `build-cache` must match it;

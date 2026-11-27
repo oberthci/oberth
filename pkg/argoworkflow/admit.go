@@ -106,6 +106,7 @@ func withoutSecretPaths(annotations map[string]string) map[string]string {
 	return rest
 }
 func (g *graph) spec(s *wfv1.WorkflowSpec, where string, shared bool) {
+	g.runPriority(s.PodPriorityClassName, s.Priority, where+".podPriorityClassName", false)
 	for _, v := range []struct {
 		field, code string
 		present     bool
@@ -150,6 +151,7 @@ func (g *graph) spec(s *wfv1.WorkflowSpec, where string, shared bool) {
 func (g *graph) admitNode(n *node) {
 	t := n.template
 	p := n.path
+	g.runPriority(t.PriorityClassName, nil, p+".priorityClassName", true)
 	g.templateForm(n)
 	for _, entry := range []struct {
 		field, code string

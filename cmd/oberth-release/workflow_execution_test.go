@@ -57,6 +57,7 @@ exit 1
   *'version --short') cat hack/lint-version | sed 's/^v//'; exit;;
   'env GOARCH') echo amd64; exit;;
   'test '*) printf '%s' "${OBERTH_TEST_GIT:-}" > "$FIXTURE_ROOT/test-git"; exit;;
+  '-C test/ordering test -race -count=1 -timeout=10m ./...') printf '%s' "${OBERTH_TEST_GIT:-}" > "$FIXTURE_ROOT/ordering-test-git"; exit;;
   'vet '*|tool\ *) exit;;`, 1))
 	if err := os.WriteFile(p, body, 0700); err != nil {
 		t.Fatal(err)
@@ -157,9 +158,11 @@ func assertTestsUseBaseGit(t *testing.T, dir string) {
 	if err != nil || !bytes.Equal(body, fixtureGit(runtime.GOARCH)) {
 		t.Fatal("test step did not export the checked base Git", err)
 	}
-	found, err := os.ReadFile(filepath.Join(dir, "test-git"))
-	if err != nil || strings.TrimSpace(string(found)) != exported {
-		t.Fatal("tests do not name the base Git as their test Git", err, string(found))
+	for _, name := range []string{"test-git", "ordering-test-git"} {
+		found, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || strings.TrimSpace(string(found)) != exported {
+			t.Fatal("tests do not name the base Git as their test Git", name, err, string(found))
+		}
 	}
 }
 func assertCompileCaches(t *testing.T, dir string, want map[string]int) {

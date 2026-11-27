@@ -16,6 +16,7 @@ var controllerFixture = controllertest.New(map[string]string{
 	"oberth_installer_status_test.go": "testdata/installer_status_test.go",
 	"oberth_cancelled_locks_test.go":  "testdata/cancelled_locks_test.go",
 	"oberth_cancellation_test.go":     "testdata/cancellation_test.go",
+	"oberth_native_ordering_test.go":  "testdata/native_ordering_test.go",
 })
 
 func TestMain(m *testing.M) {

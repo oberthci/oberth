@@ -179,12 +179,13 @@ Agent-host policy uses `host:fixture-host` in the external names file; unmarked 
 remain unconditional literals. `hack/guards/host_paths.json` scopes host naming to plugins,
 the derived root marketplace file, and the `Agent plugins` install section in the named docs.
 Contributor credit has no plugin exception; commit and tag metadata also has no host exception.
+
 # Capacity observation
 
 `python3 -I hack/observe.py collect --namespace <runs> --node <node> --samples 240 --interval 30`
 emits sanitized JSONL from ordinary traffic using GET only. Run with `umask 077`
-and redirect into a private local file. Select each namespace containing child
-Jobs/VMs with another `--namespace`; use the existing read-only operator context.
+and redirect into a private local file. Include the control namespace and each
+child Job/VM namespace with another `--namespace`; use the read-only operator context.
 It never reads credential files itself or creates runs. It invokes kubectl with
 fixed arguments and bounded requests. No observation runs on the server/push path.
 `project` consumes raw JSONL frames on stdin with `observed_at`, Kubernetes List
@@ -205,3 +206,33 @@ before proposing smaller requests. Counts here are observations, never complete
 executions or a sizing recommendation. Existing historical cross-revision samples
 cannot justify resizing. Missing/idle traffic leaves qualification unmeasured.
 
+# Native ordering
+
+For installation namespace `oberth`, choose native Workflow `priority` and
+`podPriorityClassName` together: release `30` / `oberth-run-release-oberth`,
+promotion-critical `20` / `oberth-run-promotion-oberth`, qualification `10` /
+`oberth-run-qualification-oberth`, lint `0` / `oberth-run-lint-oberth`.
+Replace the namespace suffix for another installation. These classes are
+non-default and nonpreempting, below the protected control class. Argo orders
+workflows waiting for its cap; Kubernetes orders feasible pending Pods.
+Choose the tier explicitly per entrypoint. Credentials and caller urgency do
+not choose it. Template `priorityClassName` remains a deliberate leaf override.
+Mismatches and custom references are advisories; verify custom classes yourself.
+For measured fan-out candidates, start with a ceiling of 2; preserve intentional
+`parallelism: 1` and correctness locks. Admission never rewrites these fields.
+Equal-class Workflows use native creation-time/key ordering. Pod backoff and
+feasibility prevent a strict FIFO guarantee. Shared-namespace fairness is best
+effort: sparse-repo progress in a bounded burst does not prevent starvation
+under sustained higher-priority traffic. No per-repo locks or fairness timer.
+Run PriorityClasses carry Helm's keep policy so rollback retains classes used by
+admitted Workflows. After uninstall, remove them only after those Workflows and
+their Pods finish. Control-class exclusion remains the existing native quota.
+The [capacity sampler](#capacity-observation) reports missing measurements and
+makes no sizing change.
+
+For native ordering qualification, the root Go tests exercise the pinned Argo
+throttler/controller. `go -C test/ordering test -race -count=1 ./...` separately
+exercises real Kubernetes v1.35.7 queue-sort and preemption plugins, matching the
+product's Kubernetes library line. It has no product dependency or live cluster
+client. This component check is not production v1.37.2 scheduler qualification:
+backoff, changing feasibility and full control recovery remain unmeasured.

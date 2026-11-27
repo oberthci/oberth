@@ -135,7 +135,7 @@ containers keep separate log selectors within native attempt evidence.
 - Refuse identity patches, host access, arbitrary Secret reads, reserved ownership
   metadata, executor names/volumes/env and ungranted credentials in every carrier,
   including defaults, inline calls and hooks. Preserve native placement, resources,
-  priority, retries and optional deadlines. Mutex names must be literal
+  priority, retries and optional deadlines. Native Workflow/Pod priority mismatches and unmanaged class references produce bounded advisories after defaults merge; native fields and intentional serialization remain authored. Installed run classes use Never preemption; custom classes remain the operator's responsibility. Mutex names must be literal
   `<upstream>/<organization>/<repository>/<lock>` for the run's repository; mutex and semaphore namespaces must be omitted. Offline validation without a repository checks only the mutex shape, with nonempty literal parts.
   Mutexes and semaphores on a Steps/DAG template or the workflow produce a non-blocking advisory naming the declaration and suggesting leaf locks; admission preserves the authored lock.
   Semaphore reads stay in same-namespace `oberth-sync-limits`. No CPU math, capacity queue, numeric resource grant,
