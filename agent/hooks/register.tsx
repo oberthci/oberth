@@ -181,8 +181,8 @@ export const register: Register = (on, options) => {
     // A pass that is not evidence is grey, as other runs that are no result, never green.
     const color = (run: Run) => run.status === 'passed' ? (notEvidence(run) ? 'gray' : 'green') : run.status === 'failed' ? 'red' : run.status === 'cancelled' ? 'gray' : 'yellow'
     return <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor="gray" paddingX={1} width={problems.length && !compact ? problemWidth : undefined}>
-      {rows.length > 0 && <Text wrap="truncate-end" dimColor>{header}</Text>}
-      {rows.map((run, index) => <Text wrap="truncate-end" color={color(run)}>{lines[index]}</Text>)}
+      {rows.length > 0 && <Text wrap="wrap" dimColor>{header}</Text>}
+      {rows.map((run, index) => <Text wrap="wrap" color={color(run)}>{lines[index]}</Text>)}
       {problems.map(problem => <Text wrap={compact ? 'truncate-end' : 'wrap'} color="yellow">{problem}</Text>)}
     </Box>
   })

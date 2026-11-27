@@ -55,11 +55,11 @@ none at 0) while a listed or watched run is active or finished in the last ten m
 the server's clock that the run list carries, with watched runs first in any state. Each
 run is one line under a header: id, repository and ref in short forms, status word,
 authoritative plan counts, duration (unknown until a recorded start), age, a watched mark and a failed run's step name,
-measured in terminal cells, cut to the box's width and never wrapped; the last column
-gives way first. `/oberth-runs` prints the same lines with a failed run's step and reason
-or a cancelled run's reason last; there the names give way before the reason.
-The box and bridge footer use one time per render and each profile's clock to bound
-duration by age, even when native start predates creation.
+measured in terminal cells. Native reasons use the existing last position in every state and stay whole;
+metadata gives way first. `/oberth-runs` keeps the same rows and whole reasons.
+Below the physical minimum the existing text row may wrap; no outer renderer cuts its reason.
+The box and bridge footer use one time per render and each profile's clock for live duration;
+terminal duration is frozen from recorded start and finish, with inconsistent clocks unknown.
 An explicitly selected workflow's filename appears in the existing box message, list reason
 and bridge footer, even for a passing run. No new column or header changes the layout.
 Finished watches produce one completion notice. The box, `/oberth-runs` and `/oberth-watch`

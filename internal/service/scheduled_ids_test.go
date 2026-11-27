@@ -155,10 +155,7 @@ func checkScheduledOperation(t *testing.T, op scheduledOperation, visible bool) 
 	} else if err != nil || got != r.ID {
 		t.Fatal("scheduled operation refused exact child", got, err)
 	}
-	wantCalls := 1
-	if !visible && op.name == "purge" {
-		wantCalls = 0
-	}
+	wantCalls := scheduledResolverCalls(op.name, visible)
 	if calls != wantCalls {
 		t.Fatalf("scoped resolver calls=%d, want %d", calls, wantCalls)
 	}
@@ -274,4 +271,14 @@ func TestScheduledRunIDRoutesCancellationToTheExactChild(t *testing.T) {
 	if obligations[0].RunID != r.ID || obligations[0].Value != stateport.ObligationStop {
 		t.Fatal("wrong child obligation", obligations)
 	}
+}
+
+func scheduledResolverCalls(name string, visible bool) int {
+	if !visible && name == "purge" {
+		return 0
+	}
+	if visible && (name == "get" || name == "status") {
+		return 2
+	}
+	return 1
 }

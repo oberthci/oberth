@@ -29,7 +29,11 @@ func TestClusterPodRefusalKeepsNativeDetail(t *testing.T) {
 				w.Status.Nodes[n.ID] = n
 				out := project(t, argojob.Projection{Workflow: w, Plan: admissioncontract.Plan{Entries: []admissioncontract.PlanEntry{{Path: "build"}}}})
 				step := out.Steps[0]
-				if step.Status != stepmodel.StepFailed || step.DisplayReason != "Pod refused by the cluster" || step.Detail != tc.message || out.Failure == nil {
+				wantReason := "Pod refused by the cluster"
+				if tc.name == "quota" {
+					wantReason = "quota exceeded"
+				}
+				if step.Status != stepmodel.StepFailed || step.DisplayReason != wantReason || step.Detail != tc.message || out.Failure == nil {
 					t.Fatal(out)
 				}
 				if out.Failure.Class != tc.class || out.Failure.Retry.Action != tc.retry {

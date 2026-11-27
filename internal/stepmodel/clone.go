@@ -24,6 +24,7 @@ func (f FailureRecord) Clone() FailureRecord {
 }
 
 func (s RunStep) Clone() RunStep {
+	s.Diagnostic = s.Diagnostic.Clone()
 	s.StartedAt = clonePointer(s.StartedAt)
 	s.FinishedAt = clonePointer(s.FinishedAt)
 	s.Attempts = slices.Clone(s.Attempts)
@@ -32,6 +33,7 @@ func (s RunStep) Clone() RunStep {
 }
 
 func (r RunSummary) Clone() RunSummary {
+	r.Diagnostic = r.Diagnostic.Clone()
 	r.CommitSHA = clonePointer(r.CommitSHA)
 	r.NativePhase = clonePointer(r.NativePhase)
 	r.StartedAt = clonePointer(r.StartedAt)

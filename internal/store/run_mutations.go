@@ -179,6 +179,7 @@ func (s *Store) saveVerdict(ctx context.Context, tx *sql.Tx, r *stateport.Run, u
 	r.Failure = update.Failure
 	r.DisplayReason = update.Reason
 	r.Detail = update.Detail
+	r.Diagnostic = update.Diagnostic.Clone()
 	r.NativePhase = update.NativePhase
 	r.FinishedAt = new(s.options.Clock().UTC())
 	if update.Restart {

@@ -70,6 +70,8 @@ func TestEvidenceRefusalsResetAfterSuccessfulObservation(t *testing.T) {
 	c.Progress = &progressProbe{Runs: owner, begin: func(ctx context.Context, a stateport.Action, in stateport.EvidenceStart) (int64, error) {
 		calls++
 		if calls == 3 {
+			n.FailedPodRestarts = 1
+			f.Object.Status.Nodes[n.ID] = n
 			cache.Changed(b.Workflow.Name)
 			return owner.BeginEvidence(ctx, a, in)
 		}

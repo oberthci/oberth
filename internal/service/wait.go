@@ -92,8 +92,17 @@ func (s *Service) waitSnapshot(ctx, wait context.Context, o *waitOptions) (obser
 	if err != nil {
 		return out, err
 	}
-	current := summary(r.RunSummary)
-	evidenceReason(&current, o.run.Origin)
+	if r.Revision != o.run.Revision {
+		o.run, err = s.c.Runs.Run(ctx, r.ID)
+		if err != nil {
+			return out, err
+		}
+	}
+	o.run.RunSummary = r.RunSummary
+	current, err := s.view(ctx, o.actor, o.run)
+	if err != nil {
+		return out, err
+	}
 	out.state, out.result.Run = r, &current
 	out.holds, err = s.waitHolds(wait, r, o)
 	return out, err

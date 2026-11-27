@@ -96,11 +96,11 @@ func checkRunStart(t *testing.T, f RunFixture) {
 		started := c.step.In(time.FixedZone("east", 3600))
 		steps[0].Status, steps[0].StartedAt = stepmodel.StepRunning, &started
 		mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps, Waiting: "waiting for sync limit go"}))
-		runState(t, f, id, progressWant{stepmodel.RunRunning, "", &c.want})
+		runState(t, f, id, progressWant{stepmodel.RunRunning, "waiting for sync limit go", &c.want})
 	}
 	steps[0].Status = stepmodel.StepQueued
 	mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps, Waiting: "waiting for a node"}))
-	runState(t, f, id, progressWant{stepmodel.RunRunning, "", new(base.Add(-time.Second))})
+	runState(t, f, id, progressWant{stepmodel.RunRunning, "waiting for a node", new(base.Add(-time.Second))})
 	mustRun(t, f.Port.Finish(t.Context(), stateport.Action{Actor: "operator"}, stateport.RunUpdate{ID: id, Revision: saved.Runs[0].Revision, Status: stepmodel.RunFailed, Reason: "run failed"}))
 	steps[0].Status = stepmodel.StepRunning
 	mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps, Waiting: "waiting for a node"}))

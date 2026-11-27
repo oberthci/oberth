@@ -77,13 +77,18 @@ func (f *Runs) SaveProgress(ctx context.Context, id string, p stateport.Progress
 		r.StartedAt = stepmodel.RunStart(r.StartedAt, steps)
 		if !runTerminal(r) {
 			r.Status, r.DisplayReason = stepmodel.Progress(r.Status, r.DisplayReason, steps, p.Waiting)
+			p.Steps = steps
+			r.Diagnostic = p.DiagnosticFor(r.DisplayReason)
 		}
 		r.Steps = append([]stepmodel.RunStep{}, steps...)
 		r = r.Clone()
-		m.runs[id] = r
-		if reflect.DeepEqual(before.RunSummary, r.RunSummary) {
+		sameSteps := stateport.EqualStepFacts(before.Steps, r.Steps)
+		oldSummary, newSummary := before.RunSummary, r.RunSummary
+		oldSummary.Steps, newSummary.Steps = nil, nil
+		if sameSteps && reflect.DeepEqual(oldSummary, newSummary) {
 			return noRunChange{}
 		}
+		m.runs[id] = r
 		return m.appendEvents([]stateport.EventWrite{stateport.ProgressEvent(r, m.eventID+1, m.now)})
 	})
 }

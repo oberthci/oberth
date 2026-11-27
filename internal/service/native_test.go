@@ -20,7 +20,7 @@ func TestNativeProgressIsStoredWithoutEventOrAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, err := f.s.Status(t.Context(), caller(), viewQuery{ID: runID})
-	if err != nil || v.Detail != "full native detail" || v.DisplayReason == v.Detail {
+	if err != nil || v.Detail != "native detail restricted" || v.DisplayReason == v.Detail {
 		t.Fatalf("progress %+v %v", v, err)
 	}
 	p, err := f.s.EventsSince(t.Context(), caller(), eventsInput{})
@@ -43,7 +43,10 @@ func TestNativeFinishAtomicEventAndPublication(t *testing.T) {
 func TestNativeFailureReasonsAndEvidenceAreDetached(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
-	f.seed(stepmodel.RunRunning)
+	r := f.seed(stepmodel.RunRunning)
+	r.Origin.WorkflowUID = "own"
+	f.store.native.SeedRun(r)
+	f.store.native.SeedSteps(r.ID, []stepmodel.RunStep{{Path: "build", Name: "build", Status: stepmodel.StepFailed, Diagnostic: &stepmodel.NativeDiagnostic{Source: "pod", WorkflowUID: "own"}}})
 	phase := stepmodel.NativeFailed
 	failure := &stepmodel.FailureRecord{Class: stepmodel.FailureInfrastructure, Step: "build", Retry: stepmodel.RetryHint{Action: stepmodel.RetryRerun}}
 	o := service.FinishedRun{RunID: runID, Status: stepmodel.RunFailed, Reason: "image pull failed", Detail: strings.Repeat("native detail ", 100), Failure: failure, NativePhase: &phase}
@@ -52,7 +55,7 @@ func TestNativeFailureReasonsAndEvidenceAreDetached(t *testing.T) {
 	}
 	failure.Step = "changed"
 	v, err := f.s.Status(t.Context(), caller(), viewQuery{ID: runID})
-	if err != nil || v.DisplayReason != o.Reason || v.Detail != o.Detail || v.Failure == nil || v.Failure.Step != "build" || v.NativePhase == nil {
+	if err != nil || v.DisplayReason != o.Reason || v.Detail != "native detail restricted" || v.Failure == nil || v.Failure.Step != "build" || v.NativePhase == nil {
 		t.Fatalf("failure %+v %v", v, err)
 	}
 }

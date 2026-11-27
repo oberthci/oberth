@@ -61,6 +61,7 @@ func composeFixture(t *testing.T, binary string) *composedFixture {
 		return false, nil, nil
 	}
 	f.kube.PrependWatchReactor("pods", rejectStreamingList)
+	f.kube.PrependWatchReactor("nodes", rejectStreamingList)
 	realNow := time.Now //nolint:forbidigo // Real Git children use sockets whose deadlines follow wall time.
 	f.clock.Advance(realNow().Sub(f.clock.Now()))
 	f.deps.clock.Now = realNow

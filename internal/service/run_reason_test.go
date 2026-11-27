@@ -15,7 +15,7 @@ func TestRunReadsOnlyShowSpecificReasons(t *testing.T) {
 				r.DisplayReason = reason
 				f.store.native.SeedRun(r)
 				want := reason
-				if reason == string(status) {
+				if reason == string(status) || reason == "cancelled by worker" || status == stepmodel.RunPassed && (reason == "waiting for a node" || reason == "image pull failed") {
 					want = ""
 				}
 				requireRunReads(t, f, runRead{status, want, false})

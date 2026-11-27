@@ -102,6 +102,8 @@ func TestAcknowledgedTerminalAPIErrorsDoNotConsumeEvidenceRefusals(t *testing.T)
 		calls++
 		seq, err := owner.BeginEvidence(ctx, a, in)
 		if calls == 1 {
+			n.FailedPodRestarts = 1
+			f.Object.Status.Nodes[n.ID] = n
 			cache.Changed(b.Workflow.Name)
 		} else {
 			cancel()

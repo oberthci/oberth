@@ -56,7 +56,7 @@ func TestTruthfulConcurrentHistoryContract(t *testing.T) {
 	}
 	close(release)
 	out := receive(t, done)
-	if out.err != nil || out.result.Run == nil || out.result.Run.Status != stepmodel.RunPassed || out.result.Run.Detail != "native final detail" || out.result.TimedOut {
+	if out.err != nil || out.result.Run == nil || out.result.Run.Status != stepmodel.RunPassed || out.result.Run.Detail != "native detail restricted" || out.result.TimedOut {
 		t.Fatalf("wait %+v", out)
 	}
 	after := f.store.Calls()
@@ -89,7 +89,7 @@ func TestWaitUntilAnyAndHeld(t *testing.T) {
 			if err != nil || result.Run == nil || result.TimedOut {
 				t.Fatalf("until %+v %v", result, err)
 			}
-			if until == "any" && result.Run.Detail != "changed" {
+			if until == "any" && result.Run.Detail != "native detail restricted" {
 				t.Fatal("returned before a change")
 			}
 		}
@@ -182,7 +182,7 @@ func TestServiceRestartObservesSameDurableRunWithoutStarting(t *testing.T) {
 
 func checkWaitCost(t *testing.T, before, after map[string]int) {
 	t.Helper()
-	if after["ResolveRun"]-before["ResolveRun"] != 1 || after["Run"]-before["Run"] != 1 || after["RunState"]-before["RunState"] != 1 || after["Current"]-before["Current"] != 3 || after["Steps"] != before["Steps"] || after["Runs"] != before["Runs"] {
-		t.Fatalf("wait calls %v -> %v (includes finish's one Run)", before, after)
+	if after["ResolveRun"]-before["ResolveRun"] != 1 || after["Run"]-before["Run"] != 2 || after["RunState"]-before["RunState"] != 1 || after["Current"]-before["Current"] != 3 || after["Steps"] != before["Steps"] || after["Runs"] != before["Runs"] {
+		t.Fatalf("wait calls %v -> %v (includes finish and fresh binding after its revision)", before, after)
 	}
 }

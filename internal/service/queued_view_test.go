@@ -25,13 +25,13 @@ func TestQueuedRunReadsQueuedWithItsWaitUntilAStepStarts(t *testing.T) {
 		}
 	}
 	save("waiting for sync limit go")
-	requireRunReads(t, f, runRead{stepmodel.RunQueued, "waiting for sync limit go", false})
+	requireRunReads(t, f, runRead{stepmodel.RunQueued, "waiting for a lock", false})
 	steps[0].Status = stepmodel.StepRunning
 	save("")
 	requireRunReads(t, f, runRead{stepmodel.RunRunning, "", true})
 	steps[0].Status = stepmodel.StepQueued
 	save("waiting for a node")
-	requireRunReads(t, f, runRead{stepmodel.RunRunning, "", true})
+	requireRunReads(t, f, runRead{stepmodel.RunRunning, "waiting for a node", true})
 }
 
 type runRead struct {

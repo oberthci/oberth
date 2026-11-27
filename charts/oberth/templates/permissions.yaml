@@ -74,6 +74,23 @@ subjects:
   - {kind: ServiceAccount, name: oberth, namespace: {{ .Release.Namespace }}}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "oberth.clusterName" (list . "node-observer") }}
+rules:
+  - apiGroups: ['']
+    resources: [nodes]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "oberth.clusterName" (list . "node-observer") }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ include "oberth.clusterName" (list . "node-observer") }}}
+subjects:
+  - {kind: ServiceAccount, name: oberth, namespace: {{ .Release.Namespace }}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: oberth-task-results

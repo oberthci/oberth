@@ -33,7 +33,7 @@ export async function runHeader(client) {
    check(metrics.summary.startsWith(status)&&!metrics.summary.includes('run is'),'status sentence retained '+JSON.stringify(metrics));
    const metaLines=width<760?2:1;
    check(!metrics.overflow&&metrics.summaryHeight<=metrics.lineHeight*(metrics.wrapped?2:1)&&metrics.metaHeight<=metrics.lineHeight*metaLines&&metrics.height<=metrics.lineHeight*(1+metaLines+Number(Boolean(metrics.reason))+Number(metrics.wrapped)),'header exceeds its wrapped layout or overflows '+JSON.stringify({width,theme,status,...metrics}));
-   check(metrics.reason===(specific?'waiting for a node':'')&&metrics.reasonHeight<=metrics.lineHeight&&(!metrics.reason||metrics.reason==='waiting for a node'),'reason cut or missing '+JSON.stringify(metrics));
+   check(metrics.reason===(specific&&status!=='passed'?'waiting for a node':'')&&metrics.reasonHeight<=metrics.lineHeight&&(!metrics.reason||metrics.reason==='waiting for a node'),'reason cut or missing '+JSON.stringify(metrics));
    check(metrics.counts===(status==='queued'?'0/14 passed · 14 pending':status==='failed'?'12/14 passed · 1 failed · 1 pending':'13/14 passed'),'step counts changed '+JSON.stringify(metrics));
    if(status==='queued')check(metrics.duration===undefined&&(metrics.wrapped||Math.abs(metrics.queuedGap-metrics.gap)<0.5),'queued header reserves an empty duration gap '+JSON.stringify({width,theme,metrics}));
    check(['queued','running'].includes(status)?metrics.cancel.length===1&&!metrics.cancel[0].disabled&&metrics.cancel[0].right<=metrics.right:metrics.cancel.length===0,'Cancel visibility wrong '+JSON.stringify(metrics));

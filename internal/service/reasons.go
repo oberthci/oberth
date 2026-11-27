@@ -1,10 +1,14 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/oberthci/oberth/internal/actor"
 	"github.com/oberthci/oberth/internal/nativebinding"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -205,13 +209,33 @@ func isMissing(err error) bool {
 
 // view is a run's public summary. A resumed run says so in every state, and
 // an assisted run is never shown as plainly passed.
-func view(r stateport.Run) stepmodel.RunSummary {
+func (s *Service) view(ctx context.Context, a actor.Actor, r stateport.Run) (stepmodel.RunSummary, error) {
+	if !a.CanTouchRepository(r.Repo) {
+		return stepmodel.RunSummary{}, refuse(forbidden)
+	}
+	r = r.Clone()
+	bindNativeReferences(&r)
 	v := summary(r.RunSummary)
+	if r.Status == stepmodel.RunRunning && stepmodel.NativeWait(v.DisplayReason) {
+		v.Detail = strings.TrimSpace(v.Detail + "\n" + nativeWaitingDetail(r))
+	}
+	if !terminal(r.Status) {
+		holds, _ := s.liveHolds(ctx, r)
+		if slices.ContainsFunc(holds, func(h model.LiveHold) bool {
+			return h.RunID == r.ID && !h.AvailabilityUnknown && h.PodUID != "" && h.NodeID != ""
+		}) {
+			v.DisplayReason = "held for debugging"
+			v.Detail = "An admitted Pod is in a verified live debugging hold."
+		}
+	}
+	if err := s.publicCancellation(ctx, r, &v); err != nil {
+		return stepmodel.RunSummary{}, err
+	}
 	evidenceReason(&v, r.Origin)
 	if r.Origin.Resumed() {
 		v.Detail = resumeDetail(r, v.Detail)
 	}
-	return v
+	return v, nil
 }
 
 func evidenceReason(v *stepmodel.RunSummary, o model.RunOrigin) {
@@ -235,6 +259,7 @@ func notEvidence(o model.RunOrigin, status stepmodel.RunStatus) string {
 // summary keeps reasons that add information beyond the status; detail stays whole.
 func summary(r stepmodel.RunSummary) stepmodel.RunSummary {
 	v := r.Clone()
+	projectNativeSummary(&v)
 	if v.DisplayReason == string(v.Status) || (v.Status != stepmodel.RunQueued && v.DisplayReason == runReason(v.Status)) {
 		v.DisplayReason = ""
 	}
@@ -281,4 +306,13 @@ func resumeDetail(r stateport.Run, detail string) string {
 		text += "; next: run_rerun " + r.ID
 	}
 	return text
+}
+
+func nativeWaitingDetail(r stateport.Run) string {
+	for _, step := range r.Steps {
+		if step.DisplayReason == r.DisplayReason && step.Name != "" {
+			return "Step " + strconv.Quote(step.Name) + " is waiting; other work may continue."
+		}
+	}
+	return "A step is waiting; other work may continue."
 }

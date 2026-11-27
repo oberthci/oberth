@@ -72,6 +72,7 @@ func (s *Service) eventsSince(ctx context.Context, a actor.Actor, q eventQuery) 
 	if err != nil {
 		return page, err
 	}
+	s.projectNativeEvents(ctx, a, &page)
 	return page, nil
 }
 
@@ -89,12 +90,14 @@ func (s *Service) prepareEventsWait(ctx context.Context, a actor.Actor, q eventQ
 	}
 	if q.Snapshot {
 		return func(ctx context.Context) (apicontract.EventResult, error) {
-			a, q, err := s.refreshEventScope(ctx, a, q)
-			if err != nil {
-				return apicontract.EventResult{}, err
-			}
-			page, err := s.eventsSince(ctx, a, q)
-			return apicontract.EventResult{EventPage: page}, err
+			return authorizedRead(ctx, s, readAuthority{a, "events_wait"}, func(ctx context.Context, current actor.Actor) (apicontract.EventResult, error) {
+				query, err := s.rebindEventScope(ctx, current, q)
+				if err != nil {
+					return apicontract.EventResult{}, err
+				}
+				page, err := s.eventsSince(ctx, current, query)
+				return apicontract.EventResult{EventPage: page}, err
+			})
 		}, nil
 	}
 	return func(ctx context.Context) (apicontract.EventResult, error) { return s.eventsWait(ctx, a, q) }, nil

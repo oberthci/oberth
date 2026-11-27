@@ -18,7 +18,7 @@ func TestResyncHealthAndPodNotification(t *testing.T) {
 	if resyncPeriod != 10*time.Minute {
 		t.Fatal(resyncPeriod)
 	}
-	h := &Hub{workflows: syncedInformer{}, pods: syncedInformer{}, healthy: [2]bool{true, true}}
+	h := &Hub{workflows: syncedInformer{}, pods: syncedInformer{}, healthy: [3]bool{true, true}}
 	if !h.Healthy() {
 		t.Fatal("both healthy")
 	}

@@ -14,7 +14,9 @@ func alignStepReason(step *stepmodel.RunStep) {
 	case stepmodel.StepUnknown:
 		step.DisplayReason = reasonUnknown
 	case stepmodel.StepRunning:
-		step.DisplayReason = reasonRunning
+		if !stepmodel.NativeWait(step.DisplayReason) {
+			step.DisplayReason = reasonRunning
+		}
 	}
 }
 
@@ -54,7 +56,7 @@ func mergeStep(row projected, old stepmodel.RunStep, raw map[string]stateport.No
 	if latest != latestNode(current.Attempts) || len(attempts) == 0 && terminalStep(old.Status) {
 		row.step = old
 	} else if latest == latestNode(old.Attempts) {
-		row = mergeDiagnosis(row, old)
+		row = mergeCurrentDiagnosis(row, old)
 	}
 	if current.StartedAt == nil || old.StartedAt != nil && old.StartedAt.Before(*current.StartedAt) {
 		row.step.StartedAt = old.StartedAt
@@ -67,6 +69,15 @@ func mergeStep(row projected, old stepmodel.RunStep, raw map[string]stateport.No
 		}
 	}
 	return row
+}
+
+func mergeCurrentDiagnosis(row projected, old stepmodel.RunStep) projected {
+	if old.Status == stepmodel.StepRunning && (row.step.Status == stepmodel.StepPending || row.step.Status == stepmodel.StepQueued) {
+		row.step.DisplayReason, row.step.Detail = old.DisplayReason, old.Detail
+		row.step.Diagnostic = old.Diagnostic.Clone()
+		return row
+	}
+	return mergeDiagnosis(row, old)
 }
 func mergeDiagnosis(row projected, old stepmodel.RunStep) projected {
 	if keepDiagnosis(old, row.step) {

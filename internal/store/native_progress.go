@@ -35,19 +35,19 @@ func (s *Store) saveNativeProgress(ctx context.Context, tx *sql.Tx, id string, p
 	if err != nil {
 		return refuse(invalid, err)
 	}
-	next := projectNativeProgress(before.run, stateport.Progress{Steps: steps, Waiting: p.Waiting})
+	p.Steps = steps
+	next := projectNativeProgress(before.run, p)
 	next.LogicalStepCounts = counts
 	sameSummary := encode(before.run.RunSummary) == encode(next.RunSummary)
-	if before.steps == encode(steps) && sameSummary {
+	sameSteps, err := sameProgressSteps(before.steps, steps)
+	if err != nil {
+		return err
+	}
+	if sameSteps && sameSummary {
 		return unchanged{}
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO native_steps VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET value=excluded.value`, id, encode(steps)); err != nil {
-		return databaseError(err)
-	}
-	if !sameSummary {
-		if err = writeProgressSummary(ctx, tx, id, next.RunSummary); err != nil {
-			return err
-		}
+	if err := writeNativeProjection(ctx, tx, nativeProjectionWrite{id: id, steps: steps, summary: next.RunSummary, sameSummary: sameSummary}); err != nil {
+		return err
 	}
 	return s.progressEvent(ctx, tx, next)
 }
@@ -61,6 +61,20 @@ func mutableProgress(ctx context.Context, tx *sql.Tx, id string) (progressSnapsh
 		err = requireUnhandedRun(ctx, tx, id)
 	}
 	return before, err
+}
+
+func sameProgressSteps(previous string, steps []stepmodel.RunStep) (bool, error) {
+	if previous == "" {
+		return false, nil
+	}
+	if previous == encode(steps) {
+		return true, nil
+	}
+	var before []stepmodel.RunStep
+	if err := json.Unmarshal([]byte(previous), &before); err != nil {
+		return false, refuse(corrupt, err)
+	}
+	return stateport.EqualStepFacts(before, steps), nil
 }
 
 func writeProgressSummary(ctx context.Context, tx *sql.Tx, id string, summary stepmodel.RunSummary) error {
@@ -77,6 +91,7 @@ func projectNativeProgress(r stateport.Run, p stateport.Progress) stateport.Run 
 	r.StartedAt = stepmodel.RunStart(r.StartedAt, p.Steps)
 	if !terminal(r.Status) {
 		r.Status, r.DisplayReason = stepmodel.Progress(r.Status, r.DisplayReason, p.Steps, p.Waiting)
+		r.Diagnostic = p.DiagnosticFor(r.DisplayReason)
 	}
 	return r
 }
@@ -145,4 +160,21 @@ func (s *Store) AdvanceNative(ctx context.Context, id string) error {
 		_, err := tx.ExecContext(ctx, `UPDATE runs SET evidence_complete=0 WHERE id=?`, id)
 		return databaseError(err)
 	})
+}
+
+type nativeProjectionWrite struct {
+	id          string
+	steps       []stepmodel.RunStep
+	summary     stepmodel.RunSummary
+	sameSummary bool
+}
+
+func writeNativeProjection(ctx context.Context, tx *sql.Tx, row nativeProjectionWrite) error {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO native_steps VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET value=excluded.value`, row.id, encode(row.steps)); err != nil {
+		return databaseError(err)
+	}
+	if !row.sameSummary {
+		return writeProgressSummary(ctx, tx, row.id, row.summary)
+	}
+	return nil
 }

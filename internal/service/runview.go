@@ -34,14 +34,22 @@ func (s *Service) prepareRunGet(ctx context.Context, a actor.Actor, q runQuery) 
 		return nil, err
 	}
 	q.View = true
-	r, err := s.resolveRun(ctx, a, q)
+	_, err = s.resolveRun(ctx, a, q)
 	if err != nil {
 		return nil, err
 	}
-	return bounded(func(ctx context.Context) (apicontract.RunRecord, error) { return s.runView(ctx, r, q) }), nil
+	return bounded(func(ctx context.Context) (apicontract.RunRecord, error) {
+		return authorizedRead(ctx, s, readAuthority{a, "run_get"}, func(ctx context.Context, a actor.Actor) (apicontract.RunRecord, error) {
+			r, err := s.resolveRun(ctx, a, q)
+			if err != nil {
+				return apicontract.RunRecord{}, err
+			}
+			return s.runView(ctx, a, r, q)
+		})
+	}), nil
 }
 
-func (s *Service) runView(ctx context.Context, r stateport.Run, q runQuery) (apicontract.RunRecord, error) {
+func (s *Service) runView(ctx context.Context, a actor.Actor, r stateport.Run, q runQuery) (apicontract.RunRecord, error) {
 	steps, err := s.c.Runs.Steps(ctx, r.ID)
 	if err != nil {
 		return apicontract.RunRecord{}, err
@@ -63,7 +71,10 @@ func (s *Service) runView(ctx context.Context, r stateport.Run, q runQuery) (api
 	if end < len(steps) {
 		r.NextStepOffset = &end
 	}
-	out := record(r)
+	out, err := s.record(ctx, a, r)
+	if err != nil {
+		return out, err
+	}
 	usage, err := s.c.Logs.Usage(ctx, r)
 	if err != nil {
 		return out, err
@@ -74,8 +85,12 @@ func (s *Service) runView(ctx context.Context, r stateport.Run, q runQuery) (api
 
 // record shows a resolved run with its recorded cause. Callers pass only runs
 // already resolved inside the caller's repository scope.
-func record(r stateport.Run) apicontract.RunRecord {
-	return apicontract.RunRecord{RunSummary: view(r), RunCause: r.Origin.RunCause, SelectedFile: r.Origin.RequestedFile}
+func (s *Service) record(ctx context.Context, a actor.Actor, r stateport.Run) (apicontract.RunRecord, error) {
+	v, err := s.view(ctx, a, r)
+	if err != nil {
+		return apicontract.RunRecord{}, err
+	}
+	return apicontract.RunRecord{RunSummary: v, RunCause: r.Origin.RunCause, SelectedFile: r.Origin.RequestedFile}, nil
 }
 
 func (s *Service) listFilter(ctx context.Context, a actor.Actor, q runQuery) (stateport.RunFilter, error) {
@@ -139,25 +154,35 @@ func (s *Service) prepareRunList(ctx context.Context, a actor.Actor, q runQuery)
 	if err != nil {
 		return nil, err
 	}
-	f, err := s.listFilter(ctx, a, q)
+	_, err = s.listFilter(ctx, a, q)
 	if err != nil {
 		return nil, err
 	}
 	return bounded(func(ctx context.Context) (apicontract.RunPage, error) {
-		if q.Held {
-			return s.heldRunPage(ctx, f)
-		}
-		rows, err := s.c.Runs.Runs(ctx, f)
-		page := apicontract.RunPage{Runs: []apicontract.RunRecord{}, ServerTime: s.c.Now()}
-		for _, r := range rows {
-			r.Steps = nil
-			r.NextStepOffset = nil
-			page.Runs = append(page.Runs, record(r))
-		}
-		if len(rows) == f.Limit {
-			page.NextCursor = rows[len(rows)-1].ID
-		}
-		return page, err
+		return authorizedRead(ctx, s, readAuthority{a, "run_list"}, func(ctx context.Context, a actor.Actor) (apicontract.RunPage, error) {
+			f, err := s.listFilter(ctx, a, q)
+			if err != nil {
+				return apicontract.RunPage{}, err
+			}
+			if q.Held {
+				return s.heldRunPage(ctx, a, f)
+			}
+			rows, err := s.c.Runs.Runs(ctx, f)
+			page := apicontract.RunPage{Runs: []apicontract.RunRecord{}, ServerTime: s.c.Now()}
+			for _, r := range rows {
+				r.Steps = nil
+				r.NextStepOffset = nil
+				record, err := s.record(ctx, a, r)
+				if err != nil {
+					return apicontract.RunPage{}, err
+				}
+				page.Runs = append(page.Runs, record)
+			}
+			if len(rows) == f.Limit {
+				page.NextCursor = rows[len(rows)-1].ID
+			}
+			return page, err
+		})
 	}), nil
 }
 
@@ -166,14 +191,22 @@ func (s *Service) prepareStatus(ctx context.Context, a actor.Actor, q runQuery) 
 	if err != nil {
 		return nil, err
 	}
-	r, err := s.resolveRun(ctx, a, q)
+	_, err = s.resolveRun(ctx, a, q)
 	if err != nil {
 		return nil, err
 	}
-	return bounded(func(context.Context) (stepmodel.RunSummary, error) { return view(r), nil }), nil
+	return bounded(func(ctx context.Context) (stepmodel.RunSummary, error) {
+		return authorizedRead(ctx, s, readAuthority{a, "status"}, func(ctx context.Context, a actor.Actor) (stepmodel.RunSummary, error) {
+			r, err := s.resolveRun(ctx, a, q)
+			if err != nil {
+				return stepmodel.RunSummary{}, err
+			}
+			return s.view(ctx, a, r)
+		})
+	}), nil
 }
 
-func (s *Service) repos(ctx context.Context, scope []string, options apicontract.RepoListArgs) ([]apicontract.Repository, error) {
+func (s *Service) repos(ctx context.Context, a actor.Actor, scope []string, options apicontract.RepoListArgs) ([]apicontract.Repository, error) {
 	out := []apicontract.Repository{}
 	q := stateport.CatalogFilter{Repositories: scope, Limit: stateport.RunPageLimit, IncludeArchived: true}
 	for {
@@ -181,7 +214,7 @@ func (s *Service) repos(ctx context.Context, scope []string, options apicontract
 		if err != nil {
 			return nil, err
 		}
-		page, err := s.repoViews(ctx, selectArchivedRepositories(rows, options.Archived), options)
+		page, err := s.repoViews(ctx, a, selectArchivedRepositories(rows, options.Archived), options)
 		if err != nil {
 			return nil, err
 		}
@@ -193,7 +226,7 @@ func (s *Service) repos(ctx context.Context, scope []string, options apicontract
 	}
 }
 
-func (s *Service) repoViews(ctx context.Context, repos []stateport.Repository, options apicontract.RepoListArgs) ([]apicontract.Repository, error) {
+func (s *Service) repoViews(ctx context.Context, a actor.Actor, repos []stateport.Repository, options apicontract.RepoListArgs) ([]apicontract.Repository, error) {
 	if options.NamesOnly {
 		out := make([]apicontract.Repository, 0, len(repos))
 		for _, r := range repos {
@@ -204,11 +237,7 @@ func (s *Service) repoViews(ctx context.Context, repos []stateport.Repository, o
 	if len(repos) == 0 {
 		return []apicontract.Repository{}, nil
 	}
-	scope := make([]string, len(repos))
-	for i, r := range repos {
-		scope[i] = r.Canonical
-	}
-	out, err := s.runFacts(ctx, repos, scope, options.RecentRuns)
+	out, err := s.runFacts(ctx, a, repos, options.RecentRuns)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +261,11 @@ func (s *Service) repoViews(ctx context.Context, repos []stateport.Repository, o
 // its recent runs: one store read for the whole page, under the names already
 // narrowed to the caller's scope, as for the run list. Asked for, a repository
 // without runs carries an empty list, so every reader can say "no runs".
-func (s *Service) runFacts(ctx context.Context, repos []stateport.Repository, scope []string, wanted bool) ([]apicontract.Repository, error) {
+func (s *Service) runFacts(ctx context.Context, a actor.Actor, repos []stateport.Repository, wanted bool) ([]apicontract.Repository, error) {
+	scope := make([]string, len(repos))
+	for i, r := range repos {
+		scope[i] = r.Canonical
+	}
 	latest, err := s.c.Runs.Runs(ctx, stateport.RunFilter{Repositories: scope, LatestRepository: true, Limit: stateport.RunPageLimit})
 	if err != nil {
 		return nil, err
@@ -251,7 +284,10 @@ func (s *Service) runFacts(ctx context.Context, repos []stateport.Repository, sc
 		}
 		for _, run := range latest {
 			if run.Repo == r.Canonical {
-				latest := view(run)
+				latest, err := s.view(ctx, a, run)
+				if err != nil {
+					return nil, err
+				}
 				v.LatestRun = &latest
 				break
 			}

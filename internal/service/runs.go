@@ -19,6 +19,7 @@ type FinishedRun struct {
 	NativePhase    *stepmodel.NativePhase
 	Reason, Detail string
 	Failure        *stepmodel.FailureRecord
+	Diagnostic     *stepmodel.NativeDiagnostic
 }
 
 func validateFinishedRun(o FinishedRun) error {
@@ -104,7 +105,7 @@ func (s *Service) recordFinished(ctx context.Context, f finishedRecord) error {
 	if err != nil {
 		return err
 	}
-	update := stateport.RunUpdate{ProjectCI: projectCI, ID: r.ID, Revision: r.Revision, Status: o.Status, Failure: o.Failure, Publication: intent, Promotion: promotion, Reason: reason, Detail: o.Detail, NativePhase: o.NativePhase}
+	update := stateport.RunUpdate{ProjectCI: projectCI, ID: r.ID, Revision: r.Revision, Status: o.Status, Failure: o.Failure, Publication: intent, Promotion: promotion, Reason: reason, Detail: o.Detail, NativePhase: o.NativePhase, Diagnostic: o.Diagnostic}
 	action := stateport.Action{Actor: r.Origin.Actor, Events: []stateport.EventWrite{s.event(r, model.EventRunFinished, reason, fmt.Sprint(r.Revision))}}
 
 	if promotion != nil {

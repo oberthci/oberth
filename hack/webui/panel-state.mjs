@@ -9,13 +9,14 @@ export async function panelState() {
    window.fetch=async(path,options)=>{
     const url=new URL(path,location.href),response=await panelFetch(path,options);
     if(url.pathname.endsWith('/logs'))panelReads.logs++;
-    if(url.pathname===${JSON.stringify('/api'+path)})panelReads.phase=(await response.clone().json()).steps.find(step=>step.plan_path==='test').detail;
+    if(url.pathname===${JSON.stringify('/api'+path)})panelReads.phase=(await response.clone().json()).steps.find(step=>step.plan_path==='test').native_diagnostic?.cause;
     return response;
    };`});
   await client.loaded(path,'.log h2');
   const advance=async phase=>{
+   const cause={steps:'startup','other-1':'image','other-2':'quota_wait','other-3':'node',detail:'deadline'}[phase];
    await deadline('commit panel '+phase,()=>client.evaluate(`fetch('/example/progress?phase=${phase}',{method:'POST'}).then(async response=>{if(!response.ok)throw new Error(await response.text());})`));
-   await deadline('observe panel '+phase,()=>client.evaluate(`new Promise(resolve=>{const test=()=>{if(panelReads.phase===${JSON.stringify(phase)}&&!screen.reading&&!screen.logBusy)resolve();else setTimeout(test,10);};test();})`));
+   await deadline('observe panel '+phase,()=>client.evaluate(`new Promise(resolve=>{const test=()=>{if(panelReads.phase===${JSON.stringify(cause)}&&!screen.reading&&!screen.logBusy)resolve();else setTimeout(test,10);};test();})`));
   };
   await advance('steps');
   await client.evaluate(`(()=>{
@@ -37,7 +38,7 @@ export async function panelState() {
   check(other.logs===1,'other steps re-read a finished log '+JSON.stringify(other));
   await advance('detail');
   const changed=await inspect();preserved(changed);
-  check(changed.detail==='Updated prepare diagnostics.'&&changed.logs===2,'selected step did not refresh its own changed projection '+JSON.stringify(changed));
+  check(changed.detail==='A required secret could not be delivered to this admitted step.'&&changed.logs===2,'selected step did not refresh its own changed projection '+JSON.stringify(changed));
   return {before,other,changed};
  } finally {await client.close();}
 }

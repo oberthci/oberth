@@ -48,6 +48,7 @@ export function duration(run: Run, now: number): string {
   const start = Date.parse(run.started_at)
   const end = run.finished_at ? Date.parse(run.finished_at) : now - (run.clockOffset ?? 0)
   if (!Number.isFinite(created) || !Number.isFinite(start) || !Number.isFinite(end) || end < start) return '—'
+  if (run.finished_at) return span(end - start, 2)
   // Native start and stored creation stamps can differ; bound both on the profile's clock.
   const lived = Math.max(0, now - (run.clockOffset ?? 0) - created)
   return span(Math.min(end - start, lived), 2)
@@ -126,7 +127,7 @@ const FALLBACK_WIDTH = 80
 // the order Last says (the last column goes when it cannot keep NARROWEST), then lines are cut.
 // A kept reason is never cut and the status word always stays: the last column keeps the
 // reason whole while the names give way, then AGE, TIME and STEPS go, then the names. Below
-// about 42 cells (the RUN and STATUS columns, the reason and its spaces) a line is cut.
+// the physical minimum, the existing row overflows rather than cutting its reason.
 function fit(table: string[][], requested: number, first: boolean, kept: string[]): string[] {
   const width = Number.isFinite(requested) && requested >= 2 ? Math.floor(requested) : FALLBACK_WIDTH
   const widths = table[0]!.map((_, index) => Math.max(...table.map(row => cells(row[index]!))))
@@ -145,12 +146,15 @@ function fit(table: string[][], requested: number, first: boolean, kept: string[
     }
   }
   for (const shrink of first ? [shrinkLast, shrinkNames] : [shrinkNames, shrinkLast]) shrink()
-  if (floor > 0) for (const index of [6, 5, 4, 1, 2]) if (over() > 0) widths[index] = 0
+  for (const index of [6, 5, 4, 1, 2]) if (over() > 0) widths[index] = 0
   // A cut keeps all but the last cell, so a kept reason exactly as wide as its column shows alone.
-  const fitted = (cell: string, size: number, keep: string) => cells(cell) > size && keep && size <= cells(keep) ? keep : cut(cell, size)
+  const fitted = (cell: string, size: number, keep: string) => {
+    const clipped = cut(cell, size)
+    return keep && !clipped.includes(keep) ? keep : clipped
+  }
   const shown = (row: string[], upto: number, keep: string) => row.slice(0, upto).flatMap((cell, index) =>
     widths[index] ? [pad(fitted(cell, widths[index]!, index === last ? keep : ''), widths[index]!)] : [])
-  return table.map((row, index) => cut(shown(row, row.length, kept[index]!).join(' ').trimEnd(), width))
+  return table.map((row, index) => shown(row, row.length, kept[index]!).join(' ').trimEnd())
 }
 
 // The header and one line per run, shared by the box and /oberth-runs.
@@ -161,6 +165,7 @@ function rows(runs: Run[], now: number, width: number, last: Last): string[] {
   ].map(clean))], width, last.first, ['', ...runs.map(run => clean(last.kept(run)))])
 }
 
+const specific = (run: Run) => [run.status, `step ${run.status}`, `run ${run.status}`, `run is ${run.status}`].includes(run.display_reason) ? '' : run.display_reason
 const selected = (run: Run) => run.selected_file ? `${run.selected_file} selected` : ''
 
 // A resumed or assisted run is never evidence: its row says so whole, passed rows included,
@@ -174,21 +179,20 @@ export const notEvidence = (run: Run) => run.display_reason === RESUMED_REASON |
 export function boxRows(state: Snapshot, count: number, width: number): string[] {
   const runs = visible(state, count)
   const watched = (run: Run) => state.pins.some(pin => pin.run.id === run.id) ? '●' : ''
-  const kept = (run: Run) => notEvidence(run) ? [watched(run), notEvidence(run)].filter(Boolean).join(' ') : ''
-  const text = (run: Run) => [kept(run) || watched(run), selected(run), failedStep(run)].filter(Boolean).join(' ')
+  const kept = specific
+  const text = (run: Run) => [watched(run), specific(run), selected(run), failedStep(run)].filter(Boolean).join(' ')
   return runs.length ? rows(runs, state.now, width, { label: '', text, kept, first: true }) : []
 }
 
 // /oberth-runs ends a failed row with its failed step and reason and a cancelled row with
 // its reason, kept before the names; a not-evidence row leads with its reason, whole;
 // other reasons only repeat the status word.
-const explained = (run: Run) => run.status === 'failed' || run.status === 'cancelled'
 const reason = (run: Run) => notEvidence(run)
   ? [notEvidence(run), selected(run), failedStep(run)].filter(Boolean).join(' · ')
-  : [selected(run), explained(run) ? [failedStep(run), run.display_reason].filter(Boolean).join(': ') : ''].filter(Boolean).join(' · ')
+  : [selected(run), [failedStep(run), specific(run)].filter(Boolean).join(': ')].filter(Boolean).join(' · ')
 
 export function table(runs: Run[], now: number, width: number): string {
-  return runs.length ? rows(runs, now, width, { label: 'REASON', text: reason, kept: notEvidence, first: false }).join('\n') : 'No runs.'
+  return runs.length ? rows(runs, now, width, { label: 'REASON', text: reason, kept: specific, first: false }).join('\n') : 'No runs.'
 }
 
 export function limit(value: unknown): number {

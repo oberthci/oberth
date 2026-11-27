@@ -1,10 +1,25 @@
 package stateport
 
 import (
+	"reflect"
 	"time"
 
 	"github.com/oberthci/oberth/internal/stepmodel"
 )
+
+// EqualStepFacts separates the public native facts from opaque diagnostics.
+// Raw text has its own bounded evidence owner, never a progress event.
+func EqualStepFacts(a, b []stepmodel.RunStep) bool {
+	a = (stepmodel.RunSummary{Steps: a}).Clone().Steps
+	b = (stepmodel.RunSummary{Steps: b}).Clone().Steps
+	for i := range a {
+		a[i].Detail = ""
+	}
+	for i := range b {
+		b[i].Detail = ""
+	}
+	return reflect.DeepEqual(a, b)
+}
 
 // Node is raw native attempt evidence, separate from logical plan entries.
 // A nil exit or credential observation remains unknown.
@@ -26,8 +41,21 @@ type Node struct {
 // steps has started gives for what it waits. The store derives the run's
 // queued or running status from them with stepmodel.Progress.
 type Progress struct {
-	Steps   []stepmodel.RunStep
-	Waiting string
+	Steps      []stepmodel.RunStep
+	Waiting    string
+	Diagnostic *stepmodel.NativeDiagnostic
+}
+
+func (p Progress) DiagnosticFor(reason string) *stepmodel.NativeDiagnostic {
+	for _, step := range p.Steps {
+		if step.DisplayReason == reason && step.Diagnostic != nil {
+			return step.Diagnostic.Clone()
+		}
+	}
+	if reason == p.Waiting {
+		return p.Diagnostic.Clone()
+	}
+	return nil
 }
 
 // EvidenceStart declares the number of distinct native nodes in one observation.

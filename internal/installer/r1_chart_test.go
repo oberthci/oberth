@@ -132,13 +132,14 @@ func TestControllerScopeAndNoTestHooks(t *testing.T) {
 	}
 	for _, o := range objects {
 		name := o["metadata"].(map[string]any)["name"]
-		if (o["kind"] == "ClusterRole" || o["kind"] == "ClusterRoleBinding") && name != "oberth-source-review" && name != "oberth-oberth-store-server-binding" {
+		if (o["kind"] == "ClusterRole" || o["kind"] == "ClusterRoleBinding") && !allowedClusterRoleName(name) {
 			t.Fatal("controller has cluster authority", o)
 		}
 		if o["kind"] == "Pod" {
 			t.Fatal("dependency test hook retained", o)
 		}
 	}
+	assertNodeObserverScope(t, objects)
 	binding := object(t, objects, "RoleBinding", "oberth-task-results")
 	if jsonOf(t, binding["subjects"]) != `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:serviceaccounts:jobs"}]` {
 		t.Fatal(binding)
@@ -146,6 +147,26 @@ func TestControllerScopeAndNoTestHooks(t *testing.T) {
 	role := object(t, objects, "Role", "oberth-task-results")
 	if jsonOf(t, role["rules"]) != `[{"apiGroups":["argoproj.io"],"resources":["workflowtaskresults"],"verbs":["create","patch"]}]` {
 		t.Fatal(role)
+	}
+}
+
+func allowedClusterRoleName(name any) bool {
+	switch name {
+	case "oberth-source-review", "oberth-oberth-store-server-binding", "oberth-node-observer":
+		return true
+	}
+	return false
+}
+
+func assertNodeObserverScope(t *testing.T, objects []map[string]any) {
+	t.Helper()
+	role := object(t, objects, "ClusterRole", "oberth-node-observer")
+	if jsonOf(t, role["rules"]) != `[{"apiGroups":[""],"resources":["nodes"],"verbs":["get","list","watch"]}]` {
+		t.Fatal("Node observer gained authority", role)
+	}
+	binding := object(t, objects, "ClusterRoleBinding", "oberth-node-observer")
+	if jsonOf(t, binding["subjects"]) != `[{"kind":"ServiceAccount","name":"oberth","namespace":"oberth"}]` || jsonOf(t, binding["roleRef"]) != `{"apiGroup":"rbac.authorization.k8s.io","kind":"ClusterRole","name":"oberth-node-observer"}` {
+		t.Fatal("Node observer escaped the server account", binding)
 	}
 }
 func TestOwnedNativeInputsOnly(t *testing.T) {

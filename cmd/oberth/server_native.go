@@ -19,7 +19,7 @@ func (o *serverOwners) nativePart(ctx context.Context) (Part, error) {
 	ns := o.c.config.PipelineNamespace
 	workflows := o.cluster.Argo.ArgoprojV1alpha1().Workflows(ns)
 	pods := o.cluster.Kube.CoreV1().Pods(ns)
-	hub, err := argowatch.New(argowatch.Config{Namespace: ns, Workflows: workflows, Pods: pods})
+	hub, err := argowatch.New(argowatch.Config{Namespace: ns, Workflows: workflows, Pods: pods, Nodes: o.cluster.Kube.CoreV1().Nodes()})
 	if err != nil {
 		return Part{}, err
 	}
@@ -64,7 +64,7 @@ func (p nativePods) Exec(ctx context.Context, r argojob.ExecRequest) error {
 type nativeReporter struct{ owner *serverOwners }
 
 func (r nativeReporter) Finished(ctx context.Context, id string, o argojob.Observation) error {
-	return r.owner.service.Finished(ctx, service.FinishedRun{RunID: id, Status: o.Status, NativePhase: &o.Phase, Reason: o.Reason, Detail: o.Detail, Failure: o.Failure})
+	return r.owner.service.Finished(ctx, service.FinishedRun{RunID: id, Status: o.Status, NativePhase: &o.Phase, Reason: o.Reason, Detail: o.Detail, Failure: o.Failure, Diagnostic: o.Diagnostic})
 }
 func (r nativeReporter) Held(ctx context.Context, h model.HeldNotice) error {
 	return r.owner.service.Held(ctx, h)

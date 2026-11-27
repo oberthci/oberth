@@ -24,6 +24,11 @@ const (
 	reasonSyncLimit        = "waiting for sync limit %s"
 	reasonMutex            = "waiting for mutex %s"
 	reasonRunSlot          = "waiting for a run slot"
+	reasonQuotaWait        = "waiting for quota"
+	reasonQuota            = "quota exceeded"
+	reasonDiskPressure     = "node disk pressure"
+	reasonMemoryPressure   = "node memory pressure"
+	reasonPIDPressure      = "node process pressure"
 	reasonImage            = "image pull failed"
 	reasonStarting         = "starting containers"
 	reasonBeforeStart      = "failed before starting"
@@ -54,11 +59,12 @@ type diagnosis struct {
 	reason, detail, container string
 	class                     stepmodel.FailureClass
 	exit                      *int
+	fact                      *stepmodel.NativeDiagnostic
 }
 
 func diagnose(n wf.NodeStatus, p *core.Pod, stop bool, template *wf.Template) (d diagnosis) {
 	defer func() {
-		d = phaseDiagnosis(d, n.Phase)
+		d = currentPhaseDiagnosis(d, n, p)
 		// Only a node ended by shutdown loses its author-failure diagnosis.
 		if stop {
 			d.reason, d.class = reasonStopped, stepmodel.FailureCancelled
@@ -69,6 +75,13 @@ func diagnose(n wf.NodeStatus, p *core.Pod, stop bool, template *wf.Template) (d
 	}()
 	n.Message = currentMessage(n)
 	d = diagnosis{reason: reasonUnknown, detail: n.Message, container: "main", class: stepmodel.FailureUnknown}
+	if nodeQuotaRefused(n, p) {
+		d.reason, d.class = reasonQuotaWait, stepmodel.FailureInfrastructure
+		if terminalNode(n) {
+			d.reason = reasonQuota
+		}
+		return d
+	}
 	if p != nil && diagnosePod(&d, p, template) {
 		d = nativeDiagnosis(d, n)
 		if !stop {
@@ -79,7 +92,7 @@ func diagnose(n wf.NodeStatus, p *core.Pod, stop bool, template *wf.Template) (d
 	if nativeExit(&d, n) {
 		return nativeDiagnosis(d, n)
 	}
-	if p == nil && n.Type == wf.NodeTypePod && terminalNode(n) && strings.Contains(n.Message, "is forbidden") {
+	if nodePodRefused(n, p) {
 		d.reason, d.class = reasonPodRefused, stepmodel.FailureInfrastructure
 		if strings.Contains(n.Message, "violates PodSecurity") {
 			d.class = stepmodel.FailureAuthor
@@ -87,6 +100,14 @@ func diagnose(n wf.NodeStatus, p *core.Pod, stop bool, template *wf.Template) (d
 		return d
 	}
 	d.reason = observedNodeReason(n, p, template)
+	return d
+}
+
+func currentPhaseDiagnosis(d diagnosis, n wf.NodeStatus, pod *core.Pod) diagnosis {
+	d = phaseDiagnosis(d, n.Phase)
+	if n.Phase == wf.NodeRunning && stepmodel.NativeWait(d.reason) && (pod == nil || pod.Status.Phase != core.PodRunning) {
+		d.reason = reasonRunning
+	}
 	return d
 }
 
@@ -98,11 +119,15 @@ func phaseDiagnosis(d diagnosis, phase wf.NodePhase) diagnosis {
 		return d
 	case wf.NodePending:
 		switch d.reason {
-		case reasonWaiting, reasonNode, reasonImage, reasonStarting:
+		case reasonWaiting, reasonNode, reasonImage, reasonStarting, reasonQuotaWait:
 			return d
 		}
 		d.reason = reasonStarting
 		return d
+	case wf.NodeRunning:
+		if stepmodel.NativeWait(d.reason) {
+			return d
+		}
 	}
 	d.reason = nodeReason(phase)
 	return d
@@ -133,6 +158,9 @@ func diagnosePod(d *diagnosis, p *core.Pod, template *wf.Template) bool {
 		return true
 	}
 	for _, c := range p.Status.InitContainerStatuses {
+		if initialContainerWaiting(d, p, c) {
+			return true
+		}
 		if c.State.Terminated != nil && c.State.Terminated.ExitCode != 0 {
 			d.container, d.detail, d.reason, d.class = c.Name, c.State.Terminated.Message, reasonInit, stepmodel.FailureAuthor
 			d.exit = new(int(c.State.Terminated.ExitCode))
@@ -200,7 +228,7 @@ func typedPodReason(d *diagnosis, p *core.Pod) bool {
 			d.reason, d.detail, d.class = reasonDisrupted, c.Message, stepmodel.FailureInfrastructure
 			return true
 		}
-		if c.Type == core.PodScheduled && c.Status == core.ConditionFalse && c.Reason == "Unschedulable" {
+		if c.Type == core.PodScheduled && c.Status == core.ConditionFalse && c.Reason == "Unschedulable" && p.Status.Phase != core.PodRunning {
 			d.reason, d.detail = reasonNode, c.Message
 			return true
 		}
@@ -324,4 +352,14 @@ func holdDiagnosticDetail(detail string, p *core.Pod) string {
 		}
 	}
 	return detail
+}
+
+func nodeQuotaRefused(n wf.NodeStatus, p *core.Pod) bool {
+	return p == nil && (n.Phase == wf.NodePending || terminalNode(n)) && quotaRefusal(n.Message)
+}
+func nodePodRefused(n wf.NodeStatus, p *core.Pod) bool {
+	return p == nil && n.Type == wf.NodeTypePod && terminalNode(n) && strings.Contains(n.Message, "is forbidden")
+}
+func initialContainerWaiting(d *diagnosis, p *core.Pod, c core.ContainerStatus) bool {
+	return c.State.Waiting != nil && p.Status.Phase == core.PodPending && diagnoseContainer(d, c) && (d.reason == reasonImage || d.reason == reasonStarting)
 }

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/oberthci/oberth/internal/actor"
 	"github.com/oberthci/oberth/internal/apicontract"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/stateport"
@@ -38,27 +39,25 @@ func (s *Service) PrepareRepoList(ctx context.Context, c apicontract.Caller, q a
 	if err != nil {
 		return nil, err
 	}
-	scope, err := s.repositoryScope(ctx, a)
-	if err != nil {
+	if _, err := s.listRepositories(ctx, a, runQuery{Repo: q.Repo}); err != nil {
 		return nil, err
 	}
-	if q.Repo != "" {
-		r, e := s.resolveRepo(ctx, a, q.Repo)
-		if e != nil {
-			return nil, e
-		}
-		scope = []string{r.Canonical}
-	}
 	return bounded(func(ctx context.Context) (apicontract.RepoPage, error) {
-		rows, err := s.repos(ctx, scope, q)
-		if err != nil {
-			return apicontract.RepoPage{}, err
-		}
-		upstreams, err := s.scopedRepoUpstreams(ctx, a)
-		if err != nil {
-			return apicontract.RepoPage{}, err
-		}
-		return apicontract.RepoPage{Repositories: rows, Upstreams: upstreams}, nil
+		return authorizedRead(ctx, s, readAuthority{a, "repo_list"}, func(ctx context.Context, a actor.Actor) (apicontract.RepoPage, error) {
+			scope, err := s.listRepositories(ctx, a, runQuery{Repo: q.Repo})
+			if err != nil {
+				return apicontract.RepoPage{}, err
+			}
+			rows, err := s.repos(ctx, a, scope, q)
+			if err != nil {
+				return apicontract.RepoPage{}, err
+			}
+			upstreams, err := s.scopedRepoUpstreams(ctx, a)
+			if err != nil {
+				return apicontract.RepoPage{}, err
+			}
+			return apicontract.RepoPage{Repositories: rows, Upstreams: upstreams}, nil
+		})
 	}), nil
 }
 func (s *Service) PrepareRunCancel(ctx context.Context, c apicontract.Caller, q apicontract.RunCancelArgs) (apicontract.Call[apicontract.Receipt], error) {

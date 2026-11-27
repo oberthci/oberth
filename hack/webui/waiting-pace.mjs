@@ -26,7 +26,7 @@ export async function waitingPace() {
   await post('/example/log-ready');
   await deadline('paced waiting log receives output',()=>client.evaluate(`new Promise(resolve=>{const test=()=>{if(!screen.logBusy&&document.querySelector('.terminal pre').textContent.includes('prepare live output'))resolve();else setTimeout(test,10);};test();})`),7000);
   const after=await client.evaluate(`({count:waitPace.times.length,open:screen.logHeader.querySelector('details').open,notice:document.querySelector('#notice').textContent,detail:screen.logStep.detail})`);
-  check(after.open&&after.notice===''&&after.detail==='Updated running diagnostics.','paced waiting log lost its panel '+JSON.stringify(after));
+  check(after.open&&after.notice===''&&after.detail==='Source delivery did not complete for this admitted step.','paced waiting log lost its panel '+JSON.stringify(after));
   await pause(600);check(await client.evaluate('waitPace.times.length')===after.count,'resolved paced log kept polling');
   client.checkFatal();return {gaps,progressAt,resumed,hidden,after};
  } finally {await client.close();}

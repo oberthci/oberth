@@ -16,7 +16,7 @@ func checkQueuedReason(t *testing.T, f RunFixture) {
 	steps[0].Status = stepmodel.StepPending
 	for _, reason := range []string{"starting containers", "waiting to start", "waiting for a run slot", "waiting for sync limit go", ""} {
 		mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps, Waiting: reason}))
-		runState(t, f, id, progressWant{stepmodel.RunQueued, "starting containers", nil})
+		runState(t, f, id, progressWant{stepmodel.RunQueued, reason, nil})
 	}
 	steps[0].Status = stepmodel.StepRunning
 	mustRun(t, f.Port.SaveProgress(t.Context(), id, stateport.Progress{Steps: steps, Waiting: "waiting to start"}))

@@ -57,6 +57,7 @@ func TestInformerSelectorsCopiesEventsAndCancellation(t *testing.T) {
 	assertCache(t, h)
 	var got *wf.Workflow
 	w.ResourceVersion = "2"
+	w.Status.Phase = wf.WorkflowRunning
 	if _, err = argo.ArgoprojV1alpha1().Workflows("ci").Update(ctx, w, meta.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}

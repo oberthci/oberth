@@ -24,6 +24,7 @@ type Observation struct {
 	Phase          stepmodel.NativePhase
 	Reason, Detail string
 	Failure        *stepmodel.FailureRecord
+	Diagnostic     *stepmodel.NativeDiagnostic
 	Complete       bool
 	workflow       *wf.Workflow
 }
@@ -39,6 +40,7 @@ type Projection struct {
 	Plan                        admissioncontract.Plan
 	Workflow                    *wf.Workflow
 	Pods                        []*core.Pod
+	Nodes                       []*core.Node
 	Previous                    []stepmodel.RunStep
 	PreviousNodes               []stateport.Node
 }
@@ -65,7 +67,7 @@ func Project(ctx context.Context, in Projection) (Observation, error) {
 		if err := ctx.Err(); err != nil {
 			return Observation{}, err
 		}
-		rows = appendPlan(rows, projectionInput{runID: in.RunID, infrastructure: in.Infrastructure, deliveryEvidenceUnavailable: in.DeliveryEvidenceUnavailable, entry: entry, w: w, pods: pods, groups: groups, out: &out, paths: paths, waits: waits, previous: prev, previousNodes: in.PreviousNodes})
+		rows = appendPlan(rows, projectionInput{runID: in.RunID, infrastructure: in.Infrastructure, deliveryEvidenceUnavailable: in.DeliveryEvidenceUnavailable, entry: entry, w: w, pods: pods, nodes: in.Nodes, groups: groups, out: &out, paths: paths, waits: waits, previous: prev, previousNodes: in.PreviousNodes})
 	}
 	seen := 0
 	for _, nodes := range groups {
@@ -82,6 +84,7 @@ func Project(ctx context.Context, in Projection) (Observation, error) {
 	}
 	out.Steps = stateport.PlanSteps(plan, out.Steps)
 	finishProjection(&out, w, rows)
+	out.Diagnostic = observationDiagnostic(out, w)
 	return out, nil
 }
 
@@ -92,6 +95,7 @@ type projectionInput struct {
 	entry                       admissioncontract.PlanEntry
 	w                           *wf.Workflow
 	pods                        []*core.Pod
+	nodes                       []*core.Node
 	groups                      map[string][]wf.NodeStatus
 	out                         *Observation
 	paths                       nativePaths
@@ -105,6 +109,7 @@ func appendPlan(rows []projected, in projectionInput) []projected {
 	for _, path := range paths {
 		waiting := waitingFor(in.w, in.waits, path)
 		row := projected{step: stepmodel.RunStep{Path: path, Name: in.entry.Name, Status: stepmodel.StepPending, DisplayReason: waiting}}
+		row.step.Diagnostic = workflowDiagnostic(waiting, "", in.w)
 		if waiting != reasonWaiting && !terminalWorkflow(in.w) {
 			row.step.Detail = waitingDetail(in.w, waiting)
 		}
@@ -160,11 +165,13 @@ func projectAttempt(row *projected, in projectionInput, n wf.NodeStatus) {
 	p := boundPod(in.w, n, in.pods)
 	d := diagnose(n, p, stoppedNode(in, n), nodeTemplate(in.w, n, admissioncontract.MaxNestingDepth))
 	d = receiptDiagnosis(d, in, n, p)
+	d = pressureDiagnosis(d, n, p, in.nodes)
 	row.step.Status, row.step.DisplayReason, row.step.Detail, row.step.FailureClass = nodeStatus(n.Phase), d.reason, d.detail, d.class
 	if lock := waitingLock(n); lock != "" {
 		row.step.DisplayReason = lockReason(lock)
 		row.step.Detail = strings.TrimSpace(row.step.Detail + "\n" + detailLockStatus)
 	}
+	row.step.Diagnostic = projectedDiagnostic(in, p, d, row.step.DisplayReason)
 	if row.step.StartedAt == nil {
 		row.step.StartedAt = timePointer(n.StartedAt.Time)
 	}
@@ -243,20 +250,21 @@ func underPath(path, base string) bool {
 func finishProjection(out *Observation, w *wf.Workflow, rows []projected) {
 	out.Failure = primaryFailure(rows)
 	if !terminalWorkflow(w) {
-		out.Status, out.Reason = stepmodel.Progress(stepmodel.RunQueued, "", out.Steps, queuedReason(rows))
+		waiting := queuedReason(rows)
+		if quotaRefusal(w.Status.Message) && w.Status.Phase == wf.WorkflowPending {
+			waiting = reasonQuotaWait
+		}
+		out.Status, out.Reason = stepmodel.Progress(stepmodel.RunQueued, "", out.Steps, waiting)
 		return
 	}
 	out.Status, out.Reason = runVerdict(w)
+	if quotaRefusal(w.Status.Message) && out.Status == stepmodel.RunFailed && out.Failure == nil {
+		out.Reason = reasonQuota
+	}
 	if out.Status == stepmodel.RunPassed || out.Status == stepmodel.RunCancelled {
 		out.Failure = nil
 	}
-	if out.Status == stepmodel.RunFailed && out.Failure != nil {
-		for _, r := range rows {
-			if r.step.Path == out.Failure.Step {
-				out.Reason = r.step.DisplayReason
-			}
-		}
-	}
+	finishFailureReason(out, rows)
 }
 func groupNativeNodes(ctx context.Context, w *wf.Workflow) (map[string][]wf.NodeStatus, nativePaths, error) {
 	paths := indexPaths(w)
@@ -279,4 +287,14 @@ func unobservedStep(path string, previous []stepmodel.RunStep) (stepmodel.StepSt
 		}
 	}
 	return stepmodel.StepSkipped, reasonNotReached
+}
+
+func finishFailureReason(out *Observation, rows []projected) {
+	if out.Status == stepmodel.RunFailed && out.Failure != nil {
+		for _, r := range rows {
+			if r.step.Path == out.Failure.Step {
+				out.Reason = r.step.DisplayReason
+			}
+		}
+	}
 }

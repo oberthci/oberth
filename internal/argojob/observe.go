@@ -48,6 +48,8 @@ type tracking struct {
 	previous                 []stepmodel.RunStep
 	previousNodes            []stateport.Node
 	waiting                  string
+	diagnostic               *stepmodel.NativeDiagnostic
+	previousComplete         bool
 	completed, lost, settled bool
 	final                    *Observation
 	refusals                 int
@@ -349,7 +351,7 @@ func (e *Executor) observeRun(ctx context.Context, t *tracking) error {
 	w = o.workflow
 	e.capture(ctx, t, w, pods)
 	settled := e.evidenceSettled(t, o, pods)
-	progressError := e.saveObservation(ctx, t, o, terminalWorkflow(w))
+	progressError := e.saveObservation(ctx, t, o)
 	e.reportHolds(ctx, t, w, pods)
 	t.settled = settled
 	err = errors.Join(terminalError, progressError)
@@ -401,29 +403,27 @@ func (e *Executor) writeEvidence(ctx context.Context, id string, o Observation) 
 // saveProgress writes the steps and, for a queued run, what it waits for,
 // whenever either changed since the last write.
 func (e *Executor) saveProgress(ctx context.Context, t *tracking, o Observation) error {
-	p := stateport.Progress{Steps: o.Steps}
-	if o.Status == stepmodel.RunQueued {
-		p.Waiting = o.Reason
-	}
-	if reflect.DeepEqual(p.Steps, t.previous) && p.Waiting == t.waiting {
+	p := stateport.Progress{Steps: o.Steps, Waiting: o.Reason, Diagnostic: o.Diagnostic}
+	if stateport.EqualStepFacts(p.Steps, t.previous) && p.Waiting == t.waiting && reflect.DeepEqual(p.Diagnostic, t.diagnostic) {
 		return nil
 	}
 	if err := e.config.Progress.SaveProgress(ctx, t.binding.RunID, p); err != nil {
 		return err
 	}
 	t.previous, t.waiting = (stepmodel.RunSummary{Steps: p.Steps}).Clone().Steps, p.Waiting
+	t.diagnostic = p.Diagnostic.Clone()
 	return nil
 }
-func (e *Executor) saveObservation(ctx context.Context, t *tracking, o Observation, terminal bool) error {
+func (e *Executor) saveObservation(ctx context.Context, t *tracking, o Observation) error {
 	if err := e.saveProgress(ctx, t, o); err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(o.Nodes, t.previousNodes) || terminal {
+	if !sameNodeFacts(o.Nodes, t.previousNodes) || o.Complete != t.previousComplete {
 		if err := e.writeEvidence(ctx, t.binding.RunID, o); err != nil {
 			return err
 		}
-		t.previousNodes = o.Nodes
 	}
+	t.previousNodes, t.previousComplete = o.Nodes, o.Complete
 	return nil
 }
 

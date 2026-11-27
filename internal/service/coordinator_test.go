@@ -289,7 +289,7 @@ func TestDirectNativeWriteWakesBlockedWaiter(t *testing.T) {
 		synctest.Wait()
 		select {
 		case got := <-done:
-			if got.err != nil || got.result.Run == nil || got.result.Run.Detail != "native changed" || got.result.TimedOut {
+			if got.err != nil || got.result.Run == nil || got.result.Run.Detail != "native detail restricted" || got.result.TimedOut {
 				t.Fatalf("native wake %+v", got)
 			}
 		default:

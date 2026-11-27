@@ -67,6 +67,11 @@ type InfrastructureStore interface {
 
 func (e *Executor) project(ctx context.Context, t *tracking, w *wf.Workflow, pods []*core.Pod) (Observation, error) {
 	in := Projection{RunID: t.binding.RunID, Plan: t.plan, Workflow: w, Pods: pods, Previous: t.previous, PreviousNodes: t.previousNodes}
+	if nodes, ok := e.config.Cache.(interface {
+		NodesForPods([]*core.Pod) []*core.Node
+	}); ok {
+		in.Nodes = nodes.NodesForPods(pods)
+	}
 	if e.config.Infrastructure != nil {
 		var err error
 		in.Infrastructure, err = e.config.Infrastructure.Infrastructure(ctx, t.binding.RunID)

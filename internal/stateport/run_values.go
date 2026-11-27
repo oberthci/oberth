@@ -50,6 +50,7 @@ type RunUpdate struct {
 	Promotion      *PromotionUpdate
 	Reason, Detail string
 	NativePhase    *stepmodel.NativePhase
+	Diagnostic     *stepmodel.NativeDiagnostic
 }
 
 const (

@@ -40,6 +40,7 @@ func (f *Runs) Finish(ctx context.Context, a stateport.Action, u stateport.RunUp
 			r.DisplayReason = stateport.ReasonRestart
 		}
 		r.Detail = u.Detail
+		r.Diagnostic = u.Diagnostic.Clone()
 		r.NativePhase = u.NativePhase
 		r.Revision++
 		r.FinishedAt = new(f.clock().UTC())

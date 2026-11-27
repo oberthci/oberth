@@ -19,7 +19,7 @@ consumer ports supply native clients, run writes and log capture.
 | **Delta:** `Hooks` | Transform the admitted native object, verify named account UIDs, append source trust and wrap eligible assist leaves. C4 alone calls Prepare and seals; C5 does not decode or admit authored YAML. |
 | `Submit`, `Adopt`, `Cancel` | Post the sealed spec once under C3's fixed-length name, applying an already-saved cancellation as Terminate in that POST. AlreadyExists or an uncertain reply gets one GET and a run/spec-identity check. Adopt reads cache then one live GET on a miss or binding mismatch, verifies original UID/binding and never rebuilds. Only live reads establish foreign ownership or absence. Leave completed Workflows unchanged. First branch cancellation reads live native nodes: Terminate unstarted work, Stop started work; offloaded progress stays Stop. Patch shutdown with a test of exact UID/current mode; Stop never replaces Terminate. No Workflow Delete. |
 | **Delta:** `Project`, observation | Map native node boundary paths onto the immutable plan, stripping Workflow prefix and retry-child suffixes. Latest attempt decides; retain attempts and native Pod/container identities. Use plan order, with numeric loop indexes. Dynamic entries expand in place; terminal remainder becomes unknown. Persist each failed step's reason and failure class so earlier failures survive shutdown and restart. Only native shutdown evidence or a previously active node permits a stopped diagnosis; Stop preserves exit-handler diagnoses. Shutdown messages written before Pod creation also identify stopped steps without a previous observation. Decode compressed nodes with Argo's packer; offloaded/missing nodes mean incomplete evidence. |
-| Watch | Two native informers for Workflows and Pods, managed fields stripped, 10-minute resync and watch-error health. Expose Workflow, Pods, OnChange and Healthy; reads are read-only. Client-go workqueue handles observation keys and retry after observation I/O errors. Sync before recovery and child discovery. Cache membership grants no authority. |
+| Watch | Three shared read-only informers: Workflows, Pods and projected Node UID/name/conditions/taints. Strip managed fields and Node heartbeats; retain 10-minute resync and source health. Node changes follow reverse assigned-Pod links. Client-go workqueue handles existing observation keys and I/O errors. Sync before recovery and child discovery. Cache membership grants no authority. |
 | Logs | Verify Pod controller UID and node identity before and after opening pods/log. Select a failed init when main never started. Retire live-follow availability for missing sources and retired observers. Archive each finished container within a bounded 30-second attempt; retry only unpublished copies. C8 stores bytes and verifies durable receipts before collection. |
 | Holds | List, inspect with arbitrary commands, and release an exactly bound held container. Commands use the step identity and mounts and may change files and downstream outputs; the tool help says so. There is no continue or file tool. C5 owns the paired helper and adds no public endpoint or event cursor. |
 
@@ -175,8 +175,8 @@ source runtime, concrete Store, service, transport or installer imports.
 5. Observation reads informer caches; a miss or binding mismatch gets one live GET. API errors do not
    establish absence. Stop/Terminate keeps observation through exit handlers and
    holds. Native TTL defaults to one day. The run-record finalizer blocks deletion until the final record and every archive receipt are durable, even after the evidence deadline. Terminal nodes without a Pod get a durable never-ran or Pod-missing receipt after a live absence check; captured partial receipts remain readable and collectible. Native TTL collects owned Pods and ends their PVC holds. Authored Pod GC is replaced by collection at Workflow TTL, with no post-finish restoration. Finished-Workflow collection has its own observation worker, retry queue, one copy worker and shared API client budget of five requests per second with burst one. It admits at most eight Workflow attempts per 15-second pass and eight live Pod lookups per attempt, at five collection reads per second with burst one. Collection cannot occupy the live observation loop or its two capture workers; live observation keeps its existing client budget. Newly settled live observations hand off their evidence deadline: only an actual archive failure after it invalidates evidence, once; waiting for collection execution does not. Their existing transient attempt bound precedes historical archive backoff. Replay cannot take ownership while the live observer still tracks the run. Captured node receipts skip live GETs and an attempt reuses its first Pod lookup. Unarchivable sources back off from one minute to one hour even through watch events, with a visible run-log archive deferred reason and retry delay. Historical collection only archives logs and patches retention; it never reprojects steps, rewrites captured log attribution or changes evidence completeness. Shutdown leaves Workflows intact.
-6. Reasons are closed phrases of at most 40 characters with full native text in
-   Detail. Held-step inspection commands are bounded by their deadline and output
+6. Reasons are closed phrases of at most 40 characters. Raw native text stays in internal evidence;
+   C2 rebuilds public Detail from typed facts and authorized references. Inspection commands retain their deadline and output
    limit. C4 owns spec/plan bounds.
 
 | Typed evidence | Reason | Failure class |
@@ -184,13 +184,13 @@ source runtime, concrete Store, service, transport or installer imports.
 | no node / Pending | `waiting to start` | — |
 | Pending for the run cap | `waiting for a run slot` | — |
 | Unschedulable / synchronization wait | `waiting for a node` / `waiting for sync limit K`, `waiting for mutex N` (N is the lock part after the repository segments; `waiting for a lock` when the name is not plain or does not fit) | — |
-| image pull errors | `image pull failed` | unknown |
+| image pull errors / native quota refusal | `image pull failed` / `waiting for quota`, `quota exceeded` | unknown / infrastructure |
 | ContainerCreating / PodInitializing | `starting containers` | — |
 | main exit N / OOMKilled | `exited with code N` / `out of memory` | author |
 | DeadlineExceeded | `step timed out` | deadline |
 | failed source init / authored init without a server receipt | `source delivery failed` (or `failed before starting`) / `init container failed` | author / author |
 | NodeShutdown / DisruptionTarget | `node shut down` / `Pod disrupted` | infrastructure |
-| Evicted without typed cause | `Pod evicted` | unknown |
+| affected assigned Pod with positive pressure / otherwise Evicted | `node disk pressure`, `node memory pressure`, `node process pressure` / `Pod evicted` | infrastructure / unknown |
 | Stop / Terminate, including exit 143 | `stopped` | cancelled |
 | failed/error without exit or Pod | `ended without an exit code` | unknown |
 | Skipped / Omitted | `skipped by condition` / `omitted` | — |
@@ -199,12 +199,12 @@ source runtime, concrete Store, service, transport or installer imports.
 A run is queued until one of its steps has started (a node of it ran or
 failed, in any attempt; a skipped step has not) and running from then on,
 never queued again; its start is the earliest start of a started step. A
-queued run's reason is its first waiting step's reason (a lock, a run slot,
-a node, `image pull failed`, `starting containers`), else `waiting to start`;
-`unknown` is passed over. While queued it keeps the most advanced reason seen:
-every waiting reason < starting containers or image pull failed; within either
-rank the newest reason shows. Progress writes no event and no
-control revision.
+current reason follows the first concrete current step wait in stable plan order,
+including while the run is running; otherwise use an applicable Workflow wait or the queued fallback.
+An obsolete waiting rank never overrides a newer cause. A verified live debugging hold takes precedence;
+resumed always and assisted-on-pass keep their existing not-evidence reasons.
+A public projection batch writes at most one run.updated and no control revision;
+raw message churn with unchanged public facts writes neither steps nor evidence generations.
 A Pending step whose Pod ran, exited, was evicted, disrupted or timed out says `starting containers`
 until its node phase advances; waiting for a node and image pull failures keep their waiting reasons.
 Step reasons follow the displayed status after evidence merges; newer Pod exits cannot label queued or running steps as passed or failed.

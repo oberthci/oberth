@@ -37,7 +37,7 @@ func progressExample(t *testing.T) http.Handler {
 	p := &progressPage{store: store, id: strings.Repeat("c", 32), ready: make(chan struct{}), lateLog: os.Getenv("OBERTH_UI_LATE_LOG") != ""}
 	plan := admissioncontract.Plan{Entries: []admissioncontract.PlanEntry{{Path: "prepare", Name: "prepare"}, {Path: "test", Name: "test"}}}
 	store.SeedRun(stateport.Run{HasAdmission: true, RepositoryID: 1, RunSummary: stepmodel.RunSummary{ID: p.id, Repo: "origin/team/web", Ref: "refs/heads/progress", Status: stepmodel.RunQueued, CreatedAt: testNow()}, Admission: admissioncontract.PreparedView{Plan: plan}})
-	store.SeedSteps(p.id, []stepmodel.RunStep{{Path: "prepare", Name: "prepare", Status: stepmodel.StepQueued, Detail: "Prepare diagnostics."}, {Path: "test", Name: "test", Status: stepmodel.StepPending}})
+	store.SeedSteps(p.id, []stepmodel.RunStep{{Path: "prepare", Name: "prepare", Status: stepmodel.StepQueued, Detail: "Prepare diagnostics.", Diagnostic: &stepmodel.NativeDiagnostic{Source: "pod", Cause: "init"}}, {Path: "test", Name: "test", Status: stepmodel.StepPending}})
 	bindings := exampleRunService(t, store).Bindings()
 	f := setup(t, func(c *api.Config, b *apicontract.Bindings) {
 		c.Runtime.Now = testNow
@@ -116,6 +116,7 @@ func (p *progressPage) advance(ctx context.Context, phase string) error {
 func progressSteps(steps []stepmodel.RunStep, phase string, at time.Time) []stepmodel.RunStep {
 	if phase == "running-progress" {
 		steps[0].Detail = "Updated running diagnostics."
+		steps[0].Diagnostic = &stepmodel.NativeDiagnostic{Source: "pod", Cause: "source"}
 		return steps
 	}
 	steps[0].Status = stepmodel.StepRunning
@@ -123,6 +124,8 @@ func progressSteps(steps []stepmodel.RunStep, phase string, at time.Time) []step
 		steps[0].StartedAt = &at
 	}
 	steps[1].Status, steps[1].Detail = stepmodel.StepQueued, phase
+	causes := map[string]string{"steps": "startup", "other-1": "image", "other-2": "quota_wait", "other-3": "node", "detail": "deadline"}
+	steps[1].Diagnostic = &stepmodel.NativeDiagnostic{Source: "pod", Cause: causes[phase]}
 	if phase != "running" {
 		steps[0].Status = stepmodel.StepPassed
 		if steps[0].FinishedAt == nil {
@@ -138,6 +141,7 @@ func progressSteps(steps []stepmodel.RunStep, phase string, at time.Time) []step
 	}
 	if phase == "detail" {
 		steps[0].Detail = "Updated prepare diagnostics."
+		steps[0].Diagnostic = &stepmodel.NativeDiagnostic{Source: "pod", Cause: "secret"}
 	}
 	return steps
 }

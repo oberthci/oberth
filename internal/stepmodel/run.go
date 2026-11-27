@@ -15,19 +15,20 @@ type LogSelector struct {
 // at most 40 characters, without ellipsis or free-form native text. Detail holds
 // the full diagnostic message for on-demand display; views never truncate reasons.
 type RunStep struct {
-	Path             string        `json:"plan_path"`
-	Name             string        `json:"name"`
-	ParallelGroup    int           `json:"parallel_group,omitempty"`
-	CredentialIntent bool          `json:"credential_intent"`
-	Status           StepStatus    `json:"status"`
-	DisplayReason    string        `json:"display_reason"`
-	FailureClass     FailureClass  `json:"failure_class,omitempty"`
-	Detail           string        `json:"detail,omitempty"`
-	StartedAt        *time.Time    `json:"started_at"`
-	FinishedAt       *time.Time    `json:"finished_at"`
-	AttemptCount     int           `json:"attempt_count"`
-	Attempts         []StepAttempt `json:"attempts,omitzero"`
-	Logs             []LogSelector `json:"logs,omitzero"`
+	Path             string            `json:"plan_path"`
+	Name             string            `json:"name"`
+	ParallelGroup    int               `json:"parallel_group,omitempty"`
+	CredentialIntent bool              `json:"credential_intent"`
+	Status           StepStatus        `json:"status"`
+	DisplayReason    string            `json:"display_reason"`
+	FailureClass     FailureClass      `json:"failure_class,omitempty"`
+	Detail           string            `json:"detail,omitempty"`
+	Diagnostic       *NativeDiagnostic `json:"native_diagnostic,omitempty"`
+	StartedAt        *time.Time        `json:"started_at"`
+	FinishedAt       *time.Time        `json:"finished_at"`
+	AttemptCount     int               `json:"attempt_count"`
+	Attempts         []StepAttempt     `json:"attempts,omitzero"`
+	Logs             []LogSelector     `json:"logs,omitzero"`
 }
 
 // Started reports a step that ran or failed in any attempt: a step that is
@@ -49,28 +50,23 @@ func (s StepStatus) started() bool { return s != StepPending && s != StepQueued 
 
 // Progress is the run-status rule for an unfinished run: it is queued until
 // one of its steps has started and running from then on, never queued again,
-// even while a retry waits. A queued run keeps its most advanced waiting
-// reason; a running run's reason is empty.
-func Progress(current RunStatus, previousReason string, steps []RunStep, waiting string) (RunStatus, string) {
+// even while a retry waits. Current native causes follow stable plan order;
+// an old waiting reason never outranks a newer observation.
+func Progress(current RunStatus, _ string, steps []RunStep, waiting string) (RunStatus, string) {
+	status := RunQueued
 	if current == RunRunning || slices.ContainsFunc(steps, RunStep.Started) {
-		return RunRunning, ""
+		status = RunRunning
 	}
-	if waitingRank(previousReason) > waitingRank(waiting) {
-		waiting = previousReason
+	for _, step := range steps {
+		unfinished := step.Status == StepPending || step.Status == StepQueued || step.Status == StepRunning
+		if unfinished && NativeWait(step.DisplayReason) {
+			return status, step.DisplayReason
+		}
 	}
-	return RunQueued, waiting
-}
-
-// Locks and run slots precede starting a Pod; its containers come last.
-func waitingRank(reason string) int {
-	switch reason {
-	case "starting containers", "image pull failed":
-		return 1
-	case "":
-		return -1
-	default:
-		return 0
+	if status == RunRunning && !NativeWait(waiting) {
+		waiting = ""
 	}
+	return status, waiting
 }
 
 // RunStart is a run's start: the earliest of its recorded start and the starts
@@ -90,18 +86,19 @@ func RunStart(recorded *time.Time, steps []RunStep) *time.Time {
 // phrase of at most 40 characters, without ellipsis or free-form native text.
 // Detail holds full diagnostics for on-demand display; views never truncate reasons.
 type RunSummary struct {
-	ID            string       `json:"id"`
-	Repo          string       `json:"repo"`
-	Ref           string       `json:"ref"`
-	ObjectSHA     string       `json:"object_sha"`
-	CommitSHA     *string      `json:"commit_sha"`
-	Status        RunStatus    `json:"status"` // queued|running|passed|failed|cancelled
-	DisplayReason string       `json:"display_reason"`
-	Detail        string       `json:"detail,omitempty"`
-	NativePhase   *NativePhase `json:"native_phase,omitempty"`
-	CreatedAt     time.Time    `json:"created_at"`
-	StartedAt     *time.Time   `json:"started_at"`
-	FinishedAt    *time.Time   `json:"finished_at"`
+	ID            string            `json:"id"`
+	Repo          string            `json:"repo"`
+	Ref           string            `json:"ref"`
+	ObjectSHA     string            `json:"object_sha"`
+	CommitSHA     *string           `json:"commit_sha"`
+	Status        RunStatus         `json:"status"` // queued|running|passed|failed|cancelled
+	DisplayReason string            `json:"display_reason"`
+	Detail        string            `json:"detail,omitempty"`
+	Diagnostic    *NativeDiagnostic `json:"native_diagnostic,omitempty"`
+	NativePhase   *NativePhase      `json:"native_phase,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
+	StartedAt     *time.Time        `json:"started_at"`
+	FinishedAt    *time.Time        `json:"finished_at"`
 	LogicalStepCounts
 	Steps          []RunStep      `json:"steps,omitzero"`
 	NextStepOffset *int           `json:"next_step_offset,omitempty"`

@@ -38,8 +38,8 @@ func TestRunGetSelectsMetadataWithoutAdmission(t *testing.T) {
 		before := reads.lookups
 		call, err := f.s.PrepareRunGet(t.Context(), workerCaller(), q)
 		got, err := execute(t.Context(), call, err)
-		if err != nil || got.ID != r.ID || len(got.Steps) != 2 || reads.lookups != before+1 {
-			t.Fatal("run_get did not use one metadata lookup", q, got, err, reads.lookups)
+		if err != nil || got.ID != r.ID || len(got.Steps) != 2 || reads.lookups != before+2 {
+			t.Fatal("run_get did not refresh its metadata selection", q, got, err, reads.lookups)
 		}
 	}
 }

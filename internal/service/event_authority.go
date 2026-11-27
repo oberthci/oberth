@@ -19,15 +19,21 @@ func (s *Service) refreshEventScope(ctx context.Context, a actor.Actor, q eventQ
 	if !slices.Equal(a.Scope, current.Scope) {
 		return current, q, refuse(forbidden)
 	}
+	q, err = s.rebindEventScope(ctx, current, q)
+	return current, q, err
+}
+
+func (s *Service) rebindEventScope(ctx context.Context, current actor.Actor, q eventQuery) (eventQuery, error) {
 	for _, repo := range append(slices.Clone(q.Repos), q.runRepositories...) {
 		if _, err := s.resolveRepo(ctx, current, repo); err != nil {
-			return current, q, err
+			return q, err
 		}
 	}
+	var err error
 	if len(q.Repos) == 0 {
 		q.repositories, err = s.repositoryScope(ctx, current)
 	}
-	return current, q, err
+	return q, err
 }
 
 func (s *Service) eventTimeout(ctx context.Context, a actor.Actor, q eventQuery, cause error) (apicontract.EventResult, error) {
@@ -41,6 +47,8 @@ func (s *Service) eventTimeout(ctx context.Context, a actor.Actor, q eventQuery,
 	if err != nil {
 		return apicontract.EventResult{}, err
 	}
-	page, err := s.eventsSince(ctx, a, q)
-	return apicontract.EventResult{EventPage: page, TimedOut: true}, err
+	return authorizedRead(ctx, s, readAuthority{a, "events_wait"}, func(ctx context.Context, current actor.Actor) (apicontract.EventResult, error) {
+		page, err := s.eventsSince(ctx, current, q)
+		return apicontract.EventResult{EventPage: page, TimedOut: true}, err
+	})
 }

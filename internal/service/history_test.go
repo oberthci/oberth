@@ -197,9 +197,11 @@ func TestStepsKeepAuthoredContainersAndUnknownEvidence(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
 	r := f.seed(stepmodel.RunRunning)
-	f.store.native.SeedSteps(r.ID, []stepmodel.RunStep{{Path: "build", Status: stepmodel.StepUnknown, Detail: "native detail", Logs: []stepmodel.LogSelector{{Container: "main"}, {Container: "authored"}, {Container: "wait"}, {Container: "init"}, {Container: "oberth-executor-token"}, {Container: "init-artifact-source"}}}})
+	r.Origin.WorkflowUID = "own"
+	f.store.native.SeedRun(r)
+	f.store.native.SeedSteps(r.ID, []stepmodel.RunStep{{Path: "build", Diagnostic: &stepmodel.NativeDiagnostic{Source: "pod", WorkflowUID: "own"}, Status: stepmodel.StepUnknown, Detail: "native detail", Logs: []stepmodel.LogSelector{{Container: "main"}, {Container: "authored"}, {Container: "wait"}, {Container: "init"}, {Container: "oberth-executor-token"}, {Container: "init-artifact-source"}}}})
 	v, err := f.s.RunGet(t.Context(), caller(), viewQuery{ID: r.ID})
-	if err != nil || v.Steps[0].Status != stepmodel.StepUnknown || len(v.Steps[0].Logs) != 2 || v.Steps[0].Detail != "native detail" {
+	if err != nil || v.Steps[0].Status != stepmodel.StepUnknown || len(v.Steps[0].Logs) != 2 || v.Steps[0].Detail != "native detail restricted" {
 		t.Fatalf("steps %+v %v", v, err)
 	}
 	v, err = f.s.RunGet(t.Context(), caller(), viewQuery{ID: r.ID, Helpers: true})

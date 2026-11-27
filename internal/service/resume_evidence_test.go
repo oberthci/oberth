@@ -238,7 +238,7 @@ func TestResumedWaitAnyAcrossChange(t *testing.T) {
 			if err != nil || result.Run == nil || result.Run.DisplayReason != resumedReason || result.TimedOut == changed {
 				t.Fatal("wait any", changed, result, err)
 			}
-			if changed && result.Run.Detail != "changed" {
+			if changed && !strings.Contains(result.Run.Detail, "native detail restricted") {
 				t.Fatal("returned before the change", result.Run)
 			}
 		}

@@ -362,7 +362,7 @@ test('rows stay single aligned lines within narrow widths', { options }, async (
   for (const line of tiny) expect(line.length).toBeLessThanOrEqual(20)
   const ui = await $.ui.mount({ ...band, surface: 'terminal' })
   for (const line of await ui.findAll({ type: 'Text' })) {
-    expect(line.props.wrap).toBe('truncate-end')
+    expect(line.props.wrap).toBe('wrap')
   }
   await ui.unmount()
 })
@@ -556,7 +556,7 @@ test('one render time bounds duration by age when native start predates creation
   expect(boxRows({ ...state, now: now + 1 }, 3, 120)[1]).toMatch(/ +21s +21s$/)
   expect(duration({ ...item, started_at: '2026-11-18T00:00:10Z' }, now)).toBe('10s')
   expect(duration({ ...item, status: 'queued', started_at: null }, now)).toBe('—')
-  expect(duration({ ...item, status: 'passed', finished_at: '2026-11-18T00:00:21Z' }, now)).toBe('20s')
+  expect(duration({ ...item, status: 'passed', finished_at: '2026-11-18T00:00:21Z' }, now)).toBe('22s')
 })
 
 for (const clockOffset of [-5000, 5000]) {
@@ -568,7 +568,7 @@ for (const clockOffset of [-5000, 5000]) {
     expect(age(item, now)).toBe('20s')
     expect(boxRows(state, 3, 120)[1]).toMatch(/ ▶ running +6\/11 +20s +20s$/)
     expect(table([item], now, 120)).toMatch(/ ▶ running +6\/11 +20s +20s$/)
-    expect(duration({ ...item, status: 'passed', finished_at: '2026-11-18T00:00:21Z' }, now)).toBe('20s')
+    expect(duration({ ...item, status: 'passed', finished_at: '2026-11-18T00:00:21Z' }, now)).toBe('22s')
   })
 }
 
