@@ -26,24 +26,7 @@ func TestReviewPreCacheRefusalsMustBeAudited(t *testing.T) {
 	who := f.joinedActor(t)
 	for _, shape := range []string{"unregistered", "cancelled", "archived"} {
 		t.Run(shape, func(t *testing.T) {
-			repository := "origin/team/unregistered"
-			ctx := t.Context()
-			if shape == "cancelled" {
-				var stop context.CancelFunc
-				ctx, stop = context.WithCancel(ctx)
-				stop()
-				repository = "origin/team/cancelled"
-			}
-			if shape == "archived" {
-				repository = gittest.Repository
-				repo, err := f.owners.c.store.Repository(t.Context(), repository, nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := f.owners.c.store.ArchiveRepository(t.Context(), stateport.Action{Actor: "operator"}, repo.ID); err != nil {
-					t.Fatal(err)
-				}
-			}
+			ctx, repository := f.receiveRefusalCase(t, shape)
 			err := f.owners.gitSession(ctx, sshserver.Session{
 				Identity: sshserver.Identity{Actor: who.Identity, Fingerprint: who.Fingerprint},
 				Command:  sshserver.Command{Service: "git-receive-pack", Repository: repository},
@@ -57,6 +40,27 @@ func TestReviewPreCacheRefusalsMustBeAudited(t *testing.T) {
 				t.Fatalf("authenticated %s receive refused without audit: records=%d, refusal=%v, read_error=%v", shape, len(rows), err, readErr)
 			}
 		})
+	}
+}
+
+func (f *composedFixture) receiveRefusalCase(t *testing.T, shape string) (context.Context, string) {
+	t.Helper()
+	switch shape {
+	case "cancelled":
+		ctx, stop := context.WithCancel(t.Context())
+		stop()
+		return ctx, "origin/team/cancelled"
+	case "archived":
+		repo, err := f.owners.c.store.Repository(t.Context(), gittest.Repository, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.owners.c.store.ArchiveRepository(t.Context(), stateport.Action{Actor: "operator"}, repo.ID); err != nil {
+			t.Fatal(err)
+		}
+		return t.Context(), gittest.Repository
+	default:
+		return t.Context(), "origin/team/unregistered"
 	}
 }
 

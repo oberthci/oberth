@@ -31,12 +31,7 @@ func TestReviewValidEscapedRefBatchMustBeAudited(t *testing.T) {
 	if err != nil || readErr != nil || len(rows) != 1 {
 		t.Fatalf("valid 256-ref refusal lost: encoded_bytes=%d, records=%d, write_error=%v, read_error=%v", len(raw), len(rows), err, readErr)
 	}
-	var detail ReceiveRefusal
-	requireOK(t, json.Unmarshal([]byte(rows[0].Details), &detail))
-	if len(rows[0].Details) > maxReceiveRefusalBytes || detail.OmittedUpdates != 240 || detail.SelectorsOmitted ||
-		detail.File != v.File || detail.Step != v.Step || !reflect.DeepEqual(detail.Updates, v.Updates[:16]) {
-		t.Fatal("escaped batch lost its bounded prefix or omitted count", detail)
-	}
+	checkEscapedRefusalPrefix(t, rows[0].Details, v)
 	for range 10 {
 		requireOK(t, s.RecordReceiveRefusal(t.Context(), "agent", "origin/team/widget", v))
 	}
@@ -47,6 +42,16 @@ func TestReviewValidEscapedRefBatchMustBeAudited(t *testing.T) {
 	}
 	_, _, err = s.Audit(t.Context(), 0, 200)
 	requireOK(t, err)
+}
+
+func checkEscapedRefusalPrefix(t *testing.T, raw string, v ReceiveRefusal) {
+	t.Helper()
+	var detail ReceiveRefusal
+	requireOK(t, json.Unmarshal([]byte(raw), &detail))
+	if len(raw) > maxReceiveRefusalBytes || detail.OmittedUpdates != 240 || detail.SelectorsOmitted ||
+		detail.File != v.File || detail.Step != v.Step || !reflect.DeepEqual(detail.Updates, v.Updates[:16]) {
+		t.Fatal("escaped batch lost its bounded prefix or omitted count", detail)
+	}
 }
 
 func TestReceiveRefusalOversizedSelectorsKeepDenial(t *testing.T) {

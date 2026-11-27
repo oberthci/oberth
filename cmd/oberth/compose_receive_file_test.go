@@ -38,18 +38,24 @@ func TestReviewNativeRefusalMustKeepKnownFile(t *testing.T) {
 		t.Fatalf("native refusal lost known file: got=%q, want=%q, details=%s", detail.File, file, rows[0].Details)
 	}
 	event := gitcache.ReceiveEvent{Actor: rows[0].Actor, Repository: rows[0].ResourceID, Options: gitcache.PushOptions{File: file}}
+	f.assertRefusalFilePreference(t, event)
+}
+
+func (f *composedFixture) assertRefusalFilePreference(t *testing.T, event gitcache.ReceiveEvent) {
+	t.Helper()
 	for _, specific := range []string{"", ".oberth/specific.yaml"} {
 		if err := f.owners.refusedReceive(t.Context(), event, &app.Refusal{Code: "grant", File: specific}); err != nil {
 			t.Fatal(err)
 		}
-		rows, err = f.owners.c.store.AdministrativeAudit(t.Context(), nil, stateport.AdministrativeFilter{Action: "receive.refused", Limit: 20})
+		rows, err := f.owners.c.store.AdministrativeAudit(t.Context(), nil, stateport.AdministrativeFilter{Action: "receive.refused", Limit: 20})
 		if err != nil || len(rows) == 0 {
 			t.Fatal("missing application refusal", rows, err)
 		}
+		var detail store.ReceiveRefusal
 		if err := json.Unmarshal([]byte(rows[0].Details), &detail); err != nil {
 			t.Fatal(err)
 		}
-		want := file
+		want := event.Options.File
 		if specific != "" {
 			want = specific
 		}
