@@ -54,13 +54,23 @@ func TestLogSelectionByCommitAndRef(t *testing.T) {
 		}
 	}
 }
-func TestLogsAuthorizeOnce(t *testing.T) {
+func TestLogsAuthorizeOnceAtPreparation(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
 	f.seed(stepmodel.RunRunning)
-	_, err := f.s.Logs(t.Context(), caller(), logRequest{viewQuery: viewQuery{SHA: head}})
+	f.logs.ReadFunc = func(context.Context, stateport.Run, apicontract.RunLogsArgs) (apicontract.LogResult, error) {
+		if f.store.Calls()["Current"] != 2 {
+			t.Fatal("missing authorization before reading")
+		}
+		return apicontract.LogResult{}, nil
+	}
+	call, err := f.s.Service.PrepareLogs(t.Context(), apicontract.Caller{Actor: caller()}, apicontract.LogsArgs{SHA: head})
 	if err != nil || f.store.Calls()["Current"] != 1 {
 		t.Fatal("nested authorization", err)
+	}
+	_, err = call(t.Context())
+	if err != nil || f.store.Calls()["Current"] != 3 {
+		t.Fatal("missing read or delivery authorization", err)
 	}
 }
 

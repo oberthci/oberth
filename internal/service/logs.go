@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 
+	"github.com/oberthci/oberth/internal/actor"
 	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/stateport"
 )
 
 type logRead struct {
@@ -38,19 +40,29 @@ func (s *Service) prepareLogs(ctx context.Context, c apicontract.Caller, input l
 			}
 			defer release()
 		}
-		purge, err := s.c.Runs.PurgeReceipt(ctx, r.ID)
-		if err != nil && !isMissing(err) {
-			return apicontract.LogResult{}, err
-		}
-		if purge.Completed {
-			usage, err := s.c.Logs.Usage(ctx, r)
-			return apicontract.LogResult{ID: r.ID, DisplayReason: reasonPurged, Usage: &usage}, err
-		}
-		out, err := s.c.Logs.Read(ctx, r, q)
-		out.ID = r.ID
-		return out, err
+		return authorizedRead(ctx, s, readAuthority{a, input.action}, func(ctx context.Context, current actor.Actor) (apicontract.LogResult, error) {
+			if _, err := s.resolveRepo(ctx, current, r.Repo); err != nil {
+				return apicontract.LogResult{}, err
+			}
+			return s.readLogs(ctx, r, q)
+		})
 	}), nil
 }
+
+func (s *Service) readLogs(ctx context.Context, r stateport.Run, q apicontract.RunLogsArgs) (apicontract.LogResult, error) {
+	purge, err := s.c.Runs.PurgeReceipt(ctx, r.ID)
+	if err != nil && !isMissing(err) {
+		return apicontract.LogResult{}, err
+	}
+	if purge.Completed {
+		usage, err := s.c.Logs.Usage(ctx, r)
+		return apicontract.LogResult{ID: r.ID, DisplayReason: reasonPurged, Usage: &usage}, err
+	}
+	out, err := s.c.Logs.Read(ctx, r, q)
+	out.ID = r.ID
+	return out, err
+}
+
 func (s *Service) reserveScan(ctx context.Context, credential string) (func(), error) {
 	key := credential
 	if credential == "" {
