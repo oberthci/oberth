@@ -12,6 +12,7 @@ tests() {
     run env GOOS=darwin GOARCH=arm64 go vet -p=2 -buildvcs=false ./cmd/oberth/... ./internal/client/... ./internal/installer/... ./agent/...
     run go vet -p=2 -buildvcs=false -tags base_image_qualification ./internal/sshserver ./cmd/oberth-release
     run python3 -I -m unittest discover -s hack -p 'test_history.py'
+    run python3 -I -m unittest discover -s hack -p 'test_observe.py'
     run python3 -I -m unittest discover -s hack -p 'test_gate.py'
     run python3 -I -m unittest discover -s hack -p 'test_ui.py'
     run python3 -I -m unittest discover -s hack -p 'test_docs.py'

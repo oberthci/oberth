@@ -179,3 +179,29 @@ Agent-host policy uses `host:fixture-host` in the external names file; unmarked 
 remain unconditional literals. `hack/guards/host_paths.json` scopes host naming to plugins,
 the derived root marketplace file, and the `Agent plugins` install section in the named docs.
 Contributor credit has no plugin exception; commit and tag metadata also has no host exception.
+# Capacity observation
+
+`python3 -I hack/observe.py collect --namespace <runs> --node <node> --samples 240 --interval 30`
+emits sanitized JSONL from ordinary traffic using GET only. Run with `umask 077`
+and redirect into a private local file. Select each namespace containing child
+Jobs/VMs with another `--namespace`; use the existing read-only operator context.
+It never reads credential files itself or creates runs. It invokes kubectl with
+fixed arguments and bounded requests. No observation runs on the server/push path.
+`project` consumes raw JSONL frames on stdin with `observed_at`, Kubernetes List
+objects `pods`, `workflows`, optional `owners` (Jobs/VMIs), `events`, a `node`
+object and kubelet `stats/summary` as `stats`. `summarize` consumes projected JSONL.
+Raw specs, commands, environment and event messages are never emitted. UID joins
+retain final Pod requests/limits for main/init/restartable helpers and overhead;
+unknown children stay in the coverage denominator. Resources have a stable digest.
+Missing reads, templates, requests, usage, memory peaks and throttling remain
+explicit. Summary memory is sampled working set, never a peak or hard-limit proof.
+Volume stats can expose PVC usage; absent volume samples cannot establish PVC size.
+Record external five-minute PVC samples and control readiness/API latency beside
+these observations. Keep cache state, largest-input coverage and config/repo
+versions with the evidence; no collector infers cache state from resource usage.
+Require 20 complete same-revision executions per family including cold cache and
+largest inputs, 99% run-Pod UID/spec joins, and measured peak/throttle coverage
+before proposing smaller requests. Counts here are observations, never complete
+executions or a sizing recommendation. Existing historical cross-revision samples
+cannot justify resizing. Missing/idle traffic leaves qualification unmeasured.
+
