@@ -286,6 +286,15 @@ func capacityNamespaceFit(e CapacityEvidence, cap int64) bool {
 			if !capacityVectorFit(budget, vector, cap) {
 				return false
 			}
+			// Aggregate worst coverage does not imply namespace coverage when
+			// phases move between namespaces. Require each measured phase to
+			// fit this namespace's declared worst vector, which fits its quota.
+			for _, interval := range family.Intervals {
+				phase, valid := capacityNamespaceVector(interval.Pods, quota.Namespace)
+				if !valid || !capacityVectorFit(vector, phase, 1) {
+					return false
+				}
+			}
 		}
 	}
 	return true

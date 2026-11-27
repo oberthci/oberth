@@ -161,8 +161,8 @@ nonRunAndMaintenance Pods (worst permitted overlap), unscoped native run Quotas,
 operatingScratch, families and receipt artifact references G1/G2/G3/G7/placement.
 Each family records name, frozen mixWeight, executions>=20, sampledPods/joinedPods
 (>=99%), unknownShapes=false, active intervals with seconds/final nonterminal
-Pods, and worstPods for the largest supported concurrent shape. Preserve Pod UIDs
-and namespace identity. No zero-Pod lock-wait dilution is accepted. Include every
+Pods, and worstPods covering aggregate and per-namespace maxima of every phase.
+Preserve Pod UIDs and namespace identity. No zero-Pod lock-wait dilution is accepted. Include every
 helper, hook, retry and VM/Job child. Placement receipts must cover devices, PVCs,
 affinity/anti-affinity, RuntimeClass/overhead and actual pinned native replay.
 Positive device/hugepage requests are outside this sizing seam's four-dimensional
