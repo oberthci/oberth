@@ -13,6 +13,7 @@ go install -p=2 -buildvcs=false github.com/golangci/golangci-lint/v2/cmd/golangc
 requirement coverage and unused code. `make check` first validates the portable
 plans, then runs tests (including the Python tooling fixtures), lint and guards,
 stopping at the first error and printing the failed command.
+`make test` and `make check` require the hold namespace controls with `OBERTH_REQUIRE_HOLD_NAMESPACES=1`; unavailable user, mount or PID namespaces fail this gate. CI runs this in its separate test step, outside the private policy delivery. Direct tests may skip with the prerequisite reason, visible with `go test -v` or `-json`.
 Lint defaults to the pinned `hack/lint-tool.sh`; `GOLANGCI_LINT` overrides it with an executable matching the pin. `make lint-selftest`
 checks budget boundaries and refusals in disposable modules under `GOTMPDIR`.
 Tests are exempt from function length only; standard error handling is allowed.

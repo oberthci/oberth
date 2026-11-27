@@ -2,8 +2,11 @@
 
 package argojob
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestInspectionCannotInvokeRerunEvenWithoutSecrets(t *testing.T) {
-	t.Skip("held-command reruns require Linux PID namespaces")
+	namespaceUnavailable(t, errors.New("held-command reruns require Linux PID namespaces"))
 }

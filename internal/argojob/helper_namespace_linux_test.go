@@ -63,6 +63,9 @@ func namespaceOwner(t *testing.T) {
 	_, _ = fmt.Fprintln(os.Stdout, "READY")
 	select {
 	case <-o.done:
+		// PID 1 must outlive the injected peer, including its clean exit
+		// after reading the admission reply. Parent cleanup closes stdin.
+		_, _ = io.Copy(io.Discard, os.Stdin)
 	case <-time.After(20 * time.Second):
 		t.Fatal("namespace hold did not end")
 	}
@@ -127,12 +130,17 @@ func startNamespaceOwner(t *testing.T) (*exec.Cmd, string) {
 	cmd := namespaceCommand(t, "owner")
 	var diagnostic bytes.Buffer
 	cmd.Stderr = &diagnostic
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = input.Close() })
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = cmd.Start(); err != nil {
-		t.Skipf("private namespaces unavailable: %v", err)
+		namespaceUnavailable(t, err)
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	line, err := bufio.NewReader(out).ReadString('\n')
@@ -196,11 +204,15 @@ func TestServerExecParentZeroCanRerun(t *testing.T) {
 
 func TestRerunUsesStateAcrossBindMount(t *testing.T) {
 	cmd := namespaceCommand(t, "mount")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatal("bind-mounted checkout rerun failed", string(out), err)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		namespaceUnavailable(t, err)
 	}
-	t.Log(string(out))
+	if err := cmd.Wait(); err != nil {
+		t.Fatal("bind-mounted checkout rerun failed", out.String(), err)
+	}
+	t.Log(out.String())
 }
 
 func namespaceMount(t *testing.T) {
