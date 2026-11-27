@@ -114,7 +114,21 @@ func namespaceCommand(t *testing.T, role string) *exec.Cmd {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := holdTempDir(t)
+	var root string
+	if role == "mount" {
+		// The stage must be on disk even when TMPDIR is a memory filesystem.
+		dir, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		root, err = os.MkdirTemp(dir, ".hold-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(root) })
+	} else {
+		root = holdTempDir(t)
+	}
 	for _, dir := range []string{"state", "work/src", "volume", holdStage} {
 		if err = os.MkdirAll(filepath.Join(root, dir), 0700); err != nil {
 			t.Fatal(err)
