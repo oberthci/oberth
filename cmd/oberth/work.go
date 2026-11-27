@@ -408,6 +408,9 @@ func (s *flowSession) finishLogStep(logs apicontract.LogResult, cursor *logCurso
 	if err := s.endLogLine(cursor); err != nil {
 		return err
 	}
+	if err := s.printLogUsage(logs.Usage); err != nil {
+		return err
+	}
 	for _, step := range run.Steps {
 		if step.Path == path && step.Status == stepmodel.StepFailed {
 			reason := step.DisplayReason
