@@ -13,83 +13,167 @@ import (
 	"github.com/oberthci/oberth/internal/sourcedelivery"
 )
 
-// At most two archives (including files held by readers) share the chart's
-// scratch allowance. The compression slot serializes misses. Idle entries are
-// evicted in use order; a full cache with active readers waits for a Close.
+// Reservations, builders, completed files and reader-held files share one
+// bound. A reservation owns its build until completion or its last waiter
+// leaves. Only idle completed entries may be evicted.
 type stagedArchives struct {
 	mu       sync.Mutex
 	entries  map[[sha256.Size]byte]*stagedArchive
 	changed  chan struct{}
 	sequence uint64
+	capacity int
+	closed   bool
+	workers  sync.WaitGroup
 }
 
 type stagedArchive struct {
-	dir     string
-	bytes   int64
-	readers int
-	used    uint64
+	key                         [sha256.Size]byte
+	observation                 *sourcedelivery.Observation
+	dir                         string
+	bytes                       int64
+	readers, waiters            int
+	used                        uint64
+	done                        chan struct{}
+	building, abandoned, waited bool
+	err                         error
+	cancel                      context.CancelFunc
+	release                     func()
 }
 
-func newStagedArchives() *stagedArchives {
-	return &stagedArchives{entries: make(map[[sha256.Size]byte]*stagedArchive), changed: make(chan struct{})}
+func newStagedArchives(capacity int) *stagedArchives {
+	return &stagedArchives{entries: make(map[[sha256.Size]byte]*stagedArchive), changed: make(chan struct{}), capacity: capacity}
 }
 
 func archiveIdentity(b sourcecontract.Binding) [sha256.Size]byte {
-	// Binding's encoding sorts its recorded tags and includes repository identity,
-	// authorization, revision and the entire admission-time checkout inventory.
+	// Encoding includes the authorization digest and entire checkout inventory.
 	data, _ := json.Marshal(b)
 	return sha256.Sum256(data)
 }
 
-func (s *stagedArchives) open(key [sha256.Size]byte) (sourcedelivery.Staged, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	e := s.entries[key]
-	if e == nil {
-		return sourcedelivery.Staged{}, false, nil
-	}
-	f, err := os.Open(filepath.Join(e.dir, "source.tgz"))
-	if err != nil {
-		return sourcedelivery.Staged{}, true, err
-	}
-	s.sequence++
-	e.used, e.readers = s.sequence, e.readers+1
-	return sourcedelivery.Staged{Body: &stagedReader{File: f, cache: s, entry: e}, Bytes: e.bytes}, true, nil
-}
+func (s *stagedArchives) notify() { close(s.changed); s.changed = make(chan struct{}) }
 
-func (s *stagedArchives) room(ctx context.Context) (bool, error) {
+// reserve registers waiter ownership before any export permit is acquired.
+func (s *stagedArchives) reserve(ctx context.Context, key [sha256.Size]byte) (*stagedArchive, bool, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	waited := false
-	for len(s.entries) >= 2 {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, false, waited, context.Cause(ctx)
+		}
+		if s.closed {
+			return nil, false, waited, context.Canceled
+		}
+		if e := s.join(key); e != nil {
+			return e, false, waited || e.building, nil
+		}
+		if s.entries[key] == nil && len(s.entries) < s.capacity {
+			e := &stagedArchive{key: key, done: make(chan struct{}), building: true, waiters: 1}
+			s.entries[key] = e
+			s.workers.Add(1)
+			return e, true, waited, nil
+		}
 		if evicted, err := s.evictIdle(); err != nil {
-			return waited, err
+			return nil, false, waited, err
 		} else if evicted {
 			continue
 		}
 		changed := s.changed
 		waited = true
-		end := sourcedelivery.Measure(ctx, sourcedelivery.Archive, true)
 		s.mu.Unlock()
+		end := sourcedelivery.Measure(ctx, sourcedelivery.Archive, true)
 		select {
 		case <-ctx.Done():
-			end()
-			s.mu.Lock()
-			return waited, context.Cause(ctx)
 		case <-changed:
-			end()
-			s.mu.Lock()
 		}
+		end()
+		s.mu.Lock()
 	}
-	return waited, ctx.Err()
 }
 
-// Caller holds mu and the compression slot, so only readers can free space.
+// Caller holds mu; joining preserves ownership through build completion.
+func (s *stagedArchives) join(key [sha256.Size]byte) *stagedArchive {
+	e := s.entries[key]
+	if e != nil && !e.abandoned {
+		e.waiters++
+		return e
+	}
+	return nil
+}
+
+func (s *stagedArchives) start(e *stagedArchive, cancel context.CancelFunc, release func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e.cancel, e.release = cancel, release
+	if s.closed || e.abandoned {
+		cancel()
+	}
+}
+
+func (s *stagedArchives) complete(e *stagedArchive, dir string, stage sourcedelivery.Staged, err error) {
+	if stage.Body != nil {
+		err = errors.Join(err, stage.Body.Close())
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e.cancel()
+	e.dir, e.bytes, e.waited = dir, stage.Bytes, stage.Waited
+	if err != nil || e.waiters == 0 || s.closed {
+		cleanup := os.RemoveAll(dir)
+		err = errors.Join(err, cleanup)
+		if err == nil {
+			err = context.Canceled
+		}
+		if cleanup == nil {
+			delete(s.entries, e.key)
+			e.release()
+		} else {
+			e.abandoned = true
+		}
+	}
+	e.building, e.err = false, err
+	close(e.done)
+	s.notify()
+	s.workers.Done()
+}
+
+func (s *stagedArchives) leave(e *stagedArchive) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e.waiters--
+	if e.waiters == 0 && e.building {
+		e.abandoned = true
+		if e.cancel != nil {
+			e.cancel()
+		}
+	}
+	s.notify()
+}
+
+func (s *stagedArchives) open(e *stagedArchive) (sourcedelivery.Staged, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e.err != nil {
+		return sourcedelivery.Staged{}, e.err
+	}
+	if s.closed {
+		return sourcedelivery.Staged{}, context.Canceled
+	}
+	f, err := os.Open(filepath.Join(e.dir, "source.tgz"))
+	if err != nil {
+		return sourcedelivery.Staged{}, err
+	}
+	s.sequence++
+	e.used, e.readers = s.sequence, e.readers+1
+	return sourcedelivery.Staged{Body: &stagedReader{File: f, cache: s, entry: e}, Bytes: e.bytes}, nil
+}
+
+// Caller holds mu. Waiters keep a completed entry alive until they open it.
 func (s *stagedArchives) evictIdle() (bool, error) {
 	var oldest *stagedArchive
 	var key [sha256.Size]byte
 	for k, e := range s.entries {
-		if e.readers == 0 && (oldest == nil || e.used < oldest.used) {
+		if !e.building && e.readers == 0 && e.waiters == 0 && (oldest == nil || e.used < oldest.used) {
 			key, oldest = k, e
 		}
 	}
@@ -100,17 +184,8 @@ func (s *stagedArchives) evictIdle() (bool, error) {
 		return false, err
 	}
 	delete(s.entries, key)
+	oldest.release()
 	return true, nil
-}
-
-func (s *stagedArchives) put(key [sha256.Size]byte, dir string, stage sourcedelivery.Staged) sourcedelivery.Staged {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sequence++
-	e := &stagedArchive{dir: dir, bytes: stage.Bytes, readers: 1, used: s.sequence}
-	s.entries[key] = e
-	stage.Body = &stagedReader{File: stage.Body.(*os.File), cache: s, entry: e}
-	return stage
 }
 
 func (s *stagedArchives) prune(live map[[sha256.Size]byte]bool) error {
@@ -118,7 +193,7 @@ func (s *stagedArchives) prune(live map[[sha256.Size]byte]bool) error {
 	defer s.mu.Unlock()
 	var failures error
 	for k, e := range s.entries {
-		if e.readers != 0 || live[k] {
+		if e.building || e.readers != 0 || e.waiters != 0 || live[k] {
 			continue
 		}
 		if err := os.RemoveAll(e.dir); err != nil {
@@ -126,8 +201,26 @@ func (s *stagedArchives) prune(live map[[sha256.Size]byte]bool) error {
 			continue
 		}
 		delete(s.entries, k)
+		e.release()
 	}
+	s.notify()
 	return failures
+}
+
+func (s *stagedArchives) close() {
+	s.mu.Lock()
+	s.closed = true
+	for _, e := range s.entries {
+		if e.building {
+			e.abandoned = true
+			if e.cancel != nil {
+				e.cancel()
+			}
+		}
+	}
+	s.notify()
+	s.mu.Unlock()
+	s.workers.Wait()
 }
 
 type stagedReader struct {
@@ -144,8 +237,19 @@ func (r *stagedReader) Close() error {
 		r.cache.mu.Lock()
 		defer r.cache.mu.Unlock()
 		r.entry.readers--
-		close(r.cache.changed)
-		r.cache.changed = make(chan struct{})
+		r.cache.notify()
 	})
 	return r.err
+}
+
+func (s *stagedArchives) buildObservation(e *stagedArchive, observation *sourcedelivery.Observation) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e.observation = observation
+}
+
+func (s *stagedArchives) observation(e *stagedArchive) *sourcedelivery.Observation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return e.observation
 }

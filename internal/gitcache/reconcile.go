@@ -3,6 +3,7 @@ package gitcache
 import (
 	"context"
 	"errors"
+	"github.com/oberthci/oberth/internal/sourcedelivery"
 	"io"
 	"os"
 	"path/filepath"
@@ -51,6 +52,8 @@ func (c *Cache) reconcileMirror(ctx context.Context, p string) error {
 	if err != nil {
 		return err
 	}
+	noteReadWait(ctx)
+	defer sourcedelivery.Measure(ctx, sourcedelivery.Recovery, true)()
 	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(io.LimitReader(f, reconciliationBytes+1))
 	if err != nil {

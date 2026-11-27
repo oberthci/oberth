@@ -40,7 +40,7 @@ func checkPluginLoad(t *testing.T, restart bool) {
 	cache := f.Cache(t, nil)
 	binding := f.Binding()
 	p := prepared(t, binding)
-	delivery := sourcedelivery.New(sourcedelivery.Config{Now: clock.RealClock{}.Now, SourceClientBurst: 30,
+	delivery := sourcedelivery.New(sourcedelivery.Config{Now: clock.RealClock{}.Now, Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 10, WorkflowWaiters: 16},
 		Authenticate: func(_ context.Context, token string) (sourcedelivery.Caller, error) {
 			if token != "bound-token" {
 				return sourcedelivery.Caller{}, &sourcedelivery.Failure{Code: "unauthenticated"}

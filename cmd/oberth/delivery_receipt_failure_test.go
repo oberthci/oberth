@@ -64,7 +64,7 @@ func TestSourceDeliveryReceiptWriteFailureStillPublishesCompletion(t *testing.T)
 	var diagnostic bytes.Buffer
 	f.o.c.diagnostic = &diagnostic
 	refuseDeliveryReceiptWrites(t, f)
-	c := sourcedelivery.Config{SourceClientBurst: 3, Now: f.o.c.clock.Now, Authenticate: f.authentication(t).Authenticate,
+	c := sourcedelivery.Config{Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 1, WorkflowWaiters: 16}, Now: f.o.c.clock.Now, Authenticate: f.authentication(t).Authenticate,
 		Run: func(ctx context.Context, id string) (sourcedelivery.Run, error) {
 			r, err := f.o.sourceRun(ctx, id)
 			// The fixture's secret-only pipeline has no source declaration.

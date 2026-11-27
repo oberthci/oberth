@@ -130,6 +130,10 @@ func setHistoricalRevision(t *testing.T, f fixture, old releaseData) {
 	}
 	runs, _ := previous.Values["runs"].(map[string]any)
 	delete(runs, "priorityClasses")
+	// Source delivery settings did not exist in either archived chart.
+	server := previous.Values["server"].(map[string]any)
+	runtime := server["runtime"].(map[string]any)
+	delete(runtime, "source_delivery")
 	if _, err = installer.Render(ch, previous.Values, f.choices.Namespace); err != nil {
 		t.Fatal("historical revision does not validate", err)
 	}

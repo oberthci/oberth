@@ -92,7 +92,7 @@ func storedSource(ctx context.Context, port contracttest.RunPort, id string) (so
 
 func (d *durableSource) server(caller sourcedelivery.Caller) *sourcedelivery.Server {
 	return sourcedelivery.New(sourcedelivery.Config{
-		Now: clock.RealClock{}.Now, SourceClientBurst: 30, Stage: d.cache.Stage,
+		Now: clock.RealClock{}.Now, Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 10, WorkflowWaiters: 16}, Stage: d.cache.Stage,
 		Authenticate: func(context.Context, string) (sourcedelivery.Caller, error) { return caller, nil },
 		Run: func(ctx context.Context, id string) (sourcedelivery.Run, error) {
 			return storedSource(ctx, d.state, id)

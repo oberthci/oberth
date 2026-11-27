@@ -134,6 +134,18 @@ func Joined(ctx context.Context) {
 	}
 }
 
+// InheritWait carries a shared builder's blocking phase into this load's
+// diagnostic. Physical service durations remain owned and counted by the job.
+func InheritWait(ctx context.Context, job *Observation) {
+	if job == nil {
+		return
+	}
+	s := job.Finish("", nil)
+	if o, _ := ctx.Value(observationContext{}).(*Observation); o != nil && s.Blocked {
+		o.Block(s.Phase)
+	}
+}
+
 func (o *Observation) Finish(code string, err error) Summary {
 	o.mu.Lock()
 	defer o.mu.Unlock()

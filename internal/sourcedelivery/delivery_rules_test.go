@@ -166,7 +166,7 @@ func TestTokenReviewErrorCannotReachThePodReader(t *testing.T) {
 func deliveryRulesConfig() sourcedelivery.Config {
 	descriptor := sourcecontract.Descriptor{Version: 1, Kind: sourcecontract.Main}
 	return sourcedelivery.Config{
-		SourceClientBurst: 9, Now: func() time.Time { return time.Unix(1, 0) },
+		Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 3, WorkflowWaiters: 16}, Now: func() time.Time { return time.Unix(1, 0) },
 		Authenticate: func(context.Context, string) (sourcedelivery.Caller, error) {
 			return sourcedelivery.Caller{Namespace: "runs", Workflow: "workflow", UID: "workflow-uid"}, nil
 		},

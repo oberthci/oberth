@@ -70,6 +70,7 @@ type chartServerConfig struct {
 }
 
 type chartServerRuntime struct {
+	SourceDelivery          sourceBudgetTuple                      `json:"source_delivery"`
 	ReceiveMaxInputBytes    int64                                  `json:"receive_max_input_bytes"`
 	GitBinary               string                                 `json:"git_binary"`
 	SourceTimeoutSeconds    int                                    `json:"source_timeout_seconds"`
@@ -144,7 +145,7 @@ func configuredServerFiles() map[string]any {
 }
 
 func configuredServerRuntime() map[string]any {
-	return map[string]any{"receive_max_input_bytes": 1073741824, "git_binary": "/usr/bin/git", "source_timeout_seconds": 60, "admission_timeout_seconds": 30, "source_client_burst": 96, "default_branch": "refs/heads/main", "image_prefixes": []string{}, "helper_image": "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:dev", "workflow_defaults": map[string]any{"workflow_defaults": nil, "digest": ""}, "source_policy": map[string]any{}, "release_routes": map[string]any{}, "issue_stale_after_seconds": 86400, "issue_active_stale_after_seconds": 7200}
+	return map[string]any{"receive_max_input_bytes": 1073741824, "git_binary": "/usr/bin/git", "source_timeout_seconds": 60, "admission_timeout_seconds": 30, "source_client_burst": 96, "source_delivery": map[string]any{"exports": 1, "archives": 2, "transfers": 2, "auth": 32, "workflow_waiters": 16}, "default_branch": "refs/heads/main", "image_prefixes": []string{}, "helper_image": "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:dev", "workflow_defaults": map[string]any{"workflow_defaults": nil, "digest": ""}, "source_policy": map[string]any{}, "release_routes": map[string]any{}, "issue_stale_after_seconds": 86400, "issue_active_stale_after_seconds": 7200}
 }
 
 func TestRenderedServerStrictConfigAndMountedFiles(t *testing.T) {

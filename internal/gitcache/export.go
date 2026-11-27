@@ -33,53 +33,89 @@ func (c *Cache) Stage(ctx context.Context, b sourcecontract.Binding) (sourcedeli
 	ctx, cancel := context.WithTimeout(ctx, c.budgets.local)
 	defer cancel()
 	key := archiveIdentity(b)
-	if stage, found, err := c.staged.open(key); found {
-		return c.checkedStage(ctx, b, stage, err)
+	e, leader, waited, err := c.staged.reserve(ctx, key)
+	if err != nil {
+		return sourcedelivery.Staged{}, err
 	}
+	defer c.staged.leave(e)
+	if leader || waited {
+		defer func() { sourcedelivery.InheritWait(ctx, c.staged.observation(e)) }()
+	}
+	if leader {
+		c.startArchive(e, b) //nolint:contextcheck // The cache owns this shared build; the last waiter or shutdown cancels it.
+	} else if waited {
+		sourcedelivery.Joined(ctx)
+	}
+	end := sourcedelivery.Measure(ctx, sourcedelivery.Archive, waited)
+	select {
+	case <-ctx.Done():
+		end()
+		return sourcedelivery.Staged{}, context.Cause(ctx)
+	case <-e.done:
+		end()
+	}
+	if err := ctx.Err(); err != nil {
+		return sourcedelivery.Staged{}, context.Cause(ctx)
+	}
+	stage, err := c.staged.open(e)
+	stage.Waited = waited || (leader && e.waited)
+	return c.checkedStage(ctx, b, stage, err)
+}
+
+func (c *Cache) startArchive(e *stagedArchive, b sourcecontract.Binding) {
+	ctx, cancel := context.WithTimeout(c.ctx, c.budgets.local)
+	ctx, observation := sourcedelivery.Observe(ctx, "job")
+	c.staged.buildObservation(e, observation)
+	c.staged.start(e, cancel, c.config.Permits.Enter(sourcedelivery.Archive))
+	go func() {
+		dir, stage, err := c.buildArchive(ctx, b)
+		summary := finishObservation(observation, err)
+		summary.Leaders = 1
+		if !summary.Blocked {
+			summary.Phase = sourcedelivery.Export
+		}
+		if c.config.Observe != nil {
+			c.config.Observe(summary)
+		}
+		c.staged.complete(e, dir, stage, stageFailure(b, err))
+	}()
+}
+
+func (c *Cache) buildArchive(ctx context.Context, b sourcecontract.Binding) (string, sourcedelivery.Staged, error) {
 	waited := false
+	if err := ctx.Err(); err != nil {
+		return "", sourcedelivery.Staged{}, context.Cause(ctx)
+	}
 	select {
 	case c.export <- struct{}{}:
 	default:
 		waited = true
 		end := sourcedelivery.Measure(ctx, sourcedelivery.Export, true)
-		select {
-		case c.export <- struct{}{}:
-			end()
-		case <-ctx.Done():
-			end()
-			return sourcedelivery.Staged{}, context.Cause(ctx)
+		err := acquireContext(ctx, c.export)
+		end()
+		if err != nil {
+			return "", sourcedelivery.Staged{}, err
 		}
 	}
 	defer func() { <-c.export }()
 	defer c.config.Permits.Enter(sourcedelivery.Export)()
-	if stage, found, err := c.staged.open(key); found {
-		sourcedelivery.Joined(ctx)
-		stage.Waited = waited
-		return c.checkedStage(ctx, b, stage, err)
-	}
-	roomWaited, err := c.staged.room(ctx)
-	if err != nil {
-		return sourcedelivery.Staged{}, err
-	}
 	dir, err := os.MkdirTemp(c.config.Scratch, "oberth-export-")
 	if err != nil {
-		return sourcedelivery.Staged{}, err
+		return "", sourcedelivery.Staged{}, err
 	}
 	stage, err := c.build(ctx, dir, b)
-	if err != nil {
-		_ = os.RemoveAll(dir)
-		return stage, stageFailure(b, err)
-	}
-	stage.Waited = waited || roomWaited
-	return c.staged.put(key, dir, stage), nil
+	stage.Waited = stage.Waited || waited
+	return dir, stage, err
 }
-func (c *Cache) build(ctx context.Context, dir string, b sourcecontract.Binding) (sourcedelivery.Staged, error) {
+func (c *Cache) build(ctx context.Context, dir string, b sourcecontract.Binding) (stage sourcedelivery.Staged, result error) {
+	waited := false
+	defer func() { stage.Waited = stage.Waited || waited }()
 	defer sourcedelivery.Measure(ctx, sourcedelivery.Export, false)()
 	p, err := c.path(b.Revision.Repository)
 	if err != nil {
 		return sourcedelivery.Staged{}, err
 	}
-	if err = c.lockRead(ctx, p); err != nil {
+	if waited, err = c.lockReadWait(ctx, p); err != nil {
 		return sourcedelivery.Staged{}, err
 	}
 	defer c.unlock(p)
@@ -118,7 +154,9 @@ func (c *Cache) build(ctx context.Context, dir string, b sourcecontract.Binding)
 
 func (c *Cache) checkedStage(ctx context.Context, b sourcecontract.Binding, stage sourcedelivery.Staged, err error) (sourcedelivery.Staged, error) {
 	if err == nil {
-		err = c.checkStagedObjects(ctx, b)
+		var waited bool
+		waited, err = c.checkStagedObjects(ctx, b)
+		stage.Waited = stage.Waited || waited
 	}
 	if err != nil {
 		if stage.Body != nil {
@@ -129,20 +167,21 @@ func (c *Cache) checkedStage(ctx context.Context, b sourcecontract.Binding, stag
 	return stage, nil
 }
 
-func (c *Cache) checkStagedObjects(ctx context.Context, b sourcecontract.Binding) error {
+func (c *Cache) checkStagedObjects(ctx context.Context, b sourcecontract.Binding) (bool, error) {
 	p, err := c.path(b.Revision.Repository)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if err = c.lockRead(ctx, p); err != nil {
-		return err
+	waited, err := c.lockReadWait(ctx, p)
+	if err != nil {
+		return waited, err
 	}
 	defer c.unlock(p)
 	if err = c.commit(ctx, p, b.Revision.Commit); err != nil {
-		return err
+		return waited, err
 	}
 	refs := append([]sourcecontract.Ref{b.Export.Ref, b.Export.DefaultBranch}, b.Export.Tags...)
-	return c.checkArchiveObjects(ctx, p, refs)
+	return waited, c.checkArchiveObjects(ctx, p, refs)
 }
 
 func cleanExports(dir string) error {

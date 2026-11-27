@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/apicontract"
+	"github.com/oberthci/oberth/internal/sourcedelivery"
 )
 
 // installationSettings contains only public scalar chart facts. Never add raw
@@ -80,6 +81,8 @@ func (s *settingsRows) server(c serverConfig, r serverRuntime) {
 	s.add("source timeout seconds", r.SourceTimeoutSeconds)
 	s.add("admission timeout seconds", r.AdmissionTimeoutSeconds)
 	s.add("source client burst", r.SourceClientBurst)
+	b, _ := sourcedelivery.ResolveBudgets(r.SourceDelivery)
+	s.add("source delivery", fmt.Sprintf("exports=%d archives=%d transfers=%d auth=%d workflow_waiters=%d", b.Exports, b.Archives, b.Transfers, b.Auth, b.WorkflowWaiters))
 	s.add("receive input bytes", r.ReceiveMaxInputBytes)
 	s.add("default branch", r.DefaultBranch)
 	s.add("image prefixes", r.ImagePrefixes)

@@ -17,7 +17,7 @@ import (
 func TestAuthorizationCapacityAcceptsNRefusesNPlusOne(t *testing.T) {
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
-	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, SourceClientBurst: 6,
+	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 2, WorkflowWaiters: 16},
 		Authenticate: func(context.Context, string) (sourcedelivery.Caller, error) {
 			entered <- struct{}{}
 			<-release
@@ -47,7 +47,7 @@ func TestWorkflowAuthorizationCapacityAcceptsTwoRefusesThird(t *testing.T) {
 	p := prepared(t, b)
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
-	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, SourceClientBurst: 30,
+	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 10, WorkflowWaiters: 16},
 		Authenticate: func(context.Context, string) (sourcedelivery.Caller, error) {
 			return sourcedelivery.Caller{Namespace: "ns", Workflow: "wf", UID: "uid"}, nil
 		},
@@ -79,7 +79,7 @@ func TestPostStreamFailureWithholdsReceiptAndCountsFixedMetric(t *testing.T) {
 	b := f.Binding()
 	p := prepared(t, b)
 	var metrics []string
-	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, SourceClientBurst: 30, Metric: func(summary sourcedelivery.Summary) { metrics = append(metrics, summary.Code+"/"+summary.Reason) },
+	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 10, WorkflowWaiters: 16}, Metric: func(summary sourcedelivery.Summary) { metrics = append(metrics, summary.Code+"/"+summary.Reason) },
 		Authenticate: func(context.Context, string) (sourcedelivery.Caller, error) {
 			return sourcedelivery.Caller{Namespace: "ns", Workflow: "wf", UID: "uid"}, nil
 		},
@@ -123,7 +123,7 @@ func TestActiveTransferCapacityAcceptsTwoWaitsForThird(t *testing.T) {
 	p := prepared(t, b)
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
-	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, SourceClientBurst: 30,
+	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 10, WorkflowWaiters: 16},
 		Authenticate: func(context.Context, string) (sourcedelivery.Caller, error) {
 			return sourcedelivery.Caller{Namespace: "ns", Workflow: "wf", UID: "uid"}, nil
 		},

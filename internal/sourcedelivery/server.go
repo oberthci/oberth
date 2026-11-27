@@ -38,7 +38,8 @@ type Run struct {
 type Staged struct {
 	Body  io.ReadCloser
 	Bytes int64
-	// Waited reports a capacity wait inside Stage, before any response bytes.
+	// Waited reports any capacity, repository or recovery wait inside Stage,
+	// before any response bytes. It belongs to this load, including on a hit.
 	Waited bool
 }
 type Config struct {
@@ -46,15 +47,17 @@ type Config struct {
 	Run          func(context.Context, string) (Run, error)
 	Stage        func(context.Context, sourcecontract.Binding) (Staged, error)
 	// Metric receives exactly one final summary per handled request. It must not block or do I/O.
-	Metric            func(Summary)
-	Permits           *Permits
-	SourceClientBurst int
-	Now               func() time.Time
-	RecordFailure     func(context.Context, Caller, time.Time) error
-	RecordSuccess     func(context.Context, Caller, time.Time) error
+	Metric        func(Summary)
+	Permits       *Permits
+	Budgets       *Budgets
+	Now           func() time.Time
+	RecordFailure func(context.Context, Caller, time.Time) error
+	RecordSuccess func(context.Context, Caller, time.Time) error
 }
 type Server struct {
 	config          Config
+	budgets         Budgets
+	valid           bool
 	auth, transfers chan struct{}
 	mu              sync.Mutex
 	workflows       map[Caller]int
@@ -98,10 +101,12 @@ func (e *Failure) Remedy() string {
 	}
 }
 
-const maxWorkflowWaiters = 16
-
 func New(config Config) *Server {
-	return &Server{config: config, auth: make(chan struct{}, max(0, config.SourceClientBurst/3)), transfers: make(chan struct{}, 2), workflows: make(map[Caller]int), waiters: make(map[Caller]int)}
+	b, err := ResolveBudgets(config.Budgets)
+	if err != nil {
+		b = DefaultBudgets()
+	}
+	return &Server{config: config, budgets: b, valid: err == nil, auth: make(chan struct{}, b.Auth), transfers: make(chan struct{}, b.Transfers), workflows: make(map[Caller]int), waiters: make(map[Caller]int)}
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	observation := newObservation("load")
@@ -126,7 +131,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(405)
 		return
 	}
-	if s.config.Authenticate == nil || s.config.Run == nil || s.config.Stage == nil || s.config.Now == nil {
+	if !s.valid || s.config.Authenticate == nil || s.config.Run == nil || s.config.Stage == nil || s.config.Now == nil {
 		s.fail(w, 501, "not_configured", "")
 		return
 	}
@@ -224,7 +229,7 @@ func (s *Server) checkStagedAuthorization(ctx context.Context, header string, lo
 func (s *Server) waiter(c Caller, delta int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if delta > 0 && s.waiters[c] >= maxWorkflowWaiters {
+	if delta > 0 && s.waiters[c] >= s.budgets.WorkflowWaiters {
 		return false
 	}
 	s.waiters[c] += delta

@@ -32,7 +32,7 @@ func (o *serverOwners) cachePart(ctx context.Context) (Part, error) {
 	notices := newRefNotices(ctx, func(ctx context.Context, repo string, refs []string) error {
 		return o.c.schedules.RefsChanged(ctx, repo, refs)
 	}, o.notice)
-	cache, err := gitcache.New(ctx, gitcache.Config{DeliveryContext: ctx, MaxInputBytes: o.settings.ReceiveMaxInputBytes, Log: o.cacheObservation, Observe: o.sourceObservation, Permits: &o.c.health.source.permits, AdmissionMetric: o.admissionMetric, Root: filepath.Join(data, "git"), Scratch: filepath.Join(data, "scratch"), Binary: o.settings.GitBinary, HookBinary: o.platform.executable, Now: o.c.clock.Now, Upstream: o.upstream, LiveOwners: o.liveOwners, AdmissionTimeout: timeDuration(o.settings.AdmissionTimeoutSeconds), PreReceive: o.gate, AbortReceive: func(id string) { o.wiring.Forget(id) }, RefChanged: notices.changed})
+	cache, err := gitcache.New(ctx, gitcache.Config{DeliveryContext: ctx, SourceDelivery: o.settings.SourceDelivery, MaxInputBytes: o.settings.ReceiveMaxInputBytes, Log: o.cacheObservation, Observe: o.sourceObservation, Permits: &o.c.health.source.permits, AdmissionMetric: o.admissionMetric, Root: filepath.Join(data, "git"), Scratch: filepath.Join(data, "scratch"), Binary: o.settings.GitBinary, HookBinary: o.platform.executable, Now: o.c.clock.Now, Upstream: o.upstream, LiveOwners: o.liveOwners, AdmissionTimeout: timeDuration(o.settings.AdmissionTimeoutSeconds), PreReceive: o.gate, AbortReceive: func(id string) { o.wiring.Forget(id) }, RefChanged: notices.changed})
 	if err != nil {
 		return Part{}, errors.Join(err, notices.close(context.WithoutCancel(ctx)))
 	}

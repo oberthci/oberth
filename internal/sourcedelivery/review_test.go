@@ -43,7 +43,7 @@ func TestReviewSecondWireByteAndCountBoundaries(t *testing.T) {
 func TestReviewSecondBearerBoundary(t *testing.T) {
 	for _, n := range []int{8192, 8193} {
 		called := false
-		s := New(Config{SourceClientBurst: 3, Authenticate: func(_ context.Context, _ string) (Caller, error) {
+		s := New(Config{Budgets: &Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 1, WorkflowWaiters: 16}, Authenticate: func(_ context.Context, _ string) (Caller, error) {
 			called = true
 			return Caller{}, &Failure{Code: "unauthenticated"}
 		}})

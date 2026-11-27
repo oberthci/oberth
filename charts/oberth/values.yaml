@@ -69,6 +69,7 @@ server:
     source_timeout_seconds: 60
     admission_timeout_seconds: 30
     source_client_burst: 96
+    source_delivery: {exports: 1, archives: 2, transfers: 2, auth: 32, workflow_waiters: 16}
     receive_max_input_bytes: 1073741824
     default_branch: refs/heads/main
     image_prefixes: []

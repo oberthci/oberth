@@ -50,7 +50,7 @@ func TestExactRecordedWorkflowSourceContract(t *testing.T) {
 	p := prepared(t, binding)
 	caller := sourcedelivery.Caller{Namespace: "runs", Workflow: "workflow", UID: "uid-1"}
 	run := sourcedelivery.Run{Admission: p.View(), Namespace: "runs", Workflow: "workflow", UID: "uid-1"}
-	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, SourceClientBurst: 30,
+	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 10, WorkflowWaiters: 16},
 		Authenticate: func(_ context.Context, token string) (sourcedelivery.Caller, error) {
 			if token != "valid" {
 				return sourcedelivery.Caller{}, &sourcedelivery.Failure{Code: "unauthenticated"}
@@ -115,7 +115,7 @@ func TestPinDescriptorCannotChangeCommit(t *testing.T) {
 	b.Descriptor = sourcecontract.Descriptor{Version: 1, Kind: sourcecontract.Pinned, Repository: gittest.Repository, Commit: f.Commit}
 	p := prepared(t, b)
 	caller := sourcedelivery.Caller{Namespace: "ns", Workflow: "wf", UID: "uid"}
-	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, SourceClientBurst: 9, Authenticate: func(context.Context, string) (sourcedelivery.Caller, error) { return caller, nil }, Run: func(context.Context, string) (sourcedelivery.Run, error) {
+	server := sourcedelivery.New(sourcedelivery.Config{Now: instant, Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 3, WorkflowWaiters: 16}, Authenticate: func(context.Context, string) (sourcedelivery.Caller, error) { return caller, nil }, Run: func(context.Context, string) (sourcedelivery.Run, error) {
 		return sourcedelivery.Run{Admission: p.View(), Namespace: "ns", Workflow: "wf", UID: "uid"}, nil
 	}, Stage: cache.Stage})
 	request := sourcedelivery.LoadRequest{Locator: "run-1", Descriptor: b.Descriptor}

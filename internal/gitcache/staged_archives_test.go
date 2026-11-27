@@ -15,9 +15,12 @@ import (
 
 func addTestArchive(t *testing.T, s *stagedArchives, key byte) sourcedelivery.Staged {
 	t.Helper()
-	if _, err := s.room(t.Context()); err != nil {
-		t.Fatal(err)
+	e, leader, _, err := s.reserve(t.Context(), [sha256.Size]byte{key})
+	if err != nil || !leader {
+		t.Fatal("reservation", err)
 	}
+	defer s.leave(e)
+	s.start(e, func() {}, func() {})
 	dir := t.TempDir()
 	file := filepath.Join(dir, "source.tgz")
 	if err := os.WriteFile(file, []byte("archive"), 0600); err != nil {
@@ -27,17 +30,22 @@ func addTestArchive(t *testing.T, s *stagedArchives, key byte) sourcedelivery.St
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s.put([sha256.Size]byte{key}, dir, sourcedelivery.Staged{Body: f, Bytes: 7})
+	s.complete(e, dir, sourcedelivery.Staged{Body: f, Bytes: 7}, nil)
+	stage, err := s.open(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stage
 }
 
 func TestStagedArchivesBoundReadersAndEvictIdle(t *testing.T) {
 	t.Parallel()
-	s := newStagedArchives()
+	s := newStagedArchives(2)
 	first, second := addTestArchive(t, s, 1), addTestArchive(t, s, 2)
 	t.Cleanup(func() { _ = first.Body.Close(); _ = second.Body.Close() })
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
-	if waited, err := s.room(ctx); !waited || !errors.Is(err, context.DeadlineExceeded) {
+	if _, _, waited, err := s.reserve(ctx, [sha256.Size]byte{3}); !waited || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal("active files exceeded scratch bound", waited, err)
 	}
 	if err := first.Body.Close(); err != nil {
@@ -48,7 +56,7 @@ func TestStagedArchivesBoundReadersAndEvictIdle(t *testing.T) {
 	}
 	third := addTestArchive(t, s, 3)
 	defer func() { _ = third.Body.Close() }()
-	if _, found, _ := s.open([sha256.Size]byte{1}); found {
+	if s.entries[[sha256.Size]byte{1}] != nil {
 		t.Fatal("idle archive was not evicted")
 	}
 	if len(s.entries) != 2 {
@@ -69,11 +77,21 @@ func TestStagedArchivesBoundReadersAndEvictIdle(t *testing.T) {
 
 func TestStagedArchiveRoomWakesOnReaderClose(t *testing.T) {
 	t.Parallel()
-	s := newStagedArchives()
+	s := newStagedArchives(2)
 	first, second := addTestArchive(t, s, 1), addTestArchive(t, s, 2)
 	defer func() { _ = first.Body.Close(); _ = second.Body.Close() }()
 	done := make(chan error, 1)
-	go func() { _, err := s.room(t.Context()); done <- err }()
+	go func() {
+		e, leader, _, err := s.reserve(t.Context(), [sha256.Size]byte{3})
+		if err == nil {
+			s.start(e, func() {}, func() {})
+			s.leave(e)
+			if leader {
+				s.complete(e, "", sourcedelivery.Staged{}, context.Canceled)
+			}
+		}
+		done <- err
+	}()
 	if err := first.Body.Close(); err != nil {
 		t.Fatal(err)
 	}

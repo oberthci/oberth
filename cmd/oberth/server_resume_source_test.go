@@ -114,7 +114,7 @@ func (f deliveryFixture) bindSourceRun(t *testing.T, r stateport.Run) {
 func (f deliveryFixture) assertResumeSourceLoad(t *testing.T, caller sourcedelivery.Caller, locator string, commit string) {
 	t.Helper()
 	staged := 0
-	h := sourcedelivery.New(sourcedelivery.Config{SourceClientBurst: 3, Now: f.o.c.clock.Now, Run: f.o.sourceRun,
+	h := sourcedelivery.New(sourcedelivery.Config{Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 1, WorkflowWaiters: 16}, Now: f.o.c.clock.Now, Run: f.o.sourceRun,
 		Authenticate: func(context.Context, string) (sourcedelivery.Caller, error) { return caller, nil },
 		Stage: func(_ context.Context, b sourcecontract.Binding) (sourcedelivery.Staged, error) {
 			staged++

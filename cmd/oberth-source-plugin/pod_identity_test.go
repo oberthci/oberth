@@ -72,7 +72,7 @@ func (s *sourceIdentity) handler(t *testing.T) http.Handler {
 			}, Spec: corev1.PodSpec{ServiceAccountName: "pipeline"}}, nil
 		},
 	}
-	return sourcedelivery.New(sourcedelivery.Config{Now: clock.RealClock{}.Now, SourceClientBurst: 30,
+	return sourcedelivery.New(sourcedelivery.Config{Now: clock.RealClock{}.Now, Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 10, WorkflowWaiters: 16},
 		Authenticate: auth.Authenticate,
 		Run: func(context.Context, string) (sourcedelivery.Run, error) {
 			return sourcedelivery.Run{Admission: p.View(), Namespace: "runs", Workflow: "wf", UID: "uid"}, nil

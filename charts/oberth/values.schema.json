@@ -267,6 +267,44 @@
               "minimum": 1,
               "maximum": 9223372036854775807
             },
+            "source_delivery": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "exports": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                },
+                "archives": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 32
+                },
+                "transfers": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 32
+                },
+                "auth": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 128
+                },
+                "workflow_waiters": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 16
+                }
+              },
+              "required": [
+                "exports",
+                "archives",
+                "transfers",
+                "auth",
+                "workflow_waiters"
+              ]
+            },
             "source_client_burst": {
               "type": "integer",
               "minimum": 3

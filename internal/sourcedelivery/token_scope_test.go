@@ -64,7 +64,7 @@ func assertSourceTokenScope(t *testing.T, tc sourceScopeCase) {
 	authn, reviews := executorPodTokenAuth(t)
 	descriptor := sourcecontract.Descriptor{Version: 1, Kind: sourcecontract.Main}
 	staged := 0
-	server := sourcedelivery.New(sourcedelivery.Config{SourceClientBurst: 3, Now: func() time.Time { return time.Unix(1, 0) }, Authenticate: authn.Authenticate,
+	server := sourcedelivery.New(sourcedelivery.Config{Now: func() time.Time { return time.Unix(1, 0) }, Authenticate: authn.Authenticate,
 		Run: func(_ context.Context, locator string) (sourcedelivery.Run, error) {
 			if locator != "requested-run" {
 				t.Fatal("wrong run lookup")

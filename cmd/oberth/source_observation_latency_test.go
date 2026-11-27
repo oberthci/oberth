@@ -23,7 +23,7 @@ func TestSourceObservationHandlerLatency(t *testing.T) {
 	for range cap(c.cacheNotices) {
 		c.cacheNotices <- cacheNotice{}
 	}
-	cfg := sourcedelivery.Config{SourceClientBurst: 96, Now: (clock.RealClock{}).Now, Authenticate: func(context.Context, string) (sourcedelivery.Caller, error) {
+	cfg := sourcedelivery.Config{Now: (clock.RealClock{}).Now, Authenticate: func(context.Context, string) (sourcedelivery.Caller, error) {
 		(clock.RealClock{}).Sleep(10 * time.Millisecond)
 		return sourcedelivery.Caller{}, &sourcedelivery.Failure{Code: "forbidden"}
 	}, Run: func(context.Context, string) (sourcedelivery.Run, error) { return sourcedelivery.Run{}, nil }, Stage: func(context.Context, sourcecontract.Binding) (sourcedelivery.Staged, error) {

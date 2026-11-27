@@ -84,7 +84,7 @@ func newBackpressureServer(w *wf.Workflow, p *core.Pod, logs *runlog.Store, base
 	entered, release := make(chan struct{}), make(chan struct{})
 	var staging atomic.Bool
 	var count atomic.Int32
-	c := sourcedelivery.Config{SourceClientBurst: 9, Now: func() time.Time { return base.StartedAt }, Authenticate: func(_ context.Context, bearer string) (sourcedelivery.Caller, error) {
+	c := sourcedelivery.Config{Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 3, WorkflowWaiters: 16}, Now: func() time.Time { return base.StartedAt }, Authenticate: func(_ context.Context, bearer string) (sourcedelivery.Caller, error) {
 		pod := p.DeepCopy()
 		if bearer == "first" {
 			pod.UID = "first"

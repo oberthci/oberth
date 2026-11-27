@@ -213,16 +213,19 @@ repositories. A manual schedule trigger uses ordinary admission; force bypasses 
 
 ### Git and endpoint budgets
 
-- Authorization has two in-flight calls per verified Workflow and a global
-  `SourceClientBurst/3` bound; excess returns immediately. Caller authentication and
-  recorded Workflow ownership are checked; the sealed admission decides what source the
-  run may load. There is no repeated admission, replay computation or
-  authorization-result cache at Load. An export capacity wait does no Git or repository
-  locking. None of these limits gates run submission. More than 16 flooding Workflows
-  can delay another tenant's Loads; no isolation guarantee is claimed. **Delta:** retain
-  one Git/compression slot, release it before network writes, and bound active staged
-  transfers separately at two. Reuse staged files for a sealed binding, with independent
-  readers; keep at most two archives, evict idle files for space and collect dead owners' files. Capacity waits are cancelable; loads recheck Pod/run authorization after transfer or staging capacity waits, before sending bytes. Each Workflow has at most 16 waiters for the two active transfer slots.
+- Authorization retains two in-flight calls per verified Workflow and a global H
+  bound; excess returns immediately. Live Pod/run ownership and sealed admission
+  select source. No cached authorization decision or repeated admission exists.
+  `source_delivery` sets exports E, archives A, transfers T, auth H and Workflow
+  waiters W together: defaults 1/2/2/32/16, ceilings 8/32/32/128/16, E<=A and E<=T.
+  Explicit zero or partial tuples refuse startup; absent uses all defaults. Broker
+  budgets are independent. **Delta:** reserve building archives atomically before E;
+  A includes builds, ready and reader-held files. Identical full bindings join one
+  bounded build; only idle entries evict. Last-waiter cancellation and shutdown join
+  cleanup. T covers a whole load; release E before network writes. Every capacity,
+  repository or repair wait propagates per load and triggers live authorization plus
+  digest equality before any source bytes; ready hits retain their own wait fact.
+  No limit gates run submission or promises tenant isolation. Status shows the tuple.
 
 - Main delivery contains regular files plus sanitized detached `.git` history, index and
   the recorded checkout snapshot. Never export hooks, remotes, credentials, private refs
@@ -238,11 +241,12 @@ repositories. A manual schedule trigger uses ordinary admission; force bypasses 
   total deadline and one-minute write bounds; authorization phases have 10-second
   bounds. Reconcile uses bounded owner pages inside the existing GC pass. **Delta:**
   staged archives cap main at 544 MiB and pins at 160 MiB (payload limit plus 32 MiB
-  framing allowance). Two main archives plus a 512 MiB pack and 256 MiB metadata reserve
-  require 1856 MiB below the chart's 2 GiB default scratch limit. Retained archives can occupy 1088 MiB until eviction or owner GC, sharing that volume with refresh and upload scratch. Stream blobs directly
-  into local archives; remove Git scratch before releasing its slot. Directories/files
-  are 0700/0600. Startup removes owned interrupted exports before serving; cleanup
-  failure refuses startup. C9 guards configured chart capacity. A first clone or a refresh fetch runs under the server lifetime for at most 30 minutes within the one-minute idle bound, one per repository, and later callers join it; a caller waits at most its deadline (15 seconds for a refresh) and is told the transfer continues once the forge is sending, a refresh fetch that ends at its bound is recorded as a forge failure, and a transfer imports nothing when the upstream address changed and announces its refs, when no caller took them, only while the repository is registered under the same ID. A default head the cache holds is not fetched again. The default-head read of a pin, a release's ancestry, and a default-branch or tag push runs its forge commands as repository jobs in the same way, one per forge address, catalogue ID and default branch, and a head object fetched from an address that changed meanwhile is not imported; its caller waits at most three seconds and decides as C3's source binding says. The head each forge identity last answered to an admission read is kept for those 15 minutes for callers whose own read does not finish in time, until a refresh or a delivery moves the cache's tracking refs, and a read that asked the forge before such a move keeps nothing; other reads of the default head never use it; a read that ends after every caller left fetches the head object it found missing; neither counts as a refresh of the cache. A refresh accepts an empty forge only while the cache has no forge-tracking refs; accepted local heads and retained objects do not block bootstrap and remain unchanged. Once forge history is tracked, an empty refresh or live default-head read refuses and preserves all cached history, even with a recent refresh or a saved absent publication predecessor.
+  framing allowance). Scratch shares the data filesystem with demanded fetches,
+  backup and retained data. PVC requests and temporary-volume limits do not bound
+  it. Expanded tuples require measured peak headroom and an enforced native scratch
+  allowance; no fleet capacity is certified here. Stream blobs into local archives;
+  remove Git scratch before releasing E. Directories/files are 0700/0600. Startup
+  removes owned interrupted exports; cleanup failure refuses startup. A first clone or a refresh fetch runs under the server lifetime for at most 30 minutes within the one-minute idle bound, one per repository, and later callers join it; a caller waits at most its deadline (15 seconds for a refresh) and is told the transfer continues once the forge is sending, a refresh fetch that ends at its bound is recorded as a forge failure, and a transfer imports nothing when the upstream address changed and announces its refs, when no caller took them, only while the repository is registered under the same ID. A default head the cache holds is not fetched again. The default-head read of a pin, a release's ancestry, and a default-branch or tag push runs its forge commands as repository jobs in the same way, one per forge address, catalogue ID and default branch, and a head object fetched from an address that changed meanwhile is not imported; its caller waits at most three seconds and decides as C3's source binding says. The head each forge identity last answered to an admission read is kept for those 15 minutes for callers whose own read does not finish in time, until a refresh or a delivery moves the cache's tracking refs, and a read that asked the forge before such a move keeps nothing; other reads of the default head never use it; a read that ends after every caller left fetches the head object it found missing; neither counts as a refresh of the cache. A refresh accepts an empty forge only while the cache has no forge-tracking refs; accepted local heads and retained objects do not block bootstrap and remain unchanged. Once forge history is tracked, an empty refresh or live default-head read refuses and preserves all cached history, even with a recent refresh or a saved absent publication predecessor.
 
 - Plugin trust is an explicit HTTPS origin/CA/server name, without proxies, redirects or
   system-root fallback. Dial/TLS handshakes have 10-second bounds; response-header wait

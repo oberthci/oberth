@@ -71,6 +71,7 @@ func (c *Cache) lockMirror(ctx context.Context, p string) error {
 	select {
 	case slot <- struct{}{}:
 	default:
+		noteReadWait(ctx)
 		end := sourcedelivery.Measure(ctx, sourcedelivery.Repository, true)
 		err := acquireContext(ctx, slot)
 		end()

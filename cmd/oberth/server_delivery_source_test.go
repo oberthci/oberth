@@ -18,7 +18,7 @@ func TestSourceRequestDatabaseDeadlineRecordsItsVerifiedPod(t *testing.T) {
 	if err := f.o.c.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	c := sourcedelivery.Config{SourceClientBurst: 3, Authenticate: f.authentication(t).Authenticate, Run: f.o.sourceRun, Stage: func(context.Context, sourcecontract.Binding) (sourcedelivery.Staged, error) {
+	c := sourcedelivery.Config{Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 1, WorkflowWaiters: 16}, Authenticate: f.authentication(t).Authenticate, Run: f.o.sourceRun, Stage: func(context.Context, sourcecontract.Binding) (sourcedelivery.Staged, error) {
 		t.Error("failed run read reached source staging")
 		return sourcedelivery.Staged{}, nil
 	}, Now: f.o.c.clock.Now, RecordFailure: func(ctx context.Context, who sourcedelivery.Caller, started time.Time) error {

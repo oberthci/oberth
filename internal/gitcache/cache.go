@@ -42,10 +42,11 @@ type Config struct {
 	AdmissionMetric func(reason string)
 	// Log carries cache observations and native operation failure details.
 	// It must be nonblocking; detail belongs in the server log, not feedback.
-	Log     func(reason, detail string)
-	Observe func(sourcedelivery.Summary)
-	Permits *sourcedelivery.Permits
-	Now     func() time.Time
+	Log            func(reason, detail string)
+	Observe        func(sourcedelivery.Summary)
+	Permits        *sourcedelivery.Permits
+	SourceDelivery *sourcedelivery.Budgets
+	Now            func() time.Time
 	// AbortReceive forgets a started admission that never reaches Deliver.
 	// It is nonblocking and performs no I/O; refusing/cancelled attempts may
 	// have no saved preparation, so forgetting an unknown ID must be harmless.
@@ -93,13 +94,11 @@ func New(ctx context.Context, config Config) (*Cache, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if config.Now == nil {
-		config.Now = clock.RealClock{}.Now
-	}
-	config.ReservedBranches = slices.Clone(config.ReservedBranches)
-	if err := prepareCachePaths(config); err != nil {
+	config, err := prepareCacheConfig(config)
+	if err != nil {
 		return nil, err
 	}
+	capacity := *config.SourceDelivery
 	owner, err := ownRoot(config.Root)
 	if err != nil {
 		return nil, err
@@ -129,8 +128,8 @@ func New(ctx context.Context, config Config) (*Cache, error) {
 		config:    config,
 		rootLock:  owner,
 		gates:     &repositoryGates{repos: make(map[string]chan struct{})},
-		export:    make(chan struct{}, 1),
-		staged:    newStagedArchives(),
+		export:    make(chan struct{}, capacity.Exports),
+		staged:    newStagedArchives(capacity.Archives),
 		activeMu:  &sync.Mutex{},
 		active:    make(map[string]bool),
 	}
@@ -144,6 +143,22 @@ func New(ctx context.Context, config Config) (*Cache, error) {
 	opened = true
 	return cache, nil
 }
+func prepareCacheConfig(config Config) (Config, error) {
+	if config.Now == nil {
+		config.Now = clock.RealClock{}.Now
+	}
+	capacity, err := sourcedelivery.ResolveBudgets(config.SourceDelivery)
+	if err != nil {
+		return config, err
+	}
+	config.SourceDelivery = &capacity
+	config.ReservedBranches = slices.Clone(config.ReservedBranches)
+	if err := prepareCachePaths(config); err != nil {
+		return config, err
+	}
+	return config, nil
+}
+
 func prepareCachePaths(config Config) error {
 	if err := validatePatterns(config.ReservedBranches); err != nil {
 		return err
@@ -163,6 +178,7 @@ func prepareCachePaths(config Config) error {
 // it ends running forge transfers and waits for them before releasing it.
 func (c *Cache) Close() error {
 	c.stopDelivery()
+	c.staged.close()
 	c.transfers.close()
 	return errors.Join(c.staged.prune(nil), c.rootLock.Close())
 }

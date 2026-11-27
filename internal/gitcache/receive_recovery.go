@@ -3,6 +3,7 @@ package gitcache
 import (
 	"context"
 	"errors"
+	"github.com/oberthci/oberth/internal/sourcedelivery"
 	"maps"
 	"os"
 )
@@ -15,6 +16,7 @@ func (c *Cache) restoreUnchecked(ctx context.Context, store string) (Reservation
 		if c.isActive(files.owner) {
 			return Reservation{}, nil, nil
 		}
+		noteReadWait(ctx)
 		if err := files.cleanReceive(); err != nil {
 			return Reservation{}, nil, err
 		}
@@ -37,6 +39,8 @@ func (c *Cache) restoreReceiveRecord(ctx context.Context, store string, files *r
 	if c.isActive("receive-" + record.Event.ID) {
 		return Reservation{}, nil, nil
 	}
+	noteReadWait(ctx)
+	defer sourcedelivery.Measure(ctx, sourcedelivery.Recovery, true)()
 	return c.settleReceiveRecord(ctx, store, record, files != nil && files.rejected)
 }
 

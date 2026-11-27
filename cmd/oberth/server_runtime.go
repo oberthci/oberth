@@ -18,6 +18,7 @@ import (
 	"github.com/oberthci/oberth/internal/runtimeconfig"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/sourcecontract"
+	"github.com/oberthci/oberth/internal/sourcedelivery"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -28,6 +29,7 @@ import (
 // serverRuntime contains composition settings; workflow defaults and release
 // routes retain their owning contracts instead of a second policy decoder.
 type serverRuntime struct {
+	SourceDelivery          *sourcedelivery.Budgets                `json:"source_delivery,omitempty"`
 	ReceiveMaxInputBytes    int64                                  `json:"receive_max_input_bytes"`
 	GitBinary               string                                 `json:"git_binary"`
 	SourceTimeoutSeconds    int                                    `json:"source_timeout_seconds"`
@@ -52,6 +54,13 @@ func decodeRuntime(raw []byte) (serverRuntime, error) {
 	d.DisallowUnknownFields()
 	if err := d.Decode(&r); err != nil {
 		return r, serverProblem("config", "runtime: "+err.Error(), err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return r, err
+	}
+	if bytes.Equal(bytes.TrimSpace(fields["source_delivery"]), []byte("null")) {
+		return r, serverProblem("config", "runtime.source_delivery: expected a complete positive tuple", nil)
 	}
 	if bytes.Equal(r.Defaults.WorkflowDefaults, []byte("null")) {
 		r.Defaults.WorkflowDefaults = nil
@@ -79,6 +88,9 @@ func validateRuntime(r serverRuntime) error {
 	if len(problems) > 0 {
 		slices.Sort(problems)
 		return serverProblem("config", strings.Join(problems, "\n"), nil)
+	}
+	if _, err := sourcedelivery.ResolveBudgets(r.SourceDelivery); err != nil {
+		return serverProblem("config", "runtime.source_delivery: "+err.Error(), err)
 	}
 	return r.Routes.Validate()
 }

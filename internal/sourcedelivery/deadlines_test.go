@@ -53,7 +53,7 @@ func TestBodyAndWriteDeadlinesBoundStalledIOAndTotalDeadline(t *testing.T) {
 }
 func TestAuthenticationDeadlineStopsUnavailableIdentityRead(t *testing.T) {
 	var observed time.Duration
-	s := New(Config{SourceClientBurst: 3, Authenticate: func(ctx context.Context, _ string) (Caller, error) {
+	s := New(Config{Budgets: &Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 1, WorkflowWaiters: 16}, Authenticate: func(ctx context.Context, _ string) (Caller, error) {
 		deadline, ok := ctx.Deadline()
 		if !ok {
 			t.Error("missing auth deadline")

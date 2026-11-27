@@ -36,7 +36,7 @@ func TestMissingRecordedTagMessageReachesRealPlugin(t *testing.T) {
 	}
 	f.Git(t, f.Store(), "gc", "--prune=now")
 	caller := sourcedelivery.Caller{Namespace: "runs", Workflow: "wf", UID: "uid"}
-	server := sourcedelivery.New(sourcedelivery.Config{Now: clock.RealClock{}.Now, SourceClientBurst: 30, Stage: cache.Stage,
+	server := sourcedelivery.New(sourcedelivery.Config{Now: clock.RealClock{}.Now, Budgets: &sourcedelivery.Budgets{Exports: 1, Archives: 2, Transfers: 2, Auth: 10, WorkflowWaiters: 16}, Stage: cache.Stage,
 		Authenticate: func(context.Context, string) (sourcedelivery.Caller, error) { return caller, nil },
 		Run: func(context.Context, string) (sourcedelivery.Run, error) {
 			return sourcedelivery.Run{Admission: p.View(), Namespace: caller.Namespace, Workflow: caller.Workflow, UID: caller.UID}, nil
