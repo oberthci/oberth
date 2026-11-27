@@ -9390,7 +9390,7 @@
     }
   },
   "spec_sha256": {
-    "docs/plans/c1-transport-and-tool-registry.md": "76696fc4cec3a528c7151119f0f95c5349e025cf9564625759a4343e2ace42a1",
+    "docs/plans/c1-transport-and-tool-registry.md": "ad0f25195e36188600102ef33cc0a16cdbb2a4ed2e58f072491fd648aeb91e7b",
     "docs/plans/c10-schedules.md": "78bd7b77d6511426d16b5c7ddf543b8124c47e82d40fb16542cfa8efbac7ca67",
     "docs/plans/c11-cli-and-server-composition.md": "2ebbc2b71b8428fca3759ca5f90641b6ccf3bd08d9cb20bfc9738e38b4374530",
     "docs/plans/c12-agent-client.md": "ca882747bf58f807cd9c803cbfeac286378c6a14dbea2dc91b24633e12a50201",
@@ -9522,7 +9522,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:119",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:117",
       "markers": [
         "**Delta:**"
       ],
@@ -9537,7 +9537,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:139",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:137",
       "markers": [
         "**Delta:**"
       ],
@@ -9596,7 +9596,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:155",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:153",
       "markers": [
         "**Delta:**"
       ],
@@ -9634,7 +9634,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:163",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:161",
       "markers": [
         "**Delta:**"
       ],
@@ -9815,7 +9815,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:172",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:170",
       "markers": [
         "**Delta:**"
       ],
@@ -9839,7 +9839,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:184",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:182",
       "markers": [
         "**Delta:**"
       ],
@@ -10087,7 +10087,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:191",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:189",
       "markers": [
         "**Delta:**"
       ],
@@ -10096,7 +10096,7 @@
       "rows": []
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:196",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:194",
       "markers": [
         "**Delta:**"
       ],
@@ -10150,7 +10150,7 @@
       ]
     },
     {
-      "spec": "docs/plans/c1-transport-and-tool-registry.md:254",
+      "spec": "docs/plans/c1-transport-and-tool-registry.md:252",
       "markers": [
         "**Delta:**"
       ],

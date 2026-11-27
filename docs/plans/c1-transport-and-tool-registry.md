@@ -25,7 +25,7 @@ Only verified client certificates are accepted. Dual credentials must agree on i
 fingerprint, admin and scope; an unknown certificate cannot fall back to a bearer.
 
 C1 owns request-scoped delivery reservations and browser preferences. MCP uses only
-2026-07-28, per-request version, client identity and capabilities, and server/discover.
+2026-07-28, per-request version and capabilities, optional client identity, and server/discover.
 Validate matching version/method/name headers (including Base64 sentinel encoding) before
 effects. Header errors are HTTP 400/-32020; unsupported revisions are 400/-32022 with
 supported versions; unknown methods are 404/-32601. Required missing capabilities are
@@ -105,12 +105,10 @@ C4 is the sole validator.
 parallel dispatcher. Storage, credential handling and bootstrap remain with their owning
 components.
 
-MCP keeps the explicit negotiated dates `2025-03-26` and `2025-06-18`, preferring the
-latter. Unsupported valid dates receive the preferred date; malformed dates are invalid
-params. Version headers are validated per request. Negotiation is not an authentication
-gate. Tools use `{name, arguments, _meta?}`. Results have text `content`, object
-`structuredContent` on success and `isError`; protocol errors retain their JSON-RPC code
-and request ID.
+Tool calls require `{name, arguments, _meta}`. Metadata carries the per-request protocol
+version and client capabilities; client identity is optional. Complete tool results have
+text `content`, object `structuredContent` on success and `isError`; protocol errors
+retain their JSON-RPC code and request ID.
 
 Public DTOs have explicit snake_case tags after authorization/redaction. Collections are
 objects such as `{"runs":[]}`, `{"repositories":[]}` and `{"grants":[]}`. Empty
