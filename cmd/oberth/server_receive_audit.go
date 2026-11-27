@@ -5,16 +5,28 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/publicerr"
+	"github.com/oberthci/oberth/internal/sshserver"
 	"github.com/oberthci/oberth/internal/store"
 )
 
 const reasonRefusalAudit = "Refusal audit could not be saved."
 const remedyRefusalAudit = "Ask an administrator to check the audit store, then try again."
 const codeReceiveRefused = "receive_refused"
+const receiveRefusalTimeout = 5 * time.Second
+
+func (o *serverOwners) refusedSession(ctx context.Context, s sshserver.Session, cause error) error {
+	if s.Command.Service != "git-receive-pack" || s.Identity.Actor == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), receiveRefusalTimeout)
+	defer cancel()
+	return o.refusedReceive(ctx, gitcache.ReceiveEvent{Actor: s.Identity.Actor, Repository: s.Command.Repository}, cause)
+}
 
 func (o *serverOwners) refusedReceive(ctx context.Context, event gitcache.ReceiveEvent, cause error) error {
 	v := store.ReceiveRefusal{Code: codeReceiveRefused}

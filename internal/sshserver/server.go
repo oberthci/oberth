@@ -22,9 +22,11 @@ type Session struct {
 	Begin, End          func()
 }
 type Config struct {
-	Signer                 ssh.Signer
-	Lookup                 func(context.Context, ssh.PublicKey) (Identity, error)
-	Run                    func(context.Context, Session) error
+	Signer ssh.Signer
+	Lookup func(context.Context, ssh.PublicKey) (Identity, error)
+	Run    func(context.Context, Session) error
+	// Refused records authenticated scope denials before Run can own the request.
+	Refused                func(context.Context, Session, error) error
 	Now                    func() time.Time
 	Handshake, Idle, Total time.Duration
 	Connections            int
@@ -177,7 +179,7 @@ func (s *Server) session(ctx context.Context, caller peer, ch ssh.Channel, reque
 				return
 			}
 			if !caller.identity.CanAccess(cmd.Repository) {
-				_, _ = io.WriteString(ch.Stderr(), reasonScope+". "+remedyScope+"\n")
+				_, _ = io.WriteString(ch.Stderr(), gitFailure(s.refuseScope(ctx, caller.identity, cmd))+"\n")
 				_ = request.Reply(false, nil)
 				return
 			}

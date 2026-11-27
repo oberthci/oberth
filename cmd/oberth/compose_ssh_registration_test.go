@@ -51,8 +51,16 @@ func TestComposedSSHRefusesUnregisteredWithoutWriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(before, cacheTree(t, root)) || !reflect.DeepEqual(audit, afterAudit) || head != afterHead || !reflect.DeepEqual(repos, afterRepos) {
-		t.Fatal("unregistered SSH request changed cache or store")
+	if !reflect.DeepEqual(before, cacheTree(t, root)) || !reflect.DeepEqual(repos, afterRepos) {
+		t.Fatal("unregistered SSH request changed cache or repositories")
+	}
+	if len(afterAudit) != len(audit)+3 || afterHead.ID != head.ID+3 || !reflect.DeepEqual(audit, afterAudit[:len(audit)]) {
+		t.Fatal("unregistered receive refusals did not append exactly three audit records", afterAudit, afterHead)
+	}
+	for _, row := range afterAudit[len(audit):] {
+		if row.Action != "receive.refused" || row.Actor != who.Identity || row.ResourceType != "repository" {
+			t.Fatal("unregistered refusal lost trusted attribution", row)
+		}
 	}
 }
 

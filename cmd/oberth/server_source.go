@@ -21,7 +21,7 @@ import (
 )
 
 func (o *serverOwners) sourcePart(ctx context.Context) (Part, error) {
-	server, err := sshserver.New(sshserver.Config{Signer: o.c.hostKey, Lookup: o.sshIdentity, Run: o.gitSession, Now: o.c.clock.Now})
+	server, err := sshserver.New(sshserver.Config{Signer: o.c.hostKey, Lookup: o.sshIdentity, Run: o.gitSession, Refused: o.refusedSession, Now: o.c.clock.Now})
 	if err != nil {
 		return Part{}, err
 	}
@@ -58,11 +58,18 @@ func (o *serverOwners) sshIdentity(ctx context.Context, key ssh.PublicKey) (sshs
 	}
 	return sshserver.Identity{Actor: who.Identity, Fingerprint: who.Fingerprint, CanAccess: who.CanTouchRepository}, nil
 }
-func (o *serverOwners) gitSession(ctx context.Context, s sshserver.Session) error {
+func (o *serverOwners) gitSession(ctx context.Context, s sshserver.Session) (result error) {
+	cacheOwnsRefusal := false
+	defer func() {
+		if result != nil && !cacheOwnsRefusal {
+			result = errors.Join(result, o.refusedSession(ctx, s, result))
+		}
+	}()
 	who, err := (currentAuthority{o}).byFingerprint(ctx, s.Identity.Fingerprint, "ssh")
 	if err != nil {
 		return err
 	}
+	s.Identity.Actor = who.Identity
 	repo, err := service.ResolveRepository(ctx, o.c.store, who, s.Command.Repository)
 	if err != nil {
 		if publicerr.Classify(err).Code() == publicerr.NotFound {
@@ -87,6 +94,7 @@ func (o *serverOwners) gitSession(ctx context.Context, s sshserver.Session) erro
 	if err != nil {
 		return err
 	}
+	cacheOwnsRefusal = true
 	return o.cache.Receive(ctx, gitcache.ReceiveRequest{Repository: s.Command.Repository, Actor: who.Identity, Fingerprint: who.Fingerprint, AllowDefault: !policy.Agent, AlwaysRun: !policy.Agent, Admission: gitcache.ReleaseAdmission{DefaultBranch: head.Name, SHA: head.CommitSHA}, Input: s.Input, Output: s.Output, Diagnostics: s.Diagnostics, Begin: s.Begin, End: s.End, Deliver: o.deliver})
 }
 
