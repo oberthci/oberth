@@ -31,6 +31,8 @@ const (
 	reasonAdmissionStuck   = "admission still running at its deadline"
 	reasonAdmissionEnded   = "admission ended at its deadline"
 	reasonForgeUpdating    = "forge copy still updating"
+	reasonReleaseHead      = "release default head is unavailable"
+	remedyReleaseHead      = "Try again once the forge answers."
 	reasonForgeSilent      = "forge did not answer in time"
 	remedyForgeSilent      = "Retry in a minute; the cached head cannot decide this without the forge."
 	reasonForgeRefused     = "forge refused the head read"

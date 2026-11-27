@@ -33,10 +33,10 @@ Stable `vMAJOR.MINOR.PATCH` tags release after setup. The server supplies:
 - `release-default-commit`: the exact default head used by the server's Git ancestry check.
 - `release-build-status`: `passed` from the latest admitted `.oberth/build.yaml` run on that commit.
 
-Missing, running, failed or assisted builds refuse before execution: run the build, then push again.
-Outside releases are unknown; reruns keep facts but must clear the recorded version floor. Changed
-identity or assistance refuses. Release arguments, defaults and global outputs cannot replace facts;
-builds keep their own values. Offline validation proves no live facts. By hand is the fallback. See
+Missing, running, failed or assisted builds refuse: run the build, then push again. Releases and
+administrator reruns need fresh forge ancestry; retry once the forge answers. Reruns keep facts,
+check the version floor and refuse changed identity or assistance. Inputs cannot replace facts;
+builds keep theirs. Offline checks prove no live facts. By hand is the fallback. See
 [tag routing](pipelines.md#build-tags-and-release-tags) for file selection and ambiguity refusal.
 Release files are assets of the tag's GitHub release. Set `release-config.origin` to
 `https://github.com/oberthci/oberth/releases/download`, the

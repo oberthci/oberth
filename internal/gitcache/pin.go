@@ -12,7 +12,7 @@ import (
 )
 
 // headDeadline is how long a pin or a release's ancestry check waits for the
-// forge's default head before it decides from the head the cache holds. One
+// forge's default head. Only ordinary pins may use a cached head. One
 // forge round trip fits; a slower read continues in the background, and
 // several slow producers still fit in a push's 30-second admission and in a
 // rerun's 10-second request bound.
@@ -25,9 +25,26 @@ func (c *Cache) Pin(ctx context.Context, at sourcecontract.Revision) (int64, boo
 	return id, reachable, err
 }
 
-// DefaultAncestor returns the exact default head used for the ancestry decision.
+// DefaultAncestor requires a live forge head for release admission. It never
+// uses cached refs or saved admission answers to authorize a release.
 func (c *Cache) DefaultAncestor(ctx context.Context, at sourcecontract.Revision) (sourcecontract.Ref, bool, error) {
-	_, head, reachable, err := c.defaultAncestor(ctx, at)
+	r, p, err := c.pinProducer(ctx, at)
+	if err != nil || r.RepositoryID == 0 {
+		return sourcecontract.Ref{}, false, err
+	}
+	wait, cancel := context.WithTimeout(ctx, c.budgets.headWait)
+	defer cancel()
+	head, err := c.policyHead(wait, at.Repository, r)
+	if forgeError(err) {
+		return sourcecontract.Ref{}, false, forgeRefusal(reasonReleaseHead, remedyReleaseHead, at.Repository, err)
+	}
+	if isAbsent(err) {
+		return sourcecontract.Ref{}, false, nil
+	}
+	if err != nil {
+		return sourcecontract.Ref{}, false, err
+	}
+	reachable, err := c.reaches(ctx, p, at.Commit, head.CommitSHA)
 	return head, reachable, err
 }
 

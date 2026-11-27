@@ -9,9 +9,9 @@ import (
 )
 
 // policyHead reads the forge's current default head of repo and makes sure
-// its object is in the cache, for the reads that are not admission decisions
-// (a publication's predecessor, the promotion policy, a default-ref
-// checkout). Each forge command runs as a job of the repository and its forge
+// its object is in the cache, for release admission, a publication's
+// predecessor, the promotion policy and a default-ref checkout. Each forge
+// command runs as a job of the repository and its forge
 // identity under the cache lifetime, joined only by callers whose
 // registration names the same forge and branch, so a caller's deadline never
 // kills it. A caller waits at most the refresh wait within ctx; one that stops
