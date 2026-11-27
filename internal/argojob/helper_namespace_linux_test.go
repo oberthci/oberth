@@ -250,35 +250,38 @@ func namespaceMount(t *testing.T) {
 
 func TestRerunRefusesReplacedRoot(t *testing.T) {
 	for _, point := range []string{"admit", "install"} {
-		t.Run(point, func(t *testing.T) {
-			r := rerunRuntime(t)
-			bundle, digest := rerunBundle(t, minimalRerunFiles(), nil, strings.Repeat("f", 40))
-			stage, err := r.stageRerun(t.Context(), bytes.NewReader(bundle), digest)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer os.Remove(stage)
-			o, _, _ := testHoldOwner(t)
-			o.runtime = r
-			request := holdRequest{Version: holdProtocol, Op: "rerun", UID: "uid", Stage: stage, Digest: digest}
-			if point == "install" {
-				if _, frame, _, _ := o.admit(request); frame.Type != "rerunning" {
-					t.Fatal(frame)
-				}
-			}
-			if err = os.Rename(r.sourceRoot, r.sourceRoot+"-original"); err != nil {
-				t.Fatal(err)
-			}
-			if err = os.Mkdir(r.sourceRoot, 0700); err != nil {
-				t.Fatal(err)
-			}
-			if point == "admit" {
-				if _, frame, _, _ := o.admit(request); frame.Type != "refused" {
-					t.Fatal("replacement root admitted", frame)
-				}
-			} else if _, err = r.applyRerunSnapshot(t.Context(), stage, digest); err == nil {
-				t.Fatal("replacement root installed")
-			}
-		})
+		t.Run(point, func(t *testing.T) { checkReplacedRoot(t, point) })
+	}
+}
+
+func checkReplacedRoot(t *testing.T, point string) {
+	t.Helper()
+	r := rerunRuntime(t)
+	bundle, digest := rerunBundle(t, minimalRerunFiles(), nil, strings.Repeat("f", 40))
+	stage, err := r.stageRerun(t.Context(), bytes.NewReader(bundle), digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(stage)
+	o, _, _ := testHoldOwner(t)
+	o.runtime = r
+	request := holdRequest{Version: holdProtocol, Op: "rerun", UID: "uid", Stage: stage, Digest: digest}
+	if point == "install" {
+		if _, frame, _, _ := o.admit(request); frame.Type != "rerunning" {
+			t.Fatal(frame)
+		}
+	}
+	if err = os.Rename(r.sourceRoot, r.sourceRoot+"-original"); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Mkdir(r.sourceRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if point == "admit" {
+		if _, frame, _, _ := o.admit(request); frame.Type != "refused" {
+			t.Fatal("replacement root admitted", frame)
+		}
+	} else if _, err = r.applyRerunSnapshot(t.Context(), stage, digest); err == nil {
+		t.Fatal("replacement root installed")
 	}
 }
