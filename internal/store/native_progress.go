@@ -19,7 +19,7 @@ func (s *Store) SaveProgress(ctx context.Context, id string, p stateport.Progres
 
 func (s *Store) saveNativeProgress(ctx context.Context, tx *sql.Tx, id string, p stateport.Progress) error {
 	steps := p.Steps
-	before, err := mutableProgress(ctx, tx, id)
+	before, err := s.mutableProgress(ctx, tx, id)
 	if err != nil {
 		return err
 	}
@@ -46,14 +46,14 @@ func (s *Store) saveNativeProgress(ctx context.Context, tx *sql.Tx, id string, p
 	if sameSteps && sameSummary {
 		return unchanged{}
 	}
-	if err := writeNativeProjection(ctx, tx, nativeProjectionWrite{id: id, steps: steps, summary: next.RunSummary, sameSummary: sameSummary}); err != nil {
+	if err := s.writeNativeProjection(ctx, tx, nativeProjectionWrite{id: id, steps: steps, summary: next.RunSummary, sameSummary: sameSummary}); err != nil {
 		return err
 	}
 	return s.progressEvent(ctx, tx, next)
 }
 
-func mutableProgress(ctx context.Context, tx *sql.Tx, id string) (progressSnapshot, error) {
-	before, err := readProgress(ctx, tx, id)
+func (s *Store) mutableProgress(ctx context.Context, tx *sql.Tx, id string) (progressSnapshot, error) {
+	before, err := s.readProgress(ctx, tx, id)
 	if err != nil {
 		return before, err
 	}
@@ -77,11 +77,12 @@ func sameProgressSteps(previous string, steps []stepmodel.RunStep) (bool, error)
 	return stateport.EqualStepFacts(before, steps), nil
 }
 
-func writeProgressSummary(ctx context.Context, tx *sql.Tx, id string, summary stepmodel.RunSummary) error {
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status=?,summary=? WHERE id=?`, summary.Status, encode(summary), id); err != nil {
+func (s *Store) writeProgressSummary(ctx context.Context, tx *sql.Tx, id string, summary stepmodel.RunSummary) error {
+	if _, err := s.progressExec(ctx, tx, `UPDATE runs SET status=?,summary=? WHERE id=?`, summary.Status, encode(summary), id); err != nil {
 		return databaseError(err)
 	}
-	return saveCounts(ctx, tx, id, summary.LogicalStepCounts)
+	_, err := s.progressExec(ctx, tx, progressCountsSQL, progressCountsArgs(id, summary.LogicalStepCounts)...)
+	return databaseError(err)
 }
 
 // projectNativeProgress sets the run's start from its earliest started step and, while
@@ -169,12 +170,12 @@ type nativeProjectionWrite struct {
 	sameSummary bool
 }
 
-func writeNativeProjection(ctx context.Context, tx *sql.Tx, row nativeProjectionWrite) error {
-	if _, err := tx.ExecContext(ctx, `INSERT INTO native_steps VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET value=excluded.value`, row.id, encode(row.steps)); err != nil {
+func (s *Store) writeNativeProjection(ctx context.Context, tx *sql.Tx, row nativeProjectionWrite) error {
+	if _, err := s.progressExec(ctx, tx, `INSERT INTO native_steps VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET value=excluded.value`, row.id, encode(row.steps)); err != nil {
 		return databaseError(err)
 	}
 	if !row.sameSummary {
-		return writeProgressSummary(ctx, tx, row.id, row.summary)
+		return s.writeProgressSummary(ctx, tx, row.id, row.summary)
 	}
 	return nil
 }

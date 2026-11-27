@@ -13,14 +13,7 @@ func TestNativeProgressUsesOneProjectionRead(t *testing.T) {
 	t.Parallel()
 	s := testStore(t)
 	r, _ := accepted(t, s, "progress-queries")
-	s.stopUses()
-	<-s.usesDone
-	probe := new(queryProbe)
-	original := s.writer
-	db := sql.OpenDB(probeConnector{driver: original.Driver(), dsn: "file:" + s.path + "?mode=rw&_txlock=immediate&_pragma=foreign_keys(1)", probe: probe})
-	db.SetMaxOpenConns(1)
-	s.writer = db
-	defer func() { s.writer = original; requireOK(t, db.Close()) }()
+	probe := probeProgressWriter(t, s)
 	entry := r.Admission.Plan.Entries[0]
 	started := r.CreatedAt.Add(time.Second)
 	progress := stateport.Progress{Steps: []stepmodel.RunStep{{Path: entry.Path, Name: entry.Name, Status: stepmodel.StepRunning, StartedAt: &started}}}
@@ -43,4 +36,24 @@ func TestNativeProgressUsesOneProjectionRead(t *testing.T) {
 		t.Fatal("unchanged projection signaled")
 	default:
 	}
+}
+
+func probeProgressWriter(t *testing.T, s *Store) *queryProbe {
+	t.Helper()
+	s.stopUses()
+	<-s.usesDone
+	probe := new(queryProbe)
+	original := s.writer
+	db := sql.OpenDB(probeConnector{driver: original.Driver(), dsn: "file:" + s.path + "?mode=rw&_txlock=immediate&_pragma=foreign_keys(1)", probe: probe})
+	db.SetMaxOpenConns(1)
+	originalQueries := s.progress
+	queries, err := prepareProgressStatements(t.Context(), db)
+	requireOK(t, err)
+	s.writer, s.progress = db, queries
+	t.Cleanup(func() {
+		s.writer, s.progress = original, originalQueries
+		requireOK(t, queries.close())
+		requireOK(t, db.Close())
+	})
+	return probe
 }

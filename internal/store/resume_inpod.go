@@ -95,7 +95,7 @@ func (s *Store) finishInPodPredecessor(ctx context.Context, tx *sql.Tx, input st
 }
 
 func (s *Store) persistHeldProjection(ctx context.Context, tx *sql.Tx, old stateport.Run, h nativebinding.ResumeHold) error {
-	progress, err := readProgress(ctx, tx, old.ID)
+	progress, err := s.readProgress(ctx, tx, old.ID)
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func (s *Store) persistHeldProjection(ctx context.Context, tx *sql.Tx, old state
 	if _, err = tx.ExecContext(ctx, `INSERT INTO native_steps VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET value=excluded.value`, old.ID, encode(steps)); err != nil {
 		return databaseError(err)
 	}
-	return writeProgressSummary(ctx, tx, old.ID, old.RunSummary)
+	return s.writeProgressSummary(ctx, tx, old.ID, old.RunSummary)
 }
 
 func (s *Store) heldHandoffEvent(ctx context.Context, tx *sql.Tx, old stateport.Run) error {
@@ -131,7 +131,7 @@ func (s *Store) heldHandoffEvent(ctx context.Context, tx *sql.Tx, old stateport.
 	if old.Origin.Resumed() {
 		data, _ = json.Marshal(map[string]string{"resumed_from": old.Origin.ResumedFrom})
 	}
-	_, err := insertEvent(ctx, tx, stateport.EventWrite{Event: model.AgentEvent{Kind: string(model.EventRunFinished), At: s.options.Clock(), Repo: old.Repo, RunID: old.ID, Ref: old.Ref, ObjectSHA: old.ObjectSHA, CommitSHA: old.CommitSHA, Summary: "resumed in place", Data: data}, Dedupe: "run.finished:" + old.ID + ":in-pod"})
+	_, err := s.insertEvent(ctx, tx, stateport.EventWrite{Event: model.AgentEvent{Kind: string(model.EventRunFinished), At: s.options.Clock(), Repo: old.Repo, RunID: old.ID, Ref: old.Ref, ObjectSHA: old.ObjectSHA, CommitSHA: old.CommitSHA, Summary: "resumed in place", Data: data}, Dedupe: "run.finished:" + old.ID + ":in-pod"})
 	return err
 }
 

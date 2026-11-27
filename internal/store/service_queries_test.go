@@ -14,8 +14,9 @@ import (
 )
 
 type queryProbe struct {
-	mu      sync.Mutex
-	queries []string
+	mu       sync.Mutex
+	queries  []string
+	prepares []string
 }
 
 func (p *queryProbe) record(q string) {
@@ -28,6 +29,19 @@ func (p *queryProbe) take() []string {
 	defer p.mu.Unlock()
 	out := p.queries
 	p.queries = nil
+	return out
+}
+
+func (p *queryProbe) recordPrepare(query string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.prepares = append(p.prepares, query)
+}
+func (p *queryProbe) takePrepares() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := p.prepares
+	p.prepares = nil
 	return out
 }
 
@@ -54,7 +68,41 @@ type probeConn struct {
 	probe *queryProbe
 }
 
+type probeStmt struct {
+	driver.Stmt
+	query string
+	probe *queryProbe
+}
+
+func (c probeConn) Prepare(query string) (driver.Stmt, error) {
+	c.probe.recordPrepare(query)
+	stmt, err := c.Conn.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	return probeStmt{Stmt: stmt, query: query, probe: c.probe}, nil
+}
+func (c probeConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
+	c.probe.recordPrepare(query)
+	stmt, err := c.Conn.(driver.ConnPrepareContext).PrepareContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return probeStmt{Stmt: stmt, query: query, probe: c.probe}, nil
+}
+func (s probeStmt) Query(args []driver.Value) (driver.Rows, error) {
+	s.probe.record(s.query)
+	return s.Stmt.Query(args)
+}
+func (s probeStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	s.probe.record(s.query)
+	return s.Stmt.(driver.StmtQueryContext).QueryContext(ctx, args)
+}
+func (s probeStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	return s.Stmt.(driver.StmtExecContext).ExecContext(ctx, args)
+}
 func (c probeConn) QueryContext(ctx context.Context, q string, args []driver.NamedValue) (driver.Rows, error) {
+	c.probe.recordPrepare(q)
 	c.probe.record(q)
 	return c.Conn.(driver.QueryerContext).QueryContext(ctx, q, args)
 }

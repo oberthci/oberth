@@ -103,18 +103,25 @@ func loadRun(ctx context.Context, tx *sql.Tx, id string) (stateport.Run, error) 
 	return readRun(ctx, tx, id, true)
 }
 
+const runReadPrefix = `SELECT repo_id,sequence,revision,summary,origin,`
+const runReadSuffix = `,admission IS NOT NULL AND length(admission)>0,evidence_complete,release,step_count,
+steps_planned_exact,steps_pending,steps_queued,steps_running,steps_passed,steps_failed,steps_skipped,
+steps_unknown,findings
+FROM runs WHERE id=?`
+
 func readRun(ctx context.Context, tx *sql.Tx, id string, admissionBody bool) (stateport.Run, error) {
-	var r stateport.Run
-	var summary, origin, findings string
-	var admission []byte
 	column := "NULL"
 	if admissionBody {
 		column = "admission"
 	}
-	err := tx.QueryRowContext(ctx, `SELECT repo_id,sequence,revision,summary,origin,`+column+`,admission IS NOT NULL AND length(admission)>0,evidence_complete,release,step_count,
-steps_planned_exact,steps_pending,steps_queued,steps_running,steps_passed,steps_failed,steps_skipped,
-steps_unknown,findings
-FROM runs WHERE id=?`, id).Scan(&r.RepositoryID, &r.Sequence, &r.Revision, &summary, &origin, &admission, &r.HasAdmission, &r.EvidenceComplete,
+	return scanRun(tx.QueryRowContext(ctx, runReadPrefix+column+runReadSuffix, id))
+}
+
+func scanRun(row *sql.Row) (stateport.Run, error) {
+	var r stateport.Run
+	var summary, origin, findings string
+	var admission []byte
+	err := row.Scan(&r.RepositoryID, &r.Sequence, &r.Revision, &summary, &origin, &admission, &r.HasAdmission, &r.EvidenceComplete,
 		&r.Release, &r.Total, &r.Exact, &r.Pending, &r.Queued, &r.Running, &r.Passed, &r.Failed, &r.Skipped, &r.Unknown, &findings)
 	if err != nil {
 		return r, databaseError(err)

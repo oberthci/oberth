@@ -33,10 +33,15 @@ func readCounts(ctx context.Context, tx *sql.Tx, id string) (stepmodel.LogicalSt
 	return c, databaseError(err)
 }
 
+const progressCountsSQL = `UPDATE runs SET step_count=?,steps_planned_exact=?,steps_pending=?,
+  steps_queued=?,steps_running=?,steps_passed=?,steps_failed=?,steps_skipped=?,steps_unknown=? WHERE id=?`
+
+func progressCountsArgs(id string, c stepmodel.LogicalStepCounts) []any {
+	return []any{c.Total, c.Exact, c.Pending, c.Queued, c.Running, c.Passed, c.Failed, c.Skipped, c.Unknown, id}
+}
+
 func saveCounts(ctx context.Context, tx *sql.Tx, id string, c stepmodel.LogicalStepCounts) error {
-	_, err := tx.ExecContext(ctx, `UPDATE runs SET step_count=?,steps_planned_exact=?,steps_pending=?,
-  steps_queued=?,steps_running=?,steps_passed=?,steps_failed=?,steps_skipped=?,steps_unknown=? WHERE id=?`,
-		c.Total, c.Exact, c.Pending, c.Queued, c.Running, c.Passed, c.Failed, c.Skipped, c.Unknown, id)
+	_, err := tx.ExecContext(ctx, progressCountsSQL, progressCountsArgs(id, c)...)
 	return databaseError(err)
 }
 

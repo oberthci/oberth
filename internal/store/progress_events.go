@@ -13,13 +13,13 @@ type progressSnapshot struct {
 	steps string
 }
 
-func readProgress(ctx context.Context, tx *sql.Tx, id string) (progressSnapshot, error) {
-	run, err := loadRun(ctx, tx, id)
+func (s *Store) readProgress(ctx context.Context, tx *sql.Tx, id string) (progressSnapshot, error) {
+	run, err := scanRun(s.progressRow(ctx, tx, runReadPrefix+"admission"+runReadSuffix, id))
 	if err != nil {
 		return progressSnapshot{}, err
 	}
 	before := progressSnapshot{run: run}
-	err = tx.QueryRowContext(ctx, `SELECT value FROM native_steps WHERE run_id=?`, id).Scan(&before.steps)
+	err = s.progressRow(ctx, tx, `SELECT value FROM native_steps WHERE run_id=?`, id).Scan(&before.steps)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = nil
 	}
@@ -29,7 +29,7 @@ func readProgress(ctx context.Context, tx *sql.Tx, id string) (progressSnapshot,
 func (s *Store) progressEvent(ctx context.Context, tx *sql.Tx, run stateport.Run) error {
 	// The existing event allocator survives pruning and supplies the projection revision.
 	var sequence int64
-	if err := tx.QueryRowContext(ctx, `SELECT coalesce((SELECT seq FROM sqlite_sequence WHERE name='events'),0)+1`).Scan(&sequence); err != nil {
+	if err := s.progressRow(ctx, tx, `SELECT coalesce((SELECT seq FROM sqlite_sequence WHERE name='events'),0)+1`).Scan(&sequence); err != nil {
 		return databaseError(err)
 	}
 	_, err := s.insertEvent(ctx, tx, stateport.ProgressEvent(run, sequence, s.options.Clock()))

@@ -27,6 +27,7 @@ type Options struct {
 type Store struct {
 	refusals                                                    receiveRefusals
 	metrics                                                     storeMetrics
+	progress                                                    *progressStatements
 	notifications                                               stateport.ChangeHub
 	pendingChanges                                              map[stateport.Change]struct{}
 	backupMu                                                    sync.RWMutex
@@ -92,7 +93,15 @@ func Create(ctx context.Context, path string, options Options) (_ *Store, result
 
 // Open requires an existing database and applies supported forward migrations.
 func Open(ctx context.Context, path string, options Options) (*Store, error) {
-	return open(ctx, path, options, currentSchema())
+	s, err := open(ctx, path, options, currentSchema())
+	if err != nil {
+		return nil, err
+	}
+	s.progress, err = prepareProgressStatements(ctx, s.writer)
+	if err != nil {
+		return nil, errors.Join(err, s.Close())
+	}
+	return s, nil
 }
 
 func open(ctx context.Context, path string, options Options, definition schemaDefinition) (*Store, error) {
@@ -185,6 +194,9 @@ func (s *Store) Close() error {
 	}
 	if s.writer != nil {
 		errs = append(errs, s.writer.Close())
+	}
+	if s.progress != nil {
+		errs = append(errs, s.progress.close())
 	}
 	return errors.Join(errs...)
 }

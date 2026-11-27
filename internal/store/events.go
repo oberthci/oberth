@@ -16,7 +16,7 @@ func (s *Store) insertEvent(ctx context.Context, tx *sql.Tx, input stateport.Eve
 	event.ID = 0
 	var id int64
 	var previous string
-	err := tx.QueryRowContext(ctx, `SELECT id,value FROM events WHERE dedupe=?`, input.Dedupe).Scan(&id, &previous)
+	err := s.progressRow(ctx, tx, `SELECT id,value FROM events WHERE dedupe=?`, input.Dedupe).Scan(&id, &previous)
 	if err == nil {
 		if previous != encode(event) {
 			return 0, refuse(eventDedupe, nil)
@@ -26,7 +26,7 @@ func (s *Store) insertEvent(ctx context.Context, tx *sql.Tx, input stateport.Eve
 	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, databaseError(err)
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO events(repo,kind,dedupe,at,value) VALUES(?,?,?,?,?)`, stateport.EventScope(event), event.Kind,
+	result, err := s.progressExec(ctx, tx, `INSERT INTO events(repo,kind,dedupe,at,value) VALUES(?,?,?,?,?)`, stateport.EventScope(event), event.Kind,
 		input.Dedupe, event.At.UTC().Format(timestampFormat), encode(event))
 	if err != nil {
 		return 0, databaseError(err)
