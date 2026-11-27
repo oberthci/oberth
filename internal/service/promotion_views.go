@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/oberthci/oberth/internal/actor"
 	"github.com/oberthci/oberth/internal/apicontract"
@@ -137,30 +138,58 @@ func (s *Service) PreparePromoteStatus(ctx context.Context, c apicontract.Caller
 	if err != nil {
 		return nil, err
 	}
-	timeout := toolTimeout(q.TimeoutS)
 	return func(ctx context.Context) (apicontract.PromotionWaitResult, error) {
-		wait, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		for {
-			changed := s.watch()
-			result, settled, err := s.promotionOutcome(wait, p.ID)
-			if err != nil || settled {
-				return result, err
-			}
-			select {
-			case <-changed:
-			case <-s.ctx.Done():
-				return apicontract.PromotionWaitResult{}, refuse(unavailable)
-			case <-wait.Done():
-				if ctx.Err() != nil {
-					return apicontract.PromotionWaitResult{}, ctx.Err()
-				}
-				result, _, err = s.promotionOutcome(ctx, p.ID)
-				result.TimedOut = true
-				return result, err
-			}
-		}
+		return s.waitPromotion(ctx, a, p, toolTimeout(q.TimeoutS))
 	}, nil
+}
+
+func (s *Service) waitPromotion(ctx context.Context, a actor.Actor, p model.Promotion, timeout time.Duration) (apicontract.PromotionWaitResult, error) {
+	sub := s.c.Events.Subscribe(stateport.ChangeScope{Repositories: []string{p.Repo}})
+	defer sub.Close()
+	wait, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	for {
+		if err := s.authorizePromotion(wait, a, p); err != nil {
+			return apicontract.PromotionWaitResult{}, err
+		}
+		result, settled, err := s.promotionOutcome(wait, p.ID)
+		if err != nil {
+			return apicontract.PromotionWaitResult{}, err
+		}
+		if settled {
+			if err := s.authorizePromotion(wait, a, p); err != nil {
+				return apicontract.PromotionWaitResult{}, err
+			}
+			return result, nil
+		}
+		if err := s.awaitEventChange(wait, sub.C, nil); err != nil {
+			return s.promotionTimeout(ctx, a, p, err)
+		}
+	}
+}
+
+func (s *Service) promotionTimeout(ctx context.Context, a actor.Actor, p model.Promotion, cause error) (apicontract.PromotionWaitResult, error) {
+	if ctx.Err() != nil {
+		return apicontract.PromotionWaitResult{}, ctx.Err()
+	}
+	if !errors.Is(cause, context.DeadlineExceeded) {
+		return apicontract.PromotionWaitResult{}, cause
+	}
+	if err := s.authorizePromotion(ctx, a, p); err != nil {
+		return apicontract.PromotionWaitResult{}, err
+	}
+	result, _, err := s.promotionOutcome(ctx, p.ID)
+	result.TimedOut = true
+	return result, err
+}
+
+func (s *Service) authorizePromotion(ctx context.Context, a actor.Actor, p model.Promotion) error {
+	a, err := s.allow(ctx, a, "promote_status")
+	if err != nil {
+		return err
+	}
+	_, err = s.resolveRepo(ctx, a, p.Repo)
+	return err
 }
 
 // promotionOutcome follows a promotion that the server retests on a moved

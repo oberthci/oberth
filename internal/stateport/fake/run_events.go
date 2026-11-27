@@ -50,33 +50,44 @@ func (f *Runs) Events(ctx context.Context, q stateport.EventFilter) (model.Event
 	if err := f.before(ctx, "Events", false); err != nil {
 		return p, err
 	}
-	if q.After < 0 || q.Through < 0 || q.Limit < 1 || q.Limit > stateport.EventPageLimit {
+	if !q.Valid() {
 		return p, runProblem(publicerr.InvalidInput)
 	}
 	f.data.eventEndpoints(q.ScopeKeys(), &p)
 	p.Gap = f.data.eventGap(q)
+	f.data.fillEventPage(&p, q)
+	return p, nil
+}
+
+func (m *runMemory) fillEventPage(p *model.EventPage, q stateport.EventFilter) {
 	upper := q.Through
 	if upper == 0 {
 		upper = p.LatestID
 	}
-	for _, e := range f.data.events {
-		if !eventRange(e, q, upper) {
+	scanned := 0
+	base := q
+	base.RefsGlob = nil
+	for _, e := range m.events {
+		if !m.scannableEvent(e, base, upper) {
 			continue
 		}
-		if !f.data.actorEvent(q.Actor, e) {
-			continue
-		}
-		p.Events = append(p.Events, e.Clone())
+		scanned++
 		p.NextAfterID = e.ID
-		if len(p.Events) == q.Limit {
+		if q.Selects(e) {
+			p.Events = append(p.Events, e.Clone())
+		}
+		if len(p.Events) == q.Limit || len(q.RefsGlob) > 0 && scanned == stateport.EventPageLimit {
 			break
 		}
 	}
-	if len(p.Events) < q.Limit {
+	if len(p.Events) < q.Limit && (len(q.RefsGlob) == 0 || scanned < stateport.EventPageLimit) {
 		p.NextAfterID = max(p.NextAfterID, min(p.LatestID, upper))
 	}
 	p.HasMore = p.NextAfterID < min(p.LatestID, upper)
-	return p, nil
+}
+
+func (m *runMemory) scannableEvent(e model.AgentEvent, q stateport.EventFilter, upper int64) bool {
+	return eventRange(e, q, upper) && m.actorEvent(q.Actor, e) && q.Selects(e)
 }
 
 // RecordAction supplies administrative facts with events to shared fixtures.

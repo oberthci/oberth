@@ -59,7 +59,7 @@ func (f *composedFixture) waitMatchingRun(t *testing.T, ready func(stateport.Run
 	deadline := time.NewTimer(10 * time.Second)
 	defer deadline.Stop()
 	for {
-		changes := f.owners.c.store.Changes()
+		changes := observeChanges(t, f.owners.c.store)
 		rows, err := f.owners.c.store.Runs(t.Context(), stateport.RunFilter{Limit: 20})
 		if err != nil {
 			t.Fatal(err)

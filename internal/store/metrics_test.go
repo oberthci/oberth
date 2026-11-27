@@ -29,10 +29,12 @@ func TestBaselineDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed := s.Changes()
-	s.signalChange()
+	sub := s.Subscribe(stateport.ChangeScope{All: true})
+	defer sub.Close()
+	s.noteChange(stateport.Change{Broadcast: true})
+	s.publishChanges()
 	select {
-	case <-changed:
+	case <-sub.C:
 	default:
 		t.Fatal("publication did not wake observer")
 	}

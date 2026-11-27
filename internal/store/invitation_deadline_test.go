@@ -15,7 +15,7 @@ func TestInvitationReservationCannotOutliveInvitation(t *testing.T) {
 	requireOK(t, s.Invite(t.Context(), stateport.Action{Actor: "operator"}, invite))
 	_, before, err := s.Audit(t.Context(), 0, 100)
 	requireOK(t, err)
-	changed := s.Changes()
+	changed := observeChanges(t, s)
 	reservation := stateport.InvitationReservation{
 		ID: input.InvitationID, Digest: input.Digest, Token: "too-long",
 		Until: invite.Public.ExpiresAt.Add(time.Nanosecond),

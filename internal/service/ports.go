@@ -58,10 +58,10 @@ type CatalogStore interface {
 	Repositories(context.Context, stateport.CatalogFilter) ([]stateport.Repository, error)
 }
 
-// Changes closes after any committed run/event fact, including native progress.
+// Subscribe registers scoped hints before a durable read.
 type EventStore interface {
 	RecordEvents(context.Context, []stateport.EventWrite) error
-	Changes() <-chan struct{}
+	Subscribe(stateport.ChangeScope) stateport.Subscription
 	Events(context.Context, stateport.EventFilter) (model.EventPage, error)
 }
 
@@ -122,4 +122,5 @@ type eventQuery struct {
 	Own, Future, Snapshot   bool
 	Timeout                 time.Duration
 	repositories            []string
+	runRepositories         []string
 }

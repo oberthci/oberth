@@ -118,18 +118,19 @@ func TestWaitRearmsAfterNonterminalWake(t *testing.T) {
 		done := make(chan waitOutcome, 1)
 		go func() { r, e := call(t.Context()); done <- waitOutcome{r, e} }()
 		synctest.Wait()
+		initialReads := reads
 		if err := f.store.native.Progress(t.Context(), statefake.NativeProgress{ID: runID, Revision: 1, Status: stepmodel.RunRunning, Detail: "progress"}); err != nil {
 			t.Fatal(err)
 		}
 		synctest.Wait()
-		if reads != 1 {
-			t.Fatal("waiter reread a closed wake channel", reads)
+		if reads != initialReads+1 {
+			t.Fatal("waiter reread a closed wake channel", reads, initialReads)
 		}
 		if err := f.s.Finished(t.Context(), service.FinishedRun{RunID: runID, Status: stepmodel.RunPassed}); err != nil {
 			t.Fatal(err)
 		}
 		result := <-done
-		if result.err != nil || result.result.Run == nil || result.result.Run.Status != stepmodel.RunPassed || result.result.TimedOut || reads != 2 {
+		if result.err != nil || result.result.Run == nil || result.result.Run.Status != stepmodel.RunPassed || result.result.TimedOut || reads != initialReads+2 {
 			t.Fatal("second committed wake was lost", result, reads)
 		}
 	})

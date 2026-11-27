@@ -29,7 +29,7 @@ func checkProgressEvents(t *testing.T, f RunFixture) {
 		if phase == 4 {
 			p.Steps[0].Status, p.Steps[0].FinishedAt = stepmodel.StepPassed, &started
 		}
-		changed := f.Port.Changes()
+		changed := observeChanges(t, f.Port)
 		mustRun(t, f.Port.SaveProgress(t.Context(), r.ID, p))
 		changedSignal(t, changed)
 		page, err := f.Port.Events(t.Context(), stateport.EventFilter{After: after, Limit: 500})
@@ -46,7 +46,7 @@ func checkProgressEvents(t *testing.T, f RunFixture) {
 		if saved.Revision != r.Revision || saved.Status != want || len(f.Audit(t)) != audit {
 			t.Fatal("progress changed control state or missed the run start", saved)
 		}
-		changed = f.Port.Changes()
+		changed = observeChanges(t, f.Port)
 		mustRun(t, f.Port.SaveProgress(t.Context(), r.ID, p))
 		unchangedSignal(t, changed)
 		replay, err := f.Port.Events(t.Context(), stateport.EventFilter{After: after, Limit: 500})

@@ -48,6 +48,9 @@ func (s *Store) pruneEvents(ctx context.Context, selection pruneSelection, event
 	var count int64
 	err := s.observe(ctx, func(tx *sql.Tx) error {
 		ids := `SELECT id FROM events WHERE ` + selection.predicate + ` LIMIT 512`
+		if err := s.prunedChanges(ctx, tx, ids, selection.argument); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO event_pruned(repo,kind,through)
    SELECT repo,kind,max(id) FROM events WHERE id IN (`+ids+`) GROUP BY repo,kind
    ON CONFLICT(repo,kind) DO UPDATE SET through=max(through,excluded.through)`, selection.argument)
@@ -65,6 +68,26 @@ func (s *Store) pruneEvents(ctx context.Context, selection pruneSelection, event
 		return databaseError(err)
 	}, events...)
 	return count, err
+}
+
+func (s *Store) prunedChanges(ctx context.Context, tx *sql.Tx, ids string, argument any) error {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT repo FROM events WHERE id IN (`+ids+`)`, argument)
+	if err != nil {
+		return databaseError(err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var scope string
+		if err := rows.Scan(&scope); err != nil {
+			return databaseError(err)
+		}
+		c := stateport.Change{Upstream: scope}
+		if validRepository(scope) {
+			c = stateport.Change{Repository: scope, Invalidate: true}
+		}
+		s.noteChange(c)
+	}
+	return databaseError(rows.Err())
 }
 
 // Give independent handles two lock-poll opportunities before maintenance retries.

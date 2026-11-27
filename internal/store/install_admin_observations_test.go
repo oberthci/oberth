@@ -13,7 +13,7 @@ func TestInstallAdminUnchangedBindingRecordsNothing(t *testing.T) {
 	requireOK(t, s.InstallAdmin(t.Context(), installObservation("first"), key))
 	assertInstallObservations(t, s, 1)
 	before := databaseContents(t, s.readers)
-	changes := s.Changes()
+	changes := observeChanges(t, s)
 	requireOK(t, s.InstallAdmin(t.Context(), installObservation("repeated"), key))
 	assertInstallObservations(t, s, 1)
 	if databaseContents(t, s.readers) != before {
@@ -30,7 +30,7 @@ func TestInstallAdminChangedBindingCommitsSuppliedEvents(t *testing.T) {
 	s := testStore(t)
 	requireOK(t, s.InstallAdmin(t.Context(), installObservation("first"), installRegistration(t, 'a')))
 	assertInstallObservations(t, s, 1)
-	changes := s.Changes()
+	changes := observeChanges(t, s)
 	requireOK(t, s.InstallAdmin(t.Context(), installObservation("changed"), installRegistration(t, 'b')))
 	assertInstallObservations(t, s, 2)
 	select {

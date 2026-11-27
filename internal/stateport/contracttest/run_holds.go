@@ -19,7 +19,7 @@ func checkHoldsAndVerdict(t *testing.T, f RunFixture) {
 func checkNativeVerdict(t *testing.T, f RunFixture, r stateport.RunState) {
 	phase := stepmodel.NativePhase("Error")
 	u := stateport.RunUpdate{ID: r.ID, Revision: r.Revision, Status: stepmodel.RunFailed, Reason: "image pull failed", Detail: strings.Repeat("diagnostic ", 200), NativePhase: &phase}
-	ch := f.Port.Changes()
+	ch := observeChanges(t, f.Port)
 	for _, bad := range []stateport.RunUpdate{
 		{ID: r.ID, Revision: r.Revision, Status: stepmodel.RunFailed, Reason: strings.Repeat("x", 41)},
 		{ID: r.ID, Revision: r.Revision, Status: stepmodel.RunFailed, NativePhase: new(stepmodel.NativePhase("unknown"))},
@@ -35,7 +35,7 @@ func checkNativeVerdict(t *testing.T, f RunFixture, r stateport.RunState) {
 	if got.DisplayReason != u.Reason || got.Detail != u.Detail || got.NativePhase == nil || *got.NativePhase != phase {
 		t.Fatal("native verdict was reconstructed or discarded", got)
 	}
-	ch = f.Port.Changes()
+	ch = observeChanges(t, f.Port)
 	runCode(t, f.Port.Finish(t.Context(), a, u), publicerr.Conflict)
 	unchangedSignal(t, ch)
 	page, err := f.Port.Events(t.Context(), stateport.EventFilter{Limit: 500})

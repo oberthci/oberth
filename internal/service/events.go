@@ -11,6 +11,9 @@ import (
 )
 
 func validateEventKinds(q eventQuery) error {
+	if len(q.Repos) > 32 || len(q.RunIDs) > 32 || len(q.Kinds) > 32 || len(q.RefsGlob) > 32 {
+		return bad("filters")
+	}
 	for _, k := range q.Kinds {
 		if !k.Valid() {
 			return bad("kinds")
@@ -35,6 +38,7 @@ func (s *Service) prepareEvents(ctx context.Context, a actor.Actor, q eventQuery
 	q.RunIDs = slices.Clone(q.RunIDs)
 	q.RefsGlob = slices.Clone(q.RefsGlob)
 	q.Kinds = slices.Clone(q.Kinds)
+	q.runRepositories = nil
 	for i, selector := range q.Repos {
 		r, err := s.resolveRepo(ctx, a, selector)
 		if err != nil {
@@ -48,6 +52,7 @@ func (s *Service) prepareEvents(ctx context.Context, a actor.Actor, q eventQuery
 			return a, q, err
 		}
 		q.RunIDs[i] = r.ID
+		q.runRepositories = append(q.runRepositories, r.Repo)
 	}
 
 	if len(q.Repos) > 0 {
@@ -59,29 +64,13 @@ func (s *Service) prepareEvents(ctx context.Context, a actor.Actor, q eventQuery
 }
 func (s *Service) eventsSince(ctx context.Context, a actor.Actor, q eventQuery) (model.EventPage, error) {
 	scope := q.repositories
-	f := stateport.EventFilter{Repositories: scope, Upstreams: issueEventUpstreams(a, q), After: q.After, Limit: 500}
+	f := stateport.EventFilter{Repositories: scope, Upstreams: issueEventUpstreams(a, q), After: q.After, Limit: pageLimit(q.Limit, model.MaxEventPage), RunIDs: q.RunIDs, Kinds: q.Kinds, RefsGlob: q.RefsGlob}
 	if q.Own {
 		f.Actor = a.Identity
 	}
 	page, err := s.c.Events.Events(ctx, f)
 	if err != nil {
 		return page, err
-	}
-	rows := page.Events
-	page.Events = []model.AgentEvent{}
-	cursor := q.After
-	for _, e := range rows {
-		cursor = e.ID
-		if eventSelected(q, e) {
-			page.Events = append(page.Events, e)
-		}
-		if len(page.Events) == pageLimit(q.Limit, model.MaxEventPage) {
-			break
-		}
-	}
-	if cursor < page.NextAfterID && len(page.Events) == pageLimit(q.Limit, model.MaxEventPage) {
-		page.NextAfterID = cursor
-		page.HasMore = true
 	}
 	return page, nil
 }
@@ -100,6 +89,10 @@ func (s *Service) prepareEventsWait(ctx context.Context, a actor.Actor, q eventQ
 	}
 	if q.Snapshot {
 		return func(ctx context.Context) (apicontract.EventResult, error) {
+			a, q, err := s.refreshEventScope(ctx, a, q)
+			if err != nil {
+				return apicontract.EventResult{}, err
+			}
 			page, err := s.eventsSince(ctx, a, q)
 			return apicontract.EventResult{EventPage: page}, err
 		}, nil
@@ -118,48 +111,60 @@ func (s *Service) eventsWait(ctx context.Context, a actor.Actor, q eventQuery) (
 	}
 	wait, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	authority := s.c.Events.Subscribe(stateport.ChangeScope{})
+	defer authority.Close()
+	var err error
 	for {
-		changed := s.watch()
+		a, q, err = s.refreshEventScope(ctx, a, q)
+		if err != nil {
+			return apicontract.EventResult{}, err
+		}
+		sub := s.c.Events.Subscribe(eventChangeScope(a, q))
 		page, err := s.eventsSince(ctx, a, q)
 		if err != nil {
+			sub.Close()
 			return apicontract.EventResult{}, err
 		}
 		result := apicontract.EventResult{EventPage: page}
 		if len(page.Events) > 0 || page.Gap || page.HasMore {
+			sub.Close()
+			if _, _, err := s.refreshEventScope(ctx, a, q); err != nil {
+				return apicontract.EventResult{}, err
+			}
 			return result, nil
 		}
 		q.After = page.NextAfterID
-		select {
-		case <-changed:
-		case <-wait.Done():
-			if ctx.Err() != nil {
-				return result, ctx.Err()
-			}
-			result.TimedOut = true
-			return result, nil
-		case <-s.ctx.Done():
-			return result, refuse(unavailable)
+		err = s.awaitEventChange(wait, sub.C, authority.C)
+		sub.Close()
+		if err != nil {
+			return s.eventTimeout(ctx, a, q, err)
 		}
 	}
 }
 
-func eventSelected(q eventQuery, e model.AgentEvent) bool {
-	if len(q.RunIDs) > 0 && !slices.Contains(q.RunIDs, e.RunID) {
-		return false
+func (s *Service) awaitEventChange(ctx context.Context, scoped, authority <-chan struct{}) error {
+	select {
+	case <-scoped:
+		return nil
+	case <-authority:
+		return nil
+	case <-s.ctx.Done():
+		return refuse(unavailable)
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	if len(q.Kinds) > 0 && !slices.Contains(q.Kinds, model.EventKind(e.Kind)) {
-		return false
-	}
-	if len(q.RefsGlob) == 0 {
-		return true
-	}
-	for _, glob := range q.RefsGlob {
-		if stateport.MatchRefGlob(glob, e.Ref) {
-			return true
-		}
-	}
-	return false
 }
+
+func eventChangeScope(a actor.Actor, q eventQuery) stateport.ChangeScope {
+	if len(q.RunIDs) > 0 {
+		return stateport.ChangeScope{Runs: q.RunIDs, Invalidations: q.runRepositories}
+	}
+	if len(q.Repos) > 0 {
+		return stateport.ChangeScope{Repositories: q.Repos}
+	}
+	return stateport.ChangeScope{Upstreams: a.Scope, All: len(a.Scope) == 0}
+}
+
 func (s *Service) prepareSyncStatus(ctx context.Context, a actor.Actor) (func(context.Context) ([]Lock, error), error) {
 	a, err := s.allow(ctx, a, "sync_status")
 	if err != nil {

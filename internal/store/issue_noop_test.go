@@ -14,7 +14,7 @@ func TestUnchangedIssueEditRecordsNothing(t *testing.T) {
 	issue := manualIssue(t, s)
 	_, before, err := s.Audit(t.Context(), 0, 100)
 	requireOK(t, err)
-	changed := s.Changes()
+	changed := observeChanges(t, s)
 	action := stateport.Action{Actor: "operator", Events: []stateport.EventWrite{{
 		Dedupe: "edit", Event: model.AgentEvent{Repo: issue.Repo, Kind: "issue.updated", At: issue.UpdatedAt},
 	}}}

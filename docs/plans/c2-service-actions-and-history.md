@@ -129,11 +129,11 @@ Finish commits verdict, run.finished, pending publication and CI-issue changes
 atomically; no crash window can lose their events or publication intent.
 Native progress is observation, never an authority audit record.
 
-**Delta:** After commit, wake waiters by closing/replacing a channel; register before read,
-then wait, so a concurrent commit cannot be missed. Event reads capture an upper
-cursor and scan `(after,upper]`, at most 500 internally and 200 publicly, filtering
-scope before output. Advance past examined filter misses; never skip unexamined
-matches. Pages carry events, next_after_id, latest_id, oldest_id, has_more and gap.
+**Delta:** After commit, coalesce scoped repository/run/upstream wake hints; silent observations do not wake readers.
+Subscribe before every read; authority, removal and pruning invalidate affected readers. Reauthorize before delivery.
+Event queries capture an upper cursor and filter scope/run/kind before their limit, at most 500 internally and 200 publicly.
+Ref matching belongs to the same query owner. Advance past examined filter misses; never skip unexamined
+matches. Pages carry events, next_after_id, latest_id, oldest_id, has_more and gap; hints never replace durable events.
 A pruned cursor requires a snapshot. Progress retention is separately 24 hours
 or newest 10,000, whichever removes first. Ordinary events are kept for 30 days;
 C11 calls retention once a day. Streams and waits are observations only. Completion/timeout reads

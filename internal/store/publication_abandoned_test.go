@@ -21,7 +21,7 @@ func TestAbandonedPublicationCannotBeRetried(t *testing.T) {
 	}
 	_, head, err := s.Audit(t.Context(), 0, 100)
 	requireOK(t, err)
-	changed := s.Changes()
+	changed := observeChanges(t, s)
 	err = s.RetryPublication(t.Context(), a, stateport.PublicationAttempt{ID: p.ID, ExpectedAttempts: before.Attempts})
 	want := "invalid_transition: requested state transition is invalid - Read the current status and choose an allowed transition."
 	if err == nil || err.Error() != want {

@@ -36,7 +36,7 @@ func checkAcceptanceRollbackResult(t *testing.T, f RunFixture) {
 	b := batchFor(t, f, RunCase{ID: "rolled-back"})
 	event.Event.Summary = "different fact"
 	b.Events = []stateport.EventWrite{event}
-	ch := f.Port.Changes()
+	ch := observeChanges(t, f.Port)
 	head := len(f.Audit(t))
 	failed, err := f.Port.AcceptBatch(t.Context(), b)
 	runCode(t, err, publicerr.Conflict)

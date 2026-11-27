@@ -52,8 +52,8 @@ func TestEventCursorAdvancesPastFilterMisses(t *testing.T) {
 		f.store.native.SeedEvent(event(i))
 	}
 	p, err := f.s.EventsSince(t.Context(), caller(), eventsInput{Kinds: []model.EventKind{model.EventRunFinished}})
-	if err != nil || len(p.Events) != 0 || p.NextAfterID != 500 || !p.HasMore {
-		t.Fatalf("scan cap %+v %v", p, err)
+	if err != nil || len(p.Events) != 0 || p.NextAfterID != 501 || p.HasMore {
+		t.Fatalf("filtered cursor %+v %v", p, err)
 	}
 	p, err = f.s.EventsSince(t.Context(), caller(), eventsInput{After: p.NextAfterID, Kinds: []model.EventKind{model.EventRunFinished}})
 	if err != nil || p.NextAfterID != 501 || p.HasMore {
@@ -194,8 +194,8 @@ func TestEventsRegisterBeforeRead(t *testing.T) {
 	if len(p.Events) != 1 || p.Events[0].Kind != string(model.EventRunFinished) || p.TimedOut {
 		t.Fatalf("lost wakeup %+v", p)
 	}
-	if f.store.Calls()["Current"] != 1 {
-		t.Fatal("nested authorization")
+	if f.store.Calls()["Current"] < 3 {
+		t.Fatal("wait omitted authority checks before reread and delivery")
 	}
 }
 func TestEventsCapturedUpperCursor(t *testing.T) {

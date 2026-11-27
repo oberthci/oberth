@@ -28,6 +28,9 @@ func (s *Store) change(ctx context.Context, m mutation, apply func(*sql.Tx) erro
 		return databaseError(err)
 	}
 	defer done()
+	if err := s.mutationChange(ctx, tx, m); err != nil {
+		return err
+	}
 	if err := apply(tx); err != nil {
 		var same unchanged
 		if errors.As(err, &same) {
@@ -38,14 +41,11 @@ func (s *Store) change(ctx context.Context, m mutation, apply func(*sql.Tx) erro
 	if err := s.appendAudit(ctx, tx, m); err != nil {
 		return err
 	}
-	var completed time.Time
-	if m.action == "backup.completed" {
-		completed, err = backupAtHead(ctx, tx)
-		if err != nil {
-			return err
-		}
+	completed, err := mutationBackupAtHead(ctx, tx, m.action)
+	if err != nil {
+		return err
 	}
-	if err := writeEvents(ctx, tx, events); err != nil {
+	if err := s.writeEvents(ctx, tx, events); err != nil {
 		return err
 	}
 	if err := s.commitWrite(ctx, tx); err != nil {
@@ -56,13 +56,16 @@ func (s *Store) change(ctx context.Context, m mutation, apply func(*sql.Tx) erro
 		s.lastBackup = completed
 		s.backupMu.Unlock()
 	}
-	s.signalChange()
+	s.publishChanges()
 	return nil
 }
 
 func genesis() string { return stateport.AuditGenesis() }
 
 func (s *Store) appendAudit(ctx context.Context, tx *sql.Tx, m mutation) error {
+	if err := s.mutationChange(ctx, tx, m); err != nil {
+		return err
+	}
 	var head stateport.AuditHead
 	if err := tx.QueryRowContext(ctx, `SELECT id,hash FROM audit_head WHERE singleton=1`).Scan(&head.ID, &head.SHA256); err != nil {
 		return databaseError(err)
@@ -210,3 +213,10 @@ func (unchanged) Error() string { return "unchanged" }
 type commitFailure struct{ error }
 
 func (e commitFailure) Unwrap() error { return e.error }
+
+func mutationBackupAtHead(ctx context.Context, tx *sql.Tx, action string) (time.Time, error) {
+	if action != "backup.completed" {
+		return time.Time{}, nil
+	}
+	return backupAtHead(ctx, tx)
+}

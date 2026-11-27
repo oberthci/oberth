@@ -24,7 +24,7 @@ func checkProgressRevision(t *testing.T, kind, operation string) {
 	observe := nativeObservation(t, s, r.ID, kind)
 	prepared, err := s.RunState(t.Context(), r.ID)
 	requireOK(t, err)
-	ch := s.Changes()
+	ch := observeChanges(t, s)
 	requireOK(t, observe())
 	select {
 	case <-ch:

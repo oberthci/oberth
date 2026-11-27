@@ -16,6 +16,7 @@ func (s *Store) SecretGrant(ctx context.Context, action stateport.Action, grant 
 		return err
 	}
 	return s.change(ctx, mutation{action.Actor, "secret.grant", "secret", encode(grant), grant}, func(tx *sql.Tx) error {
+		s.noteChange(stateport.Change{Repository: grant.Repository, Invalidate: true})
 		id, err := repositoryNumber(ctx, tx, grant.Repository)
 		if err != nil {
 			return err
@@ -65,6 +66,7 @@ func (s *Store) GrantClaim(ctx context.Context, action stateport.Action, owner C
 		return refuse(invalid, nil)
 	}
 	return s.change(ctx, mutation{action.Actor, "claim.grant", "claim", owner.Claim, owner}, func(tx *sql.Tx) error {
+		s.noteChange(stateport.Change{Repository: owner.Repository, Invalidate: true})
 		id, err := repositoryNumber(ctx, tx, owner.Repository)
 		if err != nil {
 			return err

@@ -66,7 +66,6 @@ func New(ctx context.Context, c Config) (*Service, error) {
 	return &Service{gates: map[string]*gate{}, timers: map[string]Timer{}, c: c, ctx: life, cancel: cancel, scans: make(map[string]chan struct{}), slots: make(chan struct{}, 2)}, nil
 }
 func (s *Service) Shutdown(ctx context.Context) error { return s.stopMoving(ctx) }
-func (s *Service) watch() <-chan struct{}             { return s.c.Events.Changes() }
 
 // bounded keeps a prepared short call within the service's read/effect budget.
 func bounded[T any](call func(context.Context) (T, error)) func(context.Context) (T, error) {

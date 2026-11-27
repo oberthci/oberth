@@ -18,13 +18,14 @@ func (s *Service) prepareWait(ctx context.Context, a actor.Actor, q runQuery, ti
 	if q.Until != "" && q.Until != "finished" && q.Until != "held" && q.Until != "any" {
 		return nil, bad("until")
 	}
-	changed := s.watch()
 	r, err := s.resolveRun(ctx, a, q)
 	if err != nil {
 		return nil, err
 	}
 	return func(ctx context.Context) (apicontract.WaitResult, error) {
-		return s.wait(ctx, stateport.RunState{RunSummary: summary(r.RunSummary), Revision: r.Revision}, waitOptions{until: q.Until, timeout: timeout, changed: changed, run: r})
+		sub := s.c.Events.Subscribe(stateport.ChangeScope{Runs: []string{r.ID}, Invalidations: []string{r.Repo}})
+		defer sub.Close()
+		return s.wait(ctx, stateport.RunState{RunSummary: r.RunSummary, Revision: r.Revision}, waitOptions{until: q.Until, timeout: timeout, changed: sub.C, run: r, actor: a, action: q.Action})
 	}, nil
 }
 
@@ -33,6 +34,8 @@ type waitOptions struct {
 	timeout time.Duration
 	changed <-chan struct{}
 	run     stateport.Run
+	actor   actor.Actor
+	action  string
 }
 
 func (s *Service) wait(ctx context.Context, r stateport.RunState, o waitOptions) (apicontract.WaitResult, error) {
@@ -50,34 +53,72 @@ func (s *Service) wait(ctx context.Context, r stateport.RunState, o waitOptions)
 	var initialHolds []model.HeldNotice
 	first := true
 	for {
-		current := summary(r.RunSummary)
-		evidenceReason(&current, o.run.Origin)
-		result := apicontract.WaitResult{Run: &current}
-		holds, err := s.waitHolds(wait, r, &o)
+		observed, err := s.waitSnapshot(ctx, wait, &o)
 		if err != nil {
-			return waitReadFailure(ctx, wait, result, err)
+			return waitReadFailure(ctx, wait, observed.result, err)
 		}
 		if first {
-			initialHolds = holds
+			initialHolds = observed.holds
 			first = false
 		}
-		if waitReady(r, o.until, initial) || waitHoldsReady(o.until, holds, initialHolds) {
-			return result, nil
+		if waitReady(observed.state, o.until, initial) || waitHoldsReady(o.until, observed.holds, initialHolds) {
+			if err := s.authorizeWait(ctx, &o); err != nil {
+				return apicontract.WaitResult{}, err
+			}
+			return observed.result, nil
 		}
 		select {
 		case <-s.ctx.Done():
-			return result, refuse(unavailable)
+			return observed.result, refuse(unavailable)
 		case <-wait.Done():
-			return waitReadFailure(ctx, wait, result, wait.Err())
+			return s.waitTimeout(ctx, &o)
 		case <-o.changed:
-			o.changed = s.watch()
-			next, err := s.c.Runs.RunState(wait, r.ID)
-			if err != nil {
-				return waitReadFailure(ctx, wait, result, err)
-			}
-			r = next
 		}
 	}
+}
+
+type observedWait struct {
+	state  stateport.RunState
+	result apicontract.WaitResult
+	holds  []model.HeldNotice
+}
+
+func (s *Service) waitSnapshot(ctx, wait context.Context, o *waitOptions) (observedWait, error) {
+	var out observedWait
+	if err := s.authorizeWait(ctx, o); err != nil {
+		return out, err
+	}
+	r, err := s.c.Runs.RunState(ctx, o.run.ID)
+	if err != nil {
+		return out, err
+	}
+	current := summary(r.RunSummary)
+	evidenceReason(&current, o.run.Origin)
+	out.state, out.result.Run = r, &current
+	out.holds, err = s.waitHolds(wait, r, o)
+	return out, err
+}
+
+func (s *Service) waitTimeout(ctx context.Context, o *waitOptions) (apicontract.WaitResult, error) {
+	if ctx.Err() != nil {
+		return apicontract.WaitResult{}, ctx.Err()
+	}
+	out, err := s.waitSnapshot(ctx, ctx, o)
+	if err != nil {
+		return apicontract.WaitResult{}, err
+	}
+	out.result.TimedOut = true
+	return out.result, nil
+}
+
+func (s *Service) authorizeWait(ctx context.Context, o *waitOptions) error {
+	a, err := s.allow(ctx, o.actor, o.action)
+	if err != nil {
+		return err
+	}
+	_, err = s.resolveRepo(ctx, a, o.run.Repo)
+	o.actor = a
+	return err
 }
 func waitReady(r stateport.RunState, until string, initial stateport.RunState) bool {
 	return terminal(r.Status) || until == "any" && !reflect.DeepEqual(r, initial)

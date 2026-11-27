@@ -188,5 +188,6 @@ func (s *Store) saveVerdict(ctx context.Context, tx *sql.Tx, r *stateport.Run, u
 		r.ID); err != nil {
 		return databaseError(err)
 	}
+	s.noteChange(stateport.Change{Repository: r.Repo, Run: r.ID})
 	return nil
 }

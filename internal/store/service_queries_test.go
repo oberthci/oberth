@@ -77,7 +77,7 @@ func TestRunStateOneSummaryQueryPerNativeWake(t *testing.T) {
 	r, _ := accepted(t, s, "waiter")
 	p := probeQueries(t, s)
 	for range 10 {
-		ch := s.Changes()
+		ch := observeChanges(t, s)
 		_, err := s.BeginEvidence(t.Context(), stateport.Action{}, stateport.EvidenceStart{RunID: r.ID, Nodes: 1})
 		requireOK(t, err)
 		select {

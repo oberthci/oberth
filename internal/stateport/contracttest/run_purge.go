@@ -19,7 +19,7 @@ func checkRunPurge(t *testing.T, f RunFixture) {
 	runCode(t, f.Port.BeginPurge(t.Context(), a, r.ID, "receipt"), publicerr.Conflict)
 	mustRun(t, f.Port.Finish(t.Context(), a, stateport.RunUpdate{ID: r.ID, Revision: r.Revision, Status: stepmodel.RunFailed}))
 	mustRun(t, f.Port.BeginPurge(t.Context(), a, r.ID, "receipt"))
-	ch := f.Port.Changes()
+	ch := observeChanges(t, f.Port)
 	mustRun(t, f.Port.BeginPurge(t.Context(), a, r.ID, "receipt"))
 	unchangedSignal(t, ch)
 	runCode(t, f.Port.FinishPurge(t.Context(), a, r.ID, "different"), publicerr.Conflict)

@@ -18,9 +18,9 @@ func validateEvents(events []stateport.EventWrite) error {
 	return nil
 }
 
-func writeEvents(ctx context.Context, tx *sql.Tx, events []stateport.EventWrite) error {
+func (s *Store) writeEvents(ctx context.Context, tx *sql.Tx, events []stateport.EventWrite) error {
 	for _, event := range events {
-		if _, err := insertEvent(ctx, tx, event); err != nil {
+		if _, err := s.insertEvent(ctx, tx, event); err != nil {
 			return err
 		}
 	}

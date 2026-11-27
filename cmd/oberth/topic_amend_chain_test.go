@@ -100,7 +100,7 @@ func chainRun(t *testing.T, f *composedFixture, sha string) stateport.Run {
 	deadline := time.NewTimer(15 * time.Second)
 	defer deadline.Stop()
 	for {
-		changed := f.owners.c.store.Changes()
+		changed := observeChanges(t, f.owners.c.store)
 		rows, err := f.owners.c.store.Runs(t.Context(), stateport.RunFilter{Limit: 5})
 		if err != nil {
 			t.Fatal(err)

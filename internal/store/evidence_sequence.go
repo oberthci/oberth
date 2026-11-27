@@ -17,6 +17,9 @@ func (s *Store) BeginEvidence(ctx context.Context, action stateport.Action, inpu
 		if err := requireUnhandedRun(ctx, tx, input.RunID); err != nil {
 			return err
 		}
+		if err := s.runChange(ctx, tx, input.RunID); err != nil {
+			return err
+		}
 		if _, err := readPlan(ctx, tx, input.RunID); err != nil {
 			return err
 		}

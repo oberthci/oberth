@@ -16,7 +16,7 @@ func checkRunEvents(t *testing.T, f RunFixture) {
 	for i := range 500 {
 		events = append(events, runEvent(other, fmt.Sprint("foreign-", i)), runEvent(own, fmt.Sprint("own-", i)))
 	}
-	ch := f.Port.Changes()
+	ch := observeChanges(t, f.Port)
 	mustRun(t, f.Emit(t.Context(), events))
 	changedSignal(t, ch)
 	q := stateport.EventFilter{Actor: "alice", Limit: 500}

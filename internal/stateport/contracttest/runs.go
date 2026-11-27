@@ -16,6 +16,7 @@ import (
 
 // RunPort is the narrow owner contract exercised by service stores and fakes.
 type RunPort interface {
+	Subscribe(stateport.ChangeScope) stateport.Subscription
 	ReceivedHeads(context.Context, stateport.ReceivedRef) ([]string, error)
 	AcceptBatch(context.Context, stateport.BatchAcceptance) (stateport.AcceptanceResult, error)
 	AcceptedRuns(context.Context, string) ([]stateport.Run, error)
@@ -36,7 +37,6 @@ type RunPort interface {
 	Cancel(context.Context, stateport.Action, stateport.RunCancellation) (stateport.Obligation, error)
 	Obligations(context.Context, string) ([]stateport.Obligation, error)
 	Events(context.Context, stateport.EventFilter) (model.EventPage, error)
-	Changes() <-chan struct{}
 	RepositoryScope(context.Context, []string) ([]string, error)
 	Repository(context.Context, string, []string) (stateport.Repository, error)
 	Repositories(context.Context, stateport.CatalogFilter) ([]stateport.Repository, error)

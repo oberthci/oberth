@@ -69,7 +69,7 @@ func TestInstallAdminUsesOneAuditedOrdinaryIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	changes := p.state.Changes()
+	changes := observeChanges(t, p.state)
 	if err = p.f.s.InstallAdmin(t.Context(), certificateKey, []byte(push)); err != nil {
 		t.Fatal(err)
 	}

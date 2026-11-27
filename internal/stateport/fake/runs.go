@@ -18,12 +18,12 @@ import (
 // Runs is an in-memory implementation of the service's durable run/query ports.
 // A mutation stages a copy and publishes one change notification after success.
 type Runs struct {
+	notifications stateport.ChangeHub
 	// Before observes or refuses a fixture operation before any state changes.
-	Before  func(string, bool) error
-	mu      sync.Mutex
-	changed chan struct{}
-	clock   func() time.Time
-	data    runMemory
+	Before func(string, bool) error
+	mu     sync.Mutex
+	clock  func() time.Time
+	data   runMemory
 }
 
 type runReceipt struct {
@@ -58,7 +58,7 @@ type runMemory struct {
 }
 
 func NewRuns(clock func() time.Time) *Runs {
-	return &Runs{clock: clock, changed: make(chan struct{}), data: runMemory{upstreams: map[string]stateport.Upstream{}, grants: map[string]stateport.GrantChange{}, issues: map[int64]model.Issue{}, ciSequences: map[string]int64{}, ciCounted: map[string]bool{}, runs: map[string]stateport.Run{}, receipts: map[string]runReceipt{}, receivedHeads: map[string]receivedEvidence{},
+	return &Runs{clock: clock, data: runMemory{upstreams: map[string]stateport.Upstream{}, grants: map[string]stateport.GrantChange{}, issues: map[int64]model.Issue{}, ciSequences: map[string]int64{}, ciCounted: map[string]bool{}, runs: map[string]stateport.Run{}, receipts: map[string]runReceipt{}, receivedHeads: map[string]receivedEvidence{},
 		repos: map[string]stateport.Repository{}, obligations: map[string]stateport.Obligation{}, promotions: map[string]model.Promotion{},
 		native: map[string]nativeEvidence{}, pruned: map[string]int64{}, purges: map[string]stateport.PurgeReceipt{}, publications: map[string]model.Publication{}, dedupe: map[string]model.AgentEvent{}}}
 }
@@ -85,7 +85,7 @@ func (m runMemory) clone() runMemory {
 	return m
 }
 
-func (f *Runs) transact(ctx context.Context, events []stateport.EventWrite, apply func(*runMemory) error) error {
+func (f *Runs) transact(ctx context.Context, events []stateport.EventWrite, apply func(*runMemory) error, hints ...stateport.Change) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -109,9 +109,15 @@ func (f *Runs) transact(ctx context.Context, events []stateport.EventWrite, appl
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	changes := f.committedChanges(next)
+	for _, hint := range hints {
+		if run, ok := next.runs[hint.Run]; ok {
+			hint.Repository = run.Repo
+		}
+		changes = append(changes, hint)
+	}
 	f.data = next
-	close(f.changed)
-	f.changed = make(chan struct{})
+	f.notifications.Publish(changes)
 	return nil
 }
 
@@ -128,8 +134,6 @@ func visibleRun(scope []string, repo string) bool {
 func runTerminal(r stateport.Run) bool {
 	return r.Status == "passed" || r.Status == "failed" || r.Status == "cancelled"
 }
-
-func (f *Runs) Changes() <-chan struct{} { f.mu.Lock(); defer f.mu.Unlock(); return f.changed }
 
 // SeedRepository is used by consumer contract fixtures before their queries.
 func (f *Runs) SeedRepository(repo stateport.Repository) {

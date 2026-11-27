@@ -37,6 +37,7 @@ func (s *Store) cancelDeleted(ctx context.Context, tx *sql.Tx, id, actor string)
 	r.Status = stepmodel.RunCancelled
 	r.DisplayReason = stateport.ReasonBranchDeleted
 	r.FinishedAt = new(s.options.Clock().UTC())
+	s.noteChange(stateport.Change{Repository: r.Repo, Run: r.ID})
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status=?,summary=?,revision=revision+1 WHERE id=?`, r.Status, encode(r.RunSummary),
 		id); err != nil {
 		return databaseError(err)

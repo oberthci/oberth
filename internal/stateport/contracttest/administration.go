@@ -13,6 +13,7 @@ import (
 )
 
 type AdministrationPort interface {
+	Subscribe(stateport.ChangeScope) stateport.Subscription
 	ScopedIssue(context.Context, stateport.IssueScope, int64) (model.Issue, error)
 	ScopedIssues(context.Context, stateport.IssueScope, model.IssueFilter) (stateport.IssuePage, error)
 	ImportIssues(context.Context, stateport.Action, stateport.IssueImport) (stateport.IssueImportResult, error)
@@ -25,7 +26,6 @@ type AdministrationPort interface {
 	RegisterUpstreamBinding(context.Context, stateport.Action, stateport.Upstream) error
 	UpstreamBindings(context.Context) ([]stateport.Upstream, error)
 	Events(context.Context, stateport.EventFilter) (model.EventPage, error)
-	Changes() <-chan struct{}
 }
 
 type AdministrationFixture struct {
@@ -234,7 +234,7 @@ func assertAdministrativeRollback(t *testing.T, f AdministrationFixture, run fun
 	t.Helper()
 	a := conflictingAdministrativeAction(t, f)
 	before := administrationState(t, f)
-	changed := f.Port.Changes()
+	changed := observeChanges(t, f.Port)
 	if err := run(a); err == nil {
 		t.Fatal("late event conflict accepted")
 	}
@@ -314,7 +314,7 @@ func checkPendingGrantDismissal(t *testing.T, f AdministrationFixture) {
 			mustRun(t, err)
 		}
 		before := administrationState(t, f)
-		changes := f.Port.Changes()
+		changes := observeChanges(t, f.Port)
 		g.Revoke = false
 		g.Dismiss = true
 		_, err = f.Port.ChangeGrant(t.Context(), administrativeAction(g.Path+"-dismiss"), g)

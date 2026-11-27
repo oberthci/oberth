@@ -21,7 +21,7 @@ func TestEvidenceSequenceRejectsOverlappingBatchWithoutConsumingIt(t *testing.T)
 	second := first
 	second.NodeID, second.Attempt = "second", 2
 	batch := stateport.NodeBatch{RunID: r.ID, Sequence: sequence, Nodes: []stateport.Node{second}}
-	changed := s.Changes()
+	changed := observeChanges(t, s)
 	err = s.PutNodes(t.Context(), a, batch)
 	want := "conflict: run revision changed - Read the run again and submit the current revision."
 	if err == nil || err.Error() != want {

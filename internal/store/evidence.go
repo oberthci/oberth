@@ -20,6 +20,9 @@ func (s *Store) PutNodes(ctx context.Context, action stateport.Action, batch sta
 		return refuse(invalid, nil)
 	}
 	return s.observe(ctx, func(tx *sql.Tx) error {
+		if err := s.runChange(ctx, tx, runID); err != nil {
+			return err
+		}
 		if err := advanceEvidence(ctx, tx, batch); err != nil {
 			return err
 		}
@@ -103,6 +106,9 @@ func (s *Store) CompleteEvidence(ctx context.Context, action stateport.Action, i
 	runID := input.RunID
 	return s.observe(ctx, func(tx *sql.Tx) error {
 		if err := requireUnhandedRun(ctx, tx, runID); err != nil {
+			return err
+		}
+		if err := s.runChange(ctx, tx, runID); err != nil {
 			return err
 		}
 		if err := requireEvidenceSequence(ctx, tx, input); err != nil {

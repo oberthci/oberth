@@ -136,6 +136,9 @@ func (s *Store) AdvanceNative(ctx context.Context, id string) error {
 		if err := requireUnhandedRun(ctx, tx, id); err != nil {
 			return err
 		}
+		if err := s.runChange(ctx, tx, id); err != nil {
+			return err
+		}
 		if _, err := readPlan(ctx, tx, id); err != nil {
 			return err
 		}

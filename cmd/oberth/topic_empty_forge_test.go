@@ -47,7 +47,7 @@ func settledTopicPublication(t *testing.T, f *composedFixture) model.Publication
 	t.Helper()
 	deadline := time.After(10 * time.Second)
 	for {
-		changed := f.owners.c.store.Changes()
+		changed := observeChanges(t, f.owners.c.store)
 		rows, err := f.owners.c.store.Publications(t.Context(), stateport.RecordFilter{Limit: 20})
 		if err != nil {
 			t.Fatal(err)

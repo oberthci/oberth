@@ -19,6 +19,48 @@ type EventFilter struct {
 	After, Through int64
 	Limit          int
 	Actor          string
+	RunIDs         []string
+	Kinds          []model.EventKind
+	RefsGlob       []string
+}
+
+func (f EventFilter) Valid() bool {
+	if f.After < 0 || f.Through < 0 || f.Limit < 1 || f.Limit > EventPageLimit {
+		return false
+	}
+	if max(len(f.RunIDs), len(f.Kinds), len(f.RefsGlob)) > 32 {
+		return false
+	}
+	for _, glob := range f.RefsGlob {
+		if !ValidRefGlob(glob) {
+			return false
+		}
+	}
+	for _, kind := range f.Kinds {
+		if !kind.Valid() {
+			return false
+		}
+	}
+	return true
+}
+
+// Selects is shared by the durable and in-memory event query owners.
+func (f EventFilter) Selects(e model.AgentEvent) bool {
+	if len(f.RunIDs) > 0 && !slices.Contains(f.RunIDs, e.RunID) {
+		return false
+	}
+	if len(f.Kinds) > 0 && !slices.Contains(f.Kinds, model.EventKind(e.Kind)) {
+		return false
+	}
+	if len(f.RefsGlob) == 0 {
+		return true
+	}
+	for _, glob := range f.RefsGlob {
+		if MatchRefGlob(glob, e.Ref) {
+			return true
+		}
+	}
+	return false
 }
 
 // Action binds attribution and observation events to one durable fact.

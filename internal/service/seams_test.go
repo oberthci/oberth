@@ -81,7 +81,7 @@ func TestMixedBatchPreservesRejectedAndSealedOutcomes(t *testing.T) {
 	checkDeletionCalls(t, before, f.store.Calls())
 	checkMixedObservations(t, f, b)
 	audits := len(f.store.native.Audits())
-	ch := f.store.Changes()
+	ch := observeChanges(t, f.store)
 	if result, err := f.s.Accept(t.Context(), b); err != nil || result.Fresh || len(f.store.native.Audits()) != audits {
 		t.Fatal("mixed replay repeated facts", err)
 	}

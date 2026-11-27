@@ -182,7 +182,7 @@ func TestServiceRestartObservesSameDurableRunWithoutStarting(t *testing.T) {
 
 func checkWaitCost(t *testing.T, before, after map[string]int) {
 	t.Helper()
-	if after["ResolveRun"]-before["ResolveRun"] != 1 || after["Run"]-before["Run"] != 1 || after["RunState"]-before["RunState"] != 1 || after["Current"]-before["Current"] != 1 || after["Steps"] != before["Steps"] || after["Runs"] != before["Runs"] {
+	if after["ResolveRun"]-before["ResolveRun"] != 1 || after["Run"]-before["Run"] != 1 || after["RunState"]-before["RunState"] != 1 || after["Current"]-before["Current"] != 3 || after["Steps"] != before["Steps"] || after["Runs"] != before["Runs"] {
 		t.Fatalf("wait calls %v -> %v (includes finish's one Run)", before, after)
 	}
 }

@@ -21,7 +21,7 @@ func checkMixedReceive(t *testing.T, f RunFixture) {
 	b.Deletions = []stateport.BranchDeletion{{Request: req, Publication: p}}
 	checkForeignDeletion(t, f, b)
 	checkMixedRollback(t, f, b, old)
-	ch := f.Port.Changes()
+	ch := observeChanges(t, f.Port)
 	recorded, err := f.Port.AcceptBatch(t.Context(), b)
 	rows, fresh := recorded.Runs, recorded.Fresh
 	mustRun(t, err)
@@ -41,7 +41,7 @@ func checkMixedReceive(t *testing.T, f RunFixture) {
 	}
 	checkDeletionAudit(t, f, req)
 	head := len(f.Audit(t))
-	ch = f.Port.Changes()
+	ch = observeChanges(t, f.Port)
 	replayed, err := f.Port.AcceptBatch(t.Context(), b)
 	fresh = replayed.Fresh
 	mustRun(t, err)
@@ -59,7 +59,7 @@ func checkForeignDeletion(t *testing.T, f RunFixture, b stateport.BatchAcceptanc
 	bad.Deletions[0].Request.Repo = "origin/team/other"
 	bad.Deletions[0].Publication.Repo = "origin/team/other"
 	head := len(f.Audit(t))
-	ch := f.Port.Changes()
+	ch := observeChanges(t, f.Port)
 	result, err := f.Port.AcceptBatch(t.Context(), bad)
 	runCode(t, err, publicerr.InvalidInput)
 	if result.Fresh || result.Runs != nil || len(f.Audit(t)) != head {
@@ -78,7 +78,7 @@ func checkMixedRollback(t *testing.T, f RunFixture, b stateport.BatchAcceptance,
 	duplicate := batchFor(t, f, RunCase{ID: old.ID, Ref: "refs/heads/dev"}).Runs[0]
 	duplicate.Request.ReceiveID = b.ReceiveID
 	bad.Runs = append(bad.Runs, duplicate)
-	ch := f.Port.Changes()
+	ch := observeChanges(t, f.Port)
 	head := len(f.Audit(t))
 	failed, err := f.Port.AcceptBatch(t.Context(), bad)
 	if err == nil || failed.Fresh || failed.Runs != nil {

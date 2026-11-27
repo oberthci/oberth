@@ -61,8 +61,7 @@ func (f *Runs) SeedEvent(e model.AgentEvent) {
 	f.data.eventID++
 	e.ID = f.data.eventID
 	f.data.events = append(f.data.events, e.Clone())
-	close(f.changed)
-	f.changed = make(chan struct{})
+	f.notifications.Publish([]stateport.Change{{Repository: e.Repo, Run: e.RunID, Upstream: stateport.EventScope(e)}})
 }
 
 // PruneBefore supplies a partial retained-history fixture.

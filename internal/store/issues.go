@@ -69,6 +69,7 @@ func (s *Store) saveIssue(ctx context.Context, tx *sql.Tx, issue *model.Issue, i
 		return databaseError(err)
 	}
 	s.noteIssueWrite(issue.ID)
+	s.noteChange(stateport.Change{Repository: issue.Repo, Upstream: issue.Upstream})
 	return nil
 }
 

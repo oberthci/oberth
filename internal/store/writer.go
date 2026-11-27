@@ -27,6 +27,7 @@ func (s *Store) beginWrite(ctx context.Context) (*sql.Tx, func(), error) {
 	defer func() { s.metrics.lock.record(s.options.Clock().Sub(started)) }()
 	release := func() { <-s.writes }
 	s.issueWrites, s.auditSpan = nil, [2]int64{}
+	s.pendingChanges = nil
 	for {
 		tx, err := s.writer.BeginTx(ctx, nil)
 		if err == nil {
@@ -89,12 +90,12 @@ func (s *Store) observe(ctx context.Context, apply func(*sql.Tx) error, events .
 		}
 		return err
 	}
-	if err := writeEvents(ctx, tx, events); err != nil {
+	if err := s.writeEvents(ctx, tx, events); err != nil {
 		return err
 	}
 	if err := s.commitWrite(ctx, tx); err != nil {
 		return databaseError(err)
 	}
-	s.signalChange()
+	s.publishChanges()
 	return nil
 }

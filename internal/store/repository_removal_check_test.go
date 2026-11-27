@@ -49,7 +49,7 @@ func TestRepositoryRemovalCheckRollsBackCascadesWithoutAuditOrNotification(t *te
 		Kind: stateport.GrantStorePath, Repository: repo.Canonical, File: "build.yaml", Step: "build", Path: "registry/key",
 	})
 	requireOK(t, err)
-	head, changes := independentHead(t, s.readers), s.Changes()
+	head, changes := independentHead(t, s.readers), observeChanges(t, s)
 	requireOK(t, s.CheckRepositoryRemoval(t.Context(), repo.ID))
 	got, err := s.Repository(t.Context(), repo.Canonical, nil)
 	requireOK(t, err)

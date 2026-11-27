@@ -109,7 +109,7 @@ func (f *Runs) AdvanceNative(ctx context.Context, id string) error {
 		r.EvidenceComplete = false
 		m.runs[id] = r
 		return nil
-	})
+	}, stateport.Change{Run: id})
 }
 
 func fakeRunUpdate(u stateport.RunUpdate) error {

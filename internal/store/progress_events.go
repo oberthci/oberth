@@ -32,6 +32,6 @@ func (s *Store) progressEvent(ctx context.Context, tx *sql.Tx, run stateport.Run
 	if err := tx.QueryRowContext(ctx, `SELECT coalesce((SELECT seq FROM sqlite_sequence WHERE name='events'),0)+1`).Scan(&sequence); err != nil {
 		return databaseError(err)
 	}
-	_, err := insertEvent(ctx, tx, stateport.ProgressEvent(run, sequence, s.options.Clock()))
+	_, err := s.insertEvent(ctx, tx, stateport.ProgressEvent(run, sequence, s.options.Clock()))
 	return err
 }

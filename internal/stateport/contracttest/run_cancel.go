@@ -14,7 +14,7 @@ func checkCancellation(t *testing.T, f RunFixture) {
 	a := stateport.Action{Actor: "operator", Reason: "requested stop", Events: []stateport.EventWrite{runEvent(r, "stop")}}
 	bad := a
 	bad.Events = []stateport.EventWrite{runEvent(r, "")}
-	ch := f.Port.Changes()
+	ch := observeChanges(t, f.Port)
 	head := len(f.Audit(t))
 	_, err := f.Port.Cancel(t.Context(), bad, stateport.RunCancellation{ID: r.ID, Revision: r.Revision})
 	runCode(t, err, publicerr.InvalidInput)
@@ -50,7 +50,7 @@ func checkCancellation(t *testing.T, f RunFixture) {
 	mustRun(t, f.Port.Finish(t.Context(), stateport.Action{}, stateport.RunUpdate{ID: r.ID, Revision: current.Revision, Status: stepmodel.RunFailed}))
 	current, err = f.Port.RunState(t.Context(), r.ID)
 	mustRun(t, err)
-	ch = f.Port.Changes()
+	ch = observeChanges(t, f.Port)
 	head = len(f.Audit(t))
 	_, err = f.Port.Cancel(t.Context(), a, stateport.RunCancellation{ID: r.ID, Revision: current.Revision})
 	runCode(t, err, publicerr.Conflict)
@@ -101,7 +101,7 @@ func checkStaleVerdict(t *testing.T, f RunFixture) {
 	r := acceptOneRun(t, f, RunCase{ID: "stale-verdict"})
 	_, err := f.Port.Cancel(t.Context(), stateport.Action{Actor: "operator"}, stateport.RunCancellation{ID: r.ID, Revision: r.Revision})
 	mustRun(t, err)
-	ch := f.Port.Changes()
+	ch := observeChanges(t, f.Port)
 	head := len(f.Audit(t))
 	err = f.Port.Finish(t.Context(), stateport.Action{Events: []stateport.EventWrite{runEvent(r, "stale-finished")}}, stateport.RunUpdate{ID: r.ID, Revision: r.Revision, Status: stepmodel.RunFailed})
 	runCode(t, err, publicerr.Conflict)

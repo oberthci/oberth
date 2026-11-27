@@ -16,7 +16,7 @@ func movingFails(t *testing.T, f RunFixture, call func(stateport.Action) error) 
 	t.Helper()
 	a := stateport.Action{Actor: "operator", Events: []stateport.EventWrite{{Event: model.AgentEvent{Kind: string(model.EventRunUpdated), Repo: "origin/team/repo", Summary: "conflict"}, Dedupe: "moving-rollback"}}}
 	before := len(f.Audit(t))
-	changed := f.Port.Changes()
+	changed := observeChanges(t, f.Port)
 	if err := call(a); err == nil {
 		t.Fatal("midway event failure accepted")
 	}

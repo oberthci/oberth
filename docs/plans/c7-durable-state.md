@@ -67,8 +67,8 @@ IDs and dedupe keys stay internal. **Delta:** implement C2's [Events and
 observation](c2-service-actions-and-history.md#events-and-observation), including
 a projection revision and its event written with the fact, plus separate progress retention. Preserve
 cursor order and replay across restarts; notices never authorize work. The fact writer
-supplies the events; C2 owns reconnect/reset semantics. Use the existing endpoint-seek bounds query, not
-a full event scan for the fence; own-event cursors seek the event window. A lagging cursor may scan that whole window before reaching the fence.
+supplies the events; C2 owns reconnect/reset semantics. Committed facts supply bounded scoped hints, including control changes without events; rollback/no-op stays silent.
+Use endpoint-seek bounds and run/kind filtering before the page limit; ref matching shares this query owner. Silent internal observations bypass notifications.
 
 Bounded queries supply lists, a run by exact commit or ref, pending publications
 and upstream details needed by consumers. Declarations are not a stored fact.

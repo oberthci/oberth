@@ -27,10 +27,10 @@ type Options struct {
 type Store struct {
 	refusals                                                    receiveRefusals
 	metrics                                                     storeMetrics
+	notifications                                               stateport.ChangeHub
+	pendingChanges                                              map[stateport.Change]struct{}
 	backupMu                                                    sync.RWMutex
 	lastBackup                                                  time.Time
-	changeMu                                                    sync.Mutex
-	changed                                                     chan struct{}
 	writes                                                      chan struct{}
 	path                                                        string
 	options                                                     Options
@@ -110,7 +110,7 @@ func open(ctx context.Context, path string, options Options, definition schemaDe
 	if err := sweepStaging(filepath.Dir(path)); err != nil {
 		return nil, err
 	}
-	s := &Store{path: path, options: options, writes: make(chan struct{}, 1), changed: make(chan struct{})}
+	s := &Store{path: path, options: options, writes: make(chan struct{}, 1)}
 	s.writer = pool(path, "rw", options, 1)
 	s.readers = pool(path, "ro", options, 8)
 	s.auditReaders = pool(path, "ro", options, 2)

@@ -33,9 +33,14 @@ func TestNativeProgressUsesOneProjectionRead(t *testing.T) {
 	if saved.Status != stepmodel.RunRunning || saved.Running != 1 || saved.StartedAt == nil || !saved.StartedAt.Equal(started) || saved.Revision != r.Revision {
 		t.Fatal("single-read progress lost the committed projection", saved)
 	}
-	changed := s.Changes()
+	changed := observeChanges(t, s)
 	requireOK(t, s.SaveProgress(t.Context(), r.ID, progress))
-	if queries := probe.take(); len(queries) > 2 || changed != s.Changes() {
+	if queries := probe.take(); len(queries) > 2 {
 		t.Fatal("repeated progress reread or committed unchanged facts", queries)
+	}
+	select {
+	case <-changed:
+		t.Fatal("unchanged projection signaled")
+	default:
 	}
 }

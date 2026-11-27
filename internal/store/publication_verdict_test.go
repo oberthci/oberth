@@ -25,7 +25,7 @@ func TestRunPublicationRequiresPassedVerdict(t *testing.T) {
 			}
 			_, head, err := s.Audit(t.Context(), 0, 100)
 			requireOK(t, err)
-			changed := s.Changes()
+			changed := observeChanges(t, s)
 			intent := publicationIntent(r)
 			err = s.PreparePublication(t.Context(), a, intent)
 			want := "forbidden: authority is missing or expired - Request an active grant or an explicit scope change."

@@ -45,7 +45,7 @@ func checkMalformedAcceptance(t *testing.T, f RunFixture) {
 				b.Runs[0].Child = &nativebinding.ChildBinding{}
 			}
 			head := len(f.Audit(t))
-			ch := f.Port.Changes()
+			ch := observeChanges(t, f.Port)
 			result, err := f.Port.AcceptBatch(t.Context(), b)
 			runCode(t, err, publicerr.InvalidInput)
 			if result.Fresh || result.Runs != nil || len(f.Audit(t)) != head {

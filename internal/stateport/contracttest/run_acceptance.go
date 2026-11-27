@@ -24,7 +24,7 @@ func checkRunAcceptance(t *testing.T, f RunFixture) {
 		t.Fatal("returned values alias storage")
 	}
 	head := len(f.Audit(t))
-	ch := f.Port.Changes()
+	ch := observeChanges(t, f.Port)
 	replayed, err := f.Port.AcceptBatch(t.Context(), b)
 	replay, fresh := replayed.Runs, replayed.Fresh
 	mustRun(t, err)
@@ -54,7 +54,7 @@ func checkRunAcceptance(t *testing.T, f RunFixture) {
 
 func checkCommitWakeups(t *testing.T, f RunFixture) {
 	r := acceptOneRun(t, f, RunCase{ID: "wake"})
-	ch := f.Port.Changes()
+	ch := observeChanges(t, f.Port)
 	page, err := f.Port.Events(t.Context(), stateport.EventFilter{Limit: 500})
 	mustRun(t, err)
 	f.NativeAdvance(t, r.ID)
@@ -69,7 +69,7 @@ func checkCommitWakeups(t *testing.T, f RunFixture) {
 	if len(after.Events) != len(page.Events) {
 		t.Fatal("native progress invented an event")
 	}
-	ch = f.Port.Changes()
+	ch = observeChanges(t, f.Port)
 	_, err = f.Port.Cancel(t.Context(), stateport.Action{Actor: "operator"}, stateport.RunCancellation{ID: r.ID, Revision: r.Revision})
 	mustRun(t, err)
 	changedSignal(t, ch)

@@ -133,7 +133,7 @@ func (f *composedFixture) waitPublicationSettled(t *testing.T, id string) model.
 	deadline := time.NewTimer(10 * time.Second)
 	defer deadline.Stop()
 	for {
-		changes := f.owners.c.store.Changes()
+		changes := observeChanges(t, f.owners.c.store)
 		p, err := f.owners.c.store.Publication(t.Context(), id)
 		if err == nil && p.Status != model.PublicationPending {
 			return p

@@ -11,7 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/stateport"
 )
 
-func insertEvent(ctx context.Context, tx *sql.Tx, input stateport.EventWrite) (int64, error) {
+func (s *Store) insertEvent(ctx context.Context, tx *sql.Tx, input stateport.EventWrite) (int64, error) {
 	event := input.Event
 	event.ID = 0
 	var id int64
@@ -32,15 +32,18 @@ func insertEvent(ctx context.Context, tx *sql.Tx, input stateport.EventWrite) (i
 		return 0, databaseError(err)
 	}
 	id, err = result.LastInsertId()
+	if err == nil {
+		s.noteChange(stateport.Change{Repository: event.Repo, Run: event.RunID, Upstream: stateport.EventScope(event)})
+	}
 	return id, databaseError(err)
 }
 
 func (s *Store) Events(ctx context.Context, filter stateport.EventFilter) (model.EventPage, error) {
 	started := s.options.Clock()
 	defer func() { s.metrics.events.record(s.options.Clock().Sub(started)) }()
-	repositories, after, limit := filter.ScopeKeys(), filter.After, filter.Limit
+	repositories, after := filter.ScopeKeys(), filter.After
 	result := model.EventPage{Events: make([]model.AgentEvent, 0), NextAfterID: after}
-	if !validEventFilter(filter) {
+	if !filter.Valid() {
 		return result, refuse(invalid, nil)
 	}
 	tx, err := s.readers.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
@@ -61,22 +64,8 @@ func (s *Store) Events(ctx context.Context, filter stateport.EventFilter) (model
 		return result, databaseError(err)
 	}
 	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var event model.AgentEvent
-		var body string
-		if err := rows.Scan(&event.ID, &body); err != nil {
-			return result, databaseError(err)
-		}
-		id := event.ID
-		if err := json.Unmarshal([]byte(body), &event); err != nil {
-			return result, refuse(corrupt, err)
-		}
-		event.ID = id
-		result.Events = append(result.Events, event)
-		result.NextAfterID = id
-	}
-	if len(result.Events) < limit {
-		result.NextAfterID = max(result.NextAfterID, min(result.LatestID, through))
+	if err := readEventRows(rows, &result, filter); err != nil {
+		return result, err
 	}
 	result.HasMore = result.NextAfterID < min(result.LatestID, through)
 	if err := rows.Close(); err != nil {
@@ -84,6 +73,39 @@ func (s *Store) Events(ctx context.Context, filter stateport.EventFilter) (model
 	}
 	result.Gap, err = eventGap(ctx, tx, filter)
 	return result, databaseError(err)
+}
+
+func readEventRows(rows *sql.Rows, result *model.EventPage, filter stateport.EventFilter) error {
+	limit := filter.Limit
+	scanned := 0
+	for rows.Next() {
+		scanned++
+		var event model.AgentEvent
+		var body string
+		if err := rows.Scan(&event.ID, &body); err != nil {
+			return databaseError(err)
+		}
+		id := event.ID
+		if err := json.Unmarshal([]byte(body), &event); err != nil {
+			return refuse(corrupt, err)
+		}
+		event.ID = id
+		result.NextAfterID = id
+		if filter.Selects(event) {
+			result.Events = append(result.Events, event)
+		}
+		if len(result.Events) == limit {
+			break
+		}
+	}
+	if len(result.Events) < limit && scanned < eventScanLimit(filter) {
+		through := filter.Through
+		if through == 0 {
+			through = result.LatestID
+		}
+		result.NextAfterID = max(result.NextAfterID, min(result.LatestID, through))
+	}
+	return databaseError(rows.Err())
 }
 
 func validateEvent(input stateport.EventWrite) error {
@@ -121,10 +143,6 @@ func eventBounds(ctx context.Context, tx *sql.Tx, repositories []string, result 
 	return nil
 }
 
-func validEventFilter(f stateport.EventFilter) bool {
-	return f.After >= 0 && f.Through >= 0 && f.Limit >= 1 && f.Limit <= stateport.EventPageLimit
-}
-
 func eventQuery(f stateport.EventFilter, through int64) (string, []any) {
 	predicate, args := scopePredicate("e.repo", f.ScopeKeys())
 	from := `events e`
@@ -140,8 +158,29 @@ JOIN repositories p ON p.id=r.repo_id AND p.canonical=e.repo`
 		predicate += ` AND json_extract(r.origin,'$.actor')=?`
 		args = append(args, f.Actor)
 	}
+	if len(f.RunIDs) > 0 {
+		selection, values := scopePredicate("json_extract(e.value,'$.run_id')", f.RunIDs)
+		predicate += " AND " + selection
+		args = append(args, values...)
+	}
+	if len(f.Kinds) > 0 {
+		kinds := make([]string, len(f.Kinds))
+		for i, kind := range f.Kinds {
+			kinds[i] = string(kind)
+		}
+		selection, values := scopePredicate("e.kind", kinds)
+		predicate += " AND " + selection
+		args = append(args, values...)
+	}
 	query := `SELECT e.id,e.value FROM ` + from + ` WHERE ` + predicate + ` AND e.id>? AND e.id<=? ORDER BY e.id LIMIT ?`
-	return query, append(args, f.After, through, f.Limit)
+	return query, append(args, f.After, through, eventScanLimit(f))
+}
+
+func eventScanLimit(f stateport.EventFilter) int {
+	if len(f.RefsGlob) > 0 {
+		return stateport.EventPageLimit
+	}
+	return f.Limit
 }
 
 func eventRepository(v model.AgentEvent) bool {
