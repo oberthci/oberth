@@ -4,6 +4,10 @@ parallelism: {{ .Values.runs.parallel | quote }}
 executor: |
   image: {{ (include "oberth.executorImage" .) | quote }}
   imagePullPolicy: {{ .Values.argoNative.images.pullPolicy | quote }}
+  {{- with .Values.argoNative.executor.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   env:
     - name: OBERTH_SOURCE_ENDPOINT
       value: {{ .Values.server.runtime.source.endpoint | quote }}

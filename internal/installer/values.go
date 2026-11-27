@@ -81,7 +81,7 @@ func operatorValues(stored map[string]any) map[string]any {
 }
 
 func allowedOverrideNames() []string {
-	return []string{"runs", "policies", "storage", "database", "logs", "schedules", "assist", "secretStore", "resources", "argoNative", "storeNative"}
+	return []string{"runs", "policies", "storage", "database", "logs", "schedules", "assist", "secretStore", "resources", "argoNative", "storeNative", "runPolicy"}
 }
 
 func allowedOverrides(v map[string]any) bool {

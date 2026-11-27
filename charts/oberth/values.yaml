@@ -14,6 +14,11 @@ runs:
   parallel: 4
 resources:
   requests: {cpu: 250m, memory: 1Gi}
+runPolicy:
+  enabled: false
+  namespaces: {}
+  defaultRequest: {cpu: 100m, memory: 128Mi, ephemeral-storage: 1Gi}
+  default: {memory: 512Mi, ephemeral-storage: 8Gi}
 policies:
   floor: true
   egress: true

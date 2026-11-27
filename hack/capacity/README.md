@@ -95,3 +95,52 @@ under-request CPU/memory and exceed a run limit: a fault run may OOM; no control
 OOM/eviction, node pressure or out-of-budget host/device usage may occur. Require
 ten minutes healthy API recovery and an explicit return to previous values.
 Unknown shapes, absent receipts or failed containment blocks activation.
+
+## S1c: selected namespace policy
+
+Default installs have no capacity quota or LimitRange. `--run-policy '<JSON>'`
+opts selected existing namespaces into native defaults and six unscoped quota
+dimensions. `run-policy-candidate.json` assigns the entire proposed envelope to
+one namespace. Carve child shares out of that total; never duplicate it. Helm
+rejects aggregate allocations above 9000m CPU, 49152Mi memory, 80 Pods or 256Gi
+ephemeral, including on upgrades. This leaves the measured non-run reserve of
+1.5 CPU/8.834445953Gi/30 slots; baseline plus worst maintenance overlap must fit
+inside it. The separate control-priority exclusion is retained in every selected
+namespace. The chart creates no child namespace, cross-namespace execution right
+or repository binding. Namespace ownership/child authority remain native owners.
+
+Before activation, owners must complete `inventory.csv` for every admitted ref,
+entrypoint/template/templateRef/CronWorkflow, hook/retry, sidecar, restartable init,
+source artifact plugin, secret-install helper and generated Job/VM launcher/helper.
+Include Pending and existing nonterminal Pods, guest/QEMU/device/Pod overhead,
+tmpfs and all child destinations. Record native final defaulted Pod specs and
+largest cold/warm inputs on the pinned stack, not just authored main resources.
+Unknown/dynamic shapes or children outside quota-covered namespaces block G2.
+The empty inventory shipped here is a receipt format, not a completed inventory.
+Use the existing namespace/RBAC binding to restrict all child destinations; audit
+all allowed service accounts. Keep the KVM gate until the separately reviewed
+VM-count/scope change is qualified. LimitRange cannot select only plugin containers.
+
+Retain these deciding native admission fixtures in repository CI on the pinned
+API/controller (offline rendering does not establish their native outcomes):
+
+| Input | Required observation |
+| --- | --- |
+| request-only ephemeral 16Gi or memory >512Mi | Native rejection against smaller default limit; migrate authored limits >=request. Outside policy, valid input remains valid. |
+| limit-only ephemeral 256Mi / CPU 50m | API defaulting copies missing requests from limits before LimitRange; retain final values for all injected containers. |
+| explicit request/limit pairs | Preserved byte-equivalent quantities; no clamping or rewriting. |
+| intentionally empty resources | Defaulted in selected namespaces; defer namespace policy if unlimited semantics are required. |
+| sidecar/restartable-init/plugin/VM/Job | Materialize every final shape, prove init overlap/overhead and namespace quota accounting. |
+| missing required resources / quota overflow | Native Pod-create 403; retain actual Argo step or VM/Job reconcile result and explicit recovery. No automatic rerun or queue. |
+| too-large concurrent fan-out / under-request / over-limit | Quota refusal and contained run OOM; G2 control replacements and API recovery still pass. |
+
+Require disk emptyDir.sizeLimit in selected repository CI. Count shared volumes
+once, layers/logs separately and tmpfs against memory. PVC growth is outside Pod
+ephemeral quotas. Native quotas bound admitted totals, not physical reservation.
+Keep limits unqualified until short peaks/cold extraction and full-load faults
+pass. Apply executor resources, namespace defaults and quotas in their own drained
+layer after migration; give secret-install helpers authored native resources.
+The pinned artifact driver has no resource field; final LimitRange accounting is
+required. Deleting policy affects future Pods only. Roll back exact prior
+executor/default/quota values after a drain; existing defaults, failed Pod creates
+and evictions are not undone. Do not loosen quotas automatically under load.

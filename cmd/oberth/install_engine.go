@@ -115,8 +115,14 @@ func (a application) printBackupSchedule(ctx context.Context, r installationRequ
 func (a application) openInstallation(r installationRequest) (installationSession, error) {
 	s := installationSession{app: a, request: r, choices: r.choices(), name: installationProfileName(r)}
 	var err error
-	if raw := r.text("resources"); raw != "" {
-		resources, e := installer.ResourceChoices(raw)
+	for _, choice := range []struct {
+		name   string
+		decode func(string) (map[string]any, error)
+	}{{"resources", installer.ResourceChoices}, {"run-policy", installer.RunPolicyChoices}} {
+		if r.text(choice.name) == "" {
+			continue
+		}
+		resources, e := choice.decode(r.text(choice.name))
 		if e != nil {
 			return s, e
 		}

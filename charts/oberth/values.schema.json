@@ -578,6 +578,108 @@
           }
         }
       }
+    },
+    "runPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespaces": {
+          "type": "object",
+          "maxProperties": 32,
+          "patternProperties": {
+            "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cpuMilli": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9000
+                },
+                "memoryMi": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 49152
+                },
+                "pods": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 80
+                },
+                "ephemeralGi": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 256
+                }
+              },
+              "required": [
+                "cpuMilli",
+                "memoryMi",
+                "pods",
+                "ephemeralGi"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "defaultRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^[0-9]+([.][0-9]+)?([EPTGMK]i?|m)?$"
+            },
+            "memory": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^[0-9]+([.][0-9]+)?([EPTGMK]i?|m)?$"
+            },
+            "ephemeral-storage": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^[0-9]+([.][0-9]+)?([EPTGMK]i?|m)?$"
+            }
+          }
+        },
+        "default": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^[0-9]+([.][0-9]+)?([EPTGMK]i?|m)?$"
+            },
+            "memory": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^[0-9]+([.][0-9]+)?([EPTGMK]i?|m)?$"
+            },
+            "ephemeral-storage": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^[0-9]+([.][0-9]+)?([EPTGMK]i?|m)?$"
+            }
+          }
+        }
+      },
+      "required": [
+        "enabled",
+        "namespaces",
+        "defaultRequest",
+        "default"
+      ]
     }
   },
   "$schema": "http://json-schema.org/draft-07/schema#",

@@ -87,6 +87,7 @@ func wrap(operation string, err error) error {
 }
 func problems() map[string]Problem {
 	result := map[string]Problem{
+		"run-policy":             {Reason: "Run namespace policy is invalid.", Remedy: "Set --run-policy to the reviewed namespace allocation and native defaults JSON; qualify G2 before activation."},
 		"resource-choices":       {Reason: "Native resource settings are invalid.", Remedy: "Set --resources to native CPU, memory and ephemeral requests/limits by component; review at drain."},
 		"service-create":         {Reason: "This account cannot create Services.", Remedy: "Grant permission to create Services in the named namespace, then retry."},
 		"service-update":         {Reason: "This account cannot update Services.", Remedy: "Grant permission to update Services in the named namespace, then retry."},

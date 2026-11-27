@@ -1,0 +1,63 @@
+{{- if .Values.runPolicy.enabled }}
+{{- if not (hasKey .Values.runPolicy.namespaces .Values.pipeline.namespace) }}
+{{- fail "Run policy must allocate the pipeline namespace." }}
+{{- end }}
+{{- $cpu := 0 }}
+{{- $memory := 0 }}
+{{- $pods := 0 }}
+{{- $scratch := 0 }}
+{{- range $namespace, $allocation := .Values.runPolicy.namespaces }}
+{{- if or (eq $namespace $.Release.Namespace) (eq $namespace "default") (hasPrefix "kube-" $namespace) }}
+{{- fail "Run policy namespace must be an inventoried workload namespace." }}
+{{- end }}
+{{- $cpu = add $cpu $allocation.cpuMilli }}
+{{- $memory = add $memory $allocation.memoryMi }}
+{{- $pods = add $pods $allocation.pods }}
+{{- $scratch = add $scratch $allocation.ephemeralGi }}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: oberth-run-defaults
+  namespace: {{ $namespace }}
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        {{- $.Values.runPolicy.defaultRequest | toYaml | nindent 8 }}
+      default:
+        {{- $.Values.runPolicy.default | toYaml | nindent 8 }}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: oberth-run-capacity
+  namespace: {{ $namespace }}
+spec:
+  hard:
+    requests.cpu: {{ printf "%vm" $allocation.cpuMilli | quote }}
+    requests.memory: {{ printf "%vMi" $allocation.memoryMi | quote }}
+    limits.memory: {{ printf "%vMi" $allocation.memoryMi | quote }}
+    pods: {{ $allocation.pods | quote }}
+    requests.ephemeral-storage: {{ printf "%vGi" $allocation.ephemeralGi | quote }}
+    limits.ephemeral-storage: {{ printf "%vGi" $allocation.ephemeralGi | quote }}
+{{- if ne $namespace $.Values.pipeline.namespace }}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: oberth-control-priority
+  namespace: {{ $namespace }}
+spec:
+  hard: {pods: "0"}
+  scopeSelector:
+    matchExpressions:
+      - scopeName: PriorityClass
+        operator: In
+        values: [oberth-control-{{ $.Release.Namespace }}]
+{{- end }}
+{{- end }}
+{{- if or (gt $cpu 9000) (gt $memory 49152) (gt $pods 80) (gt $scratch 256) }}
+{{- fail "Aggregate run quotas exceed the qualified profile envelope." }}
+{{- end }}
+{{- end }}
