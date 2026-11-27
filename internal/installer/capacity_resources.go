@@ -177,6 +177,9 @@ func podVector(pod corev1.Pod, run bool) ([6]int64, bool) {
 	}
 	requests := resources.PodRequests(&pod, resources.PodResourcesOptions{})
 	limits := resources.PodLimits(&pod, resources.PodResourcesOptions{})
+	if !capacityResourcesSupported(requests, limits) {
+		return vector, false
+	}
 	for d, name := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory, corev1.ResourceEphemeralStorage} {
 		n, ok := capacityQuantity(requests[name], d == 0)
 		if !ok {
@@ -195,10 +198,21 @@ func podVector(pod corev1.Pod, run bool) ([6]int64, bool) {
 	return vector, true
 }
 
+func capacityResourcesSupported(requests, limits corev1.ResourceList) bool {
+	for _, list := range []corev1.ResourceList{requests, limits} {
+		for name, q := range list {
+			if _, ok := capacityQuantity(q, name == corev1.ResourceCPU); !ok || (!resourceChoiceName(name) && q.Sign() > 0) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func capacityContainer(r corev1.ResourceRequirements, run bool) bool {
 	for _, list := range []corev1.ResourceList{r.Requests, r.Limits} {
 		for name, q := range list {
-			if _, ok := capacityQuantity(q, name == corev1.ResourceCPU); !ok || (!resourceChoiceName(name) && q.Sign() > 0) {
+			if _, ok := capacityQuantity(q, name == corev1.ResourceCPU); !ok {
 				return false
 			}
 		}
