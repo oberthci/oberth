@@ -130,7 +130,7 @@ func checkTamperedSnapshot(t *testing.T, kind string) {
 			t.Fatal(err)
 		}
 	}
-	if _, err = applyRerunSnapshot(t.Context(), r.sourceRoot, stage, digest); err == nil {
+	if _, err = r.applyRerunSnapshot(t.Context(), stage, digest); err == nil {
 		t.Fatal("unsafe snapshot installed", kind)
 	}
 	if _, err = os.Stat(filepath.Join(outside, "output")); !os.IsNotExist(err) {

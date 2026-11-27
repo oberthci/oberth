@@ -4,14 +4,18 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // These processes use private user, mount and PID namespaces, never a cluster.
@@ -24,6 +28,8 @@ func TestHoldNamespaceProcess(t *testing.T) {
 		if code := r.client(t.Context(), []string{"rerun", "--pod-uid", "uid", "--sha256", os.Getenv("OBERTH_HOLD_TEST_DIGEST")}, HoldIO{In: os.Stdin, Out: os.Stdout, Err: os.Stderr}); code != 0 {
 			os.Exit(code)
 		}
+	case "mount":
+		namespaceMount(t)
 	}
 }
 
@@ -52,6 +58,7 @@ func namespaceOwner(t *testing.T) {
 		spoofProc(t)
 	}
 	r := namespaceRuntime(t)
+	r.sourceInfo, _ = os.Lstat(r.sourceRoot)
 	o, _ := startTestHoldOwner(t, r)
 	_, _ = fmt.Fprintln(os.Stdout, "READY")
 	select {
@@ -184,5 +191,94 @@ func TestServerExecParentZeroCanRerun(t *testing.T) {
 	cmd.Stdin = bytes.NewReader(bundle)
 	if out, err := cmd.CombinedOutput(); err != nil || !bytes.Contains(out, []byte(`"t":"rerunning"`)) {
 		t.Fatal("server exec with parent zero refused", string(out), err)
+	}
+}
+
+func TestRerunUsesStateAcrossBindMount(t *testing.T) {
+	cmd := namespaceCommand(t, "mount")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatal("bind-mounted checkout rerun failed", string(out), err)
+	}
+	t.Log(string(out))
+}
+
+func namespaceMount(t *testing.T) {
+	privateMounts(t)
+	r := namespaceRuntime(t)
+	volume := filepath.Join(os.Getenv("OBERTH_HOLD_TEST_ROOT"), "volume")
+	if err := syscall.Mount("tmpfs", volume, "tmpfs", 0, "size=16m,mode=0700"); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mount(volume, r.sourceRoot, "", syscall.MS_BIND, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Dir(r.sourceRoot), 0555); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(filepath.Dir(r.sourceRoot), 0700) }()
+	// Remove root's DAC override so the parent really is unwritable.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	caps := [2]unix.CapUserData{}
+	if err := unix.Capset(&unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}, &caps[0]); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := os.CreateTemp(filepath.Dir(r.sourceRoot), "must-refuse"); err == nil {
+		_ = f.Close()
+		t.Fatal("source parent is writable")
+	}
+	r.sourceInfo, _ = os.Lstat(r.sourceRoot)
+	state, _ := os.Stat(r.root)
+	if r.sourceInfo.Sys().(*syscall.Stat_t).Dev == state.Sys().(*syscall.Stat_t).Dev {
+		t.Fatal("fixture needs separate filesystems")
+	}
+	bundle, digest := rerunBundle(t, minimalRerunFiles(), nil, strings.Repeat("f", 40))
+	stage, err := r.stageRerun(t.Context(), bytes.NewReader(bundle), digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(stage)
+	if _, err = r.applyRerunSnapshot(t.Context(), stage, digest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(filepath.Join(r.sourceRoot, "FIXED")); err != nil {
+		t.Fatal("mounted checkout was not installed", err)
+	}
+	_, _ = io.WriteString(os.Stdout, "state stage installed into bind-mounted checkout with unwritable parent\n")
+}
+
+func TestRerunRefusesReplacedRoot(t *testing.T) {
+	for _, point := range []string{"admit", "install"} {
+		t.Run(point, func(t *testing.T) {
+			r := rerunRuntime(t)
+			bundle, digest := rerunBundle(t, minimalRerunFiles(), nil, strings.Repeat("f", 40))
+			stage, err := r.stageRerun(t.Context(), bytes.NewReader(bundle), digest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(stage)
+			o, _, _ := testHoldOwner(t)
+			o.runtime = r
+			request := holdRequest{Version: holdProtocol, Op: "rerun", UID: "uid", Stage: stage, Digest: digest}
+			if point == "install" {
+				if _, frame, _, _ := o.admit(request); frame.Type != "rerunning" {
+					t.Fatal(frame)
+				}
+			}
+			if err = os.Rename(r.sourceRoot, r.sourceRoot+"-original"); err != nil {
+				t.Fatal(err)
+			}
+			if err = os.Mkdir(r.sourceRoot, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if point == "admit" {
+				if _, frame, _, _ := o.admit(request); frame.Type != "refused" {
+					t.Fatal("replacement root admitted", frame)
+				}
+			} else if _, err = r.applyRerunSnapshot(t.Context(), stage, digest); err == nil {
+				t.Fatal("replacement root installed")
+			}
+		})
 	}
 }

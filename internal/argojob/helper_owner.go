@@ -199,7 +199,7 @@ func rerunningReply(op string) holdFrame {
 }
 
 func (o *holdOwner) admitRerun(r holdRequest) (holdFrame, bool) {
-	if err := rerunRoot(o.runtime.checkoutRoot(), r.Stage); err != nil {
+	if err := o.runtime.rerunRoot(r.Stage); err != nil {
 		return holdFrame{Type: "refused", Reason: "source root or stage is unsafe"}, false
 	}
 	o.rerun = &r

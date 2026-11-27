@@ -46,7 +46,7 @@ func (r holdRuntime) stageRerun(ctx context.Context, input io.Reader, digest str
 	if input == nil || !validRerunDigest(digest) {
 		return "", fmt.Errorf("invalid snapshot digest")
 	}
-	f, err := os.CreateTemp(filepath.Dir(r.checkoutRoot()), ".oberth-resume-*")
+	f, err := os.CreateTemp(r.root, ".oberth-resume-*")
 	if err != nil {
 		return "", err
 	}
@@ -86,8 +86,8 @@ func (r *resumeContextReader) Read(p []byte) (int, error) {
 }
 
 // Lstat the root itself: OpenRoot intentionally follows a root symlink.
-func rerunRoot(root, stage string) error {
-	r, err := os.Lstat(root)
+func (runtime holdRuntime) rerunRoot(stage string) error {
+	r, err := os.Lstat(runtime.checkoutRoot())
 	if err != nil {
 		return err
 	}
@@ -95,13 +95,12 @@ func rerunRoot(root, stage string) error {
 	if err != nil {
 		return err
 	}
-	if !r.IsDir() || !s.Mode().IsRegular() || s.Mode().Perm() != 0600 || filepath.Dir(stage) != filepath.Dir(root) || !strings.HasPrefix(filepath.Base(stage), ".oberth-resume-") {
+	if !r.IsDir() || !s.Mode().IsRegular() || s.Mode().Perm() != 0600 || filepath.Dir(stage) != runtime.root || !strings.HasPrefix(filepath.Base(stage), ".oberth-resume-") {
 		return fmt.Errorf("source root or stage is unsafe")
 	}
-	rstat, rok := r.Sys().(*syscall.Stat_t)
 	sstat, sok := s.Sys().(*syscall.Stat_t)
-	if !rok || !sok || rstat.Dev != sstat.Dev || sstat.Uid != uint32(os.Geteuid()) {
-		return fmt.Errorf("source filesystem changed")
+	if runtime.sourceInfo == nil || !os.SameFile(runtime.sourceInfo, r) || !sok || sstat.Uid != uint32(os.Geteuid()) {
+		return fmt.Errorf("source root changed")
 	}
 	return nil
 }
@@ -133,11 +132,11 @@ func snapshotParents(root *os.Root, p string) error {
 	return nil
 }
 
-func applyRerunSnapshot(ctx context.Context, root, stage, digest string) (rerunManifest, error) {
-	if err := rerunRoot(root, stage); err != nil {
+func (r holdRuntime) applyRerunSnapshot(ctx context.Context, stage, digest string) (rerunManifest, error) {
+	if err := r.rerunRoot(stage); err != nil {
 		return rerunManifest{}, err
 	}
-	dir, err := os.MkdirTemp(filepath.Dir(root), ".oberth-resume-tree-*")
+	dir, err := os.MkdirTemp(r.root, ".oberth-resume-tree-*")
 	if err != nil {
 		return rerunManifest{}, err
 	}
@@ -146,10 +145,10 @@ func applyRerunSnapshot(ctx context.Context, root, stage, digest string) (rerunM
 	if err != nil {
 		return rerunManifest{}, err
 	}
-	if err = rerunRoot(root, stage); err != nil {
+	if err = r.rerunRoot(stage); err != nil {
 		return rerunManifest{}, err
 	}
-	dest, err := openRerunRoot(root)
+	dest, err := openRerunRoot(r.checkoutRoot(), r.sourceInfo)
 	if err != nil {
 		return rerunManifest{}, err
 	}
@@ -196,9 +195,9 @@ func validRerunManifest(m rerunManifest) bool {
 	return gitoid.Valid(m.Commit) && m.RunID != "" && len(m.RunID) <= 128 && !strings.ContainsAny(m.RunID, "\r\n\x00")
 }
 
-func openRerunRoot(root string) (*os.Root, error) {
+func openRerunRoot(root string, expected os.FileInfo) (*os.Root, error) {
 	rootInfo, err := os.Lstat(root)
-	if err != nil || !rootInfo.IsDir() {
+	if err != nil || !rootInfo.IsDir() || expected == nil || !os.SameFile(expected, rootInfo) {
 		return nil, fmt.Errorf("source root changed")
 	}
 	dest, err := os.OpenRoot(root)
@@ -317,7 +316,7 @@ func installSnapshotFile(dest *os.Root, stage, p string) error {
 }
 
 func (r holdRuntime) rerunCommand(ctx context.Context, request holdRequest, code int, diagnostic io.Writer) int {
-	manifest, err := applyRerunSnapshot(ctx, r.checkoutRoot(), request.Stage, request.Digest)
+	manifest, err := r.applyRerunSnapshot(ctx, request.Stage, request.Digest)
 	if err != nil {
 		return holdDiagnostic(diagnostic, code, fmt.Errorf("snapshot install failed: %w", err))
 	}

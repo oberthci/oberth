@@ -57,7 +57,7 @@ func TestRerunMonitorRetainsConcurrentSignal(t *testing.T) {
 	}
 	defer os.Remove(stage)
 	o, _, _ := testHoldOwner(t)
-	o.runtime.sourceRoot = r.sourceRoot
+	o.runtime.sourceRoot, o.runtime.sourceInfo, o.runtime.root = r.sourceRoot, r.sourceInfo, r.root
 	signals := make(chan os.Signal, 1)
 	o.runtime.signals = signals
 	_, frame, _, _ := o.admit(holdRequest{Version: holdProtocol, Op: "rerun", UID: "uid", Stage: stage, Digest: digest})
@@ -80,7 +80,7 @@ func TestRerunStopsRegisteredInspectionGroups(t *testing.T) {
 	}
 	defer os.Remove(stage)
 	o, _, _ := testHoldOwner(t)
-	o.runtime.sourceRoot = r.sourceRoot
+	o.runtime.sourceRoot, o.runtime.sourceInfo, o.runtime.root = r.sourceRoot, r.sourceInfo, r.root
 	child, frame, _, _ := o.admit(holdRequest{Version: holdProtocol, Op: "exec", UID: "uid", Argv: []string{"sh", "-c", "exec cat /dev/zero >/dev/null"}})
 	if child == nil {
 		t.Fatal(frame)

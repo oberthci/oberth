@@ -64,6 +64,11 @@ func rerunRuntime(t *testing.T) holdRuntime {
 	if err := os.Mkdir(r.sourceRoot, 0700); err != nil {
 		t.Fatal(err)
 	}
+	var err error
+	r.sourceInfo, err = os.Lstat(r.sourceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return r
 }
 
@@ -89,7 +94,7 @@ func TestRerunReplacesTrackedKeepsUntracked(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Remove(stage)
-	commit, err := applyRerunSnapshot(t.Context(), r.sourceRoot, stage, digest)
+	commit, err := r.applyRerunSnapshot(t.Context(), stage, digest)
 	if err != nil || commit.Commit != strings.Repeat("f", 40) {
 		t.Fatal(commit, err)
 	}
@@ -126,7 +131,7 @@ func TestRerunCheckoutIsF(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Remove(stage)
-	if _, err = applyRerunSnapshot(t.Context(), r.sourceRoot, stage, digest); err != nil {
+	if _, err = r.applyRerunSnapshot(t.Context(), stage, digest); err != nil {
 		t.Fatal(err)
 	}
 	if got := git("rev-parse", "HEAD"); got != fix {
@@ -209,7 +214,7 @@ func TestRerunRootNotSymlink(t *testing.T) {
 	}
 	defer os.Remove(stage)
 	o, _, _ := testHoldOwner(t)
-	o.runtime.sourceRoot = r.sourceRoot
+	o.runtime.sourceRoot, o.runtime.sourceInfo, o.runtime.root = r.sourceRoot, r.sourceInfo, r.root
 	_, frame, _, _ := o.admit(holdRequest{Version: holdProtocol, Op: "rerun", UID: "uid", Stage: stage, Digest: digest})
 	if frame.Type != "refused" {
 		t.Fatal("symlink root admitted", frame)
@@ -218,7 +223,7 @@ func TestRerunRootNotSymlink(t *testing.T) {
 	if frame.Type != "held" {
 		t.Fatal("refusal closed hold", frame)
 	}
-	if _, err = applyRerunSnapshot(t.Context(), r.sourceRoot, stage, digest); err == nil {
+	if _, err = r.applyRerunSnapshot(t.Context(), stage, digest); err == nil {
 		t.Fatal("symlink root installed")
 	}
 	if _, err = os.Stat(filepath.Join(outside, "FIXED")); !os.IsNotExist(err) {
@@ -236,7 +241,7 @@ func TestHoldRerunOneShot(t *testing.T) {
 	}
 	defer os.Remove(stage)
 	o, _, _ := testHoldOwner(t)
-	o.runtime.sourceRoot = r.sourceRoot
+	o.runtime.sourceRoot, o.runtime.sourceInfo, o.runtime.root = r.sourceRoot, r.sourceInfo, r.root
 	request := holdRequest{Version: holdProtocol, Op: "rerun", UID: "uid", Stage: stage, Digest: digest}
 	_, frame, _, end := o.admit(request)
 	if frame.Type != "rerunning" || !end {
@@ -266,7 +271,7 @@ func TestHoldRerunRacesClose(t *testing.T) {
 			t.Fatal(err)
 		}
 		o, _, _ := testHoldOwner(t)
-		o.runtime.sourceRoot = r.sourceRoot
+		o.runtime.sourceRoot, o.runtime.sourceInfo, o.runtime.root = r.sourceRoot, r.sourceInfo, r.root
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() {

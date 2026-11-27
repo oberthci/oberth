@@ -29,6 +29,7 @@ type holdRuntime struct {
 	after         func(time.Duration) <-chan time.Time
 	signals       <-chan os.Signal
 	sourceRoot    string
+	sourceInfo    os.FileInfo
 	rerunPeer     func(net.Conn) bool
 	command       []string
 	streams       HoldIO
@@ -128,6 +129,9 @@ func (r holdRuntime) run(ctx context.Context, argv []string, streams HoldIO) int
 	if err != nil {
 		return holdDiagnostic(streams.Err, 125, err)
 	}
+	// Capture the mounted checkout before either the authored command or an
+	// inspection can replace it. A missing checkout disables only rerun.
+	r.sourceInfo, _ = os.Lstat(r.checkoutRoot())
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = streams.In, streams.Out, streams.Err
 	if err = cmd.Start(); err != nil {
