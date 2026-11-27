@@ -54,7 +54,7 @@ func (e *Engine) forwardStore(ctx context.Context, cfg secretstore.Config, ca []
 	endpoint := e.Cluster.Client.CoreV1().RESTClient().Post().Namespace(cfg.ServerNamespace).Resource("pods").Name(pod).SubResource("portforward").URL()
 	lifetime, cancel := context.WithCancel(ctx)
 	client := &http.Client{Transport: contextTransport{ctx: lifetime, next: transport}}
-	dialer := spdy.NewDialer(upgrader, client, http.MethodPost, endpoint)
+	dialer := forwardingDialer{spdy.NewDialer(upgrader, client, http.MethodPost, endpoint)}
 	ready, done := make(chan struct{}), make(chan struct{})
 	forward, err := portforward.NewOnAddresses(dialer, []string{"127.0.0.1"}, []string{"0:8200"}, lifetime.Done(), ready, io.Discard, io.Discard)
 	if err != nil {
@@ -83,7 +83,7 @@ func (e *Engine) forwardStore(ctx context.Context, cfg secretstore.Config, ca []
 		closeForward()
 		return nil, nil, err
 	}
-	return store, closeForward, nil
+	return store, func() { store.Close(); closeForward() }, nil
 }
 
 func (e *Engine) waitStorePod(ctx context.Context, namespace string) (string, error) {
