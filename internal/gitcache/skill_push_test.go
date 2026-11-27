@@ -1,15 +1,13 @@
-package agent_test
+package gitcache
 
 import (
 	"os"
 	"regexp"
 	"testing"
-
-	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 func TestSkillPushOptionsMatchReceiver(t *testing.T) {
-	text, err := os.ReadFile("../internal/api/skills/oberth-ci/SKILL.md")
+	text, err := os.ReadFile("../api/skills/oberth-ci/SKILL.md")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,7 +16,7 @@ func TestSkillPushOptionsMatchReceiver(t *testing.T) {
 		t.Fatal("skill omits its CI push option")
 	}
 	for _, option := range options {
-		got, err := gitcache.ParsePushOptions([]string{string(option[1])})
+		got, err := ParsePushOptions([]string{string(option[1])})
 		if err != nil || !got.Run {
 			t.Fatalf("skill CI push option %s is not accepted: %v", option[1], err)
 		}
