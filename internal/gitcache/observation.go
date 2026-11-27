@@ -32,9 +32,6 @@ func (c *Cache) observe(o *sourcedelivery.Observation, err error) {
 func finishObservation(o *sourcedelivery.Observation, err error) sourcedelivery.Summary {
 	s := o.Finish(observationCode(err), err)
 	s.Reason = observationReason(err)
-	if s.Wait[sourcedelivery.ReceiveSlot] > 0 {
-		s.Reason = "contention"
-	}
 	return s
 }
 
