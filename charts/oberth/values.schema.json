@@ -17,6 +17,18 @@
         "parallel": {
           "type": "integer",
           "minimum": 0
+        },
+        "priorityClasses": {
+          "type": "object",
+          "maxProperties": 16,
+          "patternProperties": {
+            "^[a-z0-9]([a-z0-9-]{0,15}[a-z0-9])?$": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 999999
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [
@@ -568,13 +580,19 @@
         "requests": {
           "type": "object",
           "additionalProperties": {
-            "type": "string"
+            "type": [
+              "string",
+              "number"
+            ]
           }
         },
         "limits": {
           "type": "object",
           "additionalProperties": {
-            "type": "string"
+            "type": [
+              "string",
+              "number"
+            ]
           }
         }
       }
@@ -630,22 +648,28 @@
           "additionalProperties": false,
           "properties": {
             "cpu": {
-              "type": "string",
+              "type": [
+                "string",
+                "number"
+              ],
               "minLength": 1,
-              "maxLength": 32,
-              "pattern": "^[0-9]+([.][0-9]+)?([EPTGMK]i?|m)?$"
+              "maxLength": 32
             },
             "memory": {
-              "type": "string",
+              "type": [
+                "string",
+                "number"
+              ],
               "minLength": 1,
-              "maxLength": 32,
-              "pattern": "^[0-9]+([.][0-9]+)?([EPTGMK]i?|m)?$"
+              "maxLength": 32
             },
             "ephemeral-storage": {
-              "type": "string",
+              "type": [
+                "string",
+                "number"
+              ],
               "minLength": 1,
-              "maxLength": 32,
-              "pattern": "^[0-9]+([.][0-9]+)?([EPTGMK]i?|m)?$"
+              "maxLength": 32
             }
           }
         },
@@ -654,22 +678,28 @@
           "additionalProperties": false,
           "properties": {
             "cpu": {
-              "type": "string",
+              "type": [
+                "string",
+                "number"
+              ],
               "minLength": 1,
-              "maxLength": 32,
-              "pattern": "^[0-9]+([.][0-9]+)?([EPTGMK]i?|m)?$"
+              "maxLength": 32
             },
             "memory": {
-              "type": "string",
+              "type": [
+                "string",
+                "number"
+              ],
               "minLength": 1,
-              "maxLength": 32,
-              "pattern": "^[0-9]+([.][0-9]+)?([EPTGMK]i?|m)?$"
+              "maxLength": 32
             },
             "ephemeral-storage": {
-              "type": "string",
+              "type": [
+                "string",
+                "number"
+              ],
               "minLength": 1,
-              "maxLength": 32,
-              "pattern": "^[0-9]+([.][0-9]+)?([EPTGMK]i?|m)?$"
+              "maxLength": 32
             }
           }
         }

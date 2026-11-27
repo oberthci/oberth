@@ -1,5 +1,0 @@
-{
-  "server": {"requests": {"ephemeral-storage": "256Mi"}, "limits": {"ephemeral-storage": "3Gi"}},
-  "controller": {"requests": {"ephemeral-storage": "128Mi"}, "limits": {"ephemeral-storage": "1Gi"}},
-  "store": {"requests": {"ephemeral-storage": "64Mi"}, "limits": {"ephemeral-storage": "256Mi"}}
-}

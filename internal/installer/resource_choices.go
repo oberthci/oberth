@@ -18,13 +18,13 @@ func ResourceChoices(raw string) (map[string]any, error) {
 		return nil, problem("resource-choices", nil)
 	}
 	values := map[string]any{}
+	var authored map[string]any
+	_ = json.Unmarshal([]byte(raw), &authored)
 	for name, resources := range choices {
 		if !validResourceChoices(resources) {
 			return nil, problem("resource-choices", nil)
 		}
-		encoded, _ := json.Marshal(resources)
-		var native map[string]any
-		_ = json.Unmarshal(encoded, &native)
+		native := authored[name]
 		switch name {
 		case "server":
 			values["resources"] = native
@@ -45,7 +45,7 @@ func validResourceChoices(r corev1.ResourceRequirements) bool {
 	}
 	for _, list := range []corev1.ResourceList{r.Requests, r.Limits} {
 		for name, quantity := range list {
-			if (name != corev1.ResourceCPU && name != corev1.ResourceMemory && name != corev1.ResourceEphemeralStorage) || quantity.Sign() < 0 {
+			if !resourceChoiceName(name) || quantity.Sign() < 0 {
 				return false
 			}
 		}
@@ -56,6 +56,14 @@ func validResourceChoices(r corev1.ResourceRequirements) bool {
 		}
 	}
 	return true
+}
+
+func resourceChoiceName(name corev1.ResourceName) bool {
+	switch name {
+	case corev1.ResourceCPU, corev1.ResourceMemory, corev1.ResourceEphemeralStorage:
+		return true
+	}
+	return false
 }
 
 func nativeResourceChoices(name string, value any) map[string]any {
@@ -78,4 +86,36 @@ func nativeResourcesOnly(name string, value any) bool {
 	filtered, _ := json.Marshal(nativeResourceChoices(name, value))
 	raw, _ := json.Marshal(value)
 	return bytes.Equal(filtered, raw)
+}
+
+// Explicit null restores a resource field to the target chart's default rather
+// than retaining the saved trial value. The input is already an owned merge.
+func clearNativeResourceNulls(values map[string]any) map[string]any {
+	if values["resources"] == nil {
+		delete(values, "resources")
+	} else if r, ok := values["resources"].(map[string]any); ok {
+		clearResourceNulls(r)
+	}
+	for _, name := range []string{"argoNative", "storeNative"} {
+		block, _ := values[name].(map[string]any)
+		for _, component := range block {
+			part, _ := component.(map[string]any)
+			if part["resources"] == nil {
+				delete(part, "resources")
+			} else if r, ok := part["resources"].(map[string]any); ok {
+				clearResourceNulls(r)
+			}
+		}
+	}
+	return values
+}
+
+func clearResourceNulls(values map[string]any) {
+	for name, value := range values {
+		if value == nil {
+			delete(values, name)
+		} else if nested, ok := value.(map[string]any); ok {
+			clearResourceNulls(nested)
+		}
+	}
 }

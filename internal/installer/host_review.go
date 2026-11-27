@@ -9,17 +9,18 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// HostProfile is an operator-applied kubelet drop-in, outside Helm ownership.
-// It preserves the daemon reserves and Pod ceiling of this measured profile.
-//
 //go:embed kubelet-profile.yaml
-var HostProfile string
+var hostProfile string
+
+// HostProfile returns the operator-applied kubelet drop-in, outside Helm
+// ownership, preserving this measured profile's daemon reserves and Pod ceiling.
+func HostProfile() string { return hostProfile }
 
 // ReviewHost compares a captured effective configz kubeletconfig with the
 // proposed profile. It neither reads a node nor changes its configuration.
 func ReviewHost(effective map[string]any) []string {
 	var expected map[string]any
-	_ = yaml.Unmarshal([]byte(HostProfile), &expected)
+	_ = yaml.Unmarshal([]byte(hostProfile), &expected)
 	var changed []string
 	for name, want := range expected {
 		if name == "apiVersion" || name == "kind" {

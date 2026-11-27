@@ -36,7 +36,7 @@ func values(r Release, c Choices, stored map[string]any) (map[string]any, error)
 	if c.replaceValues {
 		saved = nil
 	}
-	v := chosenValues(merge(saved, c.Values), c)
+	v := chosenValues(clearNativeResourceNulls(mergeNativeChoices(saved, c.Values)), c)
 	runtime := map[string]any{
 		"controller_namespace": c.Namespace,
 		"controller_configmap": "oberth-controller-config",

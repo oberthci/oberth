@@ -60,6 +60,9 @@ func TestNativeResourceChoicesSurviveInstallerReviewAndUpgrade(t *testing.T) {
 	if !strings.Contains(strings.Join(plan.Detail(), "\n"), "ephemeral-storage") {
 		t.Fatal("resources missing from installer review")
 	}
+	if !strings.Contains(strings.Join(plan.Review(), "\n"), "ephemeral-storage") {
+		t.Fatal("resource changes missing from compact approval")
+	}
 	apply(t, f, plan)
 	f.choices = installer.Choices{Context: "test"}
 	apply(t, f, prepare(t, f))
@@ -68,5 +71,26 @@ func TestNativeResourceChoicesSurviveInstallerReviewAndUpgrade(t *testing.T) {
 		if !strings.Contains(jsonOf(t, object(t, rendered(t, last.Values), tc[0], tc[1])), "ephemeral-storage") {
 			t.Fatal("saved resource choice lost on upgrade", tc)
 		}
+	}
+}
+
+func TestControlResourceTrialCanRestoreAbsentFields(t *testing.T) {
+	f := setup(t)
+	var err error
+	f.choices.Values, err = installer.ResourceChoices(`{"server":{"requests":{"ephemeral-storage":"256Mi"},"limits":{"ephemeral-storage":"3Gi"}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(t, f, prepare(t, f))
+	clear, err := installer.ResourceChoices(`{"server":{"requests":{"ephemeral-storage":null},"limits":{"ephemeral-storage":null}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.choices = installer.Choices{Context: "test", Values: clear}
+	apply(t, f, prepare(t, f))
+	last := f.charts.Applies[len(f.charts.Applies)-1]
+	server := object(t, rendered(t, last.Values), "Deployment", "oberth")
+	if strings.Contains(jsonOf(t, server), `"ephemeral-storage"`) {
+		t.Fatal("trial fields survived rollback", server)
 	}
 }

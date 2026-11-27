@@ -87,8 +87,6 @@ func wrap(operation string, err error) error {
 }
 func problems() map[string]Problem {
 	result := map[string]Problem{
-		"run-policy":             {Reason: "Run namespace policy is invalid.", Remedy: "Set --run-policy to the reviewed namespace allocation and native defaults JSON; qualify G2 before activation."},
-		"resource-choices":       {Reason: "Native resource settings are invalid.", Remedy: "Set --resources to native CPU, memory and ephemeral requests/limits by component; review at drain."},
 		"service-create":         {Reason: "This account cannot create Services.", Remedy: "Grant permission to create Services in the named namespace, then retry."},
 		"service-update":         {Reason: "This account cannot update Services.", Remedy: "Grant permission to update Services in the named namespace, then retry."},
 		"namespace-reserved":     {Reason: "System namespaces cannot hold an installation.", Remedy: "Choose another namespace for the server and pipelines."},
@@ -152,6 +150,8 @@ func problems() map[string]Problem {
 
 func operationProblems() map[string]Problem {
 	return map[string]Problem{
+		"run-policy":             {Reason: "Run namespace policy is invalid.", Remedy: "Set --run-policy to the reviewed namespace allocation and native defaults JSON; qualify G2 before activation."},
+		"resource-choices":       {Reason: "Native resource settings are invalid.", Remedy: "Set --resources to native CPU, memory and ephemeral requests/limits by component; review at drain."},
 		"loopback-url":           {Reason: "The API host is loopback; choose a reachable server URL.", Remedy: "Run oberth install with --url set to an HTTPS address clients can reach."},
 		"address":                {Reason: "The server address is unspecified.", Remedy: "Run oberth install with --url and --ssh-port clients can reach."},
 		"url-host":               {Reason: "Public URL host must use ASCII.", Remedy: "Set --url to the punycode address shown below and review again."},

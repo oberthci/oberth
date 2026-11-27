@@ -1,0 +1,13 @@
+{{- range $name, $priority := .Values.runs.priorityClasses }}
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: oberth-run-{{ $.Release.Namespace }}-{{ $name }}
+  annotations:
+    helm.sh/resource-policy: keep
+value: {{ $priority }}
+globalDefault: false
+preemptionPolicy: Never
+description: Explicit native run ordering; no capacity reservation.
+{{- end }}

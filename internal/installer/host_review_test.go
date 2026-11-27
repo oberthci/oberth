@@ -43,7 +43,7 @@ func TestHostProfileCompleteNativeMap(t *testing.T) {
 func hostFixture(t *testing.T) map[string]any {
 	t.Helper()
 	var config map[string]any
-	if err := yaml.Unmarshal([]byte(HostProfile), &config); err != nil {
+	if err := yaml.Unmarshal([]byte(HostProfile()), &config); err != nil {
 		t.Fatal(err)
 	}
 	return config

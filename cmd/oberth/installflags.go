@@ -16,6 +16,7 @@ type installationCommand struct {
 func installationCommands() []installationCommand {
 	return []installationCommand{
 		{"install", "Review or install Oberth in the chosen context.", 0, 0},
+		{"install capacity", "Review frozen capacity evidence offline from standard input.", 0, 0},
 		{"upgrade", "Upgrade Oberth using a signed release.", 0, 0},
 		{"rollback", "Roll back the installation to its prior release.", 0, 0},
 		{"backup", "Back up database, store data and installation Secrets.", 0, 0},
@@ -36,6 +37,9 @@ func installationFlags(name string) *flag.FlagSet {
 	f.SetOutput(io.Discard)
 	f.Bool("detail", false, "Show complete public diagnostics.")
 	switch name {
+	case "install capacity":
+		f.Bool("print-host-profile", false, "Print the operator-applied kubelet profile without reading evidence.")
+		f.String("output", "text", "Output text or JSON.")
 	case "install":
 		f.String("context", "", "Chosen Kubernetes context.")
 		f.String("namespace", "", "Server namespace (default oberth).")
@@ -66,6 +70,7 @@ func installationFlags(name string) *flag.FlagSet {
 	case "install", "upgrade":
 		f.String("resources", "", "Native resources by server, controller, store or executor as JSON; drained rollout required.")
 		f.String("run-policy", "", "Opt-in namespace defaults and aggregate quotas as JSON; requires G2 migration receipts.")
+		f.String("run-priorities", "", "Explicit native nonpreempting run PriorityClass suffixes and values as JSON.")
 		f.Int("service-port", 0, "In-cluster HTTPS Service port (default 8443).")
 		f.Bool("no-egress", false, "Disable the run Pod egress policy entirely.")
 		f.Bool("egress-internet", true, "Allow public internet egress; false keeps only explicit destinations and required cluster services.")

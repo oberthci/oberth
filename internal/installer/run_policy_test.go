@@ -21,25 +21,35 @@ func TestRunPolicyIsOptInAndAggregatesAllNamespaces(t *testing.T) {
 	values := runPolicyFixture()
 	objects := rendered(t, values)
 	for _, namespace := range []string{"oberth-runs", "children"} {
-		var quota corev1.ResourceQuota
-		var defaults corev1.LimitRange
-		for _, o := range objects {
-			if o["metadata"].(map[string]any)["namespace"] != namespace {
-				continue
-			}
-			if o["metadata"].(map[string]any)["name"] == "oberth-run-capacity" {
-				decodeObject(t, o, &quota)
-			}
-			if o["kind"] == "LimitRange" {
-				decodeObject(t, o, &defaults)
-			}
+		assertRunPolicyNamespace(t, objects, namespace)
+	}
+}
+
+func assertRunPolicyNamespace(t *testing.T, objects []map[string]any, namespace string) {
+	t.Helper()
+	var quota corev1.ResourceQuota
+	var defaults corev1.LimitRange
+	for _, o := range objects {
+		if o["metadata"].(map[string]any)["namespace"] != namespace {
+			continue
 		}
-		if len(quota.Spec.Hard) != 6 || quota.Spec.ScopeSelector != nil || len(quota.Spec.Scopes) != 0 || quota.Spec.Hard.Pods().Cmp(resource.MustParse("40")) != 0 {
-			t.Fatal("quota omitted a dimension or allowed classes to escape", quota)
+		if o["metadata"].(map[string]any)["name"] == "oberth-run-capacity" {
+			decodeObject(t, o, &quota)
 		}
-		if len(defaults.Spec.Limits) != 1 || defaults.Spec.Limits[0].Type != corev1.LimitTypeContainer || !defaults.Spec.Limits[0].Default.Cpu().IsZero() {
-			t.Fatal("native container defaults differ", defaults)
+		if o["kind"] == "LimitRange" {
+			decodeObject(t, o, &defaults)
 		}
+	}
+	assertRunCapacityQuota(t, quota)
+	if len(defaults.Spec.Limits) != 1 || defaults.Spec.Limits[0].Type != corev1.LimitTypeContainer || !defaults.Spec.Limits[0].Default.Cpu().IsZero() {
+		t.Fatal("native container defaults differ", defaults)
+	}
+}
+
+func assertRunCapacityQuota(t *testing.T, quota corev1.ResourceQuota) {
+	t.Helper()
+	if len(quota.Spec.Hard) != 6 || quota.Spec.ScopeSelector != nil || len(quota.Spec.Scopes) != 0 || quota.Spec.Hard.Pods().Cmp(resource.MustParse("40")) != 0 {
+		t.Fatal("quota omitted a dimension or allowed classes to escape", quota)
 	}
 }
 

@@ -58,6 +58,6 @@ spec:
 {{- end }}
 {{- end }}
 {{- if or (gt $cpu 9000) (gt $memory 49152) (gt $pods 80) (gt $scratch 256) }}
-{{- fail "Aggregate run quotas exceed the qualified profile envelope." }}
+{{- fail "Aggregate run quotas exceed the profile envelope." }}
 {{- end }}
 {{- end }}

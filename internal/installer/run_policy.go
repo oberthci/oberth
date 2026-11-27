@@ -35,3 +35,25 @@ func RunPolicyChoices(raw string) (map[string]any, error) {
 	}
 	return map[string]any{"runPolicy": values}, nil
 }
+
+// RunPriorityChoices exposes only native nonpreempting class values. Chart
+// schema binds the suffix and the range below the reserved control class.
+func RunPriorityChoices(raw string) (map[string]any, error) {
+	var priorities map[string]int
+	if len(raw) > 16384 || json.Unmarshal([]byte(raw), &priorities) != nil || priorities == nil {
+		return nil, problem("run-policy", nil)
+	}
+	var values map[string]any
+	_ = json.Unmarshal([]byte(raw), &values)
+	return map[string]any{"runs": map[string]any{"priorityClasses": values}}, nil
+}
+
+func mergeNativeChoices(saved, chosen map[string]any) map[string]any {
+	values := merge(saved, chosen)
+	runs, _ := chosen["runs"].(map[string]any)
+	if classes, selected := runs["priorityClasses"]; selected {
+		merged, _ := values["runs"].(map[string]any)
+		merged["priorityClasses"] = copyValue(classes)
+	}
+	return values
+}

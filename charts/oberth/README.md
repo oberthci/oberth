@@ -81,7 +81,7 @@ ten years from CA creation. There is no store-leaf renewal loop or Secret
 update permission. The store drops every capability, uses RuntimeDefault
 seccomp and a read-only root; an emptyDir at `/tmp` supports the upstream
 configuration preparation. The controller also uses RuntimeDefault seccomp.
-Fixed CPU/memory requests are 250m/1Gi for the server, 100m/512Mi for the
+Default CPU/memory requests are 250m/1Gi for the server, 100m/512Mi for the
 controller and 50m/128Mi for the store. Only the store has a memory limit, 512Mi.
 All three use the installation control PriorityClass (1000000, not a global default).
 It never preempts CI Pods; a pipeline quota prevents CI from using that class.
@@ -115,7 +115,7 @@ pin Argo v4.0.16. The release chart digest binds these archive bytes too:
 
 The parent schema rejects unknown keys, including nested native configuration.
 Operator overrides accepted by the engine are limited to its documented public
-settings; native subchart inputs are generated, so operator strings never reach
+settings and typed native resource choices; arbitrary native subchart inputs are refused, so operator strings never reach
 the dependency charts' template-evaluation options. Native CRDs use the bundled
 minimal definitions rendered as ordinary templates, including on upgrade. No
 CRD download job is rendered. C4 validates submitted workflow schemas.
@@ -224,3 +224,7 @@ Install/upgrade accept `--egress-allow`, `--egress-internet=false`, `--cluster-c
 and `--no-egress`. Saved `egress: true` gets the new rules, with an upgrade review arrow.
 Node image pulls use the node network. The network plugin must enforce policies.
 New server namespaces enforce restricted Pod Security; existing namespaces retain their labels.
+
+Opt-in resource/default/quota/class seams and frozen capacity review are described
+in [the capacity runbook](../../hack/capacity/README.md). Qualification receipts
+are required before activation; default installation behavior stays unchanged.

@@ -68,6 +68,8 @@ func (a application) runInstaller(ctx context.Context, r installationRequest, in
 
 func (a application) runLocalInstaller(ctx context.Context, r installationRequest, in io.Reader, out io.Writer) (bool, error) {
 	switch r.name {
+	case "install capacity":
+		return true, reviewCapacity(r, in, out)
 	case "backup":
 		if r.enabled("print-schedule") {
 			return true, a.printBackupSchedule(ctx, r, out)
@@ -115,42 +117,35 @@ func (a application) printBackupSchedule(ctx context.Context, r installationRequ
 func (a application) openInstallation(r installationRequest) (installationSession, error) {
 	s := installationSession{app: a, request: r, choices: r.choices(), name: installationProfileName(r)}
 	var err error
-	for _, choice := range []struct {
-		name   string
-		decode func(string) (map[string]any, error)
-	}{{"resources", installer.ResourceChoices}, {"run-policy", installer.RunPolicyChoices}} {
-		if r.text(choice.name) == "" {
-			continue
-		}
-		resources, e := choice.decode(r.text(choice.name))
-		if e != nil {
-			return s, e
-		}
-		if s.choices.Values == nil {
-			s.choices.Values = map[string]any{}
-		}
-		for name, value := range resources {
-			s.choices.Values[name] = value
-		}
+	if err = s.nativeChoices(); err != nil {
+		return s, err
 	}
 	s.options, err = installationStateOptions(r)
 	if err != nil {
 		return s, err
 	}
-	profile, dir, err := a.selectedInstallation(r)
-	if err != nil {
+	if err = s.readSelectedProfile(); err != nil {
 		return s, err
 	}
+	return s, nil
+}
+
+func (s *installationSession) readSelectedProfile() error {
+	r := s.request
+	profile, dir, err := s.app.selectedInstallation(r)
+	if err != nil {
+		return err
+	}
 	if profile.Uplink {
-		return s, installationProblem("An uplink profile cannot own an installation.", "Choose an administrator installation profile with --profile.")
+		return installationProblem("An uplink profile cannot own an installation.", "Choose an administrator installation profile with --profile.")
 	}
 	if r.enabled("verify") && dir == "" {
-		return s, installationProblem("Select an installation profile.", "Pass --profile or --context, or select a current administrator profile.")
+		return installationProblem("Select an installation profile.", "Pass --profile or --context, or select a current administrator profile.")
 	}
 	if dir != "" {
 		s.profile, err = readInstallationProfile(dir, r.name == "install" || r.name == "restore")
 		if err != nil {
-			return s, err
+			return err
 		}
 	}
 	if s.choices.Context == "" {
@@ -159,7 +154,7 @@ func (a application) openInstallation(r installationRequest) (installationSessio
 	if s.name == "" && dir != "" {
 		s.name = filepath.Base(dir)
 	}
-	return s, nil
+	return nil
 }
 
 func installationProfileName(r installationRequest) string {
@@ -346,7 +341,7 @@ func installationOutput(r installationRequest) error {
 	if format != "" && format != "text" && format != "json" {
 		return usageProblems{"--output must be text or json."}
 	}
-	if format == "json" && r.name != "backup" && r.name != "backup verify" && r.name != "restore" && !r.enabled("dry-run") {
+	if format == "json" && r.name != "install capacity" && r.name != "backup" && r.name != "backup verify" && r.name != "restore" && !r.enabled("dry-run") {
 		return usageProblems{"--output json requires --dry-run for an installation review."}
 	}
 	return nil

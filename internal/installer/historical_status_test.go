@@ -125,9 +125,11 @@ func setHistoricalRevision(t *testing.T, f fixture, old releaseData) {
 	for _, name := range []string{"policies", "argoNative", "storeNative"} {
 		previous.Values[name] = ch.Values[name]
 	}
-	for _, name := range []string{"egressNetwork", "statusChosen", "statusOrigins", "statusPodSecurity", "servicePort", "restorePending", "restoreMaxBytes"} {
+	for _, name := range []string{"egressNetwork", "statusChosen", "statusOrigins", "statusPodSecurity", "servicePort", "restorePending", "restoreMaxBytes", "resources", "runPolicy"} {
 		delete(previous.Values, name)
 	}
+	runs, _ := previous.Values["runs"].(map[string]any)
+	delete(runs, "priorityClasses")
 	if _, err = installer.Render(ch, previous.Values, f.choices.Namespace); err != nil {
 		t.Fatal("historical revision does not validate", err)
 	}
