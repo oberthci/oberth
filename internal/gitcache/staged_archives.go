@@ -110,6 +110,13 @@ func (s *stagedArchives) start(e *stagedArchive, cancel context.CancelFunc, rele
 	}
 }
 
+func (s *stagedArchives) retainExport(e *stagedArchive, release func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	archiveRelease := e.release
+	e.release = func() { release(); archiveRelease() }
+}
+
 func (s *stagedArchives) complete(e *stagedArchive, dir string, stage sourcedelivery.Staged, err error) {
 	if stage.Body != nil {
 		err = errors.Join(err, stage.Body.Close())

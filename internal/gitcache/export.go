@@ -68,7 +68,7 @@ func (c *Cache) startArchive(e *stagedArchive, b sourcecontract.Binding) {
 	c.staged.buildObservation(e, observation)
 	c.staged.start(e, cancel, c.config.Permits.Enter(sourcedelivery.Archive))
 	go func() {
-		dir, stage, err := c.buildArchive(ctx, b)
+		dir, stage, err := c.buildArchive(ctx, b, e)
 		summary := finishObservation(observation, err)
 		summary.Leaders = 1
 		if !summary.Blocked {
@@ -81,7 +81,7 @@ func (c *Cache) startArchive(e *stagedArchive, b sourcecontract.Binding) {
 	}()
 }
 
-func (c *Cache) buildArchive(ctx context.Context, b sourcecontract.Binding) (string, sourcedelivery.Staged, error) {
+func (c *Cache) buildArchive(ctx context.Context, b sourcecontract.Binding, e *stagedArchive) (string, sourcedelivery.Staged, error) {
 	waited := false
 	if err := ctx.Err(); err != nil {
 		return "", sourcedelivery.Staged{}, context.Cause(ctx)
@@ -97,14 +97,25 @@ func (c *Cache) buildArchive(ctx context.Context, b sourcecontract.Binding) (str
 			return "", sourcedelivery.Staged{}, err
 		}
 	}
-	defer func() { <-c.export }()
-	defer c.config.Permits.Enter(sourcedelivery.Export)()
+	leave := c.config.Permits.Enter(sourcedelivery.Export)
+	release := func() { leave(); <-c.export }
+	defer func() { release() }()
 	dir, err := os.MkdirTemp(c.config.Scratch, "oberth-export-")
 	if err != nil {
 		return "", sourcedelivery.Staged{}, err
 	}
 	stage, err := c.build(ctx, dir, b)
 	stage.Waited = stage.Waited || waited
+	if err != nil {
+		cleanup := os.RemoveAll(dir)
+		err = errors.Join(err, cleanup)
+		if cleanup != nil {
+			// The existing archive owner retains E along with A until its
+			// failed workspace can be removed by eviction, pruning or close.
+			c.staged.retainExport(e, release)
+			release = func() {}
+		}
+	}
 	return dir, stage, err
 }
 func (c *Cache) build(ctx context.Context, dir string, b sourcecontract.Binding) (stage sourcedelivery.Staged, result error) {
