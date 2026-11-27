@@ -7,7 +7,6 @@ import (
 	wf "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	argofake "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned/fake"
 	"github.com/oberthci/oberth/internal/installer"
-	"github.com/oberthci/oberth/internal/nativebinding"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -22,7 +21,7 @@ func TestResumeDowngradeReviewNamesCancellationAndOrphanCleanup(t *testing.T) {
 	w := &wf.Workflow{ObjectMeta: meta.ObjectMeta{
 		Name: "orphan", Namespace: "jobs", UID: "orphan-uid", ResourceVersion: "1",
 		Labels:     map[string]string{"oberth.ci/engine": "argo", "workflows.argoproj.io/controller-instanceid": "frontdoor"},
-		Finalizers: []string{nativebinding.RecordFinalizer, "other.ci/guard"},
+		Finalizers: []string{"oberth.ci/run-record", "other.ci/guard"},
 	}}
 	for _, required := range []string{"cancel non-terminal resumed runs or wait for them to finish", w.Finalizers[0] + " finalizer removed by hand"} {
 		if !strings.Contains(text, required) {
