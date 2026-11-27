@@ -240,7 +240,7 @@ func (m Maintenance) RollbackReview() ([]string, error) {
 		fmt.Sprintf("Source: %s; revision %d; schema %d", r.Source.Version, r.Source.Number, r.Options.Schema),
 		fmt.Sprintf("Target: %s; revision %d; schema %d", r.TargetVersion, r.TargetRevision, r.TargetSchema),
 		"Before downgrading, cancel non-terminal resumed runs or wait for them to finish.",
-		"An orphaned resumed Workflow needs its oberth.ci/record finalizer removed by hand.",
+		"An orphaned resumed Workflow needs its " + archiveFinalizer + " finalizer removed by hand.",
 		"State: " + r.State,
 		"Backup: " + r.BackupPath,
 	}

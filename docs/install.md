@@ -107,7 +107,7 @@ target's record unchanged, or `oberth rollback --yes`. After a schema change, if
 recovery is manual: keep the encrypted pre-upgrade archive, `backup.agekey` and `rollback.json` in
 `~/.config/oberth/<profile>/` and copy them off-machine.
 Before downgrading, cancel non-terminal resumed runs or wait for them to finish.
-An orphaned resumed Workflow needs its `oberth.ci/record` finalizer removed by hand.
+An orphaned resumed Workflow needs its `oberth.ci/run-record` finalizer removed by hand.
 ## Roll back
 Review the saved record with `oberth rollback --dry-run`, then run `oberth rollback --yes` with its
 original profile. A different schema, cluster UID or unexpected revision refuses before writes.
