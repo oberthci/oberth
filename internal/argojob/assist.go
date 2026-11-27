@@ -55,9 +55,10 @@ func wrapHold(t *wf.Template, p nativebinding.Preparation) error {
 	for _, v := range values {
 		main.Env = canonicalHoldEnv(main.Env, v)
 	}
-	main.VolumeMounts = append(main.VolumeMounts, core.VolumeMount{Name: "oberth-hold-bin", MountPath: "/oberth-hold/bin", ReadOnly: true}, core.VolumeMount{Name: "oberth-hold-state", MountPath: holdState})
+	main.VolumeMounts = append(main.VolumeMounts, core.VolumeMount{Name: "oberth-hold-bin", MountPath: "/oberth-hold/bin", ReadOnly: true}, core.VolumeMount{Name: "oberth-hold-state", MountPath: holdState}, core.VolumeMount{Name: "oberth-hold-stage", MountPath: holdStage})
 	main.ReadinessProbe = &core.Probe{ProbeHandler: core.ProbeHandler{Exec: &core.ExecAction{Command: []string{holdBinary, "status", "--probe"}}}, PeriodSeconds: 5, TimeoutSeconds: 2, SuccessThreshold: 1, FailureThreshold: 1}
 	t.Volumes = append(t.Volumes, core.Volume{Name: "oberth-hold-bin", VolumeSource: core.VolumeSource{EmptyDir: &core.EmptyDirVolumeSource{}}}, core.Volume{Name: "oberth-hold-state", VolumeSource: core.VolumeSource{EmptyDir: &core.EmptyDirVolumeSource{Medium: core.StorageMediumMemory, SizeLimit: new(resource.MustParse("1Mi"))}}})
+	t.Volumes = append(t.Volumes, core.Volume{Name: "oberth-hold-stage", VolumeSource: core.VolumeSource{EmptyDir: &core.EmptyDirVolumeSource{SizeLimit: resource.NewQuantity(rerunStageBytes, resource.BinarySI)}}})
 	t.InitContainers = append(t.InitContainers, wf.UserContainer{Container: core.Container{Name: "oberth-hold-install", Image: p.HelperImage, Command: []string{"oberth", "internal-hold", "install", "--to", "/oberth-hold/bin"}, VolumeMounts: []core.VolumeMount{{Name: "oberth-hold-bin", MountPath: "/oberth-hold/bin"}}}})
 	return nil
 }

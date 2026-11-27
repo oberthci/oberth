@@ -3,6 +3,7 @@ package argojob
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -19,6 +20,9 @@ func (r holdRuntime) client(ctx context.Context, args []string, streams HoldIO) 
 	}
 	request, err = r.stageClientRequest(ctx, request, streams.In)
 	if err != nil {
+		if errors.Is(err, errRerunStageSpace) {
+			return finishHoldClient(holdFrame{Type: "refused", Reason: rerunStageReason, Remedy: rerunStageRemedy}, streams, false)
+		}
 		return holdDiagnostic(streams.Err, 120, err)
 	}
 	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(r.root, "hold.sock"))

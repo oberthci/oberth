@@ -30,6 +30,8 @@ func TestHoldNamespaceProcess(t *testing.T) {
 		}
 	case "mount":
 		namespaceMount(t)
+	case "small-stage":
+		namespaceSmallStage(t)
 	}
 }
 
@@ -37,6 +39,7 @@ func namespaceRuntime(t *testing.T) holdRuntime {
 	t.Helper()
 	r, _ := testHoldRuntime(t)
 	r.root = filepath.Join(os.Getenv("OBERTH_HOLD_TEST_ROOT"), "state")
+	r.stageRoot = filepath.Join(os.Getenv("OBERTH_HOLD_TEST_ROOT"), holdStage)
 	r.sourceRoot = filepath.Join(os.Getenv("OBERTH_HOLD_TEST_ROOT"), "work", "src")
 	r.rerunPeer = serverRerunPeer
 	return r
@@ -112,7 +115,7 @@ func namespaceCommand(t *testing.T, role string) *exec.Cmd {
 		t.Fatal(err)
 	}
 	root := holdTempDir(t)
-	for _, dir := range []string{"state", "work/src", "volume"} {
+	for _, dir := range []string{"state", "work/src", "volume", holdStage} {
 		if err = os.MkdirAll(filepath.Join(root, dir), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -218,8 +221,11 @@ func TestRerunUsesStateAcrossBindMount(t *testing.T) {
 func namespaceMount(t *testing.T) {
 	privateMounts(t)
 	r := namespaceRuntime(t)
+	if err := syscall.Mount("tmpfs", r.root, "tmpfs", 0, "size=1m,mode=0700"); err != nil {
+		t.Fatal(err)
+	}
 	volume := filepath.Join(os.Getenv("OBERTH_HOLD_TEST_ROOT"), "volume")
-	if err := syscall.Mount("tmpfs", volume, "tmpfs", 0, "size=16m,mode=0700"); err != nil {
+	if err := syscall.Mount("tmpfs", volume, "tmpfs", 0, "size=128m,mode=0700"); err != nil {
 		t.Fatal(err)
 	}
 	if err := syscall.Mount(volume, r.sourceRoot, "", syscall.MS_BIND, ""); err != nil {
@@ -245,7 +251,8 @@ func namespaceMount(t *testing.T) {
 	if r.sourceInfo.Sys().(*syscall.Stat_t).Dev == state.Sys().(*syscall.Stat_t).Dev {
 		t.Fatal("fixture needs separate filesystems")
 	}
-	bundle, digest := rerunBundle(t, minimalRerunFiles(), nil, strings.Repeat("f", 40))
+	assertDiskStage(t, r.stageRoot)
+	bundle, digest, commit := realisticRerunBundle(t)
 	stage, err := r.stageRerun(t.Context(), bytes.NewReader(bundle), digest)
 	if err != nil {
 		t.Fatal(err)
@@ -254,10 +261,8 @@ func namespaceMount(t *testing.T) {
 	if _, err = r.applyRerunSnapshot(t.Context(), stage, digest); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = os.Stat(filepath.Join(r.sourceRoot, "FIXED")); err != nil {
-		t.Fatal("mounted checkout was not installed", err)
-	}
-	_, _ = io.WriteString(os.Stdout, "state stage installed into bind-mounted checkout with unwritable parent\n")
+	assertRealisticRerun(t, r.sourceRoot, commit)
+	_, _ = io.WriteString(os.Stdout, "disk stage installed into bind-mounted checkout with unwritable parent and 1 MiB state\n")
 }
 
 func TestRerunRefusesReplacedRoot(t *testing.T) {

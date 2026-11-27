@@ -10,6 +10,7 @@ import (
 	"github.com/argoproj/argo-workflows/v4/workflow/packer"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/nativebinding"
+	"github.com/oberthci/oberth/internal/publicerr"
 	"github.com/oberthci/oberth/internal/stateport"
 	"github.com/oberthci/oberth/internal/stepmodel"
 	core "k8s.io/api/core/v1"
@@ -161,7 +162,14 @@ func (e *Executor) sendInPodRerun(ctx context.Context, r stateport.Run, plan Res
 	if statusErr != nil {
 		return errors.Join(err, statusErr)
 	}
-	return e.failInPod(ctx, r, plan, errors.Join(err, fmt.Errorf("snapshot dispatch refused")))
+	return e.failInPod(ctx, r, plan, inPodDispatchError(frame, valid, err))
+}
+
+func inPodDispatchError(frame holdFrame, valid bool, cause error) error {
+	if valid && frame.Type == "refused" && frame.Reason == rerunStageReason {
+		return publicerr.New(publicerr.Unavailable, rerunStageReason, rerunStageRemedy, cause)
+	}
+	return errors.Join(cause, fmt.Errorf("snapshot dispatch refused"))
 }
 
 func (e *Executor) inPodStatus(ctx context.Context, h model.LiveHold) (holdFrame, error) {

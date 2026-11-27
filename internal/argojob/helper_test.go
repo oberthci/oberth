@@ -50,7 +50,7 @@ func testHoldRuntime(t *testing.T) (holdRuntime, *holdTestClock) {
 	clock := newHoldTestClock()
 	root := holdTempDir(t)
 	values := map[string]string{"OBERTH_HOLD_ATTEMPT": "0", "OBERTH_HOLD_LIMIT": "0", "OBERTH_HOLD_TTL": "1200", "OBERTH_HOLD_POD_UID": "uid", "OBERTH_HOLD_PROTOCOL": "2"}
-	return holdRuntime{root: root, start: startInspection, env: func(key string) string { return values[key] }, now: clock.Now, after: clock.After, signals: make(chan os.Signal, 8), rerunPeer: func(net.Conn) bool { return true }}, clock
+	return holdRuntime{root: root, stageRoot: holdTempDir(t), start: startInspection, env: func(key string) string { return values[key] }, now: clock.Now, after: clock.After, signals: make(chan os.Signal, 8), rerunPeer: func(net.Conn) bool { return true }}, clock
 }
 func testHoldOwner(t *testing.T) (*holdOwner, string, *holdTestClock) {
 	t.Helper()

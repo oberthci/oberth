@@ -24,6 +24,7 @@ type HoldIO struct {
 type holdRuntime struct {
 	start         func([]string) (*inspection, error)
 	root          string
+	stageRoot     string
 	env           func(string) string
 	now           func() time.Time
 	after         func(time.Duration) <-chan time.Time

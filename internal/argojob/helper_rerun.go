@@ -47,9 +47,12 @@ func (r holdRuntime) stageRerun(ctx context.Context, input io.Reader, digest str
 	if input == nil || !validRerunDigest(digest) {
 		return "", fmt.Errorf("invalid snapshot digest")
 	}
-	f, err := os.CreateTemp(r.root, ".oberth-resume-*")
-	if err != nil {
+	if err := checkRerunSpace(r.rerunStageRoot(), maxRerunArchive+maxRerunTree); err != nil {
 		return "", err
+	}
+	f, err := os.CreateTemp(r.rerunStageRoot(), ".oberth-resume-*")
+	if err != nil {
+		return "", rerunStageError(err)
 	}
 	name := f.Name()
 	ok := false
@@ -62,13 +65,13 @@ func (r holdRuntime) stageRerun(ctx context.Context, input io.Reader, digest str
 	hash := sha256.New()
 	n, err := io.Copy(io.MultiWriter(f, hash), io.LimitReader(&resumeContextReader{ctx, input}, maxRerunArchive+1))
 	if err != nil {
-		return "", err
+		return "", rerunStageError(err)
 	}
 	if n > maxRerunArchive || hex.EncodeToString(hash.Sum(nil)) != digest {
 		return "", fmt.Errorf("snapshot digest mismatch")
 	}
 	if err = f.Close(); err != nil {
-		return "", err
+		return "", rerunStageError(err)
 	}
 	ok = true
 	return name, nil
@@ -96,7 +99,7 @@ func (runtime holdRuntime) rerunRoot(stage string) error {
 	if err != nil {
 		return err
 	}
-	if !r.IsDir() || !s.Mode().IsRegular() || s.Mode().Perm() != 0600 || filepath.Dir(stage) != runtime.root || !strings.HasPrefix(filepath.Base(stage), ".oberth-resume-") {
+	if !r.IsDir() || !s.Mode().IsRegular() || s.Mode().Perm() != 0600 || filepath.Dir(stage) != runtime.rerunStageRoot() || !strings.HasPrefix(filepath.Base(stage), ".oberth-resume-") {
 		return fmt.Errorf("source root or stage is unsafe")
 	}
 	sstat, sok := s.Sys().(*syscall.Stat_t)
@@ -137,7 +140,10 @@ func (r holdRuntime) applyRerunSnapshot(ctx context.Context, stage, digest strin
 	if err := r.rerunRoot(stage); err != nil {
 		return rerunManifest{}, err
 	}
-	dir, err := os.MkdirTemp(r.root, ".oberth-resume-tree-*")
+	if err := checkRerunSpace(r.rerunStageRoot(), maxRerunTree); err != nil {
+		return rerunManifest{}, err
+	}
+	dir, err := os.MkdirTemp(r.rerunStageRoot(), ".oberth-resume-tree-*")
 	if err != nil {
 		return rerunManifest{}, err
 	}

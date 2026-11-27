@@ -12,6 +12,7 @@ import (
 
 const holdBinary = "/oberth-hold/bin/oberth-hold"
 const holdState = "/oberth-hold/state"
+const holdStage = "/oberth-hold/stage"
 const maxHoldFrame = 1 << 20
 const holdProtocol = 2
 
@@ -29,6 +30,7 @@ type holdFrame struct {
 	Data         []byte    `json:"d,omitempty"`
 	Code         int       `json:"code,omitempty"`
 	Reason       string    `json:"reason,omitempty"`
+	Remedy       string    `json:"remedy,omitempty"`
 	HeldSince    time.Time `json:"heldSince,omitzero"`
 	TTL          int64     `json:"ttl,omitempty"`
 	RemainingMS  int64     `json:"remaining_ms,omitempty"`

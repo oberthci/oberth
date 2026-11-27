@@ -215,6 +215,7 @@ func TestRerunRootNotSymlink(t *testing.T) {
 	defer os.Remove(stage)
 	o, _, _ := testHoldOwner(t)
 	o.runtime.sourceRoot, o.runtime.sourceInfo, o.runtime.root = r.sourceRoot, r.sourceInfo, r.root
+	o.runtime.stageRoot = r.stageRoot
 	_, frame, _, _ := o.admit(holdRequest{Version: holdProtocol, Op: "rerun", UID: "uid", Stage: stage, Digest: digest})
 	if frame.Type != "refused" {
 		t.Fatal("symlink root admitted", frame)
@@ -242,6 +243,7 @@ func TestHoldRerunOneShot(t *testing.T) {
 	defer os.Remove(stage)
 	o, _, _ := testHoldOwner(t)
 	o.runtime.sourceRoot, o.runtime.sourceInfo, o.runtime.root = r.sourceRoot, r.sourceInfo, r.root
+	o.runtime.stageRoot = r.stageRoot
 	request := holdRequest{Version: holdProtocol, Op: "rerun", UID: "uid", Stage: stage, Digest: digest}
 	_, frame, _, end := o.admit(request)
 	if frame.Type != "rerunning" || !end {
@@ -272,6 +274,7 @@ func TestHoldRerunRacesClose(t *testing.T) {
 		}
 		o, _, _ := testHoldOwner(t)
 		o.runtime.sourceRoot, o.runtime.sourceInfo, o.runtime.root = r.sourceRoot, r.sourceInfo, r.root
+		o.runtime.stageRoot = r.stageRoot
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() {
