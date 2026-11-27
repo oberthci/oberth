@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"regexp"
 	"strings"
@@ -176,13 +177,12 @@ func checkOldSkillURIs(t *testing.T, f *fixture, oldURI, currentURI string) {
 func TestSkillExamplesUseRegisteredToolsAndArguments(t *testing.T) {
 	f := setup(t, nil)
 	text := servedSkillText(t, f)
-	examples := regexp.MustCompile("`([a-z][a-z_]+) (\\{[^`]+\\})`").FindAllStringSubmatch(text, -1)
-	if len(examples) < 10 {
-		t.Fatal("tool examples disappeared")
+	count, err := checkSkillInvocations(f, text)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, example := range examples {
-		w := rpc(f, example[1], json.RawMessage(example[2]))
-		assertSuccess(t, w)
+	if count < 10 {
+		t.Fatal("tool examples disappeared")
 	}
 	for _, phrase := range []string{`mode:"retry"`, "failed R1 -> consented committed parked F", "Assisted R2", "fresh unassisted RF", "no same-Pod resume mode", "Do not request RF without that consent", "if it failed, fix and resume again", "never evidence"} {
 		if !strings.Contains(text, phrase) {
@@ -193,5 +193,66 @@ func TestSkillExamplesUseRegisteredToolsAndArguments(t *testing.T) {
 		if strings.Contains(text, future) {
 			t.Fatal("unshipped behavior advertised", future)
 		}
+	}
+}
+
+func checkSkillInvocations(f *fixture, text string) (int, error) {
+	examples, err := skillInvocations(text)
+	if err != nil {
+		return 0, err
+	}
+	for _, example := range examples {
+		w := rpc(f, example[0], json.RawMessage(example[1]))
+		if w.Code != 200 || strings.Contains(w.Body.String(), `"isError":true`) || strings.Contains(w.Body.String(), `"error":`) {
+			return 0, fmt.Errorf("invalid skill invocation %v: %s", example, w.Body.String())
+		}
+	}
+	return len(examples), nil
+}
+
+func skillInvocations(text string) ([][2]string, error) {
+	code := regexp.MustCompile("`[^`\n]+`")
+	invocation := regexp.MustCompile(`^([a-z][a-z0-9_]*)\s+(.+)$`)
+	var examples [][2]string
+	for _, span := range code.FindAllString(text, -1) {
+		example := invocation.FindStringSubmatch(strings.Trim(span, "`"))
+		if example == nil && !strings.ContainsAny(span, "{}") {
+			continue
+		}
+		if example != nil && example[1] == "git" {
+			continue // Shell commands are checked by the agent command contract.
+		}
+		if example == nil || !strings.HasPrefix(example[2], "{") || !json.Valid([]byte(example[2])) {
+			return nil, fmt.Errorf("unchecked skill invocation: %s", span)
+		}
+		examples = append(examples, [2]string{example[1], example[2]})
+	}
+	if strings.ContainsAny(code.ReplaceAllString(text, ""), "{}") {
+		return nil, fmt.Errorf("unchecked skill invocation outside inline code")
+	}
+	return examples, nil
+}
+
+func TestSkillInvocationGuardRejectsDrift(t *testing.T) {
+	f := setup(t, nil)
+	text := servedSkillText(t, f)
+	for _, tc := range []struct{ name, call, want string }{
+		{"missing tool", "`imaginary {}`", "imaginary"},
+		{"missing argument", "`events_wait {\"snapshot\":true,\"own\":true,\"imaginary\":true}`", "imaginary"},
+		{"prose argument", "events_wait {snapshot:true, own:true, imaginary:true}", "outside inline code"},
+		{"quoted pseudo JSON", "`events_wait {snapshot:true, own:true}`", "unchecked skill invocation"},
+		{"non-object arguments", "`events_wait []`", "unchecked skill invocation"},
+		{"missing closing quote", "`events_wait {\"snapshot\":true}", "outside inline code"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The former prose-call location must obey the same guard as the examples.
+			changed := strings.Replace(text, "Before pushing, take the immediate event snapshot shown below, without after_id.", "Before pushing, call "+tc.call+".", 1)
+			if changed == text {
+				t.Fatal("prose-call control did not change the served skill")
+			}
+			if _, err := checkSkillInvocations(f, changed); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("instruction drift was not rejected: %v", err)
+			}
+		})
 	}
 }

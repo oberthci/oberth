@@ -28,7 +28,7 @@ def command_table():
 
 def server_instructions():
     base = ROOT / "internal/api/skills/oberth-ci"
-    return "\n".join((base / name).read_text() for name in ("SKILL.md", "references/fix-resume.md", "references/display.md"))
+    return "\n".join((base / name).read_text() for name in ("SKILL.md", "references/fix-resume.md", "references/display.md")).replace("{{server-version}}", "test-build")
 
 
 def check_command(command, commands):
@@ -59,6 +59,8 @@ def check_command(command, commands):
 def check_commands(text, commands):
     reference = r"(?<![\w/-])oberth[ \t]+([a-z][a-z-]*(?:[ \t]+[a-z][a-z-]*)?)"
     for code in re.findall(r"`([^`]+)`", text):
+        if code.startswith("git "):
+            check_git_push(code)
         match = re.search(reference, code)
         if match:
             check_command(code[match.start() + len("oberth "):], commands)
@@ -81,6 +83,29 @@ def check_commands(text, commands):
             raise ValueError("unknown or unattributed prose flag")
 
 
+@functools.lru_cache(maxsize=16)
+def check_git_push(command):
+    words = shlex.split(command.replace("<new-branch>", "skill-check"))
+    if words[:3] != ["git", "push", "oberth"]:
+        raise ValueError("unknown Git command: " + command)
+    with tempfile.TemporaryDirectory(prefix="oberth-skill-push-") as directory:
+        source, remote = Path(directory) / "source", Path(directory) / "remote"
+        env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+               "GIT_TERMINAL_PROMPT": "0"}
+        setup = (["init", "--quiet", "--initial-branch=main", str(source)],
+                 ["init", "--quiet", "--bare", str(remote)],
+                 ["-C", str(remote), "config", "receive.advertisePushOptions", "true"],
+                 ["-C", str(source), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                  "commit", "--quiet", "--allow-empty", "-m", "Skill push fixture"],
+                 ["-C", str(source), "remote", "add", "oberth", str(remote)])
+        for args in setup:
+            subprocess.run(["git", *args], env=env, check=True, capture_output=True, timeout=10)
+        result = subprocess.run(["git", "-C", str(source), *words[1:], "--dry-run"],
+                                env=env, capture_output=True, text=True, timeout=10)
+        if result.returncode:
+            raise ValueError("invalid Git push: " + result.stderr)
+
+
 REGISTRATION_RULES = (
     "absolute executable path printed by fetch-oberth",
     "Reject a checkout executable or a relative path.",
@@ -93,6 +118,23 @@ def check_registration(skill):
         raise ValueError("registration must use the verified absolute executable")
 
 
+def check_invocations(text, tools):
+    # Argument schemas are exercised by the Go guard through the live registry.
+    code = r"`[^`\n]+`"
+    for span in re.findall(code, text):
+        match = re.fullmatch(r"([a-z][a-z0-9_]*)\s+(.+)", span[1:-1])
+        if not match and not re.search(r"[{}]", span):
+            continue
+        if match and match[1] in ("git", "oberth", "sh", "command"):
+            continue
+        if not match or match[1] not in tools:
+            raise ValueError("unchecked skill invocation: " + span)
+        if not isinstance(json.loads(match[2]), dict):
+            raise ValueError("skill arguments must be an object")
+    if re.search(r"[{}]", re.sub(code, "", text)):
+        raise ValueError("unchecked skill invocation outside inline code")
+
+
 def check_guidance(skill, instructions, commands=None):
     check_registration(skill)
     commands = command_table() if commands is None else commands
@@ -102,6 +144,7 @@ def check_guidance(skill, instructions, commands=None):
     actions = set(re.findall(r'Retry\w+\s+RetryAction\s+=\s+"([a-z_]+)"', enums))
     for text in (skill, instructions):
         check_commands(text, commands)
+        check_invocations(text, tools)
         references = set(re.findall(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", text))
         if references - tools - FIELD_NAMES - actions:
             raise ValueError("unknown tool or field: " + str(references - tools - FIELD_NAMES - actions))
@@ -159,6 +202,12 @@ class GuidanceContract(unittest.TestCase):
             "runs flag": (skill + "\n`oberth runs --follow`", instructions),
             "status flag": (skill + "\n`oberth status --watch`", instructions),
             "unknown prose flag": (skill + "\nUse --now.", instructions),
+            "prose argument": (skill, instructions.replace("Before pushing, take the immediate event snapshot shown below, without after_id.", "Before pushing, call events_wait {snapshot:true, own:true, imaginary:true}.")),
+            "quoted pseudo JSON": (skill, instructions + '\n`events_wait {snapshot:true}`'),
+            "missing tool": (skill, instructions + '\n`imaginary {}`'),
+            "non-object arguments": (skill, instructions + '\n`events_wait []`'),
+            "unknown Git command": (skill, instructions.replace("git push oberth", "git imaginary oberth")),
+            "unknown Git flag": (skill, instructions.replace("git push oberth", "git push oberth --imaginary")),
         }
         for name, (changed_skill, changed_instructions) in drifts.items():
             with self.subTest(drift=name), self.assertRaises(ValueError):
