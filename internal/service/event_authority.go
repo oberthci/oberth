@@ -47,8 +47,12 @@ func (s *Service) eventTimeout(ctx context.Context, a actor.Actor, q eventQuery,
 	if err != nil {
 		return apicontract.EventResult{}, err
 	}
-	return authorizedRead(ctx, s, readAuthority{a, "events_wait"}, func(ctx context.Context, current actor.Actor) (apicontract.EventResult, error) {
-		page, err := s.eventsSince(ctx, current, q)
-		return apicontract.EventResult{EventPage: page, TimedOut: true}, err
-	})
+	page, err := s.eventsSince(ctx, a, q)
+	if err != nil {
+		return apicontract.EventResult{}, err
+	}
+	if _, _, err := s.refreshEventScope(ctx, a, q); err != nil {
+		return apicontract.EventResult{}, err
+	}
+	return apicontract.EventResult{EventPage: page, TimedOut: true}, nil
 }
