@@ -56,13 +56,7 @@ func (s *Service) wait(ctx context.Context, r stateport.RunState, o waitOptions)
 	for {
 		observed, err := s.waitSnapshot(ctx, wait, &o)
 		if err != nil {
-			if ctx.Err() != nil {
-				return apicontract.WaitResult{}, ctx.Err()
-			}
-			if wait.Err() != nil {
-				return s.waitTimeout(ctx, &o)
-			}
-			return apicontract.WaitResult{}, err
+			return s.waitReadFailure(ctx, wait, &o, err)
 		}
 		if first {
 			initialHolds = observed.holds
@@ -176,6 +170,16 @@ func (s *Service) waitHolds(ctx context.Context, r stateport.RunState, o *waitOp
 		out = append(out, h.HeldNotice)
 	}
 	return out, nil
+}
+
+func (s *Service) waitReadFailure(ctx, wait context.Context, o *waitOptions, err error) (apicontract.WaitResult, error) {
+	if ctx.Err() != nil {
+		return apicontract.WaitResult{}, ctx.Err()
+	}
+	if wait.Err() != nil {
+		return s.waitTimeout(ctx, o)
+	}
+	return apicontract.WaitResult{}, err
 }
 
 func waitHoldsReady(until string, current, initial []model.HeldNotice) bool {
