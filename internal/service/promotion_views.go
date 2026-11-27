@@ -179,8 +179,14 @@ func (s *Service) promotionTimeout(ctx context.Context, a actor.Actor, p model.P
 		return apicontract.PromotionWaitResult{}, err
 	}
 	result, _, err := s.promotionOutcome(ctx, p.ID)
+	if err != nil {
+		return apicontract.PromotionWaitResult{}, err
+	}
+	if err := s.authorizePromotion(ctx, a, p); err != nil {
+		return apicontract.PromotionWaitResult{}, err
+	}
 	result.TimedOut = true
-	return result, err
+	return result, nil
 }
 
 func (s *Service) authorizePromotion(ctx context.Context, a actor.Actor, p model.Promotion) error {
