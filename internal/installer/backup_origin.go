@@ -139,7 +139,7 @@ func (proof signedBackupOrigin) valid(public ed25519.PublicKey, name string) boo
 }
 
 func backupOriginProblem() error {
-	return publicerr.New(publicerr.InvalidInput, "Backup origin proof is missing or invalid.", "Keep the archive's original name; use the saved backup profile or an independently saved --sha256 digest.", nil)
+	return publicerr.New(publicerr.InvalidInput, "Backup origin proof is missing or invalid.", "Restore with the same or a newer release; use the saved profile and original name, or an independent --sha256 digest.", nil)
 }
 
 func backupSigningProblem() error {

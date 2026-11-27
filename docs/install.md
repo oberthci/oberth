@@ -116,6 +116,7 @@ Repeating resumes rollback; without the record, inspect the deployed revision. O
 rolling v0.30.19 back to v0.30.18, pause affected schedules, remove their YAML declarations and
 verify their CronWorkflows are gone. Finish or cancel every child and verify collection before
 downgrading. Recreate schedules with the restored release before resuming; startup sync can fail.
+Keep a verified v0.30.19+ recovery CLI for v0.30.19 backups and preserve the pre-upgrade backup.
 ## Back up
 `oberth backup --out <new-archive-file>` encrypts the database, bundled store data and five
 installation Secrets: CA key, forge deploy key, SSH host key, store TLS and administrator public
@@ -127,9 +128,10 @@ off-machine unrenamed; save SHA256 separately. Use local hard links; never overw
 Secrets. `oberth restore --from <archive> --identity-file <private-age-file> --dry-run` reviews
 offline; `oberth backup verify` uses the same inputs. Both need `--backup-profile <name>` or saved
 `--sha256 <saved-digest>`. Restore with the same or a newer release:
-v0.30.17 cannot read archives with forge host pins. Keep age, administrator and unseal files apart:
-the archive has neither age identity nor unseal material. A database-only backup cannot restore
-store values; keep secure originals to put again. Separate `recovery` can unseal data.
+v0.30.17 cannot read archives with forge host pins; v0.30.18 cannot verify v0.30.19 signed manifests.
+Keep a verified v0.30.19+ recovery CLI or an independently saved SHA256 digest. Keep age,
+administrator and unseal files apart: archives lack age identity and unseal material. Database-only
+backups lack store values; keep originals to put again. Separate `recovery` can unseal data.
 `oberth access list --repo <repo> --kind store_path --json` lists paths/steps, never values. JSON
 warnings exit 0: optional `warning` has `code`, `reason`, `remedy`, optional `id`, `context`, `detail`;
 also on standard error; clean and dry-run results omit `warning`.
