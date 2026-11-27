@@ -158,13 +158,22 @@ func (b *bridge) direct(ctx context.Context, req rpcRequest) ([]byte, error) {
 	if err != nil {
 		return nil, failure("reply", err)
 	}
+	return directReply(resp.StatusCode, data, req.ID)
+}
 
+func directReply(status int, data []byte, id json.RawMessage) ([]byte, error) {
 	var reply struct {
-		ID      json.RawMessage `json:"id"`
-		JSONRPC string          `json:"jsonrpc"`
+		JSONRPC json.RawMessage `json:"jsonrpc"`
 		Error   json.RawMessage `json:"error"`
+		Result  json.RawMessage `json:"result"`
 	}
-	if json.Unmarshal(data, &reply) != nil || string(reply.ID) != string(req.ID) || reply.JSONRPC != "2.0" {
+	if json.Unmarshal(data, &reply) != nil {
+		return nil, failure("reply", nil)
+	}
+	if status != http.StatusOK && reply.JSONRPC == nil && reply.Error == nil && reply.Result == nil {
+		return nil, resultError(data)
+	}
+	if _, err := apicontract.ResultTypeForID(data, id); err != nil {
 		return nil, failure("reply", nil)
 	}
 	return data, nil

@@ -72,7 +72,7 @@ func checkBridgeProtocolErrors(t *testing.T, p *bridgePeer, seen <-chan rpcReque
 	for _, tc := range []struct {
 		method, version string
 		code            int
-	}{{"unknown", apicontract.ProtocolVersion, -32601}, {"ping", "2025-06-18", -32022}, {"initialize", apicontract.ProtocolVersion, -32601}} {
+	}{{"unknown", apicontract.ProtocolVersion, -32601}, {"server/discover", "2025-06-18", -32022}, {"ping", "2025-06-18", -32022}, {"initialize", apicontract.ProtocolVersion, -32601}} {
 		p.send("error-"+tc.method, tc.method, map[string]any{"_meta": map[string]any{apicontract.ProtocolVersionMeta: tc.version}})
 		var reply struct{ Error struct{ Code int } }
 		if json.Unmarshal(p.frame(), &reply) != nil || reply.Error.Code != tc.code {
