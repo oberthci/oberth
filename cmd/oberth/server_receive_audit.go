@@ -29,16 +29,16 @@ func (o *serverOwners) refusedSession(ctx context.Context, s sshserver.Session, 
 }
 
 func (o *serverOwners) refusedReceive(ctx context.Context, event gitcache.ReceiveEvent, cause error) error {
-	v := store.ReceiveRefusal{Code: codeReceiveRefused}
+	v := store.ReceiveRefusal{Code: codeReceiveRefused, File: event.Options.File}
 	var public *publicerr.Error
 	if errors.As(cause, &public) {
 		v.Code = string(public.Code())
 	}
 	var refusal *app.Refusal
 	if errors.As(cause, &refusal) {
-		v.Code, v.File = refusal.Code, refusal.File
-		if v.File == "" {
-			v.File = event.Options.File
+		v.Code = refusal.Code
+		if refusal.File != "" {
+			v.File = refusal.File
 		}
 		if len(refusal.Problems) > 0 {
 			finding := refusal.Problems[0]
