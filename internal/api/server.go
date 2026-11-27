@@ -38,6 +38,7 @@ type Server struct {
 	observers       context.Context
 	cancelObservers context.CancelFunc
 	ui              uiBundle
+	skill           ciSkill
 	config          Config
 	mux             *http.ServeMux
 	draining        atomic.Bool
@@ -69,6 +70,11 @@ func New(c Config) (*Server, error) {
 	s := &Server{config: c, mux: http.NewServeMux(), drain: make(chan struct{}), observers: shutdown, cancelObservers: cancelShutdown}
 
 	s.ui, err = loadUI()
+	if err != nil {
+		cancelShutdown()
+		return nil, err
+	}
+	s.skill, err = loadCISkill(c.Version)
 	if err != nil {
 		cancelShutdown()
 		return nil, err

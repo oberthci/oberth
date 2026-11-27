@@ -9390,10 +9390,10 @@
     }
   },
   "spec_sha256": {
-    "docs/plans/c1-transport-and-tool-registry.md": "bee3c94562de05001c34650b20eecbe8c7a5318e2c37f07a8ade131be669509f",
+    "docs/plans/c1-transport-and-tool-registry.md": "76696fc4cec3a528c7151119f0f95c5349e025cf9564625759a4343e2ace42a1",
     "docs/plans/c10-schedules.md": "78bd7b77d6511426d16b5c7ddf543b8124c47e82d40fb16542cfa8efbac7ca67",
     "docs/plans/c11-cli-and-server-composition.md": "2ebbc2b71b8428fca3759ca5f90641b6ccf3bd08d9cb20bfc9738e38b4374530",
-    "docs/plans/c12-agent-client.md": "f54b8b037bfe3ac60826bf895d540b543fbcd6400f61efd362886c5cd7059fbd",
+    "docs/plans/c12-agent-client.md": "ca882747bf58f807cd9c803cbfeac286378c6a14dbea2dc91b24633e12a50201",
     "docs/plans/c13-own-pipelines.md": "2f1eaa0667e6dcdca40fdfb1b36588265a9a30c0eeeeb60ac772200b2c7eae80",
     "docs/plans/c14-docs.md": "5d48000e18788166c77a86ede1369d81f2a748817e218f103e3786534905650d",
     "docs/plans/c2-service-actions-and-history.md": "77a8e3aaae2ecf4b426fb64bd4310ed87bbefc47fbf9bc7a74504dab1f47ab9d",
@@ -10619,7 +10619,7 @@
         "**Delta:**"
       ],
       "scope": "behaviour",
-      "basis": "**Delta:** `agent/skills/oberth/SKILL.md` contains the complete guidance in fewer than 100 lines. `agent/skills/oberth/fetch-oberth` verifies and installs the CLI. C13's [release trust](c13-own-pipelines.md#release-trust) owns the canonical key and provisioning. The standalone fetcher embeds a generated copy and its hash because it runs before a checkout exists. `make check` runs C12's fetch contract, which proves the canonical key, embedded key and hash agree.",
+      "basis": "**Delta:** `agent/skills/oberth/SKILL.md` contains bootstrap guidance in fewer than 100 lines and points to the server-owned versioned oberth-ci skill. `agent/skills/oberth/fetch-oberth` verifies and installs the CLI. C13's [release trust](c13-own-pipelines.md#release-trust) owns the canonical key and provisioning. The standalone fetcher embeds a generated copy and its hash because it runs before a checkout exists. `make check` runs C12's fetch contract, which proves the canonical key, embedded key and hash agree.",
       "rows": [],
       "predicates": [
         {

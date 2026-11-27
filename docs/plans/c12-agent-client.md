@@ -10,8 +10,8 @@ and credential policy belong to their component owners.
 
 ## Owned data and public contract
 
-**Delta:** `agent/skills/oberth/SKILL.md` contains the complete guidance in fewer
-than 100 lines. `agent/skills/oberth/fetch-oberth` verifies and installs the CLI.
+**Delta:** `agent/skills/oberth/SKILL.md` contains bootstrap guidance in fewer
+than 100 lines and points to the server-owned versioned oberth-ci skill. `agent/skills/oberth/fetch-oberth` verifies and installs the CLI.
 C13's [release trust](c13-own-pipelines.md#release-trust) owns the canonical key
 and provisioning. The standalone fetcher embeds a generated copy and its hash
 because it runs before a checkout exists.
@@ -21,8 +21,8 @@ key and hash agree.
 The optional plugin under `agent/` supplies the run box and shared skill through
 host manifests. It adds no CA trust edit, deploy-key upload or credential store.
 C11 owns profiles, keys,
-the current-profile link, invitations, repository binding and renewal. C1 keeps
-the server agent-instruction constant and its test; C12 supplies its wording.
+the current-profile link, invitations, repository binding and renewal. C1 embeds the versioned oberth-ci skill, manifest and exact resource reader; C12 owns
+its wording. Short discovery instructions name its URI, host floor and four evidence/consent/display invariants.
 
 | Work | Public path |
 | --- | --- |
@@ -98,11 +98,17 @@ other missing configuration once per installation. Failed reads hide stale rows 
 name the unreadable profiles. Session exit cancels the timer.
 
 Plugin packaging follows C13's [guard naming policy](c13-own-pipelines.md#check-tooling).
-The connection skill stays shared and host-neutral.
+The bootstrap stays shared. Server skills/list and skills/get return one complete manifest
+with verbatim frontmatter, build version, every file URI/hash/size and zero discovery TTL.
+Exact embedded-file resources/read serves installed-version immutable bytes with public scope;
+no directory reader or filesystem traversal exists. Approval is scoped to origin and manifest;
+reading resources does not activate a skill. Unknown old URIs or integrity mismatch require
+rediscovery and approval. Upgrade requires reconnect plus explicit reload or a fresh conversation;
+already-loaded event-loop prose can remain valid syntax while becoming stale semantics.
 
 ### Push and wait
 
-The server's MCP instructions carry the loop once. With work in flight, keep
+The server-owned oberth-ci skill carries the current event loop once, with fix/resume and display references. With work in flight, keep
 one background `events_wait` open for its held/finished events and add promotion completion
 while promoting. Before pushing, call `events_wait` with `snapshot:true` and no `after_id`;
 it returns a cursor immediately. Push, then wait from that cursor, even if background calls are unavailable. Handle every event, deduplicate IDs and advance
@@ -162,8 +168,8 @@ credential files or Pod environment.
    keepalives to protocol progress for requests with a progress
    token. Hosts with smaller tool timeouts pass a smaller `timeout_s`. A long
    event wait cannot block run reads; cancellation ends observation only.
-6. The instruction file names existing commands and tools, uses neutral wording,
-   and is read whole in fewer than 100 lines. The first-run review adds one command
+6. Bootstrap names existing commands and is read whole in fewer than 100 lines.
+   Server skill examples bind registered tools, typed arguments and actual retry mode. The first-run review adds one command
    and one flag to the person's path; C13's command and flag ceilings apply.
 
 ## Inspections

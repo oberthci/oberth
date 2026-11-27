@@ -72,31 +72,30 @@ then start a new session and rediscover/attach. Keep the same server name, trans
 args, env, headers and timeout for same-session recovery. Otherwise read durable state and attach
 afresh. Recovery never restarts CI. Unsupported hosts must upgrade or use the standalone CLI.
 
+The optional [agent plugins](install.md#agent-plugins) add a run box and run/watch commands.
+
 ## Push, observe and respond
 After reviewing the commit and obtaining consent, request CI with
 `git push oberth HEAD:refs/heads/change -o oberth.run=1`. Without that option a push is parked:
-no run starts. Follow the server's discovery instructions for the CI loop.
+no run starts. Approve and load the versioned oberth-ci server skill and its references.
+Resource reads do not activate skills. Upgrade: reconnect and reload, or start a fresh conversation.
+Verify its origin, complete manifest, hashes and sizes before continuing CI.
 Without tools, follow `oberth log <run>` in a background shell, then `oberth run wait <run>`.
 Exit zero means the wait completed; read the verdict.
 
 ## Show the evidence
-When builds come up, paste the bridge's rendered display block verbatim in a code block. Without
-tools, paste the output of `oberth run list` or `oberth run get <run>` whole. Show complete reasons
-and keep full Kubernetes detail separate. Show both the accepted pushed object and the exact tested
-commit when they differ. An assisted run is never promotion evidence; obtain an unassisted pass
-before promoting.
+Paste canonical bridge display blocks verbatim; without tools, paste public CLI run output whole.
+Keep reasons complete, native detail separate, and accepted objects distinct from tested commits.
+Assisted or resumed runs are never evidence; obtain a fresh unassisted pass for the exact commit.
 
 ## Promote and release
 After consent, use `oberth promote <tested-commit-sha>` and show the resulting default commit's CI.
-On refusal, follow its remedy; do not push the default branch as a workaround.
-Follow [agent promotion](releasing.md#agent-promotion) for policy and
-[project releases](releasing.md#release-your-project) for grants and checkout synchronization.
-After release consent, use `oberth release <tag>`; show its commit, run and publication.
-Resolve lost mutation replies from durable state before repeating an action.
+Follow [agent promotion](releasing.md#agent-promotion) for policy and refusal remedies, and
+[project releases](releasing.md#release-your-project) for grants, checkout synchronization and
+`oberth release <tag>`. Show publication facts. Resolve lost mutation replies from durable state.
 
 ## Resume a failed run
-After consent, commit and push F parked, then `oberth run resume <id> <commit>`
-(`run_resume {id,commit}`). Argo retries failed work, retaining passed outputs and volumes.
-R2 is Assisted, never evidence. On failure fix/resume again; after a pass and consent, rerun once
-for a fresh unassisted pass to promote. Changed pipelines or grants require a full pushed run.
-Carried caches and effects are not fresh evidence; same-Pod resume is unavailable.
+The server skill's [retry guidance](../internal/api/skills/oberth-ci/references/fix-resume.md)
+covers a consented parked fix, Assisted resume, and a consented fresh full run after a pass.
+Only the fresh unassisted pass is evidence. Changed pipelines or grants require a full pushed run.
+Carried state may include old caches and external effects; same-Pod resume is unavailable.

@@ -27,7 +27,8 @@ def command_table():
 
 
 def server_instructions():
-    return (ROOT / "internal/api/rpc.go").read_text().split("const agentInstructions = `", 1)[1].split("`", 1)[0]
+    base = ROOT / "internal/api/skills/oberth-ci"
+    return "\n".join((base / name).read_text() for name in ("SKILL.md", "references/fix-resume.md", "references/display.md"))
 
 
 def check_command(command, commands):
@@ -116,7 +117,7 @@ def check_guidance(skill, instructions, commands=None):
 
 class GuidanceContract(unittest.TestCase):
     def test_reported_times_keep_their_timezone(self):
-        skill = (ROOT / "agent/skills/oberth/SKILL.md").read_text()
+        skill = (ROOT / "internal/api/skills/oberth-ci/references/display.md").read_text()
         self.assertIn("Show timestamps with their UTC offset; convert to the person's local zone when known.", skill)
 
     def test_install_summary_keeps_both_printed_web_signin_lines(self):
@@ -179,6 +180,15 @@ class GuidanceContract(unittest.TestCase):
             self.assertNotIn(removed, text)
         for field in ("kinds", "own", "after_id", "timeout_s"):
             self.assertIn('json:"' + field, (ROOT / "internal/apicontract/observation_args.go").read_text())
+
+    def test_skill_names_the_shipped_resume_mode(self):
+        text = server_instructions()
+        implementation = (ROOT / "internal/app/resume.go").read_text()
+        modes = set(re.findall(r'Mode:\s*"([^"]+)"', implementation))
+        declared = set(re.findall(r'mode:"([^"]+)"', text))
+        self.assertEqual(modes, {"retry"})
+        self.assertEqual(declared, modes)
+        self.assertIn("no same-Pod resume mode", text)
 
     def test_release_origin_snapshot_matches_canonical_constant(self):
         result = subprocess.run(["python3", str(ROOT / "hack/release-origin.py"), "--check"], cwd=ROOT, text=True, capture_output=True, timeout=10)

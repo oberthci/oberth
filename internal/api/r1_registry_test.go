@@ -43,7 +43,7 @@ func TestEachToolHasItsOwnDescribedInput(t *testing.T) {
 	}
 	f := setup(t, nil)
 	w := discover(f)
-	if !strings.Contains(w.Body.String(), `"instructions":`) || !strings.Contains(w.Body.String(), "publication_list") {
+	if !strings.Contains(w.Body.String(), `"instructions":`) || !strings.Contains(w.Body.String(), "skill://oberth/") {
 		t.Fatal("agent instructions absent")
 	}
 }

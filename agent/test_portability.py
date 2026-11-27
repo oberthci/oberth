@@ -17,12 +17,13 @@ class PortabilityContract(unittest.TestCase):
             home.mkdir()
             scratch.mkdir()
             shutil.copytree(source / "agent", checkout / "agent", ignore=shutil.ignore_patterns("__pycache__"))
-            for name in ("internal/api/rpc.go", "internal/stepmodel/enums.go", "internal/releaseverify/release-cosign.pub", "internal/releaseverify/origin.go", "hack/release-origin.py", "internal/workflowpolicy/release-version.pattern"):
+            for name in ("internal/api/rpc.go", "internal/app/resume.go", "internal/stepmodel/enums.go", "internal/releaseverify/release-cosign.pub", "internal/releaseverify/origin.go", "hack/release-origin.py", "internal/workflowpolicy/release-version.pattern"):
                 if not (source / name).exists():
                     continue
                 destination = checkout / name
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source / name, destination)
+            shutil.copytree(source / "internal/api/skills", checkout / "internal/api/skills")
             shutil.copytree(source / "internal/apicontract", checkout / "internal/apicontract")
             env = dict(os.environ, HOME=str(home), TMPDIR=str(scratch), PYTHONDONTWRITEBYTECODE="1")
             if not env.get("OBERTH_CLI"):

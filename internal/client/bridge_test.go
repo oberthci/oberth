@@ -41,9 +41,10 @@ func TestBridgeConcurrentRequests(t *testing.T) {
 	h := server(t, b)
 	p := newBridgePeer(t, bridgeProfile(t, streamingTransport(h)))
 	init := p.discover()
-	if !bytes.Contains(init, []byte("once per code change")) {
-		t.Fatal("server instructions changed")
+	if !bytes.Contains(init, []byte("skill://oberth/")) {
+		t.Fatal("server skill pointer missing")
 	}
+	checkBridgeSkillRule(t, p)
 	p.tool(7, "events_wait", map[string]any{"timeout_s": 600}, nil)
 	select {
 	case <-entered:
@@ -63,6 +64,21 @@ func TestBridgeConcurrentRequests(t *testing.T) {
 	p.send("fence", "ping", nil)
 	if !bytes.Contains(p.frame(), []byte(`"id":"fence"`)) {
 		t.Fatal("cancelled request produced a response or cancelled unrelated work")
+	}
+}
+
+func checkBridgeSkillRule(t *testing.T, p *bridgePeer) {
+	t.Helper()
+	p.send("skill-list", "skills/list", nil)
+	var listed struct {
+		Result struct{ Skills []struct{ URI string } }
+	}
+	if json.Unmarshal(p.frame(), &listed) != nil || len(listed.Result.Skills) != 1 {
+		t.Fatal("bridge did not forward skill discovery")
+	}
+	p.send("skill-read", "resources/read", map[string]string{"uri": listed.Result.Skills[0].URI})
+	if !bytes.Contains(p.frame(), []byte("once per code change")) {
+		t.Fatal("server CI retry rule changed")
 	}
 }
 

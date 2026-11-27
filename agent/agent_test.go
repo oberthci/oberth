@@ -58,7 +58,7 @@ func runAgentContracts(t *testing.T, modules ...string) {
 func trackInputs(t *testing.T) {
 	t.Helper()
 	// Child-process file reads must also invalidate the test cache.
-	for _, root := range []string{".", "../cmd/oberth", "../internal/client", "../internal/apicontract", "../internal/api/rpc.go", "../internal/stepmodel", "../internal/releaseverify/origin.go", "../hack/release-origin.py", "../internal/workflowpolicy/release-version.pattern"} {
+	for _, root := range []string{".", "../cmd/oberth", "../internal/client", "../internal/apicontract", "../internal/api/rpc.go", "../internal/api/skills", "../internal/app/resume.go", "../internal/stepmodel", "../internal/releaseverify/origin.go", "../hack/release-origin.py", "../internal/workflowpolicy/release-version.pattern"} {
 		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
 				return err

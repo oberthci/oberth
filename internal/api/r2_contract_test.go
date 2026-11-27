@@ -11,7 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/publicerr"
 )
 
-func TestInitializeTeachesPushWaitLogsFixPromoteRelease(t *testing.T) {
+func TestServerSkillTeachesPushWaitLogsFixPromoteRelease(t *testing.T) {
 	f := setup(t, nil)
 	w := discover(f)
 	assertSuccess(t, w)
@@ -23,10 +23,11 @@ func TestInitializeTeachesPushWaitLogsFixPromoteRelease(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &wire); err != nil {
 		t.Fatal(err)
 	}
-	instructions := wire.Result.Instructions
-	if len(strings.Split(instructions, "\n")) > 16 {
-		t.Fatal("agent loop is too long")
+	if !strings.Contains(wire.Result.Instructions, "skill://oberth/") || strings.Contains(wire.Result.Instructions, "events_wait") {
+		t.Fatal("discovery must point to the lazy skill")
 	}
+	instructions := servedSkillText(t, f)
+
 	for _, phrase := range []string{
 		"parked and creates no run", "-o oberth.run=1", "one background events_wait",
 		"Before pushing, call events_wait {snapshot:true, own:true} without after_id; it returns immediately", "Save next_after_id, then push",

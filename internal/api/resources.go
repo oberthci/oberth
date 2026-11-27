@@ -19,8 +19,11 @@ func (s *Server) resource(w http.ResponseWriter, r *http.Request, c apicontract.
 		return
 	}
 	if req.Method == "resources/list" {
-		resp.Result = map[string]any{"resources": []any{}}
+		resp.Result = map[string]any{"resources": s.skillResources(), "ttlMs": 0, "cacheScope": "public"}
 		s.writeRPC(w, r, resp)
+		return
+	}
+	if s.readSkill(w, r, x, params.URI) {
 		return
 	}
 	run, ok := resourceID(params.URI)
