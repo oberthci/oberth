@@ -38,8 +38,10 @@ func (c *Cache) Stage(ctx context.Context, b sourcecontract.Binding) (sourcedeli
 		return sourcedelivery.Staged{}, err
 	}
 	defer c.staged.leave(e)
-	if leader || waited {
-		defer func() { sourcedelivery.InheritWait(ctx, c.staged.observation(e)) }()
+	inherit := func() {
+		if leader || waited {
+			sourcedelivery.InheritWait(ctx, c.staged.observation(e))
+		}
 	}
 	if leader {
 		c.startArchive(e, b) //nolint:contextcheck // The cache owns this shared build; the last waiter or shutdown cancels it.
@@ -50,10 +52,12 @@ func (c *Cache) Stage(ctx context.Context, b sourcecontract.Binding) (sourcedeli
 	select {
 	case <-ctx.Done():
 		end()
+		inherit()
 		return sourcedelivery.Staged{}, context.Cause(ctx)
 	case <-e.done:
 		end()
 	}
+	inherit()
 	if err := ctx.Err(); err != nil {
 		return sourcedelivery.Staged{}, context.Cause(ctx)
 	}
