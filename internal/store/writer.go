@@ -13,19 +13,29 @@ import (
 // SQLite's busy handler does not observe context cancellation. Immediate lock
 // attempts plus a cancellable wait keep both the configured timeout and deadline.
 func (s *Store) beginWrite(ctx context.Context) (*sql.Tx, func(), error) {
+	started := s.options.Clock()
 	wait, cancel := context.WithTimeout(ctx, s.options.BusyTimeout)
 	defer cancel()
 	select {
 	case s.writes <- struct{}{}:
 	case <-wait.Done():
+		s.metrics.slot.record(s.options.Clock().Sub(started))
 		return nil, nil, refuse(locked, wait.Err())
 	}
+	s.metrics.slot.record(s.options.Clock().Sub(started))
+	started = s.options.Clock()
+	defer func() { s.metrics.lock.record(s.options.Clock().Sub(started)) }()
 	release := func() { <-s.writes }
 	s.issueWrites, s.auditSpan = nil, [2]int64{}
 	for {
 		tx, err := s.writer.BeginTx(ctx, nil)
 		if err == nil {
-			return tx, func() { _ = tx.Rollback(); release() }, nil
+			acquired := s.options.Clock()
+			return tx, func() {
+				_ = tx.Rollback()
+				s.metrics.transaction.record(s.options.Clock().Sub(acquired))
+				release()
+			}, nil
 		}
 		if cause := ctx.Err(); cause != nil {
 			release()

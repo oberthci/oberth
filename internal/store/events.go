@@ -36,6 +36,8 @@ func insertEvent(ctx context.Context, tx *sql.Tx, input stateport.EventWrite) (i
 }
 
 func (s *Store) Events(ctx context.Context, filter stateport.EventFilter) (model.EventPage, error) {
+	started := s.options.Clock()
+	defer func() { s.metrics.events.record(s.options.Clock().Sub(started)) }()
 	repositories, after, limit := filter.ScopeKeys(), filter.After, filter.Limit
 	result := model.EventPage{Events: make([]model.AgentEvent, 0), NextAfterID: after}
 	if !validEventFilter(filter) {

@@ -9,6 +9,8 @@ func (s *Store) Changes() <-chan struct{} {
 }
 
 func (s *Store) signalChange() {
+	started := s.options.Clock()
+	defer func() { s.metrics.fanout.record(s.options.Clock().Sub(started)) }()
 	s.changeMu.Lock()
 	defer s.changeMu.Unlock()
 	close(s.changed)

@@ -25,6 +25,7 @@ type Options struct {
 
 // Store owns independent writer, observation and reserved live reader pools.
 type Store struct {
+	metrics                                                     storeMetrics
 	backupMu                                                    sync.RWMutex
 	lastBackup                                                  time.Time
 	changeMu                                                    sync.Mutex

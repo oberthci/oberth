@@ -256,3 +256,5 @@ read/backup/restore checks.
 ### Fix and resume
 
 The existing origin JSON stores resumed_from, resume_uid and the accepted resume_plan write intent. workflow_uid stays empty, so workflow_identity remains unique without any schema object or schema bump. NativeUID returns resume_uid for a resumed run. Insertion marks Assisted and checks for an existing successor through run_ref in the same BEGIN IMMEDIATE write transaction. This serialization relies on one server process, todays deployment; another writer design needs a unique successor index. Two concurrent inserts have one winner. Ordinary unbound recovery excludes resumed_from; native resume recovery owns it.
+
+Read-only operator metrics retain bounded latency buckets for writer-slot/SQLite-lock acquisition, transactions, event queries and committed-change channel fan-out, plus reader-pool waits. Fan-out is server publication time; it does not measure client notice. No actor, repository or run labels are emitted.
