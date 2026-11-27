@@ -54,7 +54,7 @@ spec:
       containers:
         - name: server
           resources:
-            requests: {cpu: 250m, memory: 1Gi}
+            {{- .Values.resources | toYaml | nindent 12 }}
           image: {{ (include "oberth.image" .) | quote }}
           imagePullPolicy: {{ contains "@sha256:" (include "oberth.image" .) | ternary "IfNotPresent" "Always" }}
           securityContext:

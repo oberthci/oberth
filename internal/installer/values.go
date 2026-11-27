@@ -70,6 +70,9 @@ func values(r Release, c Choices, stored map[string]any) (map[string]any, error)
 func operatorValues(stored map[string]any) map[string]any {
 	result := map[string]any{}
 	for name, value := range stored {
+		if name == "argoNative" || name == "storeNative" {
+			value = nativeResourceChoices(name, value)
+		}
 		if allowedOverrides(map[string]any{name: value}) {
 			result[name] = value
 		}
@@ -78,12 +81,15 @@ func operatorValues(stored map[string]any) map[string]any {
 }
 
 func allowedOverrideNames() []string {
-	return []string{"runs", "policies", "storage", "database", "logs", "schedules", "assist", "secretStore"}
+	return []string{"runs", "policies", "storage", "database", "logs", "schedules", "assist", "secretStore", "resources", "argoNative", "storeNative"}
 }
 
 func allowedOverrides(v map[string]any) bool {
-	for k := range v {
+	for k, value := range v {
 		if !slices.Contains(allowedOverrideNames(), k) {
+			return false
+		}
+		if (k == "argoNative" || k == "storeNative") && !nativeResourcesOnly(k, value) {
 			return false
 		}
 	}

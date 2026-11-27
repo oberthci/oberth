@@ -64,6 +64,7 @@ func installationFlags(name string) *flag.FlagSet {
 	addInstallerInputs(f, name)
 	switch name {
 	case "install", "upgrade":
+		f.String("resources", "", "Native resources by server, controller, store or executor as JSON; drained rollout required.")
 		f.Int("service-port", 0, "In-cluster HTTPS Service port (default 8443).")
 		f.Bool("no-egress", false, "Disable the run Pod egress policy entirely.")
 		f.Bool("egress-internet", true, "Allow public internet egress; false keeps only explicit destinations and required cluster services.")

@@ -62,3 +62,36 @@ archive incomplete after five minutes also stops expansion. Require ten minutes
 healthy before reopening and >=48h/two busy bursts for ordinary-work acceptance.
 Missing G1 identities, high-water measurements or staffed observation blocks
 qualification. Record planned maintenance separately from ordinary-work outages.
+
+## S1b: controls
+
+`install` and `upgrade --resources '<JSON>'` accept native requests/limits keyed
+by server, controller, store and executor. The full installer `--detail` review
+shows values. Change one component per drained window; preserve all other saved
+choices and the installed release. The server value is `resources`; the other
+values are `argoNative.controller.resources`, `storeNative.server.resources` and
+`argoNative.executor.resources`. Defaults retain CPU/memory requests and the
+store's 512Mi limit. No default CPU or new memory limit is imposed.
+
+`control-candidates.json` contains unqualified ephemeral trials, not a combined
+rollout. Select exactly one entry after G1 high-water/cold source measurements
+qualify it; server tmp can reach 2Gi, and PVC state is separate. Record final Pod
+requests/limits and exact old component template. Server/controller use Recreate;
+store uses RollingUpdate. After a store restart use
+`oberth --profile <saved-profile> unseal`, then repeat the same recorded
+install/upgrade completion when required. Pod readiness alone cannot prove
+unseal. Restore the exact prior resource values at drain for rollback; unseal
+again if store restarts. Do not use release rollback for a resource-only trial.
+
+Off-production G2 recovery fixture protocol (mandatory, not executed by render
+tests): freeze the full Pod inventory and pinned versions; fill the qualified
+aggregate run CPU/memory/Pod quota using supported children and largest inputs.
+Retain native objects/events, 20s API samples, memory high-water/throttle and
+pressure/OOM/eviction counters. Replace server, controller and store separately
+at that full load and test worst permitted non-run/maintenance overlap, including
+higher preempting system classes. Record replacement UIDs, scheduling and Ready
+times, store seal/unseal and successful source/grant/log checks. Deliberately
+under-request CPU/memory and exceed a run limit: a fault run may OOM; no control
+OOM/eviction, node pressure or out-of-budget host/device usage may occur. Require
+ten minutes healthy API recovery and an explicit return to previous values.
+Unknown shapes, absent receipts or failed containment blocks activation.

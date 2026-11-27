@@ -2,8 +2,14 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "restorePending": {"type": "boolean"},
-    "restoreMaxBytes": {"type": "integer", "minimum": 0, "maximum": 4294967296},
+    "restorePending": {
+      "type": "boolean"
+    },
+    "restoreMaxBytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967296
+    },
     "runs": {
       "type": "object",
       "additionalProperties": false,
@@ -551,6 +557,24 @@
           "items": {
             "type": "string",
             "minLength": 3
+          }
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
           }
         }
       }
