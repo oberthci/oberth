@@ -50,6 +50,20 @@ func RunPriorityChoices(raw string) (map[string]any, error) {
 
 func mergeNativeChoices(saved, chosen map[string]any) map[string]any {
 	values := merge(saved, chosen)
+	// A selected policy map replaces its saved entries; an omitted map keeps
+	// them. Null entries reset to chart defaults, as for component resources.
+	policy, _ := chosen["runPolicy"].(map[string]any)
+	for _, name := range []string{"namespaces", "defaultRequest", "default"} {
+		if selected, ok := policy[name]; ok {
+			merged, _ := values["runPolicy"].(map[string]any)
+			merged[name] = copyValue(selected)
+		}
+	}
+	if values["runPolicy"] == nil {
+		delete(values, "runPolicy")
+	} else if merged, ok := values["runPolicy"].(map[string]any); ok {
+		clearResourceNulls(merged)
+	}
 	runs, _ := chosen["runs"].(map[string]any)
 	if classes, selected := runs["priorityClasses"]; selected {
 		merged, _ := values["runs"].(map[string]any)

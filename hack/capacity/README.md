@@ -144,6 +144,10 @@ The pinned artifact driver has no resource field; final LimitRange accounting is
 required. Deleting policy affects future Pods only. Roll back exact prior
 executor/default/quota values after a drain; existing defaults, failed Pod creates
 and evictions are not undone. Do not loosen quotas automatically under load.
+For `--run-policy`, omitted maps preserve saved choices. Selected `namespaces`,
+`defaultRequest` and `default` maps replace their saved entries; use the complete
+desired map. Null entries reset to chart defaults, including removing a trial
+CPU limit or child allocation. Empty maps restore chart defaults for that map.
 
 ## S4: offline evidence review and native classes
 
