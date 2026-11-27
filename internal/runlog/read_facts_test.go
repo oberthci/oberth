@@ -109,8 +109,8 @@ func assertNoPurgeEvidence(t *testing.T, s *Store) {
 			t.Fatal("purge left evidence", name, err)
 		}
 	}
-	usage, err := s.UsageByRun(t.Context())
-	if err != nil || len(usage) != 0 {
+	usage, err := s.Inventory(t.Context(), usageClock)
+	if err != nil || usage.Body.Logical != 0 || usage.Index.Logical != 0 {
 		t.Fatal(usage, err)
 	}
 }

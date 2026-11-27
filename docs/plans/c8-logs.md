@@ -121,7 +121,7 @@ C3/C11 compose; C5 verifies native bindings before opening log streams.
    not mask output; the server never receives credential values and does not
    promise to mask workflow text.
 7. Confine evidence to the log root, validate run IDs, require regular files, and refuse
-   symlink evidence during purge. `UsageByRun` counts owned bodies/indexes; `Purge`
+   symlink evidence during purge. `Usage` counts one archive; `Inventory` counts the root. `Purge`
    removes only owned body/index files and returns removed bytes and errors, creating
   nothing. C2 fences writers and repeats protection checks
    under audited purge; C8 cannot decide eligibility. Retention keeps immutable

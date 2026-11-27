@@ -9402,7 +9402,7 @@
     "docs/plans/c5-native-execution.md": "275ce51c3540ed4718f8c4bb5d8d6c9b4ba6b83ff28325d16c38f5171ff5179a",
     "docs/plans/c6-source-delivery.md": "8cd148e49163ef169281a9da8cb62e07d5e356f4a748003b8e5c1da1a3026232",
     "docs/plans/c7-durable-state.md": "a0bbbdf0fc5cad9a3e2ef117513bcc057e2b30902de9d3a16fafa3669f846216",
-    "docs/plans/c8-logs.md": "1f898d68ce74f812e0c625f836e873fd06a89846e13295feffbf2b3185bcd1c3",
+    "docs/plans/c8-logs.md": "4f9fed47b745a741161c694fe423d13ea6cc978e4dafb34e9806da76c97ccc93",
     "docs/plans/c9-install-and-upgrade.md": "6fe3aec865952d36aeb9331e2470a0449d0a99d25bd57dd2d6b79453408a6baa"
   },
   "deltas": [

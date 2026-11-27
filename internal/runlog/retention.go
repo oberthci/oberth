@@ -3,47 +3,10 @@ package runlog
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"strings"
 )
 
-// UsageByRun counts only regular bodies and current native indexes;
-// symlink/nonregular evidence is skipped without following it.
-func (s *Store) UsageByRun(ctx context.Context) (map[string]int64, error) {
-	directory, err := s.root.Open(".")
-	if err != nil {
-		return nil, storage(cannotListLogRootReason, err)
-	}
-	defer func() { _ = directory.Close() }()
-	usage := map[string]int64{}
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, storage(logOperationCanceledReason, err)
-		}
-		entries, readErr := directory.ReadDir(128)
-		for _, entry := range entries {
-			id := ownedRun(entry.Name())
-			if id == "" {
-				continue
-			}
-			info, err := entry.Info()
-			if err != nil {
-				return nil, storage(cannotInspectLogEvidenceReason, err)
-			}
-			if info.Mode().IsRegular() {
-				usage[id] += info.Size()
-			}
-		}
-		if errors.Is(readErr, io.EOF) {
-			break
-		}
-		if readErr != nil {
-			return nil, storage(cannotListLogEvidenceReason, readErr)
-		}
-	}
-	return usage, nil
-}
 func ownedRun(name string) string {
 	for _, suffix := range []string{".index.json", ".log"} {
 		if strings.HasSuffix(name, suffix) {

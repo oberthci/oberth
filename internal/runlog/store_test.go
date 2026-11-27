@@ -234,12 +234,13 @@ func TestStorageRefusalsAndOwnedPurge(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(s.directory, "run.plan.json"), []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	usage, err := s.UsageByRun(t.Context())
-	if err != nil || usage["run"] <= 6 {
+	usage, err := s.Usage(t.Context(), "run", usageClock())
+	retained := usage.Body.Logical + usage.Index.Logical
+	if err != nil || retained <= 6 {
 		t.Fatal(usage, err)
 	}
 	removed, err := s.Purge(t.Context(), "run")
-	if err != nil || removed != usage["run"] {
+	if err != nil || removed != retained {
 		t.Fatal(removed, err)
 	}
 	if _, err = os.Stat(filepath.Join(s.directory, "run.plan.json")); err != nil {
@@ -263,7 +264,7 @@ func TestUnsafeRunIDsAndSymlinkEvidence(t *testing.T) {
 	if _, err := s.Purge(t.Context(), "evil"); err == nil {
 		t.Fatal("symlink purged")
 	}
-	if usage, err := s.UsageByRun(t.Context()); err != nil || usage["evil"] != 0 {
+	if usage, err := s.Usage(t.Context(), "evil", usageClock()); err != nil || usage.Body.Logical != 0 || usage.AccountingComplete {
 		t.Fatal("symlink usage followed")
 	}
 }

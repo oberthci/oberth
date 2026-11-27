@@ -123,7 +123,7 @@ func (s *Store) Usage(ctx context.Context, id string, now time.Time) (logcontrac
 		return out, storage(logOperationCanceledReason, err)
 	}
 	s.usageFiles(id, &out)
-	saved, err := s.usageIndex(id)
+	saved, err := s.load(id)
 	if err != nil {
 		out.AccountingComplete = false
 		out.Incomplete = true
@@ -159,24 +159,4 @@ func (s *Store) usageFiles(id string, out *logcontract.Usage) {
 		*file.size, known = storageBytes(info)
 		out.AccountingComplete = out.AccountingComplete && known
 	}
-}
-
-func (s *Store) usageIndex(id string) (index, error) {
-	file, err := s.root.OpenFile(id+".index.json", os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if errors.Is(err, os.ErrNotExist) {
-		return index{RunID: id}, nil
-	}
-	if err != nil {
-		return index{}, err
-	}
-	defer func() { _ = file.Close() }()
-	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		return index{}, storage(invalidLogIndexFileOrSizeReason, err)
-	}
-	data, err := io.ReadAll(io.LimitReader(file, maxIndexBytes+1))
-	if err != nil || len(data) > maxIndexBytes {
-		return index{}, storage(cannotReadLogIndexReason, err)
-	}
-	return decodeIndex(data, id)
 }

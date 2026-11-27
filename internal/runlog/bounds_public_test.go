@@ -93,6 +93,10 @@ func TestPublicIndexReadAtEightMiB(t *testing.T) {
 		if extra != (err != nil) {
 			t.Fatal("index read bound", extra, err)
 		}
+		usage, err := s.Usage(t.Context(), "run", usageClock())
+		if err != nil || usage.AccountingComplete == extra || usage.Incomplete != extra {
+			t.Fatal("usage index read bound", extra, usage, err)
+		}
 	}
 }
 func TestPublicIndexPublicationAtEightMiB(t *testing.T) {

@@ -6,26 +6,32 @@ import (
 	"errors"
 	"io"
 	"os"
+
+	"golang.org/x/sys/unix"
 )
 
 func (s *Store) load(id string) (index, error) {
 	empty := index{RunID: id, Containers: []ContainerLog{}}
 	name := id + ".index.json"
-	info, err := s.root.Lstat(name)
+	directory, err := s.root.Open(".")
+	if err != nil {
+		return empty, storage(cannotOpenLogIndexReason, err)
+	}
+	defer func() { _ = directory.Close() }()
+	// Root.OpenFile resolves links; openat keeps the final component unfollowed.
+	fd, err := unix.Openat(int(directory.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return empty, nil
 	}
 	if err != nil {
-		return empty, storage(cannotInspectLogIndexReason, err)
-	}
-	if !info.Mode().IsRegular() {
-		return empty, storage(invalidLogIndexFileOrSizeReason, nil)
-	}
-	file, err := s.root.Open(name)
-	if err != nil {
 		return empty, storage(cannotOpenLogIndexReason, err)
 	}
+	file := os.NewFile(uintptr(fd), name)
 	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return empty, storage(invalidLogIndexFileOrSizeReason, err)
+	}
 	data, err := io.ReadAll(io.LimitReader(file, maxIndexBytes+1))
 	if err != nil || len(data) > maxIndexBytes {
 		return empty, storage(cannotReadLogIndexReason, err)

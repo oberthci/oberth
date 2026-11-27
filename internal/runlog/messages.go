@@ -10,7 +10,6 @@ const (
 	cannotCreateLogRootReason                 = "cannot create log root"
 	cannotFindLogAppendPositionReason         = "cannot find log append position"
 	cannotInspectLogEvidenceReason            = "cannot inspect log evidence"
-	cannotInspectLogIndexReason               = "cannot inspect log index"
 	cannotInspectRetainedLogReason            = "cannot inspect retained log"
 	cannotListLogEvidenceReason               = "cannot list log evidence"
 	cannotListLogRootReason                   = "cannot list log root"
