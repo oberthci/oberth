@@ -267,13 +267,25 @@ def collect(args):
             time.sleep(args.interval)
 
 
+def integer_between(lower, upper):
+    def parse(value):
+        try:
+            number = int(value)
+            if lower <= number <= upper:
+                return number
+        except ValueError:
+            pass
+        raise argparse.ArgumentTypeError(f"use an integer from {lower} to {upper}")
+    return parse
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("collect", "project", "summarize"))
     parser.add_argument("--namespace", action="append", default=[])
     parser.add_argument("--node")
-    parser.add_argument("--interval", type=int, default=30, choices=range(20, 61))
-    parser.add_argument("--samples", type=int, default=1, choices=range(1, 8641))
+    parser.add_argument("--interval", type=integer_between(20, 60), default=30, metavar="N", help="seconds between reads: 20..60")
+    parser.add_argument("--samples", type=integer_between(1, 8640), default=1, metavar="N", help="finite sample count: 1..8640")
     args = parser.parse_args()
     if args.mode == "collect":
         names = [args.node, *args.namespace]

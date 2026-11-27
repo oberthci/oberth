@@ -204,6 +204,40 @@ class ObservationTests(unittest.TestCase):
         self.assertNotIn(b"never-print", result.stderr)
         self.assertEqual(result.stdout, b"")
 
+    def test_cli_numeric_boundaries_reach_collector(self):
+        for samples in (1, 8640):
+            for interval in (20, 60):
+                argv = ["observe.py", "collect", "--namespace", "runs", "--node", "node",
+                        "--samples", str(samples), "--interval", str(interval)]
+                with patch.object(sys, "argv", argv), patch.object(observe, "collect") as collect:
+                    observe.main()
+                args = collect.call_args.args[0]
+                self.assertEqual((args.samples, args.interval), (samples, interval))
+
+    def test_cli_invalid_numbers_are_short_and_never_read_native(self):
+        directory, _ = self.native_child("from pathlib import Path\nPath(__file__).with_name('called').touch()\n")
+        for option, values in (("--samples", ("0", "8641", "bad", "9" * 10000)),
+                               ("--interval", ("19", "61", "bad"))):
+            for value in values:
+                with self.subTest(option=option, value=value[:20]):
+                    result = subprocess.run([sys.executable, "-I", str(Path(__file__).with_name("observe.py")),
+                        "collect", "--namespace", "runs", "--node", "node", option, value],
+                        capture_output=True, timeout=5)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertEqual(result.stdout, b"")
+                    error = result.stderr.decode().splitlines()[-1]
+                    self.assertLessEqual(len(error), 80)
+                    self.assertLessEqual(len(error.rsplit(": ", 1)[-1]), 40)
+                    self.assertLess(len(result.stderr), 1024)
+                    self.assertFalse((directory / "called").exists())
+
+    def test_cli_help_does_not_enumerate_sample_range(self):
+        result = subprocess.run([sys.executable, "-I", str(Path(__file__).with_name("observe.py")), "--help"],
+                                capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 0)
+        self.assertLess(len(result.stdout), 2048)
+        self.assertIn(b"1..8640", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
