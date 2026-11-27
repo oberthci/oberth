@@ -20,7 +20,7 @@ func holdPlanFor(t *testing.T, w *wf.Workflow, r admissioncontract.PrepareReques
 	g.build()
 	g.selectSecretGrants()
 	g.inventory = g.sources()
-	return g.eligibleHoldPlan()
+	return g.eligibleHoldPlan(true)
 }
 func TestBAllResolvedSecretRoutes(t *testing.T) {
 	t.Parallel()

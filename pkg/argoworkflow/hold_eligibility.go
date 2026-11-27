@@ -14,11 +14,11 @@ import (
 )
 
 // eligibleHoldPlan makes each authored decision once, before native injections.
-func (g *graph) eligibleHoldPlan() admissioncontract.Plan {
+func (g *graph) eligibleHoldPlan(assist bool) admissioncontract.Plan {
 	omitted := map[*call]bool{}
 	plan := g.planWithOmissions(omitted)
 	uses := g.holdInvocationRefusals(plan, omitted)
-	resultConsumed := g.consumesResult()
+	resultConsumed := assist && g.consumesResult()
 	for i := range plan.Entries {
 		e := &plan.Entries[i]
 		e.ResultConsumed = resultConsumed

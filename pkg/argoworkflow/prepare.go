@@ -48,7 +48,7 @@ func Prepare(ctx context.Context, request admissioncontract.PrepareRequest, poli
 	if err := g.bindSources(hooks); err != nil {
 		return nil, err
 	}
-	g.holdPlan = g.eligibleHoldPlan()
+	g.holdPlan = g.eligibleHoldPlan(admissioncontract.AssistEnabled)
 	if err := g.transform(wf, r, identity, hooks); err != nil {
 		return nil, err
 	}
