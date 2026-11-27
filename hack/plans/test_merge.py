@@ -4,10 +4,12 @@ import json
 import os
 from pathlib import Path
 import runpy
+import shlex
 import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -111,6 +113,14 @@ class PlanMergeTests(unittest.TestCase):
         self.git("rebase", "main")
         self.assert_witnesses()
 
+    def test_linked_worktree_rebase_without_conflicts(self):
+        self.branches()
+        linked = self.root / "linked"
+        self.git("worktree", "add", str(linked), "side")
+        self.git("-C", str(linked), "rebase", "main")
+        self.run_command("python3", "-I", str(linked / "hack/plans/parity.py"), "--check")
+        self.assertEqual("", self.git("-C", str(linked), "status", "--porcelain").stdout)
+
     def test_rebase_replays_multiple_reviews(self):
         self.branches()
         self.git("checkout", "side")
@@ -161,6 +171,64 @@ class PlanMergeTests(unittest.TestCase):
         result = self.git("merge", "--no-edit", "side", check=False)
         self.assertNotEqual(0, result.returncode)
         self.assertIn("docs/plans/dispositions.json", self.git("diff", "--name-only", "--diff-filter=U").stdout)
+
+    def test_missing_promised_object_refuses_without_fetching(self):
+        self.branches()
+        refs = [self.git("merge-base", "main", "side").stdout.strip(), "main", "side"]
+        backing = self.root / "backing.git"
+        self.git("clone", "--bare", str(self.root), str(backing))
+        self.git("--git-dir=" + str(backing), "config", "uploadpack.allowAnySHA1InWant", "true")
+        marker = self.root / "transport-started"
+        transport = self.root / "upload-pack"
+        transport.write_text("#!/bin/sh\nprintf started >> " + shlex.quote(str(marker)) +
+                             '\nexec git-upload-pack "$@"\n')
+        transport.chmod(0o700)
+        for field, value in (("url", backing.as_uri()), ("promisor", "true"),
+                             ("partialclonefilter", "blob:none"), ("uploadpack", str(transport))):
+            self.git("config", "remote.origin." + field, value)
+        plan = "docs/plans/c1-transport-and-tool-registry.md"
+        missing = self.git("rev-parse", refs[0] + ":" + plan).stdout.strip()
+        loose = self.root / ".git/objects" / missing[:2] / missing[2:]
+        original = loose.read_bytes()
+        loose.unlink()
+        # Prove that the promised blob really is fetchable before testing refusal.
+        self.git("show", refs[0] + ":" + plan)
+        self.assertTrue(marker.exists())
+        marker.unlink()
+        # Lazy fetch packs its response; remove that fetched pack, then restore
+        # the original loose blob so each case starts with exactly one missing blob.
+        for file in (self.root / ".git/objects/pack").iterdir():
+            file.unlink()
+        for path in ("docs/plans/dispositions.json", "docs/plans/PARITY.md"):
+            with self.subTest(path=path):
+                loose.write_bytes(original)
+                files = [self.root / name for name in ("base", "ours", "theirs")]
+                for file, ref in zip(files, refs):
+                    file.write_text(self.git("show", ref + ":" + path).stdout)
+                before = files[1].read_bytes()
+                loose.unlink()
+                with patch.dict(os.environ, {"GIT_NO_LAZY_FETCH": "0"}):
+                    result = self.run_command("python3", "-I", "hack/plans/merge.py",
+                                              *map(str, files), path, *refs, check=False)
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertIn("Plan merge needs review", result.stderr)
+                self.assertEqual(before, files[1].read_bytes())
+                self.assertFalse(marker.exists(), "merge driver started a promisor transport")
+                self.assertFalse(loose.exists())
+                self.assertEqual([], list((self.root / ".git/objects/pack").iterdir()))
+
+    def test_driver_ignores_inherited_git_configuration(self):
+        files = [self.root / name for name in ("base", "ours", "theirs")]
+        original = self.manifest.read_bytes()
+        for file in files:
+            file.write_bytes(original)
+        with patch.dict(os.environ, {"GIT_DIR": str(self.root / "absent.git"),
+                                     "GIT_CONFIG_COUNT": "1",
+                                     "GIT_CONFIG_KEY_0": "core.repositoryFormatVersion",
+                                     "GIT_CONFIG_VALUE_0": "9999"}):
+            self.run_command("python3", "-I", "hack/plans/merge.py", *map(str, files),
+                             "docs/plans/dispositions.json", "HEAD", "HEAD", "HEAD")
+        self.assertEqual(original, files[1].read_bytes())
 
     def test_guard_still_rejects_undeclared_edits_and_stale_locations(self):
         file = self.root / "docs/plans/c1-transport-and-tool-registry.md"

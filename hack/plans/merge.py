@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import runpy
@@ -15,6 +16,9 @@ ROOT = Path(__file__).resolve().parents[2]
 API = runpy.run_path(str(ROOT / "hack/plans/parity.py"))
 REVIEW = runpy.run_path(str(ROOT / "hack/plans/portable.py"))["reviewed_dispositions"]
 MANIFEST = "docs/plans/dispositions.json"
+# Object acquisition belongs to the caller, never to a merge driver.
+GIT_ENV = {"PATH": os.defpath, "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_CONFIG_GLOBAL": os.devnull, "GIT_NO_LAZY_FETCH": "1"}
 
 
 def sha(text):
@@ -29,7 +33,7 @@ def revision(label):
 
 
 def show(ref, path):
-    return subprocess.check_output(["git", "show", ref + ":" + path], text=True)
+    return subprocess.check_output(["git", "show", ref + ":" + path], text=True, env=GIT_ENV)
 
 
 def text_merge(texts):
@@ -45,7 +49,7 @@ def text_merge(texts):
         for path, text in zip(paths, texts):
             path.write_text(text)
         result = subprocess.run(["git", "merge-file", "-p", str(paths[1]), str(paths[0]), str(paths[2])],
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, env=GIT_ENV)
     assert result.returncode == 0, "authored plan content conflicts"
     return result.stdout
 
