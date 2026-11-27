@@ -242,9 +242,7 @@ func TestInspectionCannotInvokeRerunBeforeSecretStep(t *testing.T) {
 	}
 	r.Admission.Plan.Entries[1].SecretRoute = false
 	owner.SeedRun(r)
-	if _, err := e.HoldExec(t.Context(), q); err != nil || pods.inspections != 1 {
-		t.Fatal("secret-free inspection refused", err, pods.inspections)
-	}
+	t.Run("secret-free inspection cannot rerun", TestInspectionCannotInvokeRerunEvenWithoutSecrets)
 }
 
 func TestInPodApplyDormantGate(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"k8s.io/utils/clock"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -28,6 +29,7 @@ type holdRuntime struct {
 	after         func(time.Duration) <-chan time.Time
 	signals       <-chan os.Signal
 	sourceRoot    string
+	rerunPeer     func(net.Conn) bool
 	command       []string
 	streams       HoldIO
 	pendingSignal os.Signal
@@ -46,7 +48,7 @@ func holdEntry(ctx context.Context, args []string, streams HoldIO, root string) 
 	signals := make(chan os.Signal, 32)
 	signal.Notify(signals)
 	defer signal.Stop(signals)
-	runtime := holdRuntime{root: root, start: startInspection, env: os.Getenv, now: clock.RealClock{}.Now, after: time.After, signals: signals}
+	runtime := holdRuntime{root: root, start: startInspection, env: os.Getenv, now: clock.RealClock{}.Now, after: time.After, signals: signals, rerunPeer: serverRerunPeer}
 	return runtime.dispatch(ctx, args, streams)
 }
 func (r holdRuntime) dispatch(ctx context.Context, args []string, streams HoldIO) int {

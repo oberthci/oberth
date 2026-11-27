@@ -118,6 +118,10 @@ func (o *holdOwner) request(conn net.Conn) {
 		_ = stream.send(holdFrame{Type: "refused", Reason: "invalid request"})
 		return
 	}
+	if r.Op == "rerun" && (o.runtime.rerunPeer == nil || !o.runtime.rerunPeer(conn)) {
+		_ = stream.send(holdFrame{Type: "refused", Reason: "rerun requires server exec"})
+		return
+	}
 	cmd, frame, budget, release := o.admit(r)
 	if cmd == nil {
 		_ = stream.send(frame)
